@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use zebra_chain::{
     block::{self, Block},
-    sapling,
+    orchard, sapling,
     transaction::Transaction,
     transparent,
 };
@@ -63,4 +63,9 @@ pub enum ReadResponse {
     /// [`ReadRequest::SaplingTree`](crate::ReadRequest::SaplingTree) with the
     /// specified Sapling note commitment tree.
     SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),
+
+    /// Response to
+    /// [`ReadRequest::OrchardTree`](crate::ReadRequest::SaplingTree) with the
+    /// specified Orchard note commitment tree.
+    OrchardTree(Option<Arc<orchard::tree::NoteCommitmentTree>>),
 }

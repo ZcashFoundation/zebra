@@ -19,6 +19,7 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 use zebra_chain::{
     block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
+    orchard,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     sapling,
     serialization::{SerializationError, ZcashDeserialize},
@@ -549,10 +550,10 @@ where
                     data: None,
                 })?;
 
-            let request = zebra_state::ReadRequest::SaplingTree(hash_or_height);
-            let response = state
+            let sapling_request = zebra_state::ReadRequest::SaplingTree(hash_or_height);
+            let sapling_response = state
                 .ready()
-                .and_then(|service| service.call(request))
+                .and_then(|service| service.call(sapling_request))
                 .await
                 .map_err(|error| Error {
                     code: ErrorCode::ServerError(0),
@@ -560,17 +561,37 @@ where
                     data: None,
                 })?;
 
-            match response {
+            let sapling_tree = match sapling_response {
                 zebra_state::ReadResponse::SaplingTree(Some(tree)) => {
-                    Ok(GetTreestate((*tree).clone()))
+                    NoteCommitmentTree::Sapling(Some((*tree).clone()))
                 }
-                zebra_state::ReadResponse::SaplingTree(None) => Err(Error {
-                    code: ErrorCode::ServerError(0),
-                    message: "Tree not found".to_string(),
-                    data: None,
-                }),
+                zebra_state::ReadResponse::SaplingTree(None) => NoteCommitmentTree::Sapling(None),
                 _ => unreachable!("unmatched response to a block request"),
-            }
+            };
+
+            let orchard_request = zebra_state::ReadRequest::SaplingTree(hash_or_height);
+            let orchard_response = state
+                .ready()
+                .and_then(|service| service.call(orchard_request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            let orchard_tree = match orchard_response {
+                zebra_state::ReadResponse::SaplingTree(Some(tree)) => {
+                    NoteCommitmentTree::Sapling(Some((*tree).clone()))
+                }
+                zebra_state::ReadResponse::SaplingTree(None) => NoteCommitmentTree::Sapling(None),
+                _ => unreachable!("unmatched response to a block request"),
+            };
+
+            Ok(GetTreestate {
+                sapling_tree,
+                orchard_tree,
+            })
         }
         .boxed()
     }
@@ -663,7 +684,20 @@ pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
 // TODO: adjust the description above so that it reflects the new fields once
 // they are added.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct GetTreestate(sapling::tree::NoteCommitmentTree);
+pub struct GetTreestate {
+    sapling_tree: NoteCommitmentTree,
+    orchard_tree: NoteCommitmentTree,
+}
+
+/// Represents either a Sapling note commitment tree or an Orchard note
+/// commitment tree.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum NoteCommitmentTree {
+    /// Sapling note commitment tree.
+    Sapling(Option<sapling::tree::NoteCommitmentTree>),
+    /// Orchard note commitment tree.
+    Orchard(Option<orchard::tree::NoteCommitmentTree>),
+}
 
 /// Response to a `getrawtransaction` RPC request.
 ///

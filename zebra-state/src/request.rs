@@ -423,8 +423,17 @@ pub enum ReadRequest {
     ///
     /// Returns
     ///
-    /// * [`ReadResponse::SaplingTree(Some(Arc<sapling::tree::NoteCommitmentTree>))`](crate::ReadResponse::SaplingTree)
+    /// * [`ReadResponse::SaplingTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::SaplingTree)
     ///   if the corresponding block contains a Sapling note commitment tree.
     /// * [`ReadResponse::SaplingTree(None)`](crate::ReadResponse::SaplingTree) otherwise.
     SaplingTree(HashOrHeight),
+
+    /// Looks up an Orchard note commitment tree either by a hash or height.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::OrchardTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::OrchardTree)
+    ///   if the corresponding block contains a Sapling note commitment tree.
+    /// * [`ReadResponse::OrchardTree(None)`](crate::ReadResponse::OrchardTree) otherwise.
+    OrchardTree(HashOrHeight),
 }

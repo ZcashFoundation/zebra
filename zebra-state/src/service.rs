@@ -984,6 +984,26 @@ impl Service<ReadRequest> for ReadStateService {
                 }
                 .boxed()
             }
+
+            ReadRequest::OrchardTree(hash_or_height) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "treestate",
+                );
+
+                let state = self.clone();
+
+                async move {
+                    let orchard_tree = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::orchard_tree(best_chain, &state.db, hash_or_height)
+                    });
+
+                    Ok(ReadResponse::OrchardTree(orchard_tree))
+                }
+                .boxed()
+            }
         }
     }
 }
