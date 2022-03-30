@@ -135,8 +135,8 @@ impl DiskWriteBatch {
 
         // Index all new transparent outputs, before deleting any we've spent
         for (output_location, utxo) in new_outputs_by_out_loc {
-            let output = utxo.output;
-            let receiving_address = output.address(self.network());
+            let unspent_output = utxo.output;
+            let receiving_address = unspent_output.address(self.network());
             let mut receiving_address_location = None;
 
             // Update the address balance by adding this UTXO's value
@@ -146,15 +146,13 @@ impl DiskWriteBatch {
                     .or_insert_with(|| AddressBalanceLocation::new(output_location));
                 receiving_address_location = Some(address_balance_location.address_location());
 
-                let address_balance = address_balance_location.balance_mut();
-                let new_address_balance =
-                    (*address_balance + output.value()).expect("balance overflow already checked");
-
-                *address_balance = new_address_balance;
+                address_balance_location
+                    .receive_output(&unspent_output)
+                    .expect("balance overflow already checked");
             }
 
             let output_address_location =
-                UnspentOutputAddressLocation::new(output, receiving_address_location);
+                UnspentOutputAddressLocation::new(unspent_output, receiving_address_location);
             self.zs_insert(&utxo_by_outpoint, output_location, output_address_location);
         }
 
@@ -167,15 +165,14 @@ impl DiskWriteBatch {
 
             // Update the address balance by subtracting this UTXO's value
             if let Some(sending_address) = sending_address {
-                let address_balance = address_balances
-                    .entry(sending_address)
-                    .or_insert_with(|| panic!("spent outputs must already have an address balance"))
-                    .balance_mut();
+                let address_balance_location =
+                    address_balances.entry(sending_address).or_insert_with(|| {
+                        panic!("spent outputs must already have an address balance")
+                    });
 
-                let new_address_balance = (*address_balance - spent_output.value())
+                address_balance_location
+                    .spend_output(&spent_output)
                     .expect("balance underflow already checked");
-
-                *address_balance = new_address_balance;
             }
 
             self.zs_delete(&utxo_by_outpoint, output_location);
