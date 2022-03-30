@@ -126,7 +126,7 @@ impl DiskWriteBatch {
         utxos_spent_by_block: BTreeMap<OutputLocation, transparent::Utxo>,
         mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
-        let utxo_by_outpoint = db.cf_handle("utxo_by_outpoint").unwrap();
+        let utxo_by_out_loc = db.cf_handle("utxo_by_outpoint").unwrap();
 
         // Index all new transparent outputs, before deleting any we've spent
         for (output_location, utxo) in new_outputs_by_out_loc {
@@ -148,7 +148,7 @@ impl DiskWriteBatch {
 
             let output_address_location =
                 UnspentOutputAddressLocation::new(unspent_output, receiving_address_location);
-            self.zs_insert(&utxo_by_outpoint, output_location, output_address_location);
+            self.zs_insert(&utxo_by_out_loc, output_location, output_address_location);
         }
 
         // Mark all transparent inputs as spent.
@@ -170,7 +170,7 @@ impl DiskWriteBatch {
                     .expect("balance underflow already checked");
             }
 
-            self.zs_delete(&utxo_by_outpoint, output_location);
+            self.zs_delete(&utxo_by_out_loc, output_location);
         }
 
         self.prepare_transparent_balances_batch(db, address_balances)?;
