@@ -1072,18 +1072,22 @@ const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     //
     // get_block_chain_info
     //
-    // TODO: enable these checks after PR #3891 merges
-    //
     // invalid sapling height
-    //"Got sapling height 0",
+    "Got sapling height 0",
     // missing BIP70 chain name, should be "main" or "test"
-    //" chain  ",
+    " chain  ",
     // missing branchID, should be 8 hex digits
-    //" branchID \"",
+    " branchID \"",
+    // get_block
     //
-    // TODO: complete this list for each RPC with fields?
-    // get_info
-    // get_raw_transaction
+    // a block error other than "-8: Block not found"
+    "error requesting block",
+    // a missing block with an incorrect error code
+    "Block not found",
+    //
+    // TODO: complete this list for each RPC with fields, if that RPC generates logs
+    // get_info - doesn't generate logs
+    // get_raw_transaction - might not generate logs
     // z_get_tree_state
     // get_address_txids
     // get_address_balance
@@ -1206,9 +1210,9 @@ fn lightwalletd_integration() -> Result<()> {
     //
     // TODO: expect Ingestor log when we're using cached state (#3511)
     //       "Ingestor adding block to cache"
-    let result = lightwalletd.expect_stdout_line_matches(
-        r#"error requesting block: 0: Block not found","height":419200"#,
-    );
+    let result = lightwalletd.expect_stdout_line_matches(regex::escape(
+        "Waiting for zcashd height to reach Sapling activation height (419200)",
+    ));
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     // (next RPC)
