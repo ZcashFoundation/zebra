@@ -671,7 +671,7 @@ Each column family handles value updates differently, based on its specific cons
 - Update: Keys are never deleted, but values can be updated.
   - Code called by ReadStateService must accept old or new values, or use a read lock.
 
-We can't do some kinds of updates, because they cause RocksDB performance issues:
+We can't do some kinds of value updates, because they cause RocksDB performance issues:
 - Append: Keys are never deleted, existing values are never updated,
   but sets of values can be extended with more entries.
   - Code called by ReadStateService must accept truncated or extended sets, or use a read lock.
@@ -797,7 +797,7 @@ So they should not be used for consensus-critical checks.
 
 - When a block write deletes a UTXO from `utxo_by_out_loc`,
   that UTXO location should be deleted from `utxo_by_transparent_addr_loc`.
-  The deleted UTXO can be removed efficiently, because it is part of the key.
+  The deleted UTXO can be removed efficiently, because the UTXO location is part of the key.
   This is an index optimisation, which does not affect query results.
 
 - `tx_by_transparent_addr_loc` stores transaction locations by address.
