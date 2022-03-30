@@ -9,7 +9,7 @@ use std::{
     collections::BTreeSet,
     fmt::Debug,
     io::{Cursor, Read},
-    ops::Deref,
+    ops::{Deref, DerefMut},
 };
 
 use itertools::Itertools;
@@ -334,7 +334,7 @@ impl UnspentOutputAddressLocation {
 }
 
 /// A list of unspent outputs for a [`transparent::Address`].
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
     derive(Arbitrary, Serialize, Deserialize)
@@ -345,14 +345,6 @@ pub struct AddressUnspentOutputs {
 }
 
 impl AddressUnspentOutputs {
-    /// Creates a new [`AddressUnspentOutputs`] from the first output for an address.
-    pub fn new(first_output: OutputLocation) -> AddressUnspentOutputs {
-        let mut inner = BTreeSet::new();
-        inner.insert(first_output);
-
-        AddressUnspentOutputs { inner }
-    }
-
     /// Returns the inner list.
     #[allow(dead_code)]
     pub fn inner(&self) -> &BTreeSet<OutputLocation> {
@@ -372,6 +364,12 @@ impl Deref for AddressUnspentOutputs {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+impl DerefMut for AddressUnspentOutputs {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
 
