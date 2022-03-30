@@ -1,12 +1,14 @@
 use std::{fmt, io};
 
-use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
+use serde_big_array::BigArray;
+
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A ciphertext component for encrypted output notes.
 ///
 /// Corresponds to the Sapling 'encCiphertext's
 #[derive(Deserialize, Serialize)]
-pub struct EncryptedNote(#[serde(with = "serde_helpers::BigArray")] pub(crate) [u8; 580]);
+pub struct EncryptedNote(#[serde(with = "BigArray")] pub(crate) [u8; 580]);
 
 impl fmt::Debug for EncryptedNote {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -55,7 +57,7 @@ impl ZcashDeserialize for EncryptedNote {
 ///
 /// Corresponds to Sapling's 'outCiphertext'
 #[derive(Deserialize, Serialize)]
-pub struct WrappedNoteKey(#[serde(with = "serde_helpers::BigArray")] pub(crate) [u8; 80]);
+pub struct WrappedNoteKey(#[serde(with = "BigArray")] pub(crate) [u8; 80]);
 
 impl fmt::Debug for WrappedNoteKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
