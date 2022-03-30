@@ -82,3 +82,9 @@ jobs:
         with:
           command: fmt
           args: --all -- --check
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: reviewdog/action-actionlint@v1.21.0
