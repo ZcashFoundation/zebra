@@ -16,7 +16,7 @@ use crate::service::finalized_state::{
     disk_format::{
         block::MAX_ON_DISK_HEIGHT,
         transparent::{
-            AddressBalanceLocation, AddressLocation, AddressUnspentOutputs, OutputLocation,
+            AddressBalanceLocation, AddressLocation, AddressUnspentOutput, OutputLocation,
             UnspentOutputAddressLocation,
         },
         IntoDisk, TransactionLocation,
@@ -193,21 +193,13 @@ fn roundtrip_unspent_output_address_location() {
 }
 
 #[test]
-fn roundtrip_address_unspent_outputs() {
+fn roundtrip_address_unspent_output() {
     zebra_test::init();
 
     proptest!(
-        |(mut val in any::<AddressUnspentOutputs>())| {
-            let clamped = val
-                .iter()
-                .map(|output_location| {
-                    let mut output_location = *output_location;
-                    *output_location.height_mut() = output_location.height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
-                    output_location
-                })
-                .collect();
-
-            *val.inner_mut() = clamped;
+        |(mut val in any::<AddressUnspentOutput>())| {
+            *val.address_location_mut().height_mut() = val.address_location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            *val.unspent_output_location_mut().height_mut() = val.unspent_output_location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
 
             assert_value_properties(val)
         }
