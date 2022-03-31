@@ -542,6 +542,7 @@ where
         let mut state = self.state.clone();
 
         async move {
+            // Convert the [`hash_or_height`] string into an actual hash or height.
             let hash_or_height = hash_or_height
                 .parse()
                 .map_err(|error: SerializationError| Error {
@@ -549,6 +550,8 @@ where
                     message: error.to_string(),
                     data: None,
                 })?;
+
+            // Fetch the block referenced by [`hash_or_height`] from the state.
 
             let block_request = zebra_state::ReadRequest::Block(hash_or_height);
             let block_response = state
@@ -561,17 +564,24 @@ where
                     data: None,
                 })?;
 
-            let time = match block_response {
-                zebra_state::ReadResponse::Block(Some(block)) => block.header.time,
+            // The block hash, height, and time are all required fields in the
+            // RPC response. For this reason, we throw an error early if the
+            // state didn't return the requested block so that we prevent
+            // further state queries.
+            let block = match block_response {
+                zebra_state::ReadResponse::Block(Some(block)) => block,
                 zebra_state::ReadResponse::Block(None) => {
                     return Err(Error {
                         code: ErrorCode::ServerError(0),
-                        message: "could not get the time of the requested block".to_string(),
+                        message: "the requested block was not found".to_string(),
                         data: None,
                     })
                 }
                 _ => unreachable!("unmatched response to a block request"),
             };
+
+            // Fetch the Sapling & Orchard treestates referenced by
+            // [`hash_or_height`] from the state.
 
             let sapling_request = zebra_state::ReadRequest::SaplingTree(hash_or_height);
             let sapling_response = state
@@ -584,14 +594,6 @@ where
                     data: None,
                 })?;
 
-            let sapling_tree = match sapling_response {
-                zebra_state::ReadResponse::SaplingTree(Some(tree)) => {
-                    NoteCommitmentTree::Sapling(Some((*tree).clone()))
-                }
-                zebra_state::ReadResponse::SaplingTree(None) => NoteCommitmentTree::Sapling(None),
-                _ => unreachable!("unmatched response to a sapling tree request"),
-            };
-
             let orchard_request = zebra_state::ReadRequest::SaplingTree(hash_or_height);
             let orchard_response = state
                 .ready()
@@ -603,6 +605,28 @@ where
                     data: None,
                 })?;
 
+            // We've got all the data we need for the RPC request, so we
+            // assemble the request.
+
+            let hash = block.hash();
+            let height = block
+                .coinbase_height()
+                .expect("verified blocks have a valid height");
+            let time = block.header.time;
+
+            // The Sapling & Orchard treestates are optional fields in the RPC
+            // response, so we don't throw an error if the state didn't return
+            // the requested treestate. Instead, we return a [`None`] which is
+            // then serialized into an empty string (empty JSON object).
+
+            let sapling_tree = match sapling_response {
+                zebra_state::ReadResponse::SaplingTree(Some(tree)) => {
+                    NoteCommitmentTree::Sapling(Some((*tree).clone()))
+                }
+                zebra_state::ReadResponse::SaplingTree(None) => NoteCommitmentTree::Sapling(None),
+                _ => unreachable!("unmatched response to a sapling tree request"),
+            };
+
             let orchard_tree = match orchard_response {
                 zebra_state::ReadResponse::SaplingTree(Some(tree)) => {
                     NoteCommitmentTree::Sapling(Some((*tree).clone()))
@@ -612,6 +636,8 @@ where
             };
 
             Ok(GetTreestate {
+                hash,
+                height,
                 time,
                 sapling_tree,
                 orchard_tree,
@@ -709,6 +735,8 @@ pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
 // they are added.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GetTreestate {
+    hash: block::Hash,
+    height: block::Height,
     time: DateTime<Utc>,
     sapling_tree: NoteCommitmentTree,
     orchard_tree: NoteCommitmentTree,
