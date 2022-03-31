@@ -6,13 +6,9 @@
 //! be incremented each time the database format (column, serialization, etc) changes.
 
 use std::{
-    collections::BTreeSet,
     fmt::Debug,
     io::{Cursor, Read},
-    ops::{Deref, DerefMut},
 };
-
-use itertools::Itertools;
 
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
@@ -333,43 +329,91 @@ impl UnspentOutputAddressLocation {
     }
 }
 
-/// A list of unspent outputs for a [`transparent::Address`].
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// A single unspent output for a [`transparent::Address`].
+///
+/// We store both the address location key and unspend output location value
+/// in the RocksDB column family key. This improves insert and delete performance.
+///
+/// This requires 8 extra bytes for each unspent output,
+/// because we repeat the key for each value.
+/// But RocksDB compression reduces the duplicate data size on disk.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
     derive(Arbitrary, Serialize, Deserialize)
 )]
-pub struct AddressUnspentOutputs {
-    /// A list of unspent transparent output locations, in chain order.
-    inner: BTreeSet<OutputLocation>,
+pub struct AddressUnspentOutput {
+    /// The location of the first [`transparent::Output`] sent to the address in `output`.
+    address_location: AddressLocation,
+
+    /// The location of this unspent output.
+    unspent_output_location: OutputLocation,
 }
 
-impl AddressUnspentOutputs {
-    /// Returns the inner list.
-    #[allow(dead_code)]
-    pub fn inner(&self) -> &BTreeSet<OutputLocation> {
-        &self.inner
+impl AddressUnspentOutput {
+    /// Create a new [`AddressUnspentOutput`] from an address location,
+    /// and an unspent output location.
+    pub fn new(
+        address_location: AddressLocation,
+        unspent_output_location: OutputLocation,
+    ) -> AddressUnspentOutput {
+        AddressUnspentOutput {
+            address_location,
+            unspent_output_location,
+        }
     }
 
-    /// Allows tests to modify the inner list.
+    /// Create an [`AddressUnspentOutput`] which starts iteration for the supplied address.
+    /// Used to look up the first output with [`ReadDisk::zs_next_key_value_from`].
+    ///
+    /// The unspent output location is before all unspent output locations in the index.
+    /// It is always invalid, due to the genesis consensus rules.
+    pub fn address_iterator_start(address_location: AddressLocation) -> AddressUnspentOutput {
+        // Iterating from the lowest possible output location gets us the first output.
+        let zero_output_location = OutputLocation::from_usize(Height(0), 0, 0);
+
+        AddressUnspentOutput {
+            address_location,
+            unspent_output_location: zero_output_location,
+        }
+    }
+
+    /// Update the unspent output location to the next possible output for the supplied address.
+    /// Used to look up the next output with [`ReadDisk::zs_next_key_value_from`].
+    ///
+    /// The updated unspent output location may be invalid.
+    pub fn address_iterator_next(&mut self) {
+        // Iterating from the next possible output location gets us the next output,
+        // even if it is in a later block or transaction.
+        //
+        // Consensus: the block size limit is 2MB, which is much lower than the index range.
+        self.unspent_output_location.output_index.0 += 1;
+    }
+
+    /// The location of the first [`transparent::Output`] sent to the address of this output.
+    ///
+    /// This can be used to look up the address.
+    pub fn address_location(&self) -> AddressLocation {
+        self.address_location
+    }
+
+    /// The location of this unspent output.
+    pub fn unspent_output_location(&self) -> OutputLocation {
+        self.unspent_output_location
+    }
+
+    /// Allows tests to modify the address location.
     #[cfg(any(test, feature = "proptest-impl"))]
     #[allow(dead_code)]
-    pub fn inner_mut(&mut self) -> &mut BTreeSet<OutputLocation> {
-        &mut self.inner
+    pub fn address_location_mut(&mut self) -> &mut AddressLocation {
+        &mut self.address_location
     }
-}
 
-impl Deref for AddressUnspentOutputs {
-    type Target = BTreeSet<OutputLocation>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for AddressUnspentOutputs {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+    /// Allows tests to modify the unspent output location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn unspent_output_location_mut(&mut self) -> &mut OutputLocation {
+        &mut self.unspent_output_location
     }
 }
 
@@ -507,15 +551,16 @@ impl IntoDisk for AddressBalanceLocation {
 
 impl FromDisk for AddressBalanceLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let (balance_bytes, location_bytes) = disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
+        let (balance_bytes, address_location_bytes) =
+            disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
 
         let balance = Amount::from_bytes(balance_bytes.try_into().unwrap()).unwrap();
-        let address_location = AddressLocation::from_bytes(location_bytes);
+        let address_location = AddressLocation::from_bytes(address_location_bytes);
 
-        let mut balance_location = AddressBalanceLocation::new(address_location);
-        *balance_location.balance_mut() = balance;
+        let mut address_balance_location = AddressBalanceLocation::new(address_location);
+        *address_balance_location.balance_mut() = balance;
 
-        balance_location
+        address_balance_location
     }
 }
 
@@ -566,36 +611,28 @@ impl FromDisk for transparent::Output {
     }
 }
 
-impl IntoDisk for AddressUnspentOutputs {
-    type Bytes = Vec<u8>;
+impl IntoDisk for AddressUnspentOutput {
+    type Bytes = [u8; OUTPUT_LOCATION_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.iter()
-            .map(|out_loc| out_loc.as_bytes().to_vec())
+        let address_location_bytes = self.address_location().as_bytes();
+        let unspent_output_location_bytes = self.unspent_output_location().as_bytes();
+
+        [address_location_bytes, unspent_output_location_bytes]
             .concat()
+            .try_into()
+            .unwrap()
     }
 }
 
-impl FromDisk for AddressUnspentOutputs {
+impl FromDisk for AddressUnspentOutput {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let len = disk_bytes.as_ref().len();
+        let (address_location_bytes, unspent_output_location_bytes) =
+            disk_bytes.as_ref().split_at(OUTPUT_LOCATION_DISK_BYTES);
 
-        assert_eq!(
-            len % OUTPUT_LOCATION_DISK_BYTES,
-            0,
-            "unexpected trailing data,\n\
-             expected length divisible by: {OUTPUT_LOCATION_DISK_BYTES}\n\
-             got length: {len}\n\
-             with remainder: {}",
-            len % OUTPUT_LOCATION_DISK_BYTES,
-        );
+        let address_location = AddressLocation::from_bytes(address_location_bytes);
+        let unspent_output_location = AddressLocation::from_bytes(unspent_output_location_bytes);
 
-        let inner = disk_bytes
-            .as_ref()
-            .chunks_exact(OUTPUT_LOCATION_DISK_BYTES)
-            .map(OutputLocation::from_bytes)
-            .collect();
-
-        AddressUnspentOutputs { inner }
+        AddressUnspentOutput::new(address_location, unspent_output_location)
     }
 }
