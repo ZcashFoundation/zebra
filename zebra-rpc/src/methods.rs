@@ -21,10 +21,12 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::{SerializationError, ZcashDeserialize},
-    transaction::{self, SerializedTransaction, Transaction},
+    transaction::{self, SerializedTransaction, Transaction, UnminedTx},
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
+
+use crate::queue::{Queue, Runner};
 
 #[cfg(test)]
 mod tests;
@@ -160,17 +162,23 @@ where
     /// The configured network for this RPC service.
     #[allow(dead_code)]
     network: Network,
+
+    /// An instance of the RPC transaction queue
+    queue_runner: Runner,
 }
 
 impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
 where
-    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError> + 'static,
     State: Service<
-        zebra_state::ReadRequest,
-        Response = zebra_state::ReadResponse,
-        Error = zebra_state::BoxError,
-    >,
-    Tip: ChainTip + Send + Sync,
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the RPC handler.
     pub fn new<Version>(
@@ -182,14 +190,31 @@ where
     ) -> Self
     where
         Version: ToString,
+        <Mempool as Service<mempool::Request>>::Future: Send,
+        <State as Service<zebra_state::ReadRequest>>::Future: Send,
     {
-        RpcImpl {
+        let (mut listener, runner) = Queue::start();
+
+        let rpc_impl = RpcImpl {
             app_version: app_version.to_string(),
-            mempool,
-            state,
-            latest_chain_tip,
+            mempool: mempool.clone(),
+            state: state.clone(),
+            latest_chain_tip: latest_chain_tip.clone(),
             network,
-        }
+            queue_runner: runner.clone(),
+        };
+
+        // run the listener
+        tokio::spawn(async move {
+            listener.listen().await;
+        });
+
+        // run the process queue
+        tokio::spawn(async move {
+            runner.run(mempool, state, latest_chain_tip).await;
+        });
+
+        rpc_impl
     }
 }
 
@@ -319,6 +344,7 @@ where
         raw_transaction_hex: String,
     ) -> BoxFuture<Result<SentTransactionHash>> {
         let mempool = self.mempool.clone();
+        let queue_sender = self.queue_runner.sender();
 
         async move {
             let raw_transaction_bytes = Vec::from_hex(raw_transaction_hex).map_err(|_| {
@@ -328,6 +354,10 @@ where
                 .map_err(|_| Error::invalid_params("raw transaction is structurally invalid"))?;
 
             let transaction_hash = raw_transaction.hash();
+
+            // send transaction to the rpc queue
+            let unmined_transaction = UnminedTx::from(raw_transaction.clone());
+            let _ = queue_sender.send(Some(unmined_transaction)).await;
 
             let transaction_parameter = mempool::Gossip::Tx(raw_transaction.into());
             let request = mempool::Request::Queue(vec![transaction_parameter]);

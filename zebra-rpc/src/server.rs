@@ -52,7 +52,7 @@ impl RpcServer {
             + Sync
             + 'static,
         State::Future: Send,
-        Tip: ChainTip + Send + Sync + 'static,
+        Tip: ChainTip + Clone + Send + Sync + 'static,
     {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
