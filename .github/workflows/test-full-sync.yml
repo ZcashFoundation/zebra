@@ -212,7 +212,7 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
+          --command="docker logs --follow ${{ env.CONTAINER_NAME }}"
 
       - name: Get sync height from logs
         run: |
