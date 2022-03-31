@@ -367,7 +367,8 @@ impl AddressUnspentOutput {
     /// Used to look up the first output with [`ReadDisk::zs_next_key_value_from`].
     ///
     /// The unspent output location is before all unspent output locations in the index.
-    /// It is always invalid, due to the genesis consensus rules.
+    /// It is always invalid, due to the genesis consensus rules. But this is not an issue
+    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
     pub fn address_iterator_start(address_location: AddressLocation) -> AddressUnspentOutput {
         // Iterating from the lowest possible output location gets us the first output.
         let zero_output_location = OutputLocation::from_usize(Height(0), 0, 0);
@@ -381,7 +382,8 @@ impl AddressUnspentOutput {
     /// Update the unspent output location to the next possible output for the supplied address.
     /// Used to look up the next output with [`ReadDisk::zs_next_key_value_from`].
     ///
-    /// The updated unspent output location may be invalid.
+    /// The updated unspent output location may be invalid, which is not an issue
+    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
     pub fn address_iterator_next(&mut self) {
         // Iterating from the next possible output location gets us the next output,
         // even if it is in a later block or transaction.
