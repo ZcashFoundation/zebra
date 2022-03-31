@@ -1,12 +1,14 @@
 use std::{fmt, io};
 
-use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
+use serde_big_array::BigArray;
+
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A ciphertext component for encrypted output notes.
 ///
 /// Corresponds to the Orchard 'encCiphertext's
 #[derive(Deserialize, Serialize)]
-pub struct EncryptedNote(#[serde(with = "serde_helpers::BigArray")] pub(crate) [u8; 580]);
+pub struct EncryptedNote(#[serde(with = "BigArray")] pub(crate) [u8; 580]);
 
 // These impls all only exist because of array length restrictions.
 // TODO: use const generics https://github.com/ZcashFoundation/zebra/issues/2042
@@ -68,7 +70,7 @@ impl ZcashDeserialize for EncryptedNote {
 ///
 /// Corresponds to Orchard's 'outCiphertext'
 #[derive(Deserialize, Serialize)]
-pub struct WrappedNoteKey(#[serde(with = "serde_helpers::BigArray")] pub(crate) [u8; 80]);
+pub struct WrappedNoteKey(#[serde(with = "BigArray")] pub(crate) [u8; 80]);
 
 impl fmt::Debug for WrappedNoteKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
