@@ -261,10 +261,9 @@ impl DiskWriteBatch {
 
             // Fetch the balance, and the link from the address to the AddressLocation, from memory.
             if let Some(sending_address) = sending_address {
-                let address_balance_location =
-                    address_balances.entry(sending_address).or_insert_with(|| {
-                        panic!("spent outputs must already have an address balance")
-                    });
+                let address_balance_location = address_balances
+                    .get_mut(&sending_address)
+                    .expect("spent outputs must already have an address balance");
 
                 // Update the address balance by subtracting this UTXO's value, in memory.
                 address_balance_location
