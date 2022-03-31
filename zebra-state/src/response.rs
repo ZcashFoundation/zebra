@@ -65,7 +65,7 @@ pub enum ReadResponse {
     SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),
 
     /// Response to
-    /// [`ReadRequest::OrchardTree`](crate::ReadRequest::SaplingTree) with the
+    /// [`ReadRequest::OrchardTree`](crate::ReadRequest::OrchardTree) with the
     /// specified Orchard note commitment tree.
     OrchardTree(Option<Arc<orchard::tree::NoteCommitmentTree>>),
 }
