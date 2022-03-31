@@ -600,33 +600,33 @@ order on byte strings is the numeric ordering).
 
 We use the following rocksdb column families:
 
-| Column Family                      | Keys                   | Values                        | Updates |
+| Column Family                      | Keys                   | Values                        | Changes |
 | ---------------------------------- | ---------------------- | ----------------------------- | ------- |
 | *Blocks*                           |                        |                               |         |
-| `hash_by_height`                   | `block::Height`        | `block::Hash`                 | Never   |
-| `height_by_hash`                   | `block::Hash`          | `block::Height`               | Never   |
-| `block_header_by_height`           | `block::Height`        | `block::Header`               | Never   |
+| `hash_by_height`                   | `block::Height`        | `block::Hash`                 | Create  |
+| `height_by_hash`                   | `block::Hash`          | `block::Height`               | Create  |
+| `block_header_by_height`           | `block::Height`        | `block::Header`               | Create  |
 | *Transactions*                     |                        |                               |         |
-| `tx_by_loc`                        | `TransactionLocation`  | `Transaction`                 | Never   |
-| `hash_by_tx_loc`                   | `TransactionLocation`  | `transaction::Hash`           | Never   |
-| `tx_loc_by_hash`                   | `transaction::Hash`    | `TransactionLocation`         | Never   |
+| `tx_by_loc`                        | `TransactionLocation`  | `Transaction`                 | Create  |
+| `hash_by_tx_loc`                   | `TransactionLocation`  | `transaction::Hash`           | Create  |
+| `tx_loc_by_hash`                   | `transaction::Hash`    | `TransactionLocation`         | Create  |
 | *Transparent*                      |                        |                               |         |
 | `balance_by_transparent_addr`      | `transparent::Address` | `Amount \|\| AddressLocation` | Update  |
-| `tx_loc_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                          | Never   |
+| `tx_loc_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                          | Create  |
 | `utxo_by_out_loc`                  | `OutputLocation`       | `Output \|\| AddressLocation` | Delete  |
 | `utxo_loc_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                          | Delete  |
 | *Sprout*                           |                        |                               |         |
-| `sprout_nullifiers`                | `sprout::Nullifier`    | `()`                          | Never   |
-| `sprout_anchors`                   | `sprout::tree::Root`   | `sprout::NoteCommitmentTree`  | Never   |
+| `sprout_nullifiers`                | `sprout::Nullifier`    | `()`                          | Create  |
+| `sprout_anchors`                   | `sprout::tree::Root`   | `sprout::NoteCommitmentTree`  | Create  |
 | `sprout_note_commitment_tree`      | `block::Height`        | `sprout::NoteCommitmentTree`  | Delete  |
 | *Sapling*                          |                        |                               |         |
-| `sapling_nullifiers`               | `sapling::Nullifier`   | `()`                          | Never   |
-| `sapling_anchors`                  | `sapling::tree::Root`  | `()`                          | Never   |
-| `sapling_note_commitment_tree`     | `block::Height`        | `sapling::NoteCommitmentTree` | Never   |
+| `sapling_nullifiers`               | `sapling::Nullifier`   | `()`                          | Create  |
+| `sapling_anchors`                  | `sapling::tree::Root`  | `()`                          | Create  |
+| `sapling_note_commitment_tree`     | `block::Height`        | `sapling::NoteCommitmentTree` | Create  |
 | *Orchard*                          |                        |                               |         |
-| `orchard_nullifiers`               | `orchard::Nullifier`   | `()`                          | Never   |
-| `orchard_anchors`                  | `orchard::tree::Root`  | `()`                          | Never   |
-| `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Never   |
+| `orchard_nullifiers`               | `orchard::Nullifier`   | `()`                          | Create  |
+| `orchard_anchors`                  | `orchard::tree::Root`  | `()`                          | Create  |
+| `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
 | *Chain*                            |                        |                               |         |
 | `history_tree`                     | `block::Height`        | `NonEmptyHistoryTree`         | Delete  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
@@ -663,24 +663,34 @@ Derived Formats:
 ### Implementing consensus rules using rocksdb
 [rocksdb-consensus-rules]: #rocksdb-consensus-rules
 
-Each column family handles value updates differently, based on its specific consensus rules:
-- Never: Keys are never deleted, values are never updated. The value for each key is inserted once.
-- Delete: Keys can be deleted, but values are never updated. The value for each key is inserted once.
+Each column family handles updates differently, based on its specific consensus rules:
+- Create:
+  - Each key-value entry is created once.
+  - Keys are never deleted, values are never updated.
+- Delete:
+  - Each key-value entry is created once.
+  - Keys can be deleted, but values are never updated.
   - Code called by ReadStateService must ignore deleted keys, or use a read lock.
   - TODO: should we prevent re-inserts of keys that have been deleted?
-- Update: Keys are never deleted, but values can be updated.
-  - Code called by ReadStateService must accept old or new values, or use a read lock.
+- Update:
+  - Each key-value entry is created once.
+  - Keys are never deleted, but values can be updated.
+  - Code called by ReadStateService must handle old or new values, or use a read lock.
 
 We can't do some kinds of value updates, because they cause RocksDB performance issues:
-- Append: Keys are never deleted, existing values are never updated,
-  but sets of values can be extended with more entries.
-  - Code called by ReadStateService must accept truncated or extended sets, or use a read lock.
-- Up/Del: Keys can be deleted, and values can be added or removed from sets.
+- Append:
+  - Keys are never deleted.
+  - Existing values are never updated.
+  - Sets of values have additional items appended to the end of the set.
+  - Code called by ReadStateService must handle shorter or longer sets, or use a read lock.
+- Up/Del:
+  - Keys can be deleted.
+  - Sets of values have items added or deleted (in any position).
   - Code called by ReadStateService must ignore deleted keys and values,
-    accept truncated or extended sets, and accept old or new values.
+    accept shorter or longer sets, and accept old or new values.
     Or it should use a read lock.
 
-In general, avoid using large sets of values as RocksDB keys or values.
+Avoid using large sets of values as RocksDB keys or values.
 
 ### RocksDB read locks
 [rocksdb-read-locks]: #rocksdb-read-locks
