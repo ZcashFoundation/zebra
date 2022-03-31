@@ -90,6 +90,19 @@ impl IntoDisk for () {
     }
 }
 
+impl FromDisk for () {
+    #[allow(clippy::unused_unit)]
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        assert_eq!(
+            bytes.as_ref().len(),
+            0,
+            "unexpected data in zero-sized column family type",
+        );
+
+        ()
+    }
+}
+
 // Serialization Modification Functions
 
 /// Truncates `mem_bytes` to `disk_len`, by removing zero bytes from the start of the slice.
