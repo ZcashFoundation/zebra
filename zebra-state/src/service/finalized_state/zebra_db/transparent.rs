@@ -138,8 +138,10 @@ impl ZebraDb {
         &self,
         address_location: AddressLocation,
     ) -> BTreeSet<AddressUnspentOutput> {
-        let utxo_loc_by_transparent_addr_loc =
-            self.db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
+        let utxo_loc_by_transparent_addr_loc = self
+            .db
+            .cf_handle("utxo_loc_by_transparent_addr_loc")
+            .unwrap();
 
         // Manually fetch the entire addresses' UTXO locations
         let mut addr_unspent_outputs = BTreeSet::new();
@@ -193,7 +195,8 @@ impl DiskWriteBatch {
         mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
         let utxo_by_out_loc = db.cf_handle("utxo_by_outpoint").unwrap();
-        let utxo_loc_by_transparent_addr_loc = db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
+        let utxo_loc_by_transparent_addr_loc =
+            db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
 
         // Index all new transparent outputs, before deleting any we've spent
         for (new_output_location, utxo) in new_outputs_by_out_loc {
@@ -219,7 +222,11 @@ impl DiskWriteBatch {
                     receiving_address_location.unwrap(),
                     new_output_location,
                 );
-                self.zs_insert(&utxo_loc_by_transparent_addr_loc, address_unspent_output, ());
+                self.zs_insert(
+                    &utxo_loc_by_transparent_addr_loc,
+                    address_unspent_output,
+                    (),
+                );
             }
 
             let output_address_location =
