@@ -457,7 +457,8 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
     // TODO: transactions for each address (#3951)
 
     let balance_by_transparent_addr = state.cf_handle("balance_by_transparent_addr").unwrap();
-    let utxo_loc_by_transparent_addr_loc = state.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
+    let utxo_loc_by_transparent_addr_loc =
+        state.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
 
     let mut stored_address_balances = Vec::new();
     let mut stored_address_utxo_locations = Vec::new();
@@ -467,7 +468,10 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
     let addresses =
         state.full_iterator_cf(&balance_by_transparent_addr, rocksdb::IteratorMode::Start);
     let utxo_address_location_count = state
-        .full_iterator_cf(&utxo_loc_by_transparent_addr_loc, rocksdb::IteratorMode::Start)
+        .full_iterator_cf(
+            &utxo_loc_by_transparent_addr_loc,
+            rocksdb::IteratorMode::Start,
+        )
         .count();
 
     let addresses: Vec<transparent::Address> = addresses
