@@ -291,7 +291,7 @@ jobs:
 
       - name: Get sync height from logs
         run: |
-          SYNC_HEIGHT=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' --order="desc" '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+finished initial sync to chain tip.+Height\(([0-9]+)\).+")' | ggrep -oE 'Height\([0-9]+\)' | ggrep -oE '[0-9]+')
+          SYNC_HEIGHT=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' --order="desc" '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+finished initial sync to chain tip.+Height\(([0-9]+)\).+")' | grep -oE 'Height\([0-9]+\)' | grep -oE '[0-9]+')
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
           sleep 60
 
