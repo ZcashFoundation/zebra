@@ -14,6 +14,7 @@ use hex::{FromHex, ToHex};
 use indexmap::IndexMap;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
+use tokio::sync::broadcast::Sender;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
@@ -26,7 +27,7 @@ use zebra_chain::{
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
 
-use crate::queue::{Queue, Runner};
+use crate::queue::Queue;
 
 #[cfg(test)]
 mod tests;
@@ -163,8 +164,8 @@ where
     #[allow(dead_code)]
     network: Network,
 
-    /// An instance of the RPC transaction queue
-    queue_runner: Runner,
+    /// A sender component of a channel used to send transactions to the queue.
+    queue_sender: Sender<Option<UnminedTx>>,
 }
 
 impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
@@ -193,7 +194,7 @@ where
         <Mempool as Service<mempool::Request>>::Future: Send,
         <State as Service<zebra_state::ReadRequest>>::Future: Send,
     {
-        let (mut listener, runner) = Queue::start();
+        let runner = Queue::start();
 
         let rpc_impl = RpcImpl {
             app_version: app_version.to_string(),
@@ -201,13 +202,8 @@ where
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             network,
-            queue_runner: runner.clone(),
+            queue_sender: runner.sender(),
         };
-
-        // run the listener
-        tokio::spawn(async move {
-            listener.listen().await;
-        });
 
         // run the process queue
         tokio::spawn(async move {
@@ -344,7 +340,7 @@ where
         raw_transaction_hex: String,
     ) -> BoxFuture<Result<SentTransactionHash>> {
         let mempool = self.mempool.clone();
-        let queue_sender = self.queue_runner.sender();
+        let queue_sender = self.queue_sender.clone();
 
         async move {
             let raw_transaction_bytes = Vec::from_hex(raw_transaction_hex).map_err(|_| {
@@ -357,7 +353,9 @@ where
 
             // send transaction to the rpc queue
             let unmined_transaction = UnminedTx::from(raw_transaction.clone());
-            let _ = queue_sender.send(Some(unmined_transaction)).await;
+            queue_sender
+                .send(Some(unmined_transaction))
+                .expect("there is always at least one active receiver");
 
             let transaction_parameter = mempool::Gossip::Tx(raw_transaction.into());
             let request = mempool::Request::Queue(vec![transaction_parameter]);

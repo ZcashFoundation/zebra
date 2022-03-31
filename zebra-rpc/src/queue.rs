@@ -1,19 +1,20 @@
 //! Transaction Queue.
 //!
 //! All transactions that are sent from RPC methods should be added to this queue for retries.
-//! Transactions can fail to be inserted to the mempool inmediatly to different reasons,
+//! Transactions can fail to be inserted to the mempool inmediatly by different reasons,
 //! like having not mined utxos.
 //!
-//! The queue is a `HashMap` which can be shared by a `Listener` and a `Runner` component.
+//! The [`Queue`] is just a `HashMap` of transactions with insertion date.
+//! The [`Runner`] component will do the processing in it's [`Runner::run()`] method.
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use chrono::Duration;
 use tokio::{
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::broadcast::{channel, Receiver, Sender},
     time::Instant,
 };
 
@@ -43,66 +44,39 @@ pub struct Queue {
     transactions: HashMap<UnminedTxId, (Arc<Transaction>, Instant)>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 /// The runner
 pub struct Runner {
-    queue: Arc<Mutex<Queue>>,
+    queue: Queue,
     sender: Sender<Option<UnminedTx>>,
-}
-
-/// The listener
-pub struct Listener {
-    queue: Arc<Mutex<Queue>>,
-    receiver: Receiver<Option<UnminedTx>>,
 }
 
 impl Queue {
     /// Start a new queue
-    pub fn start() -> (Listener, Runner) {
-        let (sender, receiver) = channel(10);
+    pub fn start() -> Runner {
+        let (sender, _receiver) = channel(10);
 
-        let queue = Arc::new(Mutex::new(Queue {
+        let queue = Queue {
             transactions: HashMap::new(),
-        }));
-
-        let runner = Runner {
-            queue: queue.clone(),
-            sender,
         };
 
-        let listener = Listener { queue, receiver };
-
-        (listener, runner)
+        Runner { queue, sender }
     }
 
-    /// Get the transactions in the queue
+    /// Get the transactions in the queue.
     pub fn transactions(&self) -> HashMap<UnminedTxId, (Arc<Transaction>, Instant)> {
         self.transactions.clone()
     }
 
-    /// Insert a transaction to the queue
+    /// Insert a transaction to the queue.
     pub fn insert(&mut self, unmined_tx: UnminedTx) {
         self.transactions
             .insert(unmined_tx.id, (unmined_tx.transaction, Instant::now()));
     }
 
-    /// Remove a transaction from the queue
+    /// Remove a transaction from the queue.
     pub fn remove(&mut self, unmined_id: UnminedTxId) {
         self.transactions.remove(&unmined_id);
-    }
-}
-
-impl Listener {
-    /// Listen for transaction and insert them to the queue
-    pub async fn listen(&mut self) {
-        loop {
-            if let Some(Some(tx)) = self.receiver.recv().await {
-                self.queue
-                    .lock()
-                    .expect("queue mutex should be unpoisoned")
-                    .insert(tx);
-            }
-        }
     }
 }
 
@@ -112,33 +86,30 @@ impl Runner {
         self.sender.clone()
     }
 
-    /// Access the mutable queue.
-    pub fn queue(&self) -> Arc<Mutex<Queue>> {
+    /// Create a new receiver.
+    pub fn receiver(&self) -> Receiver<Option<UnminedTx>> {
+        self.sender.subscribe()
+    }
+
+    /// Access the queue.
+    pub fn queue(&self) -> Queue {
         self.queue.clone()
     }
 
     /// Get the queue transactions as a `HashSet` of unmined ids.
     fn transactions_as_hash_set(&self) -> HashSet<UnminedTxId> {
-        let transactions = self
-            .queue
-            .lock()
-            .expect("queue mutex should be unpoisoned")
-            .transactions();
+        let transactions = self.queue.transactions();
         transactions.iter().map(|t| *t.0).collect()
     }
 
     /// Get the queue transactions as a `Vec` of transactions.
     fn transactions_as_vec(&self) -> Vec<Arc<Transaction>> {
-        let transactions = self
-            .queue
-            .lock()
-            .expect("queue mutex should be unpoisoned")
-            .transactions();
+        let transactions = self.queue.transactions();
         transactions.iter().map(|t| t.1 .0.clone()).collect()
     }
 
     /// Retry sending to memempool if needed.
-    pub async fn run<Mempool, State, Tip>(self, mempool: Mempool, state: State, _tip: Tip)
+    pub async fn run<Mempool, State, Tip>(mut self, mempool: Mempool, state: State, _tip: Tip)
     where
         Mempool: Service<Request, Response = Response, Error = BoxError> + Clone + 'static,
         State: Service<ReadRequest, Response = ReadResponse, Error = zebra_state::BoxError>
@@ -157,7 +128,14 @@ impl Runner {
         // get spacing between blocks
         let spacing = NetworkUpgrade::target_spacing_for_height(network, tip_height);
 
+        let mut receiver = self.sender.subscribe();
+
         loop {
+            // check the channel for new transactions
+            if let Ok(Some(tx)) = &receiver.recv().await {
+                let _ = &self.queue.insert(tx.clone());
+            }
+
             // sleep until the next block
             tokio::time::sleep(spacing.to_std().unwrap()).await;
 
@@ -179,14 +157,10 @@ impl Runner {
     }
 
     /// Remove transactions that are expired according to number of blocks and current spacing between blocks.
-    fn remove_expired(&self, spacing: Duration) {
+    fn remove_expired(&mut self, spacing: Duration) {
         let duration_to_expire =
             Duration::seconds(NUMBER_OF_BLOCKS_TO_EXPIRE * spacing.num_seconds());
-        let transactions = self
-            .queue
-            .lock()
-            .expect("queue mutex should be unpoisoned")
-            .transactions();
+        let transactions = self.queue.transactions();
         let now = Instant::now();
 
         for tx in transactions.iter() {
@@ -196,21 +170,15 @@ impl Runner {
                     .unwrap();
 
             if now > tx_time {
-                self.queue
-                    .lock()
-                    .expect("queue mutex should be unpoisoned")
-                    .remove(*tx.0);
+                self.queue.remove(*tx.0);
             }
         }
     }
 
     /// Remove transactions from the queue that had been inserted to the state or the mempool.
-    fn remove_committed(&self, to_remove: HashSet<UnminedTxId>) {
+    fn remove_committed(&mut self, to_remove: HashSet<UnminedTxId>) {
         for r in to_remove {
-            self.queue
-                .lock()
-                .expect("queue mutex should be unpoisoned")
-                .remove(r);
+            self.queue.remove(r);
         }
     }
 

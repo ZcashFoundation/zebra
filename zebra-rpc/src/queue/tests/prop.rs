@@ -18,20 +18,20 @@ proptest! {
     #[test]
     fn insert_remove_to_from_queue(transaction in any::<UnminedTx>()) {
         // create a queue
-        let (_listener, runner) = Queue::start();
+        let mut runner = Queue::start();
 
         // insert transaction
-        runner.queue.lock().unwrap().insert(transaction.clone());
+        runner.queue.insert(transaction.clone());
 
         // transaction was inserted to queue
-        let queue_transactions = runner.queue.lock().unwrap().transactions();
+        let queue_transactions = runner.queue.transactions();
         prop_assert_eq!(1, queue_transactions.len());
 
         // remove transaction from the queue
-        runner.queue.lock().unwrap().remove(transaction.id);
+        runner.queue.remove(transaction.id);
 
         // transaction was removed from queue
-        prop_assert_eq!(runner.queue.lock().unwrap().transactions().len(), 0);
+        prop_assert_eq!(runner.queue.transactions().len(), 0);
     }
 
     /// Test transactions are removed from the queue after time elapses.
@@ -44,33 +44,33 @@ proptest! {
             tokio::time::pause();
 
             // create a queue
-            let (_listener, runner) = Queue::start();
+            let mut runner = Queue::start();
 
             // insert a transaction to the queue
-            runner.queue.lock().unwrap().insert(transaction);
-            prop_assert_eq!(runner.queue.lock().unwrap().transactions().len(), 1);
+            runner.queue.insert(transaction);
+            prop_assert_eq!(runner.queue.transactions().len(), 1);
 
             // have a block interval value
             let spacing = chrono::Duration::seconds(150);
 
             // apply expiration inmediatly, transaction will not be removed from queue
             runner.remove_expired(spacing);
-            prop_assert_eq!(runner.queue.lock().unwrap().transactions().len(), 1);
+            prop_assert_eq!(runner.queue.transactions().len(), 1);
 
             // apply expiration after 1 block elapsed, transaction will not be removed from queue
             tokio::time::advance(spacing.to_std().unwrap()).await;
             runner.remove_expired(spacing);
-            prop_assert_eq!(runner.queue.lock().unwrap().transactions().len(), 1);
+            prop_assert_eq!(runner.queue.transactions().len(), 1);
 
             // apply expiration after 2 blocks elapsed, transaction will not be removed from queue
             tokio::time::advance(spacing.mul(2).to_std().unwrap()).await;
             runner.remove_expired(spacing);
-            prop_assert_eq!(runner.queue.lock().unwrap().transactions().len(), 1);
+            prop_assert_eq!(runner.queue.transactions().len(), 1);
 
             // apply expiration after 3 block elapsed, transaction will be removed from queue
             tokio::time::advance(spacing.mul(3).to_std().unwrap()).await;
             runner.remove_expired(spacing);
-            prop_assert_eq!(runner.queue.lock().unwrap().transactions().len(), 0);
+            prop_assert_eq!(runner.queue.transactions().len(), 0);
 
             Ok::<_, TestCaseError>(())
         })?;
@@ -85,13 +85,13 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
 
             // create a queue
-            let (_listener, runner) = Queue::start();
+            let mut runner = Queue::start();
 
             // insert a transaction to the queue
             let unmined_transaction = UnminedTx::from(transaction);
-            runner.queue.lock().unwrap().insert(unmined_transaction.clone());
+            runner.queue.insert(unmined_transaction.clone());
 
-            let transactions = runner.queue.lock().unwrap().transactions();
+            let transactions = runner.queue.transactions();
             prop_assert_eq!(transactions.len(), 1);
 
             // convert to hashset
@@ -143,10 +143,10 @@ proptest! {
 
             prop_assert_eq!(result.len(), 1);
             // not deleted yet
-            prop_assert_eq!(runner.queue.lock().unwrap().transactions().len(), 1);
+            prop_assert_eq!(runner.queue.transactions().len(), 1);
             // delete
             runner.remove_committed(result);
-            prop_assert_eq!(runner.queue.lock().unwrap().transactions().len(), 0);
+            prop_assert_eq!(runner.queue.transactions().len(), 0);
 
             // no more
             mempool.expect_no_requests().await?;
@@ -167,12 +167,12 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             // create a queue
-            let (_listener, runner) = Queue::start();
+            let mut runner = Queue::start();
 
             // insert a transaction to the queue
             let unmined_transaction = UnminedTx::from(&transaction);
-            runner.queue.lock().unwrap().insert(unmined_transaction.clone());
-            prop_assert_eq!(runner.queue.lock().unwrap().transactions().len(), 1);
+            runner.queue.insert(unmined_transaction.clone());
+            prop_assert_eq!(runner.queue.transactions().len(), 1);
 
             // run the runner
             let mut hs = HashSet::new();

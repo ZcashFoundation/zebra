@@ -557,9 +557,6 @@ proptest! {
                 .await
                 .expect("Sending raw transactions should not panic");
 
-            // make sure the transaction was inserted to the queue
-            prop_assert_eq!(rpc.queue_runner.queue().lock().unwrap().transactions().len(), 1);
-
             // advance enough time to have a new runner iteration
             let spacing = chrono::Duration::seconds(150);
             tokio::time::advance(spacing.to_std().unwrap()).await;
