@@ -31,8 +31,8 @@ use zebra_node_services::{
 
 use zebra_state::{ReadRequest, ReadResponse};
 
-//#[cfg(test)]
-//mod tests;
+#[cfg(test)]
+mod tests;
 
 /// The number of blocks a transaction can be in the queue.
 const NUMBER_OF_BLOCKS_TO_EXPIRE: i64 = 3;
