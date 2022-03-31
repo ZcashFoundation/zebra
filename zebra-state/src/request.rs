@@ -58,15 +58,12 @@ impl std::str::FromStr for HashOrHeight {
     type Err = SerializationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.parse() {
-            Ok(hash) => Ok(Self::Hash(hash)),
-            Err(_) => match s.parse() {
-                Ok(height) => Ok(Self::Height(height)),
-                Err(_) => Err(SerializationError::Parse(
-                    "Could not convert the input string to a hash nor a height",
-                )),
-            },
-        }
+        s.parse()
+            .map(Self::Hash)
+            .or_else(|_| s.parse().map(Self::Height))
+            .map_err(|_| {
+                SerializationError::Parse("could not convert the input string to a hash or height")
+            })
     }
 }
 
