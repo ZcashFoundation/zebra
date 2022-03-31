@@ -613,7 +613,7 @@ We use the following rocksdb column families:
 | *Transparent*                      |                        |                               |         |
 | `balance_by_transparent_addr`      | `transparent::Address` | `Amount \|\| AddressLocation` | Update  |
 | `tx_loc_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                          | Create  |
-| `utxo_by_out_loc`                  | `OutputLocation`       | `Output \|\| AddressLocation` | Delete  |
+| `utxo_by_out_loc`                  | `OutputLocation`       | `transparent::Output`         | Delete  |
 | `utxo_loc_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                          | Delete  |
 | *Sprout*                           |                        |                               |         |
 | `sprout_nullifiers`                | `sprout::Nullifier`    | `()`                          | Create  |
