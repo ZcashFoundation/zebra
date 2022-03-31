@@ -145,7 +145,7 @@ jobs:
       - name: Format network string
         run: |
           NETWORK_CAPS=${{ github.event.inputs.network || env.NETWORK }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >>${GITHUB_ENV}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -191,9 +191,9 @@ jobs:
       # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
       - name: Get container name from logs
         id: get-container-name
-        if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           INSTANCE_ID=$(gcloud compute instances describe full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
           echo "Using instance: $INSTANCE_ID"
           while [[ ${CONTAINER_NAME} != *"full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"* ]]; do
               CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
@@ -201,12 +201,11 @@ jobs:
               sleep 10
           done
           CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
-          echo "::set-output name=zebra_container::$CONTAINER_NAME"
+          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
           sleep 60
 
       - name: Full sync
         id: full-sync
-        if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           gcloud compute ssh \
           full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -214,24 +213,24 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
-        env:
-          ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
 
       - name: Get sync height from logs
-        id: get-sync-height
         run: |
-          INSTANCE_ID=$(gcloud compute instances describe full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
-          SYNC_HEIGHT=$(gcloud logging read '(resource.labels.instance_id="${INSTANCE_ID}" AND logName="projects/zealous-zebra/logs/cos_containers")' --format='value(jsonPayload.MESSAGE)' --order="desc" --limit 25 | grep 'finished initial sync to chain tip' |  grep -o -E 'Height\([0-9]+\)' | grep -o -E '[0-9]+')
-          echo "::set-output name=sync_height::$SYNC_HEIGHT"
+          SYNC_HEIGHT=$(gcloud logging read '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload."cos.googleapis.com/container_name"="${{ env.CONTAINER_NAME }}" AND jsonPayload."cos.googleapis.com/stream"="stdout")' --format='value(jsonPayload.MESSAGE)' --order="desc" --limit 25 | grep 'finished initial sync to chain tip' |  grep -o -E 'Height\([0-9]+\)' | grep -o -E '[0-9]+')
+          echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
+          sleep 60
+
+      - name: Get state version from logs
+        run: |
+          STATE_VERSION=$(gcloud logging read '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload."cos.googleapis.com/container_name"="${{ env.CONTAINER_NAME }}" AND jsonPayload."cos.googleapis.com/stream"="stdout")' --format='value(jsonPayload.MESSAGE)' --order="asc" --limit=50 | grep "Opened Zebra state cache" | grep -oE "v[0-9]+")
+          echo "STATE_VERSION=$STATE_VERSION" >> $GITHUB_ENV
           sleep 60
 
       # Create image from disk
       # Force the image creation as the disk is still attached, even though is not being used by the container
       - name: Create image from state disk
-        # Only run if the earlier step succeeds
-        if: steps.full-sync.outcome == 'success'
         run: |
-          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }} \
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-${{ env.STATE_VERSION }}-${{ env.SYNC_HEIGHT }} \
           --force \
           --source-disk=full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --source-disk-zone=${{ env.ZONE }} \
@@ -240,7 +239,7 @@ jobs:
 
       - name: Delete test instance
         # Do not delete the instance if the sync timeouts in GitHub
-        if: ${{ steps.full-sync-mainnet.outcome == 'success' || steps.full-sync-mainnet.outcome == 'failure' }}
+        if: ${{ steps.full-sync.outcome == 'success' || steps.full-sync.outcome == 'failure' }}
         continue-on-error: true
         run: |
           gcloud compute instances delete "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
