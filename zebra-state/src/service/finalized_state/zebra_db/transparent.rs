@@ -138,8 +138,8 @@ impl ZebraDb {
         &self,
         address_location: AddressLocation,
     ) -> BTreeSet<AddressUnspentOutput> {
-        let utxo_by_transparent_addr_loc =
-            self.db.cf_handle("utxo_by_transparent_addr_loc").unwrap();
+        let utxo_loc_by_transparent_addr_loc =
+            self.db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
 
         // Manually fetch the entire addresses' UTXO locations
         let mut addr_unspent_outputs = BTreeSet::new();
@@ -151,7 +151,7 @@ impl ZebraDb {
             // A valid key representing an entry for this address or the next
             unspent_output = match self
                 .db
-                .zs_next_key_value_from(&utxo_by_transparent_addr_loc, &unspent_output)
+                .zs_next_key_value_from(&utxo_loc_by_transparent_addr_loc, &unspent_output)
             {
                 Some((unspent_output, ())) => unspent_output,
                 // We're finished with the final address in the column family
@@ -193,7 +193,7 @@ impl DiskWriteBatch {
         mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
         let utxo_by_out_loc = db.cf_handle("utxo_by_outpoint").unwrap();
-        let utxo_by_transparent_addr_loc = db.cf_handle("utxo_by_transparent_addr_loc").unwrap();
+        let utxo_loc_by_transparent_addr_loc = db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
 
         // Index all new transparent outputs, before deleting any we've spent
         for (new_output_location, utxo) in new_outputs_by_out_loc {
@@ -219,7 +219,7 @@ impl DiskWriteBatch {
                     receiving_address_location.unwrap(),
                     new_output_location,
                 );
-                self.zs_insert(&utxo_by_transparent_addr_loc, address_unspent_output, ());
+                self.zs_insert(&utxo_loc_by_transparent_addr_loc, address_unspent_output, ());
             }
 
             let output_address_location =
@@ -253,7 +253,7 @@ impl DiskWriteBatch {
                     address_balance_location.address_location(),
                     spent_output_location,
                 );
-                self.zs_delete(&utxo_by_transparent_addr_loc, address_spent_output);
+                self.zs_delete(&utxo_loc_by_transparent_addr_loc, address_spent_output);
             }
 
             self.zs_delete(&utxo_by_out_loc, spent_output_location);
