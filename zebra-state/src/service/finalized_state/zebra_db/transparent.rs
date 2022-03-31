@@ -214,15 +214,21 @@ impl DiskWriteBatch {
                 // TODO: fix up tests that use missing outputs,
                 //       then replace entry() with get_mut().expect()
 
+                // In memory:
+                // - create the balance for the address, if needed.
+                // - create or fetch the link from the address to the AddressLocation
+                //   (the first location of the address in the chain).
                 let address_balance_location = address_balances
                     .entry(receiving_address)
                     .or_insert_with(|| AddressBalanceLocation::new(new_output_location));
                 receiving_address_location = Some(address_balance_location.address_location());
 
+                // Update the balance for the address in memory.
                 address_balance_location
                     .receive_output(&unspent_output)
                     .expect("balance overflow already checked");
 
+                // Create a link from the AddressLocation to the new OutputLocation in the database.
                 let address_unspent_output = AddressUnspentOutput::new(
                     receiving_address_location.unwrap(),
                     new_output_location,
@@ -234,6 +240,9 @@ impl DiskWriteBatch {
                 );
             }
 
+            // Use the OutputLocation to store a copy of the new Output in the database.
+            // (For performance reasons, we don't want to deserialize the whole transaction
+            // to get an output.)
             let output_address_location =
                 UnspentOutputAddressLocation::new(unspent_output, receiving_address_location);
             self.zs_insert(
@@ -250,17 +259,19 @@ impl DiskWriteBatch {
             let spent_output = utxo.output;
             let sending_address = spent_output.address(self.network());
 
-            // Update the address balance by subtracting this UTXO's value
+            // Fetch the balance, and the link from the address to the AddressLocation, from memory.
             if let Some(sending_address) = sending_address {
                 let address_balance_location =
                     address_balances.entry(sending_address).or_insert_with(|| {
                         panic!("spent outputs must already have an address balance")
                     });
 
+                // Update the address balance by subtracting this UTXO's value, in memory.
                 address_balance_location
                     .spend_output(&spent_output)
                     .expect("balance underflow already checked");
 
+                // Delete the link from the AddressLocation to the spent OutputLocation in the database.
                 let address_spent_output = AddressUnspentOutput::new(
                     address_balance_location.address_location(),
                     spent_output_location,
@@ -268,6 +279,7 @@ impl DiskWriteBatch {
                 self.zs_delete(&utxo_loc_by_transparent_addr_loc, address_spent_output);
             }
 
+            // Delete the OutputLocation, and the copy of the spent Output in the database.
             self.zs_delete(&utxo_by_out_loc, spent_output_location);
         }
 
@@ -290,9 +302,7 @@ impl DiskWriteBatch {
     ) -> Result<(), BoxError> {
         let balance_by_transparent_addr = db.cf_handle("balance_by_transparent_addr").unwrap();
 
-        // Write to the database:
-        // - the updated address balances, and
-        // - the updated address UTXO lists, if they have any entries
+        // Update all the changed address balances in the database.
         for (address, address_balance_location) in address_balances.into_iter() {
             // Some of these balances are new, and some are updates
             self.zs_insert(
