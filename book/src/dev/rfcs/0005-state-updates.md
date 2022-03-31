@@ -600,36 +600,36 @@ order on byte strings is the numeric ordering).
 
 We use the following rocksdb column families:
 
-| Column Family                  | Keys                   | Values                              | Updates |
-| ------------------------------ | ---------------------- | ----------------------------------- | ------- |
-| *Blocks*                       |                        |                                     |         |
-| `hash_by_height`               | `block::Height`        | `block::Hash`                       | Never   |
-| `height_by_hash`               | `block::Hash`          | `block::Height`                     | Never   |
-| `block_header_by_height`       | `block::Height`        | `block::Header`                     | Never   |
-| *Transactions*                 |                        |                                     |         |
-| `tx_by_loc`                    | `TransactionLocation`  | `Transaction`                       | Never   |
-| `hash_by_tx_loc`               | `TransactionLocation`  | `transaction::Hash`                 | Never   |
-| `tx_loc_by_hash`               | `transaction::Hash`    | `TransactionLocation`               | Never   |
-| *Transparent*                  |                        |                                     |         |
-| `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| AddressLocation`       | Update  |
-| `tx_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                                | Never   |
-| `utxo_by_out_loc`              | `OutputLocation`       | `Output \|\| AddressLocation`       | Delete  |
-| `utxo_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                                | Delete  |
-| *Sprout*                       |                        |                                     |         |
-| `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                | Never   |
-| `sprout_anchors`               | `sprout::tree::Root`   | `sprout::tree::NoteCommitmentTree`  | Never   |
-| `sprout_note_commitment_tree`  | `block::Height`        | `sprout::tree::NoteCommitmentTree`  | Delete  |
-| *Sapling*                      |                        |                                     |         |
-| `sapling_nullifiers`           | `sapling::Nullifier`   | `()`                                | Never   |
-| `sapling_anchors`              | `sapling::tree::Root`  | `()`                                | Never   |
-| `sapling_note_commitment_tree` | `block::Height`        | `sapling::tree::NoteCommitmentTree` | Never   |
-| *Orchard*                      |                        |                                     |         |
-| `orchard_nullifiers`           | `orchard::Nullifier`   | `()`                                | Never   |
-| `orchard_anchors`              | `orchard::tree::Root`  | `()`                                | Never   |
-| `orchard_note_commitment_tree` | `block::Height`        | `orchard::tree::NoteCommitmentTree` | Never   |
-| *Chain*                        |                        |                                     |         |
-| `history_tree`                 | `block::Height`        | `NonEmptyHistoryTree`               | Delete  |
-| `tip_chain_value_pool`         | `()`                   | `ValueBalance`                      | Update  |
+| Column Family                      | Keys                   | Values                        | Updates |
+| ---------------------------------- | ---------------------- | ----------------------------- | ------- |
+| *Blocks*                           |                        |                               |         |
+| `hash_by_height`                   | `block::Height`        | `block::Hash`                 | Never   |
+| `height_by_hash`                   | `block::Hash`          | `block::Height`               | Never   |
+| `block_header_by_height`           | `block::Height`        | `block::Header`               | Never   |
+| *Transactions*                     |                        |                               |         |
+| `tx_by_loc`                        | `TransactionLocation`  | `Transaction`                 | Never   |
+| `hash_by_tx_loc`                   | `TransactionLocation`  | `transaction::Hash`           | Never   |
+| `tx_loc_by_hash`                   | `transaction::Hash`    | `TransactionLocation`         | Never   |
+| *Transparent*                      |                        |                               |         |
+| `balance_by_transparent_addr`      | `transparent::Address` | `Amount \|\| AddressLocation` | Update  |
+| `tx_loc_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                          | Never   |
+| `utxo_by_out_loc`                  | `OutputLocation`       | `Output \|\| AddressLocation` | Delete  |
+| `utxo_loc_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                          | Delete  |
+| *Sprout*                           |                        |                               |         |
+| `sprout_nullifiers`                | `sprout::Nullifier`    | `()`                          | Never   |
+| `sprout_anchors`                   | `sprout::tree::Root`   | `sprout::NoteCommitmentTree`  | Never   |
+| `sprout_note_commitment_tree`      | `block::Height`        | `sprout::NoteCommitmentTree`  | Delete  |
+| *Sapling*                          |                        |                               |         |
+| `sapling_nullifiers`               | `sapling::Nullifier`   | `()`                          | Never   |
+| `sapling_anchors`                  | `sapling::tree::Root`  | `()`                          | Never   |
+| `sapling_note_commitment_tree`     | `block::Height`        | `sapling::NoteCommitmentTree` | Never   |
+| *Orchard*                          |                        |                               |         |
+| `orchard_nullifiers`               | `orchard::Nullifier`   | `()`                          | Never   |
+| `orchard_anchors`                  | `orchard::tree::Root`  | `()`                          | Never   |
+| `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Never   |
+| *Chain*                            |                        |                               |         |
+| `history_tree`                     | `block::Height`        | `NonEmptyHistoryTree`         | Delete  |
+| `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 Other structures are encoded using `IntoDisk`/`FromDisk`.
@@ -766,8 +766,8 @@ So they should not be used for consensus-critical checks.
   of the rocksdb column family, which may help save space.
 
 - Similarly, transaction data is stored in chain order in `tx_by_loc` and `utxo_by_out_loc`,
-  and chain order within each vector in `utxo_by_transparent_addr_loc` and
-  `tx_by_transparent_addr_loc`.
+  and chain order within each vector in `utxo_loc_by_transparent_addr_loc` and
+  `tx_loc_by_transparent_addr_loc`.
 
 - `TransactionLocation`s are stored as a `(height, index)` pair referencing the
   height of the transaction's parent block and the transaction's index in that
@@ -784,23 +784,23 @@ So they should not be used for consensus-critical checks.
   `is_coinbase: OutputLocation.transaction_index == 0`
   (coinbase transactions are always the first transaction in a block).
 
-- `balance_by_transparent_addr` is the sum of all `utxo_by_transparent_addr_loc`s
+- `balance_by_transparent_addr` is the sum of all `utxo_loc_by_transparent_addr_loc`s
   that are still in `utxo_by_out_loc`. It is cached to improve performance for
   addresses with large UTXO sets. It also stores the `AddressLocation` for each
   address, which allows for efficient lookups.
 
-- `utxo_by_transparent_addr_loc` stores unspent transparent output locations
+- `utxo_loc_by_transparent_addr_loc` stores unspent transparent output locations
   by address. The address location and UTXO location are stored as a RocksDB key,
   so they are in chain order, and get good database performance.
   This column family includes also includes the original address location UTXO,
   if it has not been spent.
 
 - When a block write deletes a UTXO from `utxo_by_out_loc`,
-  that UTXO location should be deleted from `utxo_by_transparent_addr_loc`.
+  that UTXO location should be deleted from `utxo_loc_by_transparent_addr_loc`.
   The deleted UTXO can be removed efficiently, because the UTXO location is part of the key.
   This is an index optimisation, which does not affect query results.
 
-- `tx_by_transparent_addr_loc` stores transaction locations by address.
+- `tx_loc_by_transparent_addr_loc` stores transaction locations by address.
   This list includes transactions containing spent UTXOs.
   The address location and transaction location are stored as a RocksDB key,
   so they are in chain order, and get good database performance.
