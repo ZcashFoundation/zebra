@@ -21,7 +21,7 @@ mset = "0.1.0"
 proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 regex = "1.5.5"
-rlimit = "0.7.0"
+rlimit = "0.8.0"
 rocksdb = "0.18.0"
 serde = { version = "1.0.136", features = ["serde_derive"] }
 tempfile = "3.3.0"
