@@ -970,7 +970,7 @@ impl Service<ReadRequest> for ReadStateService {
                     "state.requests",
                     1,
                     "service" => "read_state",
-                    "type" => "treestate",
+                    "type" => "sapling_tree",
                 );
 
                 let state = self.clone();
@@ -990,7 +990,7 @@ impl Service<ReadRequest> for ReadStateService {
                     "state.requests",
                     1,
                     "service" => "read_state",
-                    "type" => "treestate",
+                    "type" => "orchard_tree",
                 );
 
                 let state = self.clone();
