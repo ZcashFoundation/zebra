@@ -1,0 +1,70 @@
+name: Grep logs test (do not merge!)
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        default: 'Mainnet'
+
+env:
+  CARGO_INCREMENTAL: '1'
+  ZEBRA_SKIP_IPV6_TESTS: "1"
+  RUST_BACKTRACE: full
+  RUST_LIB_BACKTRACE: full
+  COLORBT_SHOW_HIDDEN: '1'
+  NETWORK: Mainnet
+  PROJECT_ID: zealous-zebra
+  GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
+  GCR_BASE: gcr.io/zealous-zebra
+  REGION: us-central1
+  ZONE: us-central1-a
+  MACHINE_TYPE: c2d-standard-16
+  IMAGE_NAME: zebrad-test
+
+jobs:
+
+  test:
+    name: Grep logs test (do not merge!)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Format network string
+        run: |
+          NETWORK_CAPS=${{ github.event.inputs.network || env.NETWORK }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.6.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      - name: Get container name
+        run: |
+          INSTANCE_ID=2060082264991942301
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+          CONTAINER_NAME="klt-full-sync-3974-merge-4baa197-uhsk"
+          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
+          sleep 60
+
+      - name: Get sync height from logs
+        run: |
+          SYNC_HEIGHT=$(gcloud logging read '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload."cos.googleapis.com/container_name"="${{ env.CONTAINER_NAME }}" AND jsonPayload."cos.googleapis.com/stream"="stdout")' --format='value(jsonPayload.MESSAGE)' --order="desc" --limit 25 | grep 'finished initial sync to chain tip' |  grep -o -E 'Height\([0-9]+\)' | grep -o -E '[0-9]+')
+          echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
+          sleep 60
+
+      - name: Get state version from logs
+        run: |
+          STATE_VERSION=$(gcloud logging read '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload."cos.googleapis.com/container_name"="${{ env.CONTAINER_NAME }}" AND jsonPayload."cos.googleapis.com/stream"="stdout")' --format='value(jsonPayload.MESSAGE)' --order="asc" --limit=50 | grep "Opened Zebra state cache" | grep -oE "v[0-9]+")
+          echo "STATE_VERSION=$STATE_VERSION" >> $GITHUB_ENV
+          sleep 60
