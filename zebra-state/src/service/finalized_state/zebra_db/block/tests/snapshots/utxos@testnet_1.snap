@@ -16,12 +16,13 @@ expression: stored_utxos
       index: TransactionIndex(0),
     ),
     output_index: OutputIndex(0),
-  ), Some(UnspentOutputAddressLocation(
+  ), Some(Utxo(
     output: Output(
       value: Amount(50000),
       lock_script: Script("21025229e1240a21004cf8338db05679fa34753706e84f6aebba086ba04317fd8f99ac"),
     ),
-    address_location: None,
+    height: Height(1),
+    from_coinbase: true,
   ))),
   (OutputLocation(
     transaction_location: TransactionLocation(
@@ -29,17 +30,12 @@ expression: stored_utxos
       index: TransactionIndex(0),
     ),
     output_index: OutputIndex(1),
-  ), Some(UnspentOutputAddressLocation(
+  ), Some(Utxo(
     output: Output(
       value: Amount(12500),
       lock_script: Script("a914ef775f1f997f122a062fff1a2d7443abd1f9c64287"),
     ),
-    address_location: Some(OutputLocation(
-      transaction_location: TransactionLocation(
-        height: Height(1),
-        index: TransactionIndex(0),
-      ),
-      output_index: OutputIndex(1),
-    )),
+    height: Height(1),
+    from_coinbase: true,
   ))),
 ]
