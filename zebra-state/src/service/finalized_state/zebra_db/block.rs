@@ -88,8 +88,7 @@ impl ZebraDb {
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
-        let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
-        let height = hash_or_height.height_or_else(|hash| self.db.zs_get(height_by_hash, &hash))?;
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
         let sapling_note_commitment_tree_handle =
             self.db.cf_handle("sapling_note_commitment_tree").unwrap();
@@ -104,8 +103,7 @@ impl ZebraDb {
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
-        let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
-        let height = hash_or_height.height_or_else(|hash| self.db.zs_get(height_by_hash, &hash))?;
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
         let orchard_note_commitment_tree_handle =
             self.db.cf_handle("orchard_note_commitment_tree").unwrap();
