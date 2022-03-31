@@ -23,6 +23,16 @@ use crate::service::finalized_state::{
     },
 };
 
+// Common
+
+// TODO: turn this into a unit test, it has a fixed value
+#[test]
+fn roundtrip_unit_type() {
+    zebra_test::init();
+
+    proptest!(|(val in any::<()>())| assert_value_properties(val));
+}
+
 // Block
 // TODO: split these tests into the disk_format sub-modules
 
