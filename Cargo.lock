@@ -1859,9 +1859,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.17"
+version = "0.14.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "043f0e083e9901b6cc658a77d1eb86f4fc650bbb977a4337dd63192826aa85dd"
+checksum = "b26ae0a80afebe130861d90abf98e3814a4f28a4c6ffeb5ab8ebb2be311e0ef2"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -1936,9 +1936,9 @@ checksum = "ce23b50ad8242c51a442f3ff322d56b02f08852c77e4c0b4d3fd684abc89c683"
 
 [[package]]
 name = "indexmap"
-version = "1.8.0"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "282a6247722caba404c065016bbfa522806e51714c34f5dfc3e4a3a46fcb4223"
+checksum = "0f647032dfaa1f8b6dc29bd3edb7bbef4861b8b8007ebb118d6db284fd59f6ee"
 dependencies = [
  "autocfg 1.1.0",
  "hashbrown",
@@ -1964,9 +1964,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.13.0"
+version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30a7e1911532a662f6b08b68f884080850f2fd9544963c3ab23a5af42bda1eac"
+checksum = "689960f187c43c01650c805fb6bc6f55ab944499d86d4ffe9474ad78991d8e94"
 dependencies = [
  "console",
  "once_cell",
@@ -3577,7 +3577,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
 dependencies = [
- "semver 1.0.6",
+ "semver 1.0.7",
 ]
 
 [[package]]
@@ -3734,9 +3734,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.6"
+version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4a3381e03edd24287172047536f20cabde766e2cd3e65e6b00fb3af51c4f38d"
+checksum = "d65bd28f48be7196d222d95b9243287f48d27aca604e08497513019ff0502cc4"
 
 [[package]]
 name = "semver-parser"
@@ -3836,12 +3836,11 @@ dependencies = [
 
 [[package]]
 name = "serde-big-array"
-version = "0.3.2"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18b20e7752957bbe9661cff4e0bb04d183d0948cdab2ea58cdb9df36a61dfe62"
+checksum = "3323f09a748af288c3dc2474ea6803ee81f118321775bffa3ac8f7e65c5e90e7"
 dependencies = [
  "serde",
- "serde_derive",
 ]
 
 [[package]]
@@ -4413,16 +4412,16 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64910e1b9c1901aaf5375561e35b9c057d95ff41a44ede043a03e09279eabaf1"
+checksum = "0edfdeb067411dba2044da6d1cb2df793dd35add7888d73c16e3381ded401764"
 dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
- "log",
  "pin-project-lite",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4833,7 +4832,7 @@ dependencies = [
  "pin-project 1.0.10",
  "pin-project-lite",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -4841,7 +4840,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.21"
+version = "0.2.22"
 dependencies = [
  "color-eyre 0.6.1",
  "ed25519-zebra",
@@ -4861,7 +4860,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.17"
+version = "0.2.18"
 dependencies = [
  "futures-core",
  "pin-project 0.4.29",
@@ -5603,7 +5602,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "aes",
  "bech32",
@@ -5662,7 +5661,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "bellman",
  "blake2b_simd 1.0.0",
@@ -5704,7 +5703,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "arti-client",
  "bitflags",
@@ -5726,7 +5725,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "toml",
  "tor-rtcompat",
  "tower",
@@ -5739,14 +5738,14 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "zebra-chain",
 ]
 
 [[package]]
 name = "zebra-rpc"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.6"
 dependencies = [
  "chrono",
  "futures",
@@ -5757,6 +5756,7 @@ dependencies = [
  "jsonrpc-derive",
  "jsonrpc-http-server",
  "proptest",
+ "proptest-derive",
  "serde",
  "serde_json",
  "thiserror",
@@ -5773,7 +5773,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "displaydoc",
  "hex",
@@ -5786,7 +5786,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "bincode",
  "chrono",
@@ -5821,7 +5821,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "color-eyre 0.5.11",
  "futures",
@@ -5845,7 +5845,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "color-eyre 0.6.1",
  "hex",
@@ -5860,7 +5860,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "abscissa_core",
  "atty",
@@ -5882,7 +5882,7 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "regex",
- "semver 1.0.6",
+ "semver 1.0.7",
  "sentry",
  "sentry-tracing",
  "serde",

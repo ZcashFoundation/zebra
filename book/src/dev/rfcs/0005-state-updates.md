@@ -611,10 +611,10 @@ We use the following rocksdb column families:
 | `hash_by_tx_loc`               | `TransactionLocation`  | `transaction::Hash`                 | Never   |
 | `tx_loc_by_hash`               | `transaction::Hash`    | `TransactionLocation`               | Never   |
 | *Transparent*                  |                        |                                     |         |
-| `utxo_by_out_loc`              | `OutputLocation`       | `Output \|\| AddressLocation`       | Delete  |
 | `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| AddressLocation`       | Update  |
-| `utxo_by_transparent_addr_loc` | `AddressLocation`      | `AtLeastOne<OutputLocation>`        | Up/Del  |
-| `tx_by_transparent_addr_loc`   | `AddressLocation`      | `AtLeastOne<TransactionLocation>`   | Append  |
+| `tx_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                                | Never   |
+| `utxo_by_out_loc`              | `OutputLocation`       | `Output \|\| AddressLocation`       | Delete  |
+| `utxo_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                                | Delete  |
 | *Sprout*                       |                        |                                     |         |
 | `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                | Never   |
 | `sprout_anchors`               | `sprout::tree::Root`   | `sprout::tree::NoteCommitmentTree`  | Never   |
@@ -645,7 +645,10 @@ Block and Transaction Data:
 - `AddressLocation`: the first `OutputLocation` used by a `transparent::Address`.
   Always has the same value for each address, even if the first output is spent.
 - `Utxo`: `Output`, derives extra fields from the `OutputLocation` key
-- `AtLeastOne<T>`: `[T; AtLeastOne::len()]` (for known-size `T`)
+- `AddressUnspentOutput`: `AddressLocation \|\| OutputLocation`,
+  used instead of a `BTreeSet<OutputLocation>` value, to improve database performance
+- `AddressTransaction`: `AddressLocation \|\| TransactionLocation`
+  used instead of a `BTreeSet<TransactionLocation>` value, to improve database performance
 
 We use big-endian encoding for keys, to allow database index prefix searches.
 
@@ -660,13 +663,15 @@ Derived Formats:
 ### Implementing consensus rules using rocksdb
 [rocksdb-consensus-rules]: #rocksdb-consensus-rules
 
-Each column family handles updates differently, based on its specific consensus rules:
+Each column family handles value updates differently, based on its specific consensus rules:
 - Never: Keys are never deleted, values are never updated. The value for each key is inserted once.
 - Delete: Keys can be deleted, but values are never updated. The value for each key is inserted once.
   - Code called by ReadStateService must ignore deleted keys, or use a read lock.
   - TODO: should we prevent re-inserts of keys that have been deleted?
 - Update: Keys are never deleted, but values can be updated.
   - Code called by ReadStateService must accept old or new values, or use a read lock.
+
+We can't do some kinds of value updates, because they cause RocksDB performance issues:
 - Append: Keys are never deleted, existing values are never updated,
   but sets of values can be extended with more entries.
   - Code called by ReadStateService must accept truncated or extended sets, or use a read lock.
@@ -674,6 +679,8 @@ Each column family handles updates differently, based on its specific consensus 
   - Code called by ReadStateService must ignore deleted keys and values,
     accept truncated or extended sets, and accept old or new values.
     Or it should use a read lock.
+
+In general, avoid using large sets of values as RocksDB keys or values.
 
 ### RocksDB read locks
 [rocksdb-read-locks]: #rocksdb-read-locks
@@ -746,8 +753,9 @@ So they should not be used for consensus-critical checks.
   Blocks can be re-created on request using the following process:
   - Look up `height` in `height_by_hash`
   - Get the block header for `height` from `block_header_by_height`
-  - Use a [`prefix_iterator`](https://docs.rs/rocksdb/0.17.0/rocksdb/struct.DBWithThreadMode.html#method.prefix_iterator)
-    to get each transaction with `height` from `tx_by_loc`
+  - Iterate from `TransactionIndex` 0,
+    to get each transaction with `height` from `tx_by_loc`,
+    stopping when there are no more transactions in the block
 
 - Block headers are stored by height, not by hash.  This has the downside that looking
   up a block by hash requires an extra level of indirection.  The upside is
@@ -782,18 +790,22 @@ So they should not be used for consensus-critical checks.
   address, which allows for efficient lookups.
 
 - `utxo_by_transparent_addr_loc` stores unspent transparent output locations
-  by address. UTXO locations are appended by each block.
-  This list includes the `AddressLocation`, if it has not been spent.
-  (This duplicate data is small, and helps simplify the code.)
+  by address. The address location and UTXO location are stored as a RocksDB key,
+  so they are in chain order, and get good database performance.
+  This column family includes also includes the original address location UTXO,
+  if it has not been spent.
 
 - When a block write deletes a UTXO from `utxo_by_out_loc`,
   that UTXO location should be deleted from `utxo_by_transparent_addr_loc`.
+  The deleted UTXO can be removed efficiently, because the UTXO location is part of the key.
   This is an index optimisation, which does not affect query results.
 
 - `tx_by_transparent_addr_loc` stores transaction locations by address.
   This list includes transactions containing spent UTXOs.
-  It also includes the `TransactionLocation` from the `AddressLocation`.
-  (This duplicate data is small, and helps simplify the code.)
+  The address location and transaction location are stored as a RocksDB key,
+  so they are in chain order, and get good database performance.
+  This column family also includes the `TransactionLocation`
+  of the transaction for the `AddressLocation`.
 
 - The `sprout_note_commitment_tree` stores the note commitment tree state
   at the tip of the finalized state, for the specific pool. There is always
