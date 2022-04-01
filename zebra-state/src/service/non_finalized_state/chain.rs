@@ -28,22 +28,32 @@ use zebra_chain::{
 
 use crate::{service::check, ContextuallyValidBlock, HashOrHeight, ValidateContextError};
 
+use self::index::TransparentTransfers;
+
+pub mod index;
+
 #[derive(Debug, Clone)]
 pub struct Chain {
     // The function `eq_internal_state` must be updated every time a field is added to `Chain`.
+    /// The configured network for this chain.
     network: Network,
+
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
     pub(crate) blocks: BTreeMap<block::Height, ContextuallyValidBlock>,
 
     /// An index of block heights for each block hash in `blocks`.
     pub height_by_hash: HashMap<block::Hash, block::Height>,
     /// An index of block heights and transaction indexes for each transaction hash in `blocks`.
+    //
+    // TODO: replace tuple value with TransactionLocation
     pub tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
 
     /// The [`Utxo`]s created by `blocks`.
     ///
     /// Note that these UTXOs may not be unspent.
     /// Outputs can be spent by later transactions or blocks in the chain.
+    //
+    // TODO: replace OutPoint with OutputLocation?
     pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
     /// The [`OutPoint`]s spent by `blocks`,
     /// including those created by earlier transactions or blocks in the chain.
@@ -89,6 +99,9 @@ pub struct Chain {
     pub(super) sapling_nullifiers: HashSet<sapling::Nullifier>,
     /// The Orchard nullifiers revealed by `blocks`.
     pub(super) orchard_nullifiers: HashSet<orchard::Nullifier>,
+
+    /// Partial transparent address index data revealed by `blocks`.
+    pub(super) partial_transparent_transfers: HashMap<transparent::Address, TransparentTransfers>,
 
     /// The cumulative work represented by `blocks`.
     ///
@@ -138,6 +151,7 @@ impl Chain {
             sprout_nullifiers: Default::default(),
             sapling_nullifiers: Default::default(),
             orchard_nullifiers: Default::default(),
+            partial_transparent_transfers: Default::default(),
             partial_cumulative_work: Default::default(),
             history_tree,
             chain_value_pools: finalized_tip_chain_value_pools,
@@ -190,6 +204,9 @@ impl Chain {
             self.sprout_nullifiers == other.sprout_nullifiers &&
             self.sapling_nullifiers == other.sapling_nullifiers &&
             self.orchard_nullifiers == other.orchard_nullifiers &&
+
+            // transparent address indexes
+            self.partial_transparent_transfers == other.partial_transparent_transfers &&
 
             // proof of work
             self.partial_cumulative_work == other.partial_cumulative_work &&
@@ -460,6 +477,7 @@ impl Chain {
             sprout_nullifiers: self.sprout_nullifiers.clone(),
             sapling_nullifiers: self.sapling_nullifiers.clone(),
             orchard_nullifiers: self.orchard_nullifiers.clone(),
+            partial_transparent_transfers: self.partial_transparent_transfers.clone(),
             partial_cumulative_work: self.partial_cumulative_work,
             history_tree,
             chain_value_pools: self.chain_value_pools,
