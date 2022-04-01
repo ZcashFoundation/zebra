@@ -594,7 +594,7 @@ where
                     data: None,
                 })?;
 
-            let orchard_request = zebra_state::ReadRequest::SaplingTree(hash_or_height);
+            let orchard_request = zebra_state::ReadRequest::OrchardTree(hash_or_height);
             let orchard_response = state
                 .ready()
                 .and_then(|service| service.call(orchard_request))
@@ -620,18 +620,14 @@ where
             // then serialized into an empty string (empty JSON object).
 
             let sapling_tree = match sapling_response {
-                zebra_state::ReadResponse::SaplingTree(Some(tree)) => {
-                    NoteCommitmentTree::Sapling(Some((*tree).clone()))
-                }
-                zebra_state::ReadResponse::SaplingTree(None) => NoteCommitmentTree::Sapling(None),
+                zebra_state::ReadResponse::SaplingTree(Some(tree)) => Some((*tree).clone()),
+                zebra_state::ReadResponse::SaplingTree(None) => None,
                 _ => unreachable!("unmatched response to a sapling tree request"),
             };
 
             let orchard_tree = match orchard_response {
-                zebra_state::ReadResponse::SaplingTree(Some(tree)) => {
-                    NoteCommitmentTree::Sapling(Some((*tree).clone()))
-                }
-                zebra_state::ReadResponse::SaplingTree(None) => NoteCommitmentTree::Sapling(None),
+                zebra_state::ReadResponse::OrchardTree(Some(tree)) => Some((*tree).clone()),
+                zebra_state::ReadResponse::OrchardTree(None) => None,
                 _ => unreachable!("unmatched response to an orchard tree request"),
             };
 
@@ -738,18 +734,8 @@ pub struct GetTreestate {
     hash: block::Hash,
     height: block::Height,
     time: DateTime<Utc>,
-    sapling_tree: NoteCommitmentTree,
-    orchard_tree: NoteCommitmentTree,
-}
-
-/// Represents either a Sapling note commitment tree or an Orchard note
-/// commitment tree.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum NoteCommitmentTree {
-    /// Sapling note commitment tree.
-    Sapling(Option<sapling::tree::NoteCommitmentTree>),
-    /// Orchard note commitment tree.
-    Orchard(Option<orchard::tree::NoteCommitmentTree>),
+    sapling_tree: Option<sapling::tree::NoteCommitmentTree>,
+    orchard_tree: Option<orchard::tree::NoteCommitmentTree>,
 }
 
 /// Response to a `getrawtransaction` RPC request.
