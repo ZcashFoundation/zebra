@@ -7,12 +7,10 @@
 //! The [`Queue`] is just a `HashMap` of transactions with insertion date.
 //! The [`Runner`] component will do the processing in it's [`Runner::run()`] method.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 
 use chrono::Duration;
+use indexmap::IndexMap;
 use tokio::{
     sync::broadcast::{channel, Receiver, Sender},
     time::Instant,
@@ -38,10 +36,14 @@ mod tests;
 /// The number of blocks a transaction can be in the queue.
 const NUMBER_OF_BLOCKS_TO_EXPIRE: i64 = 3;
 
+/// Size of the queue and channel. Suggested valus is equal to
+/// `mempool::downloads::MAX_INBOUND_CONCURRENCY`
+const CHANNEL_AND_QUEUE_CAPACITY: usize = 10;
+
 #[derive(Clone, Debug)]
 /// The queue itself
 pub struct Queue {
-    transactions: HashMap<UnminedTxId, (Arc<Transaction>, Instant)>,
+    transactions: IndexMap<UnminedTxId, (Arc<Transaction>, Instant)>,
 }
 
 #[derive(Debug)]
@@ -54,17 +56,17 @@ pub struct Runner {
 impl Queue {
     /// Start a new queue
     pub fn start() -> Runner {
-        let (sender, _receiver) = channel(10);
+        let (sender, _receiver) = channel(CHANNEL_AND_QUEUE_CAPACITY);
 
         let queue = Queue {
-            transactions: HashMap::new(),
+            transactions: IndexMap::new(),
         };
 
         Runner { queue, sender }
     }
 
     /// Get the transactions in the queue.
-    pub fn transactions(&self) -> HashMap<UnminedTxId, (Arc<Transaction>, Instant)> {
+    pub fn transactions(&self) -> IndexMap<UnminedTxId, (Arc<Transaction>, Instant)> {
         self.transactions.clone()
     }
 
@@ -72,11 +74,21 @@ impl Queue {
     pub fn insert(&mut self, unmined_tx: UnminedTx) {
         self.transactions
             .insert(unmined_tx.id, (unmined_tx.transaction, Instant::now()));
+
+        // remove if queue is over capacity
+        if self.transactions.len() > CHANNEL_AND_QUEUE_CAPACITY {
+            self.remove_first();
+        }
     }
 
     /// Remove a transaction from the queue.
     pub fn remove(&mut self, unmined_id: UnminedTxId) {
         self.transactions.remove(&unmined_id);
+    }
+
+    /// Remove the oldest transaction from the queue.
+    pub fn remove_first(&mut self) {
+        self.transactions.shift_remove_index(0);
     }
 }
 

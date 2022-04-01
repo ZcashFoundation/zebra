@@ -11,7 +11,7 @@ use zebra_node_services::mempool::{Gossip, Request, Response};
 use zebra_state::{BoxError, ReadRequest, ReadResponse};
 use zebra_test::mock_service::MockService;
 
-use crate::queue::{Queue, Runner};
+use crate::queue::{Queue, Runner, CHANNEL_AND_QUEUE_CAPACITY};
 
 proptest! {
     /// Test insert to the queue and remove from it.
@@ -32,6 +32,54 @@ proptest! {
 
         // transaction was removed from queue
         prop_assert_eq!(runner.queue.transactions().len(), 0);
+    }
+
+    /// Test queue never grows above limit.
+    #[test]
+    fn queue_size_limit(transactions in any::<[UnminedTx; CHANNEL_AND_QUEUE_CAPACITY + 1]>()) {
+        // create a queue
+        let mut runner = Queue::start();
+
+        // insert all transactions we have
+        transactions.iter().for_each(|t| runner.queue.insert(t.clone()));
+
+        // transaction queue is never above limit
+        let queue_transactions = runner.queue.transactions();
+        prop_assert_eq!(CHANNEL_AND_QUEUE_CAPACITY, queue_transactions.len());
+    }
+
+    /// Test queue order.
+    #[test]
+    fn queue_order(transactions in any::<[UnminedTx; CHANNEL_AND_QUEUE_CAPACITY * 2]>()) {
+        // create a queue
+        let mut runner = Queue::start();
+        // fill the queue and check insertion order
+        for i in 0..CHANNEL_AND_QUEUE_CAPACITY {
+            let transaction = transactions[i].clone();
+            runner.queue.insert(transaction.clone());
+            let queue_transactions = runner.queue.transactions();
+            prop_assert_eq!(i + 1, queue_transactions.len());
+            prop_assert_eq!(UnminedTx::from(queue_transactions[i].0.clone()), transaction);
+        }
+
+        // queue is full
+        let queue_transactions = runner.queue.transactions();
+        prop_assert_eq!(CHANNEL_AND_QUEUE_CAPACITY, queue_transactions.len());
+
+        // keep adding transaction, new transactions will always be on top of the queue
+        for transaction in transactions.iter().skip(CHANNEL_AND_QUEUE_CAPACITY) {
+            runner.queue.insert(transaction.clone());
+            let queue_transactions = runner.queue.transactions();
+            prop_assert_eq!(CHANNEL_AND_QUEUE_CAPACITY, queue_transactions.len());
+            prop_assert_eq!(UnminedTx::from(queue_transactions.last().unwrap().1.0.clone()), transaction.clone());
+        }
+
+        // check the order of the final queue
+        let queue_transactions = runner.queue.transactions();
+        for i in 0..CHANNEL_AND_QUEUE_CAPACITY {
+            let transaction = transactions[CHANNEL_AND_QUEUE_CAPACITY + i].clone();
+            prop_assert_eq!(UnminedTx::from(queue_transactions[i].0.clone()), transaction);
+        }
     }
 
     /// Test transactions are removed from the queue after time elapses.
