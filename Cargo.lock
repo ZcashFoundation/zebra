@@ -169,7 +169,7 @@ dependencies = [
  "tor-dirmgr",
  "tor-persist",
  "tor-proto",
- "tor-rtcompat",
+ "tor-rtcompat 0.0.2",
  "tracing",
 ]
 
@@ -1271,6 +1271,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "educe"
+version = "0.4.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c07b7cc9cd8c08d10db74fca3b20949b9b6199725c04a0cce6d543496098fcac"
+dependencies = [
+ "enum-ordinalize",
+ "proc-macro2 1.0.36",
+ "quote 1.0.15",
+ "syn 1.0.86",
+]
+
+[[package]]
 name = "either"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1314,6 +1326,20 @@ checksum = "c134c37760b27a871ba422106eedbb8247da973a09e82558bf26d619c882b159"
 dependencies = [
  "proc-macro2 1.0.36",
  "quote 1.0.15",
+ "syn 1.0.86",
+]
+
+[[package]]
+name = "enum-ordinalize"
+version = "3.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2170fc0efee383079a8bdd05d6ea2a184d2a0f07a1c1dcabdb2fd5e9f24bc36c"
+dependencies = [
+ "num-bigint",
+ "num-traits",
+ "proc-macro2 1.0.36",
+ "quote 1.0.15",
+ "rustc_version",
  "syn 1.0.86",
 ]
 
@@ -4493,7 +4519,7 @@ dependencies = [
  "tor-linkspec",
  "tor-llcrypto",
  "tor-proto",
- "tor-rtcompat",
+ "tor-rtcompat 0.0.2",
  "tracing",
 ]
 
@@ -4534,7 +4560,7 @@ dependencies = [
  "tor-netdoc",
  "tor-persist",
  "tor-proto",
- "tor-rtcompat",
+ "tor-rtcompat 0.0.2",
  "tracing",
  "weak-table",
 ]
@@ -4584,7 +4610,7 @@ dependencies = [
  "tor-llcrypto",
  "tor-netdoc",
  "tor-proto",
- "tor-rtcompat",
+ "tor-rtcompat 0.0.2",
  "tracing",
 ]
 
@@ -4620,7 +4646,7 @@ dependencies = [
  "tor-llcrypto",
  "tor-netdir",
  "tor-netdoc",
- "tor-rtcompat",
+ "tor-rtcompat 0.0.2",
  "tracing",
 ]
 
@@ -4645,7 +4671,7 @@ dependencies = [
  "tor-netdir",
  "tor-persist",
  "tor-proto",
- "tor-rtcompat",
+ "tor-rtcompat 0.0.2",
  "tor-units",
  "tracing",
 ]
@@ -4808,6 +4834,19 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-util 0.6.9",
+]
+
+[[package]]
+name = "tor-rtcompat"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7e97b5ad1712db4e935dc3e8d149949c31a195a35a1c38892306110d61fef33"
+dependencies = [
+ "async-trait",
+ "async_executors",
+ "educe",
+ "futures",
+ "pin-project 1.0.10",
 ]
 
 [[package]]
@@ -5727,7 +5766,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util 0.7.1",
  "toml",
- "tor-rtcompat",
+ "tor-rtcompat 0.2.0",
  "tower",
  "tracing",
  "tracing-error 0.1.2",
