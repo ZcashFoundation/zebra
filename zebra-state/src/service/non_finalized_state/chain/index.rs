@@ -7,7 +7,9 @@ use zebra_chain::{
     transaction, transparent,
 };
 
-use crate::{OutputLocation, TransactionLocation};
+use crate::{OutputLocation, TransactionLocation, ValidateContextError};
+
+use super::{RevertPosition, UpdateWith};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransparentTransfers {
@@ -61,4 +63,53 @@ pub struct TransparentTransfers {
     //
     // TODO: use BTreeSet as part of PR #3978
     spent_utxos: HashSet<OutputLocation>,
+}
+
+// A created UTXO
+impl UpdateWith<(&transparent::OutPoint, &transparent::Utxo)> for TransparentTransfers {
+    fn update_chain_tip_with(
+        &mut self,
+        &(outpoint, utxo): &(&transparent::OutPoint, &transparent::Utxo),
+    ) -> Result<(), ValidateContextError> {
+        self.balance = (self.balance + utxo.output.value().constrain().unwrap()).unwrap();
+
+        // TODO: lookup height and transaction index as part of PR #3978
+        let output_location = OutputLocation::from_outpoint(outpoint);
+        self.created_utxos.insert(output_location, utxo.clone());
+
+        Ok(())
+    }
+
+    fn revert_chain_with(
+        &mut self,
+        &(outpoint, utxo): &(&transparent::OutPoint, &transparent::Utxo),
+        _position: RevertPosition,
+    ) {
+        self.balance = (self.balance - utxo.output.value().constrain().unwrap()).unwrap();
+
+        // TODO: lookup height and transaction index as part of PR #3978
+        let output_location = OutputLocation::from_outpoint(outpoint);
+        self.created_utxos.remove(&output_location);
+    }
+}
+
+impl TransparentTransfers {
+    /// Returns true if there are no transfers for this address.
+    pub fn is_empty(&self) -> bool {
+        self.balance == Amount::<NegativeAllowed>::zero()
+            && self.tx_ids.is_empty()
+            && self.created_utxos.is_empty()
+            && self.spent_utxos.is_empty()
+    }
+}
+
+impl Default for TransparentTransfers {
+    fn default() -> Self {
+        Self {
+            balance: Amount::zero(),
+            tx_ids: Default::default(),
+            created_utxos: Default::default(),
+            spent_utxos: Default::default(),
+        }
+    }
 }

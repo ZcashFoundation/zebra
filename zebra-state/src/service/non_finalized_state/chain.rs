@@ -765,6 +765,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
     }
 }
 
+// Created UTXOs
 impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
     fn update_chain_tip_with(
         &mut self,
@@ -772,16 +773,45 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
     ) -> Result<(), ValidateContextError> {
         self.created_utxos
             .extend(utxos.iter().map(|(k, v)| (*k, v.clone())));
+
+        for (outpoint, utxo) in utxos {
+            if let Some(receiving_address) = utxo.output.address(self.network) {
+                let address_transfers = self
+                    .partial_transparent_transfers
+                    .entry(receiving_address)
+                    .or_default();
+
+                address_transfers.update_chain_tip_with(&(outpoint, utxo))?;
+            }
+        }
+
         Ok(())
     }
 
     fn revert_chain_with(
         &mut self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-        _position: RevertPosition,
+        position: RevertPosition,
     ) {
         self.created_utxos
             .retain(|outpoint, _| !utxos.contains_key(outpoint));
+
+        for (outpoint, utxo) in utxos {
+            if let Some(receiving_address) = utxo.output.address(self.network) {
+                let address_transfers = self
+                    .partial_transparent_transfers
+                    .get_mut(&receiving_address)
+                    .expect("block has previously been applied to the chain");
+
+                address_transfers.revert_chain_with(&(outpoint, utxo), position);
+
+                // Remove this transfer if it is now empty
+                if address_transfers.is_empty() {
+                    self.partial_transparent_transfers
+                        .remove(&receiving_address);
+                }
+            }
+        }
     }
 }
 
