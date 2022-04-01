@@ -553,6 +553,7 @@ where
 
             // Fetch the block referenced by [`hash_or_height`] from the state.
 
+            // TODO: if this RPC is called a lot, just get the block header, rather than the whole block
             let block_request = zebra_state::ReadRequest::Block(hash_or_height);
             let block_response = state
                 .ready()
