@@ -37,6 +37,8 @@ mod arbitrary;
 #[cfg(test)]
 mod tests;
 
+pub use disk_format::{OutputLocation, TransactionLocation};
+
 pub(super) use zebra_db::ZebraDb;
 
 /// The finalized part of the chain state, stored in the db.

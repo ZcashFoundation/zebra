@@ -66,6 +66,8 @@ pub mod arbitrary;
 #[cfg(test)]
 mod tests;
 
+pub use finalized_state::{OutputLocation, TransactionLocation};
+
 pub type QueuedBlock = (
     PreparedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
