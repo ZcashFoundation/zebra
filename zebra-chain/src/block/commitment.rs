@@ -2,13 +2,11 @@
 
 use thiserror::Error;
 
-use std::convert::TryInto;
-
-use crate::parameters::{Network, NetworkUpgrade, NetworkUpgrade::*};
-use crate::sapling;
-
-use super::super::block;
-use super::merkle::AuthDataRoot;
+use crate::{
+    block::{self, merkle::AuthDataRoot},
+    parameters::{Network, NetworkUpgrade, NetworkUpgrade::*},
+    sapling,
+};
 
 /// Zcash blocks contain different kinds of commitments to their contents,
 /// depending on the network and height.
@@ -225,7 +223,11 @@ impl ChainHistoryBlockTxAuthCommitmentHash {
 #[allow(dead_code, missing_docs)]
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum CommitmentError {
-    #[error("invalid final sapling root: expected {expected:?}, actual: {actual:?}")]
+    #[error(
+        "invalid final sapling root: expected {:?}, actual: {:?}",
+        hex::encode(expected),
+        hex::encode(actual)
+    )]
     InvalidFinalSaplingRoot {
         // TODO: are these fields a security risk? If so, open a ticket to remove
         // similar fields across Zebra
@@ -233,16 +235,24 @@ pub enum CommitmentError {
         actual: [u8; 32],
     },
 
-    #[error("invalid chain history activation reserved block commitment: expected all zeroes, actual: {actual:?}")]
+    #[error("invalid chain history activation reserved block commitment: expected all zeroes, actual: {:?}",  hex::encode(actual))]
     InvalidChainHistoryActivationReserved { actual: [u8; 32] },
 
-    #[error("invalid chain history root: expected {expected:?}, actual: {actual:?}")]
+    #[error(
+        "invalid chain history root: expected {:?}, actual: {:?}",
+        hex::encode(expected),
+        hex::encode(actual)
+    )]
     InvalidChainHistoryRoot {
         expected: [u8; 32],
         actual: [u8; 32],
     },
 
-    #[error("invalid chain history + block transaction auth commitment: expected {expected:?}, actual: {actual:?}")]
+    #[error(
+        "invalid block commitment root: expected {:?}, actual: {:?}",
+        hex::encode(expected),
+        hex::encode(actual)
+    )]
     InvalidChainHistoryBlockTxAuthCommitment {
         expected: [u8; 32],
         actual: [u8; 32],
