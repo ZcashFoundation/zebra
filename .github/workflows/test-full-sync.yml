@@ -310,18 +310,15 @@ jobs:
           done
           CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
-          sleep 60
 
       - name: Get state version from logs
         run: |
           STATE_VERSION=""
-          while [[ ${STATE_VERSION} != *"v[0-9]+"* ]]; do
+
+          while [[ ${STATE_VERSION} == "" ]]; do
               STATE_VERSION=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+Opened Zebra state cache.+v[0-9]+.+")' | grep -oE "v[0-9]+")
               echo "STATE_VERSION: ${STATE_VERSION}"
-              sleep 10
           done
-
-          STATE_VERSION=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+Opened Zebra state cache.+v[0-9]+.+")' | grep -oE "v[0-9]+")
 
           echo "STATE_VERSION=$STATE_VERSION" >> $GITHUB_ENV
 
@@ -329,13 +326,11 @@ jobs:
       - name: Get (first) sync height from logs
         run: |
           SYNC_HEIGHT=""
-          while [[ ${SYNC_HEIGHT} != *"[0-9]+"* ]]; do
+
+          while [[ ${SYNC_HEIGHT} == "" ]]; do
               SYNC_HEIGHT=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' --order="desc" --limit=1 '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+chain tip sync_percent.+Height\([0-9]+\).+")' | grep -oE 'Height\([0-9]+\)' | grep -oE '[0-9]+')
               echo "SYNC_HEIGHT: ${SYNC_HEIGHT}"
-              sleep 10
           done
-
-          SYNC_HEIGHT=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' --order="desc" --limit=1 '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+chain tip sync_percent.+Height\([0-9]+\).+")' | grep -oE 'Height\([0-9]+\)' | grep -oE '[0-9]+')
 
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
 
