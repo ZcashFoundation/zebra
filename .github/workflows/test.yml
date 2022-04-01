@@ -469,7 +469,7 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="if [ $(docker wait ${{ env.ZEBRA_CONTAINER }}) -eq '0' ]; then exit 0; else exit 1; fi"
+          --command='exit_code="$(docker wait ${{ env.ZEBRA_CONTAINER }})" if [ "$exit_code" -eq "0" ]; then exit 0; else exit 1; fi'
         env:
           ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
 
