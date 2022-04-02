@@ -429,15 +429,15 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
 /// Snapshot transparent address data, using `cargo insta` and RON serialization.
 fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
-    // TODO: transactions for each address (#3951)
-
     let balance_by_transparent_addr = state.cf_handle("balance_by_transparent_addr").unwrap();
     let utxo_loc_by_transparent_addr_loc =
         state.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
+    let tx_loc_by_transparent_addr_loc = state.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
 
     let mut stored_address_balances = Vec::new();
     let mut stored_address_utxo_locations = Vec::new();
     let mut stored_address_utxos = Vec::new();
+    let mut stored_address_transaction_locations = Vec::new();
 
     // Correctness: Multi-key iteration causes hangs in concurrent code, but seems ok in tests.
     let addresses =
@@ -445,6 +445,12 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
     let utxo_address_location_count = state
         .full_iterator_cf(
             &utxo_loc_by_transparent_addr_loc,
+            rocksdb::IteratorMode::Start,
+        )
+        .count();
+    let transaction_address_location_count = state
+        .full_iterator_cf(
+            &tx_loc_by_transparent_addr_loc,
             rocksdb::IteratorMode::Start,
         )
         .count();
@@ -460,6 +466,7 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
     if height == 0 {
         assert_eq!(addresses.len(), 0);
         assert_eq!(utxo_address_location_count, 0);
+        assert_eq!(transaction_address_location_count, 0);
         return;
     }
 
@@ -484,9 +491,17 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
             stored_utxos.push(utxo);
         }
 
+        let mut stored_transaction_locations = Vec::new();
+        for transaction_location in state.address_transaction_locations(stored_address_location) {
+            assert_eq!(
+                transaction_location.address_location(),
+                stored_address_location
+            );
+
+            stored_transaction_locations.push(transaction_location.transaction_location());
+        }
+
         // Check that the lists are in chain order
-        //
-        // TODO: check that the transaction list is in chain order (#3951)
         assert!(
             is_sorted(&stored_utxo_locations),
             "unsorted: {:?}\n\
@@ -494,11 +509,19 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
             stored_utxo_locations,
             address,
         );
+        assert!(
+            is_sorted(&stored_transaction_locations),
+            "unsorted: {:?}\n\
+             for address: {:?}",
+            stored_transaction_locations,
+            address,
+        );
 
         // The default raw data serialization is very verbose, so we hex-encode the bytes.
         stored_address_balances.push((address.to_string(), stored_address_balance_location));
         stored_address_utxo_locations.push((stored_address_location, stored_utxo_locations));
         stored_address_utxos.push((address, stored_utxos));
+        stored_address_transaction_locations.push((address, stored_transaction_locations));
     }
 
     // We want to snapshot the order in the database,
@@ -508,6 +531,10 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
     // TODO: change these names to address_utxo_locations and address_utxos
     insta::assert_ron_snapshot!("address_utxos", stored_address_utxo_locations);
     insta::assert_ron_snapshot!("address_utxo_data", stored_address_utxos);
+    insta::assert_ron_snapshot!(
+        "address_transaction_locations",
+        stored_address_transaction_locations
+    );
 }
 
 /// Return true if `list` is sorted in ascending order.

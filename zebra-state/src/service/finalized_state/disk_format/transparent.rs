@@ -361,6 +361,96 @@ impl AddressUnspentOutput {
     }
 }
 
+/// A single transaction sent to a [`transparent::Address`].
+///
+/// We store both the address location key and transaction location value
+/// in the RocksDB column family key. This improves insert and delete performance.
+///
+/// This requires 8 extra bytes for each transaction location,
+/// because we repeat the key for each value.
+/// But RocksDB compression reduces the duplicate data size on disk.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
+pub struct AddressTransaction {
+    /// The location of the first [`transparent::Output`] sent to the address in `output`.
+    address_location: AddressLocation,
+
+    /// The location of the transaction sent to the address.
+    transaction_location: TransactionLocation,
+}
+
+impl AddressTransaction {
+    /// Create a new [`AddressTransaction`] from an address location,
+    /// and a transaction location.
+    pub fn new(
+        address_location: AddressLocation,
+        transaction_location: TransactionLocation,
+    ) -> AddressTransaction {
+        AddressTransaction {
+            address_location,
+            transaction_location,
+        }
+    }
+
+    /// Create an [`AddressTransaction`] which starts iteration for the supplied address.
+    /// Used to look up the first transaction with [`ReadDisk::zs_next_key_value_from`].
+    ///
+    /// The transaction location is before all unspent output locations in the index.
+    /// It is always invalid, due to the genesis consensus rules. But this is not an issue
+    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
+    pub fn address_iterator_start(address_location: AddressLocation) -> AddressTransaction {
+        // Iterating from the lowest possible transaction location gets us the first transaction.
+        let zero_transaction_location = TransactionLocation::from_usize(Height(0), 0);
+
+        AddressTransaction {
+            address_location,
+            transaction_location: zero_transaction_location,
+        }
+    }
+
+    /// Update the transaction location to the next possible transaction for the supplied address.
+    /// Used to look up the next output with [`ReadDisk::zs_next_key_value_from`].
+    ///
+    /// The updated transaction location may be invalid, which is not an issue
+    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
+    pub fn address_iterator_next(&mut self) {
+        // Iterating from the next possible output location gets us the next output,
+        // even if it is in a later block or transaction.
+        //
+        // Consensus: the block size limit is 2MB, which is much lower than the index range.
+        self.transaction_location.index.0 += 1;
+    }
+
+    /// The location of the first [`transparent::Output`] sent to the address of this output.
+    ///
+    /// This can be used to look up the address.
+    pub fn address_location(&self) -> AddressLocation {
+        self.address_location
+    }
+
+    /// The location of this transaction.
+    pub fn transaction_location(&self) -> TransactionLocation {
+        self.transaction_location
+    }
+
+    /// Allows tests to modify the address location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn address_location_mut(&mut self) -> &mut AddressLocation {
+        &mut self.address_location
+    }
+
+    /// Allows tests to modify the unspent output location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn transaction_location_mut(&mut self) -> &mut TransactionLocation {
+        &mut self.transaction_location
+    }
+}
+
 // Transparent trait impls
 
 /// Returns a byte representing the [`transparent::Address`] variant.
@@ -545,5 +635,36 @@ impl FromDisk for AddressUnspentOutput {
         let unspent_output_location = AddressLocation::from_bytes(unspent_output_location_bytes);
 
         AddressUnspentOutput::new(address_location, unspent_output_location)
+    }
+}
+
+impl IntoDisk for AddressTransaction {
+    type Bytes = [u8; OUTPUT_LOCATION_DISK_BYTES + TRANSACTION_LOCATION_DISK_BYTES];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let address_location_bytes: [u8; OUTPUT_LOCATION_DISK_BYTES] =
+            self.address_location().as_bytes();
+        let transaction_location_bytes: [u8; TRANSACTION_LOCATION_DISK_BYTES] =
+            self.transaction_location().as_bytes();
+
+        address_location_bytes
+            .iter()
+            .copied()
+            .chain(transaction_location_bytes.iter().copied())
+            .collect::<Vec<u8>>()
+            .try_into()
+            .expect("concatenation of fixed-sized arrays should have the correct size")
+    }
+}
+
+impl FromDisk for AddressTransaction {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        let (address_location_bytes, transaction_location_bytes) =
+            disk_bytes.as_ref().split_at(OUTPUT_LOCATION_DISK_BYTES);
+
+        let address_location = AddressLocation::from_bytes(address_location_bytes);
+        let transaction_location = TransactionLocation::from_bytes(transaction_location_bytes);
+
+        AddressTransaction::new(address_location, transaction_location)
     }
 }
