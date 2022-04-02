@@ -386,6 +386,10 @@ impl DiskDb {
                 "utxo_loc_by_transparent_addr_loc",
                 db_options.clone(),
             ),
+            rocksdb::ColumnFamilyDescriptor::new(
+                "tx_loc_by_transparent_addr_loc",
+                db_options.clone(),
+            ),
             // Sprout
             rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("sprout_anchors", db_options.clone()),
