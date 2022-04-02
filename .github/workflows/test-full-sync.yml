@@ -317,7 +317,7 @@ jobs:
 
           while [[ ${STATE_VERSION} == "" ]]; do
               STATE_VERSION=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+Opened Zebra state cache.+v[0-9]+.+")' | { grep -oE "v[0-9]+" || [[ $? == 1 ]] } )
-              echo "STATE_VERSION: ${STATE_VERSION}"
+              echo "STATE_VERSION: $STATE_VERSION"
           done
 
           echo "STATE_VERSION=$STATE_VERSION" >> $GITHUB_ENV
@@ -329,7 +329,7 @@ jobs:
 
           while [[ ${SYNC_HEIGHT} == "" ]]; do
               SYNC_HEIGHT=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' --order="desc" --limit=1 '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+chain tip sync_percent.+Height\([0-9]+\).+")' | grep -oE 'Height\([0-9]+\)' | { grep -oE '[0-9]+' || [[ $? == 1 ]] } )
-              echo "SYNC_HEIGHT: ${SYNC_HEIGHT}"
+              echo "SYNC_HEIGHT: $SYNC_HEIGHT"
           done
 
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
