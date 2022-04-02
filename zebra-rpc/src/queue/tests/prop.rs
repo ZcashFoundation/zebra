@@ -1,9 +1,11 @@
 //! Randomised property tests for the RPC Queue.
 
-use std::{collections::HashSet, ops::Mul};
+use std::collections::HashSet;
 
 use proptest::prelude::*;
 
+use chrono::Duration;
+use tokio::time;
 use tower::ServiceExt;
 
 use zebra_chain::transaction::{Transaction, UnminedTx, UnminedTxId};
@@ -89,7 +91,7 @@ proptest! {
 
         runtime.block_on(async move {
             // pause the clock
-            tokio::time::pause();
+            time::pause();
 
             // create a queue
             let mut runner = Queue::start();
@@ -99,24 +101,30 @@ proptest! {
             prop_assert_eq!(runner.queue.transactions().len(), 1);
 
             // have a block interval value
-            let spacing = chrono::Duration::seconds(150);
+            let spacing = Duration::seconds(150);
 
             // apply expiration inmediatly, transaction will not be removed from queue
             runner.remove_expired(spacing);
             prop_assert_eq!(runner.queue.transactions().len(), 1);
 
             // apply expiration after 1 block elapsed, transaction will not be removed from queue
-            tokio::time::advance(spacing.to_std().unwrap()).await;
+            time::advance(spacing.to_std().unwrap()).await;
             runner.remove_expired(spacing);
             prop_assert_eq!(runner.queue.transactions().len(), 1);
 
             // apply expiration after 2 blocks elapsed, transaction will not be removed from queue
-            tokio::time::advance(spacing.mul(2).to_std().unwrap()).await;
+            time::advance(spacing.to_std().unwrap()).await;
             runner.remove_expired(spacing);
             prop_assert_eq!(runner.queue.transactions().len(), 1);
 
-            // apply expiration after 3 block elapsed, transaction will be removed from queue
-            tokio::time::advance(spacing.mul(3).to_std().unwrap()).await;
+            // apply expiration after 3 block elapsed, transaction will not be removed from queue
+            // as it needs the extra time of 5 seconds
+            time::advance(spacing.to_std().unwrap()).await;
+            runner.remove_expired(spacing);
+            prop_assert_eq!(runner.queue.transactions().len(), 1);
+
+            // apply 5 more seconcs, transaction will be removed from the queue
+            time::advance(chrono::Duration::seconds(6).to_std().unwrap()).await;
             runner.remove_expired(spacing);
             prop_assert_eq!(runner.queue.transactions().len(), 0);
 

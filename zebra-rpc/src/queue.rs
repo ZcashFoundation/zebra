@@ -176,16 +176,24 @@ impl Runner {
 
     /// Remove transactions that are expired according to number of blocks and current spacing between blocks.
     fn remove_expired(&mut self, spacing: Duration) {
+        // To make sure we re-submit each transaction `NUMBER_OF_BLOCKS_TO_EXPIRE` times,
+        // as the main loop also takes some time to run.
+        let extra_time = Duration::seconds(5);
+
         let duration_to_expire =
-            Duration::seconds(NUMBER_OF_BLOCKS_TO_EXPIRE * spacing.num_seconds());
+            Duration::seconds(NUMBER_OF_BLOCKS_TO_EXPIRE * spacing.num_seconds()) + extra_time;
         let transactions = self.queue.transactions();
         let now = Instant::now();
 
         for tx in transactions.iter() {
             let tx_time =
                 tx.1 .1
-                    .checked_add(duration_to_expire.to_std().unwrap())
-                    .unwrap();
+                    .checked_add(
+                        duration_to_expire
+                            .to_std()
+                            .expect("should never be less than zero"),
+                    )
+                    .expect("this is low numbers, should always be inside bounds");
 
             if now > tx_time {
                 self.queue.remove(*tx.0);
