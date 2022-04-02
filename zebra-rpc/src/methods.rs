@@ -207,7 +207,7 @@ where
 
         // run the process queue
         tokio::spawn(async move {
-            runner.run(mempool, state, latest_chain_tip).await;
+            runner.run(mempool, state, latest_chain_tip, network).await;
         });
 
         rpc_impl

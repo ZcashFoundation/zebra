@@ -20,7 +20,7 @@ use tower::{Service, ServiceExt};
 
 use zebra_chain::{
     chain_tip::ChainTip,
-    parameters::NetworkUpgrade,
+    parameters::{Network, NetworkUpgrade},
     transaction::{Transaction, UnminedTx, UnminedTxId},
 };
 use zebra_node_services::{
@@ -121,8 +121,13 @@ impl Runner {
     }
 
     /// Retry sending to memempool if needed.
-    pub async fn run<Mempool, State, Tip>(mut self, mempool: Mempool, state: State, _tip: Tip)
-    where
+    pub async fn run<Mempool, State, Tip>(
+        mut self,
+        mempool: Mempool,
+        state: State,
+        _tip: Tip,
+        network: Network,
+    ) where
         Mempool: Service<Request, Response = Response, Error = BoxError> + Clone + 'static,
         State: Service<ReadRequest, Response = ReadResponse, Error = zebra_state::BoxError>
             + Clone
@@ -131,9 +136,6 @@ impl Runner {
             + 'static,
         Tip: ChainTip + Clone + Send + Sync + 'static,
     {
-        // TODO: this should be an argument
-        let network = zebra_chain::parameters::Network::Mainnet;
-
         // TODO: Use tip.best_tip_height()
         let tip_height = zebra_chain::block::Height(1);
 
