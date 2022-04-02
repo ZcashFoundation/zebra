@@ -19,6 +19,7 @@ use tokio::{
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
+    block::Height,
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
     transaction::{Transaction, UnminedTx, UnminedTxId},
@@ -125,7 +126,7 @@ impl Runner {
         mut self,
         mempool: Mempool,
         state: State,
-        _tip: Tip,
+        tip: Tip,
         network: Network,
     ) where
         Mempool: Service<Request, Response = Response, Error = BoxError> + Clone + 'static,
@@ -136,8 +137,11 @@ impl Runner {
             + 'static,
         Tip: ChainTip + Clone + Send + Sync + 'static,
     {
-        // TODO: Use tip.best_tip_height()
-        let tip_height = zebra_chain::block::Height(1);
+        // If we don't have a chain use height 1 to get block spacing.
+        let tip_height = match tip.best_tip_height() {
+            Some(height) => height,
+            _ => Height(1),
+        };
 
         // get spacing between blocks
         let spacing = NetworkUpgrade::target_spacing_for_height(network, tip_height);
