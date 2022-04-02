@@ -291,5 +291,45 @@ proptest! {
         })?;
     }
 
-    // TODO: add a Runner::retry test
+    // Test any given transaction can be mempool retried.
+    #[test]
+    fn queue_mempool_retry(transaction in any::<Transaction>()) {
+        let runtime = zebra_test::init_async();
+
+        runtime.block_on(async move {
+            let mut mempool = MockService::build().for_prop_tests();
+
+            // create a queue
+            let mut runner = Queue::start();
+
+            // insert a transaction to the queue
+            let unmined_transaction = UnminedTx::from(transaction.clone());
+            runner.queue.insert(unmined_transaction.clone());
+            let transactions = runner.queue.transactions();
+            prop_assert_eq!(transactions.len(), 1);
+
+            // get a `Vec` of transactions to do retries
+            let transactions_vec = runner.transactions_as_vec();
+
+            // run retry
+            let send_task = tokio::spawn(Runner::retry(mempool.clone(), transactions_vec.clone()));
+
+            // retry will queue the transaction to mempool
+            let gossip = Gossip::Tx(UnminedTx::from(transaction.clone()));
+            let expected_request = Request::Queue(vec![gossip]);
+            let response = Response::Queued(vec![Ok(())]);
+
+            mempool
+                .expect_request(expected_request)
+                .await?
+                .respond(response);
+
+            let result = send_task.await.expect("Requesting transactions should not panic");
+
+            // retry was done
+            prop_assert_eq!(result.len(), 1);
+
+            Ok::<_, TestCaseError>(())
+        })?;
+    }
 }

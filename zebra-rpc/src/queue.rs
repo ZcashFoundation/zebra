@@ -110,7 +110,7 @@ impl Runner {
     }
 
     /// Get the queue transactions as a `HashSet` of unmined ids.
-    pub(crate) fn transactions_as_hash_set(&self) -> HashSet<UnminedTxId> {
+    fn transactions_as_hash_set(&self) -> HashSet<UnminedTxId> {
         let transactions = self.queue.transactions();
         transactions.iter().map(|t| *t.0).collect()
     }
@@ -150,7 +150,7 @@ impl Runner {
 
         loop {
             // sleep until the next block
-            tokio::time::sleep(spacing.to_std().unwrap()).await;
+            tokio::time::sleep(spacing.to_std().expect("should never be less than zero")).await;
 
             // get transactions from the channel
             while let Ok(Some(tx)) = receiver.try_recv() {
@@ -209,6 +209,8 @@ impl Runner {
     }
 
     /// Check the mempool for given transactions.
+    ///
+    /// Returns transactions that are in the mempool.
     async fn check_mempool<Mempool>(
         mempool: Mempool,
         transactions: HashSet<UnminedTxId>,
@@ -221,7 +223,6 @@ impl Runner {
         if !transactions.is_empty() {
             let request = Request::TransactionsById(transactions);
 
-            // TODO: ignore errors
             let mempool_response = mempool
                 .oneshot(request)
                 .await
@@ -241,6 +242,8 @@ impl Runner {
     }
 
     /// Check the state for given transactions.
+    ///
+    /// Returns transactions that are in the state.
     async fn check_state<State>(
         state: State,
         transactions: HashSet<UnminedTxId>,
@@ -276,19 +279,29 @@ impl Runner {
     }
 
     /// Retry sending given transactions to mempool.
-    async fn retry<Mempool>(mempool: Mempool, transactions: Vec<Arc<Transaction>>)
+    ///
+    /// Returns the transaction ids what were retried.
+    async fn retry<Mempool>(
+        mempool: Mempool,
+        transactions: Vec<Arc<Transaction>>,
+    ) -> HashSet<UnminedTxId>
     where
         Mempool: Service<Request, Response = Response, Error = BoxError> + Clone + 'static,
     {
-        for tx in transactions {
-            let transaction_parameter = Gossip::Tx(UnminedTx::from(tx.clone()));
-            let request = Request::Queue(vec![transaction_parameter]);
+        let mut retried = HashSet::new();
 
-            let _ = mempool
-                .clone()
-                .oneshot(request)
-                .await
-                .expect("Sending to memmpool should not panic");
+        for tx in transactions {
+            let unmined = UnminedTx::from(tx);
+            let gossip = Gossip::Tx(unmined.clone());
+            let request = Request::Queue(vec![gossip]);
+
+            // Send to memmpool and ignore any error
+            let _ = mempool.clone().oneshot(request).await;
+
+            // retrurn what we retried but don't delete from the queue,
+            // we might retry again in a next call.
+            retried.insert(unmined.id);
         }
+        retried
     }
 }
