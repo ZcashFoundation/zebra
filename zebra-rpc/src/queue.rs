@@ -143,15 +143,15 @@ impl Runner {
         let mut receiver = self.sender.subscribe();
 
         loop {
-            // check the channel for new transactions
-            if let Ok(Some(tx)) = &receiver.recv().await {
-                let _ = &self.queue.insert(tx.clone());
-            }
-
             // sleep until the next block
             tokio::time::sleep(spacing.to_std().unwrap()).await;
 
-            // first, remove what is expired
+            // get transactions from the channel
+            while let Ok(Some(tx)) = receiver.try_recv() {
+                let _ = &self.queue.insert(tx.clone());
+            }
+
+            // remove what is expired
             self.remove_expired(spacing);
 
             // remove if any of the queued transactions is now in the mempool
@@ -203,21 +203,24 @@ impl Runner {
         Mempool: Service<Request, Response = Response, Error = BoxError> + Clone + 'static,
     {
         let mut response = HashSet::new();
-        let request = Request::TransactionsById(transactions);
 
-        // TODO: ignore errors
-        let mempool_response = mempool
-            .oneshot(request)
-            .await
-            .expect("Requesting transactions should not panic");
+        if !transactions.is_empty() {
+            let request = Request::TransactionsById(transactions);
 
-        match mempool_response {
-            Response::Transactions(txs) => {
-                for tx in txs {
-                    response.insert(tx.id);
+            // TODO: ignore errors
+            let mempool_response = mempool
+                .oneshot(request)
+                .await
+                .expect("Requesting transactions should not panic");
+
+            match mempool_response {
+                Response::Transactions(txs) => {
+                    for tx in txs {
+                        response.insert(tx.id);
+                    }
                 }
+                _ => unreachable!("TransactionsById always respond with at least an empty vector"),
             }
-            _ => unreachable!("TransactionsById always respond with at least an empty vector"),
         }
 
         response
