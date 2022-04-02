@@ -4,7 +4,8 @@
 //! Transactions can fail to be inserted to the mempool inmediatly by different reasons,
 //! like having not mined utxos.
 //!
-//! The [`Queue`] is just a `HashMap` of transactions with insertion date.
+//! The [`Queue`] is just an `IndexMap` of transactions with insertion date.
+//! We use this data type because we want the transactions in the queue to be sorted.
 //! The [`Runner`] component will do the processing in it's [`Runner::run()`] method.
 
 use std::{collections::HashSet, sync::Arc};
@@ -176,8 +177,8 @@ impl Runner {
 
     /// Remove transactions that are expired according to number of blocks and current spacing between blocks.
     fn remove_expired(&mut self, spacing: Duration) {
-        // To make sure we re-submit each transaction `NUMBER_OF_BLOCKS_TO_EXPIRE` times,
-        // as the main loop also takes some time to run.
+        // Have some extra time to to make sure we re-submit each transaction `NUMBER_OF_BLOCKS_TO_EXPIRE`
+        // times, as the main loop also takes some time to run.
         let extra_time = Duration::seconds(5);
 
         let duration_to_expire =
