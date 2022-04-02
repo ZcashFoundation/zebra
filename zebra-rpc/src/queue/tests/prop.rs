@@ -1,6 +1,6 @@
 //! Randomised property tests for the RPC Queue.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use proptest::prelude::*;
 
@@ -8,7 +8,11 @@ use chrono::Duration;
 use tokio::time;
 use tower::ServiceExt;
 
-use zebra_chain::transaction::{Transaction, UnminedTx, UnminedTxId};
+use zebra_chain::{
+    block::{Block, Height},
+    serialization::ZcashDeserializeInto,
+    transaction::{Transaction, UnminedTx},
+};
 use zebra_node_services::mempool::{Gossip, Request, Response};
 use zebra_state::{BoxError, ReadRequest, ReadResponse};
 use zebra_test::mock_service::MockService;
@@ -100,7 +104,7 @@ proptest! {
             runner.queue.insert(transaction);
             prop_assert_eq!(runner.queue.transactions().len(), 1);
 
-            // have a block interval value
+            // have a block interval value equal to the one at Height(1)
             let spacing = Duration::seconds(150);
 
             // apply expiration inmediatly, transaction will not be removed from queue
@@ -123,7 +127,7 @@ proptest! {
             runner.remove_expired(spacing);
             prop_assert_eq!(runner.queue.transactions().len(), 1);
 
-            // apply 5 more seconcs, transaction will be removed from the queue
+            // apply 6 seconds more, transaction will be removed from the queue
             time::advance(chrono::Duration::seconds(6).to_std().unwrap()).await;
             runner.remove_expired(spacing);
             prop_assert_eq!(runner.queue.transactions().len(), 0);
@@ -146,16 +150,16 @@ proptest! {
             // insert a transaction to the queue
             let unmined_transaction = UnminedTx::from(transaction);
             runner.queue.insert(unmined_transaction.clone());
-
             let transactions = runner.queue.transactions();
             prop_assert_eq!(transactions.len(), 1);
 
-            // convert to hashset
-            let transactions_hash_set: HashSet<UnminedTxId> = transactions.iter().map(|t| *t.0).collect();
+            // get a `HashSet` of transactions to call mempool with
+            let transactions_hash_set = runner.transactions_as_hash_set();
 
             // run the mempool checker
             let send_task = tokio::spawn(Runner::check_mempool(mempool.clone(), transactions_hash_set.clone()));
 
+            // mempool checker will call the mempool looking for the transaction
             let expected_request = Request::TransactionsById(transactions_hash_set.clone());
             let response = Response::Transactions(vec![]);
 
@@ -163,18 +167,15 @@ proptest! {
                 .expect_request(expected_request)
                 .await?
                 .respond(response);
-
             let result = send_task.await.expect("Requesting transactions should not panic");
 
             // empty results, transaction is not in the mempool
             prop_assert_eq!(result, HashSet::new());
 
-            // now lets insert it to the mempool
+            // insert transaction to the mempool
             let request = Request::Queue(vec![Gossip::Tx(unmined_transaction.clone())]);
             let expected_request = Request::Queue(vec![Gossip::Tx(unmined_transaction.clone())]);
-
             let send_task = tokio::spawn(mempool.clone().oneshot(request));
-
             let response = Response::Queued(vec![Ok(())]);
 
             mempool
@@ -187,6 +188,7 @@ proptest! {
             // check the mempool again
             let send_task = tokio::spawn(Runner::check_mempool(mempool.clone(), transactions_hash_set.clone()));
 
+            // mempool checker will call the mempool looking for the transaction
             let expected_request = Request::TransactionsById(transactions_hash_set);
             let response = Response::Transactions(vec![unmined_transaction]);
 
@@ -197,14 +199,17 @@ proptest! {
 
             let result = send_task.await.expect("Requesting transactions should not panic");
 
+            // transaction is in the mempool
             prop_assert_eq!(result.len(), 1);
-            // not deleted yet
+
+            // but it is not deleted from the queue yet
             prop_assert_eq!(runner.queue.transactions().len(), 1);
-            // delete
+
+            // delete by calling remove_committed
             runner.remove_committed(result);
             prop_assert_eq!(runner.queue.transactions().len(), 0);
 
-            // no more
+            // no more requets expected
             mempool.expect_no_requests().await?;
 
             Ok::<_, TestCaseError>(())
@@ -216,11 +221,9 @@ proptest! {
     fn queue_runner_state(transaction in any::<Transaction>()) {
         let runtime = zebra_test::init_async();
 
-        let transaction_hash = transaction.hash();
-
         runtime.block_on(async move {
-
-            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+            let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+            let mut write_state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             // create a queue
             let mut runner = Queue::start();
@@ -230,27 +233,59 @@ proptest! {
             runner.queue.insert(unmined_transaction.clone());
             prop_assert_eq!(runner.queue.transactions().len(), 1);
 
-            // run the runner
-            let mut hs = HashSet::new();
-            hs.insert(unmined_transaction.id);
+            // get a `HashSet` of transactions to call state with
+            let transactions_hash_set = runner.transactions_as_hash_set();
 
-            let send_task = tokio::spawn(Runner::check_state(state.clone(), hs));
+            let send_task = tokio::spawn(Runner::check_state(read_state.clone(), transactions_hash_set.clone()));
 
-            let expected_request = ReadRequest::Transaction(transaction_hash);
+            let expected_request = ReadRequest::Transaction(transaction.hash());
             let response = ReadResponse::Transaction(None);
 
-            state
+            read_state
+                .expect_request(expected_request)
+                .await?
+                .respond(response);
+
+            let result = send_task.await.expect("Requesting transaction should not panic");
+            // transaction is not in the state
+            prop_assert_eq!(HashSet::new(), result);
+
+            // get a block and push our transaction to it
+            let block =
+                zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into::<Arc<Block>>()?;
+            let mut block = Arc::try_unwrap(block).expect("block should unwrap");
+            block.transactions.push(Arc::new(transaction.clone()));
+
+            // commit the created block
+            let request = zebra_state::Request::CommitFinalizedBlock(zebra_state::FinalizedBlock::from(Arc::new(block.clone())));
+            let send_task = tokio::spawn(write_state.clone().oneshot(request.clone()));
+            let response = zebra_state::Response::Committed(block.hash());
+
+            write_state
+                .expect_request(request)
+                .await?
+                .respond(response);
+
+            let _ = send_task.await.expect("Inserting block to state should not panic");
+
+            // check the state again
+            let send_task = tokio::spawn(Runner::check_state(read_state.clone(), transactions_hash_set));
+
+            let expected_request = ReadRequest::Transaction(transaction.hash());
+            let response = ReadResponse::Transaction(Some((Arc::new(transaction), Height(1))));
+
+            read_state
                 .expect_request(expected_request)
                 .await?
                 .respond(response);
 
             let result = send_task.await.expect("Requesting transaction should not panic");
 
-            prop_assert_eq!(HashSet::new(), result);
+            // transaction was found in the state
+            prop_assert_eq!(result.len(), 1);
 
-            // TODO: finish this test
-
-            state.expect_no_requests().await?;
+            read_state.expect_no_requests().await?;
+            write_state.expect_no_requests().await?;
 
             Ok::<_, TestCaseError>(())
         })?;
