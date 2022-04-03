@@ -124,6 +124,17 @@ impl Runner {
     }
 
     /// Retry sending to memempool if needed.
+    ///
+    /// Creates a loop that will run each time a new block is mined.
+    /// In this loop, get the transactions that are in the queue and:
+    /// - Check if they are now in the mempool and if so, delete the transaction from the queue.
+    /// - Check if the transaction is now part of a block in the state and if so,
+    /// delete the transaction from the queue.
+    /// - With the transactions left in the queue, retry sending them to the mempool ignoring
+    /// the result of this operation.
+    ///
+    /// Addtionally, each iteration of the above loop, will receive and insert to the queue
+    /// transactions that are pending in the channel.
     pub async fn run<Mempool, State, Tip>(
         mut self,
         mempool: Mempool,
@@ -159,20 +170,23 @@ impl Runner {
                 let _ = &self.queue.insert(tx.clone());
             }
 
-            // remove what is expired
-            self.remove_expired(spacing);
+            if !self.queue.transactions().is_empty() {
+                // remove what is expired
+                self.remove_expired(spacing);
 
-            // remove if any of the queued transactions is now in the mempool
-            let in_mempool =
-                Self::check_mempool(mempool.clone(), self.transactions_as_hash_set()).await;
-            self.remove_committed(in_mempool);
+                // remove if any of the queued transactions is now in the mempool
+                let in_mempool =
+                    Self::check_mempool(mempool.clone(), self.transactions_as_hash_set()).await;
+                self.remove_committed(in_mempool);
 
-            // remove if any of the queued transactions is now in the state
-            let in_state = Self::check_state(state.clone(), self.transactions_as_hash_set()).await;
-            self.remove_committed(in_state);
+                // remove if any of the queued transactions is now in the state
+                let in_state =
+                    Self::check_state(state.clone(), self.transactions_as_hash_set()).await;
+                self.remove_committed(in_state);
 
-            // retry what is left in the queue
-            let _retried = Self::retry(mempool.clone(), self.transactions_as_vec()).await;
+                // retry what is left in the queue
+                let _retried = Self::retry(mempool.clone(), self.transactions_as_vec()).await;
+            }
         }
     }
 
