@@ -289,6 +289,12 @@ impl DiskDb {
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
+        // Use the recommended LZ4 compression type.
+        // https://github.com/facebook/rocksdb/wiki/Compression#configuration
+        opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
+
+        // Increase the process open file limit if needed,
+        // then use it to set RocksDB's limit.
         let open_file_limit = DiskDb::increase_open_file_limit();
         let db_file_limit = DiskDb::get_db_open_file_limit(open_file_limit);
 
