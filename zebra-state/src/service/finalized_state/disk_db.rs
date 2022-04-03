@@ -467,6 +467,9 @@ impl DiskDb {
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
+        // Split threads for write-ahead-log and memtable writes into two queues.
+        opts.set_enable_pipelined_write(true);
+
         let open_file_limit = DiskDb::increase_open_file_limit();
         let db_file_limit = DiskDb::get_db_open_file_limit(open_file_limit);
 
