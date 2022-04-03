@@ -5861,6 +5861,7 @@ dependencies = [
  "lazy_static",
  "metrics",
  "mset",
+ "num_cpus",
  "once_cell",
  "proptest",
  "proptest-derive",

@@ -9,7 +9,7 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{fmt::Debug, path::Path, sync::Arc};
+use std::{cmp::min, fmt::Debug, path::Path, sync::Arc};
 
 use rlimit::increase_nofile_limit;
 
@@ -354,6 +354,14 @@ impl DiskDb {
     /// stdio (3), and other OS facilities (2+).
     const RESERVED_FILE_COUNT: u64 = 48;
 
+    /// The maximum number of background flush and compaction threads for RocksDB.
+    ///
+    /// We limit the number of threads on large multi-core machines,
+    /// to avoid lock contention.
+    ///
+    /// (The default number of background threads is 2.)
+    const MAX_CPU_PARALLELISM: usize = 8;
+
     /// Opens or creates the database at `config.path` for `network`,
     /// and returns a shared low-level database wrapper.
     pub fn new(config: &Config, network: Network) -> DiskDb {
@@ -466,6 +474,10 @@ impl DiskDb {
 
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
+
+        // Use one background flush and compaction thread per logical CPU.
+        let background_threads = min(num_cpus::get(), Self::MAX_CPU_PARALLELISM);
+        opts.increase_parallelism(background_threads.try_into().expect("always fits in i32"));
 
         let open_file_limit = DiskDb::increase_open_file_limit();
         let db_file_limit = DiskDb::get_db_open_file_limit(open_file_limit);
