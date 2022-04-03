@@ -5,7 +5,7 @@
 //! like having not mined utxos.
 //!
 //! The [`Queue`] is just an `IndexMap` of transactions with insertion date.
-//! We use this data type because we want the transactions in the queue to be sorted.
+//! We use this data type because we want the transactions in the queue to be in order.
 //! The [`Runner`] component will do the processing in it's [`Runner::run()`] method.
 
 use std::{collections::HashSet, sync::Arc};
@@ -38,18 +38,19 @@ mod tests;
 /// The number of blocks a transaction can be in the queue.
 const NUMBER_OF_BLOCKS_TO_EXPIRE: i64 = 3;
 
-/// Size of the queue and channel. Suggested valus is equal to
+/// Size of the queue and channel. Suggested value is equal to
 /// `mempool::downloads::MAX_INBOUND_CONCURRENCY`
 const CHANNEL_AND_QUEUE_CAPACITY: usize = 10;
 
 #[derive(Clone, Debug)]
-/// The queue itself
+/// The queue is a container of transactions that are going to be
+/// sent to the mempool again.
 pub struct Queue {
     transactions: IndexMap<UnminedTxId, (Arc<Transaction>, Instant)>,
 }
 
 #[derive(Debug)]
-/// The runner
+/// The runner will make the processing of the transactions in the queue.
 pub struct Runner {
     queue: Queue,
     sender: Sender<Option<UnminedTx>>,
@@ -281,7 +282,7 @@ impl Runner {
 
     /// Retry sending given transactions to mempool.
     ///
-    /// Returns the transaction ids what were retried.
+    /// Returns the transaction ids that were retried.
     async fn retry<Mempool>(
         mempool: Mempool,
         transactions: Vec<Arc<Transaction>>,
