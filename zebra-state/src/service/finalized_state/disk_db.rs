@@ -467,6 +467,9 @@ impl DiskDb {
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
+        // Use the recommended Universal compaction style.
+        opts.set_compaction_style(rocksdb::DBCompactionStyle::Universal);
+
         let open_file_limit = DiskDb::increase_open_file_limit();
         let db_file_limit = DiskDb::get_db_open_file_limit(open_file_limit);
 
