@@ -354,59 +354,84 @@ impl DiskDb {
     /// stdio (3), and other OS facilities (2+).
     const RESERVED_FILE_COUNT: u64 = 48;
 
+    /// The size of database blocks for large data, in bytes.
+    /// Used for block header and transaction data.
+    ///
+    /// This value is chosen to fit:
+    /// - ~80 block headers (1.6 kB),
+    /// - ~50 Sapling transactions (2.7 kB),
+    /// - ~30 Orchard transactions (4.7 kB), or
+    /// - a thousand transparent transactions (130 B).
+    ///
+    /// See "General Options" in:
+    /// <https://zhangyuchi.gitbooks.io/rocksdbbook/content/RocksDB-Tuning-Guide.html>
+    const DATABASE_BLOCK_SIZE: usize = 128 * 1024;
+
     /// Opens or creates the database at `config.path` for `network`,
     /// and returns a shared low-level database wrapper.
     pub fn new(config: &Config, network: Network) -> DiskDb {
         let path = config.db_path(network);
-        let db_options = DiskDb::options();
+
+        // TODO: if this works, do we want to share the block cache?
+        let small_data_options = DiskDb::options(false);
+        let large_data_options = DiskDb::options(true);
 
         let column_families = vec![
             // Blocks
             // TODO: rename to block_header_by_height (#3151)
-            rocksdb::ColumnFamilyDescriptor::new("block_by_height", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("block_by_height", large_data_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("hash_by_height", small_data_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("height_by_hash", small_data_options.clone()),
             // Transactions
-            rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("hash_by_tx_loc", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", large_data_options),
+            rocksdb::ColumnFamilyDescriptor::new("hash_by_tx_loc", small_data_options.clone()),
             // TODO: rename to tx_loc_by_hash (#3950)
-            rocksdb::ColumnFamilyDescriptor::new("tx_by_hash", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("tx_by_hash", small_data_options.clone()),
             // Transparent
-            rocksdb::ColumnFamilyDescriptor::new("balance_by_transparent_addr", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new(
+                "balance_by_transparent_addr",
+                small_data_options.clone(),
+            ),
             // TODO: #3951
-            //rocksdb::ColumnFamilyDescriptor::new("tx_by_transparent_addr_loc", db_options.clone()),
+            //rocksdb::ColumnFamilyDescriptor::new("tx_by_transparent_addr_loc", small_data_options.clone()),
             // TODO: rename to utxo_by_out_loc (#3952)
-            rocksdb::ColumnFamilyDescriptor::new("utxo_by_outpoint", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("utxo_by_outpoint", small_data_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new(
                 "utxo_loc_by_transparent_addr_loc",
-                db_options.clone(),
+                small_data_options.clone(),
             ),
             // Sprout
-            rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_anchors", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sprout_note_commitment_tree", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", small_data_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sprout_anchors", small_data_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new(
+                "sprout_note_commitment_tree",
+                small_data_options.clone(),
+            ),
             // Sapling
-            rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("sapling_anchors", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sapling_nullifiers", small_data_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("sapling_anchors", small_data_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new(
                 "sapling_note_commitment_tree",
-                db_options.clone(),
+                small_data_options.clone(),
             ),
             // Orchard
-            rocksdb::ColumnFamilyDescriptor::new("orchard_nullifiers", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("orchard_anchors", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("orchard_nullifiers", small_data_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("orchard_anchors", small_data_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new(
                 "orchard_note_commitment_tree",
-                db_options.clone(),
+                small_data_options.clone(),
             ),
             // Chain
-            rocksdb::ColumnFamilyDescriptor::new("history_tree", db_options.clone()),
-            rocksdb::ColumnFamilyDescriptor::new("tip_chain_value_pool", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("history_tree", small_data_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new(
+                "tip_chain_value_pool",
+                small_data_options.clone(),
+            ),
         ];
 
         // TODO: move opening the database to a blocking thread (#2188)
         let db_result = rocksdb::DBWithThreadMode::<DBThreadMode>::open_cf_descriptors(
-            &db_options,
+            &small_data_options,
             &path,
             column_families,
         );
@@ -460,12 +485,17 @@ impl DiskDb {
 
     // Private methods
 
-    /// Returns the database options for the finalized state database.
-    fn options() -> rocksdb::Options {
+    /// Returns the database options for the finalized state.
+    fn options(large_data: bool) -> rocksdb::Options {
         let mut opts = rocksdb::Options::default();
+        let mut block_based_opts = rocksdb::BlockBasedOptions::default();
 
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
+
+        if large_data {
+            block_based_opts.set_block_size(Self::DATABASE_BLOCK_SIZE);
+        }
 
         let open_file_limit = DiskDb::increase_open_file_limit();
         let db_file_limit = DiskDb::get_db_open_file_limit(open_file_limit);
@@ -477,6 +507,9 @@ impl DiskDb {
         let db_file_limit = db_file_limit.try_into().unwrap_or(ideal_limit);
 
         opts.set_max_open_files(db_file_limit);
+
+        // Set the block-based options
+        opts.set_block_based_table_factory(&block_based_opts);
 
         opts
     }

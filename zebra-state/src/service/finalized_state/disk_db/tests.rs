@@ -18,7 +18,7 @@ impl Deref for DiskDb {
 impl DiskDb {
     /// Returns a list of column family names in this database.
     pub fn list_cf(&self) -> Result<Vec<String>, rocksdb::Error> {
-        let opts = DiskDb::options();
+        let opts = DiskDb::options(false);
         let path = self.path();
 
         rocksdb::DB::list_cf(&opts, path)
