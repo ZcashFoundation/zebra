@@ -127,8 +127,8 @@ jobs:
             RUST_LOG=debug
             SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
           push: true
-          cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache
+          cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache,mode=max
 
   # Test that Zebra can run a full mainnet sync after a PR is approved
   test-full-sync:

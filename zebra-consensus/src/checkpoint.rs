@@ -495,7 +495,7 @@ where
         crate::block::check::equihash_solution_is_valid(&block.header)?;
 
         // don't do precalculation until the block passes basic difficulty checks
-        let block = FinalizedBlock::with_hash_and_height(block, hash, height);
+        let block = FinalizedBlock::with_hash(block, hash);
 
         crate::block::check::merkle_root_validity(
             self.network,
