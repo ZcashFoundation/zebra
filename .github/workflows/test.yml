@@ -219,26 +219,19 @@ jobs:
           persist-credentials: false
           fetch-depth: '2'
 
-      # only run this job if the database format might have changed
+      # Only run this job if the database format version has (likely) changed.
+      #
+      # If we have accidentally changed the format, but not changed the version,
+      # we want to run with the old cached state, so this job fails.
+      #
+      # If we change the state path without changing the version,
+      # this job will take a few hours, because it will do a full rebuild.
       - name: Get specific changed files
         id: changed-files-specific
         uses: tj-actions/changed-files@v18.4
         with:
           files: |
-            zebra-state/**/config.rs
             zebra-state/**/constants.rs
-            zebra-state/**/finalized_state.rs
-            zebra-state/**/disk_format.rs
-            zebra-state/**/disk_format/block.rs
-            zebra-state/**/disk_format/chain.rs
-            zebra-state/**/disk_format/shielded.rs
-            zebra-state/**/disk_format/transparent.rs
-            zebra-state/**/disk_db.rs
-            zebra-state/**/zebra_db.rs
-            zebra-state/**/zebra_db/block.rs
-            zebra-state/**/zebra_db/chain.rs
-            zebra-state/**/zebra_db/shielded.rs
-            zebra-state/**/zebra_db/transparent.rs
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
