@@ -13,6 +13,7 @@ on:
       # workflow definitions
       - 'clippy.toml'
       - '.cargo/config.toml'
+      # TODO: we might want to run this in a separate workflow in the future for the `actionlint` job
       - '.github/workflows/*.yml'
 
 env:
