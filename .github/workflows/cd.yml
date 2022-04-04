@@ -132,7 +132,7 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
-    if: github.event_name == 'push' && github.ref_name == 'main'
+    if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
 
     steps:
       - name: Inject slug/short variables
