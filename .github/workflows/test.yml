@@ -228,7 +228,7 @@ jobs:
       # this job will take a few hours, because it will do a full rebuild.
       - name: Get specific changed files
         id: changed-files-specific
-        uses: tj-actions/changed-files@v18.4
+        uses: tj-actions/changed-files@v18.6
         with:
           files: |
             zebra-state/**/constants.rs
