@@ -354,6 +354,11 @@ impl DiskDb {
     /// stdio (3), and other OS facilities (2+).
     const RESERVED_FILE_COUNT: u64 = 48;
 
+    /// The size of the database RAM cache in megabytes.
+    ///
+    /// https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning
+    const RAM_CACHE_MEGABYTES: usize = 128;
+
     /// Opens or creates the database at `config.path` for `network`,
     /// and returns a shared low-level database wrapper.
     pub fn new(config: &Config, network: Network) -> DiskDb {
@@ -469,18 +474,33 @@ impl DiskDb {
         let mut opts = rocksdb::Options::default();
         let mut block_based_opts = rocksdb::BlockBasedOptions::default();
 
+        const ONE_MEGABYTE: usize = 1024 * 1024;
+
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
         // Use the recommended Ribbon filter setting for all column families.
         // (Ribbon filters are faster than Bloom filters in Zebra, as of April 2022.)
         //
-        // (They aren't needed for single-valued column families, but they don't hurt either.)
+        // Ribbon filters aren't needed for single-valued column families, but they don't hurt either.
         block_based_opts.set_ribbon_filter(9.9);
 
         // Use the recommended LZ4 compression type.
+        // (This might be slightly faster, as of April 2022.)
+        //
         // https://github.com/facebook/rocksdb/wiki/Compression#configuration
         opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
+
+        // Use the recommended RAM cache setting for all column families.
+        // (This might be slightly faster, as of April 2022.)
+        match rocksdb::Cache::new_lru_cache(Self::RAM_CACHE_MEGABYTES * ONE_MEGABYTE) {
+            Ok(cache) => block_based_opts.set_block_cache(&cache),
+            Err(cache_error) => warn!(
+                ?cache_error,
+                "creating {} MB database memory cache failed, using default 8 MB cache",
+                Self::RAM_CACHE_MEGABYTES,
+            ),
+        };
 
         // Increase the process open file limit if needed,
         // then use it to set RocksDB's limit.
