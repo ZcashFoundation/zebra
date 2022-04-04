@@ -10,7 +10,7 @@ on:
       - '**/Cargo.lock'
       - 'clippy.toml'
       - '.cargo/config.toml'
-      - '.github/workflows/lint.yml'
+      - '.github/workflows/*.yml'
 
 jobs:
   clippy:
