@@ -4,6 +4,60 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-beta.7](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.7) - 2022-04-05
+
+Zebra's latest beta fixes a `cargo install` build failure in the previous beta release. It also fixes a `lightwalletd` RPC bug, and improves test coverage.
+
+### Changed
+
+#### Database and State
+
+- Update database design to put ordered list values in RocksDB keys (#3997)
+- Make transparent address index database design more consistent (#4019)
+
+#### CI
+
+- Do not invalidate cache between PRs (#3996)
+
+#### Dependency Updates
+
+- Bump hyper from 0.14.17 to 0.14.18 (#3946)
+- Bump indexmap from 1.8.0 to 1.8.1 (#4003)
+- Bump semver from 1.0.6 to 1.0.7 (#3982)
+- Bump serde-big-array from 0.3.2 to 0.4.1 (#4004)
+
+##### Test Dependency Updates
+
+- Bump insta from 1.13.0 to 1.14.0 (#3980)
+- Bump tokio-util from 0.7.0 to 0.7.1 (#3981)
+
+##### CI Dependency Updates
+
+- Bump tj-actions/changed-files from 18.4 to 18.6 (#4002)
+
+### Fixed
+
+#### Build
+
+- Fix a compilation error caused by a test-only method in production code (#4000)
+- Add a job to ci.yml that does `cargo install --locked --path ./zebrad/ zebrad` (#3998)
+
+#### RPC
+
+- Tell `lightwalletd` to wait for missing blocks in the `getblock` RPC (#3977)
+
+#### State
+
+- Stop panicking when a state block commit fails (#4016)
+
+#### Logging
+
+- Log hashes as hex strings in block committment errors (#4021)
+
+#### Tests
+
+- Check for accidental database incompatibilities in cached state tests (#4020)
+
 ## [Zebra 1.0.0-beta.6](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.6) - 2022-03-28
 
 Zebra's latest beta adds RPC server support, including some of the RPC calls needed to become a **lightwalletd** back end.
