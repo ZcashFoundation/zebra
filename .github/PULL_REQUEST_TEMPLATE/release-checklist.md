@@ -85,11 +85,6 @@ If any Zebra or Tower crates have commit messages that are **not** a version bum
 
 Also check for crates that depend on crates that have changed. They should get a version bump as well.
 
-## Initial Testing
-
-- [ ] After any changes, test that the `cargo install` command in works. Use
-      e.g. `cargo install --locked --path zebrad`.
-
 ## README
 
 As we resolve various outstanding known issues and implement new functionality with each release, we should double check the README for any necessary updates.
