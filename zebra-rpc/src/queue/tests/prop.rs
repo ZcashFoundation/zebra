@@ -56,7 +56,7 @@ proptest! {
 
     /// Test queue order.
     #[test]
-    fn queue_order(transactions in any::<[UnminedTx; CHANNEL_AND_QUEUE_CAPACITY * 2]>()) {
+    fn queue_order(transactions in any::<[UnminedTx; 32]>()) {
         // create a queue
         let mut runner = Queue::start();
         // fill the queue and check insertion order
@@ -83,7 +83,7 @@ proptest! {
         // check the order of the final queue
         let queue_transactions = runner.queue.transactions();
         for i in 0..CHANNEL_AND_QUEUE_CAPACITY {
-            let transaction = transactions[CHANNEL_AND_QUEUE_CAPACITY + i].clone();
+            let transaction = transactions[(CHANNEL_AND_QUEUE_CAPACITY - 8) + i].clone();
             prop_assert_eq!(UnminedTx::from(queue_transactions[i].0.clone()), transaction);
         }
     }
@@ -121,7 +121,17 @@ proptest! {
             runner.remove_expired(spacing);
             prop_assert_eq!(runner.queue.transactions().len(), 1);
 
-            // apply expiration after 3 block elapsed, transaction will not be removed from queue
+            // apply expiration after 3 blocks elapsed, transaction will not be removed from queue
+            time::advance(spacing.to_std().unwrap()).await;
+            runner.remove_expired(spacing);
+            prop_assert_eq!(runner.queue.transactions().len(), 1);
+
+            // apply expiration after 4 blocks elapsed, transaction will not be removed from queue
+            time::advance(spacing.to_std().unwrap()).await;
+            runner.remove_expired(spacing);
+            prop_assert_eq!(runner.queue.transactions().len(), 1);
+
+            // apply expiration after 5 block elapsed, transaction will not be removed from queue
             // as it needs the extra time of 5 seconds
             time::advance(spacing.to_std().unwrap()).await;
             runner.remove_expired(spacing);
