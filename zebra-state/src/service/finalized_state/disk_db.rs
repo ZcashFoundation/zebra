@@ -354,10 +354,15 @@ impl DiskDb {
     /// stdio (3), and other OS facilities (2+).
     const RESERVED_FILE_COUNT: u64 = 48;
 
-    /// The size of the database RAM cache in megabytes.
+    /// The size of the database file block RAM cache in megabytes.
     ///
     /// https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning
-    const RAM_CACHE_MEGABYTES: usize = 128;
+    const FILE_RAM_CACHE_MEGABYTES: usize = 128;
+
+    /// The size of the database memtable RAM cache in megabytes.
+    ///
+    /// https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning
+    const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
 
     /// Opens or creates the database at `config.path` for `network`,
     /// and returns a shared low-level database wrapper.
@@ -493,14 +498,17 @@ impl DiskDb {
 
         // Use the recommended RAM cache setting for all column families.
         // (This might be slightly faster, as of April 2022.)
-        match rocksdb::Cache::new_lru_cache(Self::RAM_CACHE_MEGABYTES * ONE_MEGABYTE) {
+        match rocksdb::Cache::new_lru_cache(Self::FILE_RAM_CACHE_MEGABYTES * ONE_MEGABYTE) {
             Ok(cache) => block_based_opts.set_block_cache(&cache),
             Err(cache_error) => warn!(
                 ?cache_error,
-                "creating {} MB database memory cache failed, using default 8 MB cache",
-                Self::RAM_CACHE_MEGABYTES,
+                "creating {} MB database file cache failed, using default 8 MB cache",
+                Self::FILE_RAM_CACHE_MEGABYTES,
             ),
         };
+
+        // Tune level-style database file compaction.
+        opts.optimize_level_style_compaction(Self::MEMTABLE_RAM_CACHE_MEGABYTES * ONE_MEGABYTE);
 
         // Increase the process open file limit if needed,
         // then use it to set RocksDB's limit.
