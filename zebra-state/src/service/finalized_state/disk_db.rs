@@ -290,8 +290,8 @@ impl DiskDb {
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
-        // Use the recommended ribbon filter setting for all column families, and make them file-based,
-        // because the block header and transaction column families have large values.
+        // Use the recommended Ribbon filter setting for all column families.
+        // (Ribbon filters are faster than Bloom filters in Zebra, as of April 2022.)
         //
         // (They aren't needed for single-valued column families, but they don't hurt either.)
         block_based_opts.set_ribbon_filter(9.9);
