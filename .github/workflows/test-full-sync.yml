@@ -199,8 +199,8 @@ jobs:
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
           sleep 60
 
-      - name: Full sync mainnet
-        id: full-sync-mainnet
+      - name: Full sync
+        id: full-sync
         if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           gcloud compute ssh \
@@ -209,12 +209,26 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
+
+          EXIT_CODE=$(\
+          gcloud compute ssh \
+          sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command="docker wait ${{ env.ZEBRA_CONTAINER }}")
+
+          if [[ ${EXIT_CODE} -eq "0" ]]; then
+            exit 0
+          else
+            exit 1
+          fi
         env:
           ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
 
       - name: Delete test instance
         # Do not delete the instance if the sync timeouts in GitHub
-        if: ${{ steps.full-sync-mainnet.outcome == 'success' || steps.full-sync-mainnet.outcome == 'failure' }}
+        if: ${{ steps.full-sync.outcome == 'success' || steps.full-sync.outcome == 'failure' }}
         continue-on-error: true
         run: |
           gcloud compute instances delete "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
