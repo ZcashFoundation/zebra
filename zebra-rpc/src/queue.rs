@@ -234,18 +234,12 @@ impl Runner {
         if !transactions.is_empty() {
             let request = Request::TransactionsById(transactions);
 
-            let mempool_response = mempool
-                .oneshot(request)
-                .await
-                .expect("Requesting transactions should not panic");
-
-            match mempool_response {
-                Response::Transactions(txs) => {
-                    for tx in txs {
-                        response.insert(tx.id);
-                    }
+            // ignore any error coming from the mempool
+            let mempool_response = mempool.oneshot(request).await;
+            if let Ok(Response::Transactions(txs)) = mempool_response {
+                for tx in txs {
+                    response.insert(tx.id);
                 }
-                _ => unreachable!("TransactionsById always respond with at least an empty vector"),
             }
         }
 
@@ -271,18 +265,10 @@ impl Runner {
         for t in transactions {
             let request = ReadRequest::Transaction(t.mined_id());
 
-            let state_response = state
-                .clone()
-                .oneshot(request)
-                .await
-                .expect("Requesting transactions should not panic");
-
-            match state_response {
-                ReadResponse::Transaction(Some(tx)) => {
-                    response.insert(tx.0.unmined_id());
-                }
-                ReadResponse::Transaction(None) => {}
-                _ => unreachable!("ReadResponse::Transaction is always some or none"),
+            // ignore any error coming from the state
+            let state_response = state.clone().oneshot(request).await;
+            if let Ok(ReadResponse::Transaction(Some(tx))) = state_response {
+                response.insert(tx.0.unmined_id());
             }
         }
 

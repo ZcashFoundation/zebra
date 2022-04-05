@@ -351,11 +351,9 @@ where
 
             let transaction_hash = raw_transaction.hash();
 
-            // send transaction to the rpc queue
+            // send transaction to the rpc queue, ignore any error.
             let unmined_transaction = UnminedTx::from(raw_transaction.clone());
-            queue_sender
-                .send(Some(unmined_transaction))
-                .expect("there is always at least one active receiver");
+            let _ = queue_sender.send(Some(unmined_transaction));
 
             let transaction_parameter = mempool::Gossip::Tx(raw_transaction.into());
             let request = mempool::Request::Queue(vec![transaction_parameter]);
