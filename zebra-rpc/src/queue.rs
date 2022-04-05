@@ -35,7 +35,7 @@ use zebra_state::{ReadRequest, ReadResponse};
 #[cfg(test)]
 mod tests;
 
-/// The number of blocks a transaction can be in the queue.
+/// The approximate target number of blocks a transaction can be in the queue.
 const NUMBER_OF_BLOCKS_TO_EXPIRE: i64 = 3;
 
 /// Size of the queue and channel. Suggested value is equal to
@@ -96,7 +96,7 @@ impl Queue {
 }
 
 impl Runner {
-    /// Access the sender field of the runner.
+    /// Create a new sender for this runner.
     pub fn sender(&self) -> Sender<Option<UnminedTx>> {
         self.sender.clone()
     }
