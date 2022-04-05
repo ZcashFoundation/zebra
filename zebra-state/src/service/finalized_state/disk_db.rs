@@ -478,6 +478,12 @@ impl DiskDb {
         // (They aren't needed for single-valued column families, but they don't hurt either.)
         block_based_opts.set_ribbon_filter(9.9);
 
+        // Use the recommended LZ4 compression type.
+        // https://github.com/facebook/rocksdb/wiki/Compression#configuration
+        opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
+
+        // Increase the process open file limit if needed,
+        // then use it to set RocksDB's limit.
         let open_file_limit = DiskDb::increase_open_file_limit();
         let db_file_limit = DiskDb::get_db_open_file_limit(open_file_limit);
 
