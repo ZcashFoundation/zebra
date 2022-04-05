@@ -38,8 +38,7 @@ mod tests;
 /// The approximate target number of blocks a transaction can be in the queue.
 const NUMBER_OF_BLOCKS_TO_EXPIRE: i64 = 5;
 
-/// Size of the queue and channel. Suggested value is equal to
-/// `mempool::downloads::MAX_INBOUND_CONCURRENCY`
+/// Size of the queue and channel.
 const CHANNEL_AND_QUEUE_CAPACITY: usize = 20;
 
 /// The height to use in spacing calculation if we don't have a chain tip.
