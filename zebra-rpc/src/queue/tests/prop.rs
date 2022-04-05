@@ -1,6 +1,6 @@
 //! Randomised property tests for the RPC Queue.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, env, sync::Arc};
 
 use proptest::prelude::*;
 
@@ -19,7 +19,17 @@ use zebra_test::mock_service::MockService;
 
 use crate::queue::{Queue, Runner, CHANNEL_AND_QUEUE_CAPACITY};
 
+/// The default number of proptest cases for these tests.
+const DEFAULT_BLOCK_VEC_PROPTEST_CASES: u32 = 2;
+
 proptest! {
+    #![proptest_config(
+        proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_BLOCK_VEC_PROPTEST_CASES))
+    )]
+
     /// Test insert to the queue and remove from it.
     #[test]
     fn insert_remove_to_from_queue(transaction in any::<UnminedTx>()) {
