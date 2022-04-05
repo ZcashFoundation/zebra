@@ -178,7 +178,8 @@ impl Runner {
             }
 
             // skip some work if stored tip height is the same as the one arriving
-            if tip_height > self.tip_height {
+            // TODO: check tip block hashes instead, so we always retry when there is a chain fork (these are rare)
+            if tip_height != self.tip_height {
                 // update the chain tip
                 self.update_tip_height(tip_height);
 
