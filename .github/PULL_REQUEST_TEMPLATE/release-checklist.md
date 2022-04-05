@@ -91,7 +91,6 @@ As we resolve various outstanding known issues and implement new functionality w
 
 We should check and update if necessary:
 
-- [ ] The "Beta Release" section
 - [ ] The "Known Issues" section
 
 to ensure that any items that are resolved in the latest release are no longer listed in the README.
