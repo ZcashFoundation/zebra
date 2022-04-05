@@ -42,6 +42,9 @@ const NUMBER_OF_BLOCKS_TO_EXPIRE: i64 = 3;
 /// `mempool::downloads::MAX_INBOUND_CONCURRENCY`
 const CHANNEL_AND_QUEUE_CAPACITY: usize = 10;
 
+/// The height to use in spacing calculation if we don't have a chain tip.
+const NO_CHAIN_TIP_HEIGHT: Height = Height(1);
+
 #[derive(Clone, Debug)]
 /// The queue is a container of transactions that are going to be
 /// sent to the mempool again.
@@ -54,6 +57,7 @@ pub struct Queue {
 pub struct Runner {
     queue: Queue,
     sender: Sender<Option<UnminedTx>>,
+    tip_height: Height,
 }
 
 impl Queue {
@@ -65,7 +69,11 @@ impl Queue {
             transactions: IndexMap::new(),
         };
 
-        Runner { queue, sender }
+        Runner {
+            queue,
+            sender,
+            tip_height: Height(0),
+        }
     }
 
     /// Get the transactions in the queue.
@@ -118,6 +126,11 @@ impl Runner {
         transactions.iter().map(|t| t.1 .0.clone()).collect()
     }
 
+    /// Update the `tip_height` field with a new height.
+    pub fn update_tip_height(&mut self, height: Height) {
+        self.tip_height = height;
+    }
+
     /// Retry sending to memempool if needed.
     ///
     /// Creates a loop that will run each time a new block is mined.
@@ -145,18 +158,18 @@ impl Runner {
             + 'static,
         Tip: ChainTip + Clone + Send + Sync + 'static,
     {
-        // If we don't have a chain use height 1 to get block spacing.
-        let tip_height = match tip.best_tip_height() {
-            Some(height) => height,
-            _ => Height(1),
-        };
-
-        // get spacing between blocks
-        let spacing = NetworkUpgrade::target_spacing_for_height(network, tip_height);
-
         let mut receiver = self.sender.subscribe();
 
         loop {
+            // if we don't have a chain use `NO_CHAIN_TIP_HEIGHT` to get block spacing
+            let tip_height = match tip.best_tip_height() {
+                Some(height) => height,
+                _ => NO_CHAIN_TIP_HEIGHT,
+            };
+
+            // get spacing between blocks
+            let spacing = NetworkUpgrade::target_spacing_for_height(network, tip_height);
+
             // sleep until the next block
             tokio::time::sleep(spacing.to_std().expect("should never be less than zero")).await;
 
@@ -165,22 +178,28 @@ impl Runner {
                 let _ = &self.queue.insert(tx.clone());
             }
 
-            if !self.queue.transactions().is_empty() {
-                // remove what is expired
-                self.remove_expired(spacing);
+            // skip some work if stored tip height is the same as the one arriving
+            if tip_height > self.tip_height {
+                // update the chain tip
+                self.update_tip_height(tip_height);
 
-                // remove if any of the queued transactions is now in the mempool
-                let in_mempool =
-                    Self::check_mempool(mempool.clone(), self.transactions_as_hash_set()).await;
-                self.remove_committed(in_mempool);
+                if !self.queue.transactions().is_empty() {
+                    // remove what is expired
+                    self.remove_expired(spacing);
 
-                // remove if any of the queued transactions is now in the state
-                let in_state =
-                    Self::check_state(state.clone(), self.transactions_as_hash_set()).await;
-                self.remove_committed(in_state);
+                    // remove if any of the queued transactions is now in the mempool
+                    let in_mempool =
+                        Self::check_mempool(mempool.clone(), self.transactions_as_hash_set()).await;
+                    self.remove_committed(in_mempool);
 
-                // retry what is left in the queue
-                let _retried = Self::retry(mempool.clone(), self.transactions_as_vec()).await;
+                    // remove if any of the queued transactions is now in the state
+                    let in_state =
+                        Self::check_state(state.clone(), self.transactions_as_hash_set()).await;
+                    self.remove_committed(in_state);
+
+                    // retry what is left in the queue
+                    let _retried = Self::retry(mempool.clone(), self.transactions_as_vec()).await;
+                }
             }
         }
     }
