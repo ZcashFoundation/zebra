@@ -457,7 +457,7 @@ jobs:
       - name: Check exit code
         id: check-exit-code
         run: |
-          COMMAND="$(docker wait ${{ env.ZEBRA_CONTAINER }})"
+          COMMAND="docker wait ${{ env.ZEBRA_CONTAINER }}"
 
           EXIT_CODE=$(\
           gcloud compute ssh \
