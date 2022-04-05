@@ -106,11 +106,6 @@ impl Runner {
         self.sender.subscribe()
     }
 
-    /// Access the queue.
-    pub fn queue(&self) -> Queue {
-        self.queue.clone()
-    }
-
     /// Get the queue transactions as a `HashSet` of unmined ids.
     fn transactions_as_hash_set(&self) -> HashSet<UnminedTxId> {
         let transactions = self.queue.transactions();
