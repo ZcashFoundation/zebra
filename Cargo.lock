@@ -4898,7 +4898,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.22"
+version = "0.2.23"
 dependencies = [
  "color-eyre 0.6.1",
  "ed25519-zebra",
@@ -4918,7 +4918,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.18"
+version = "0.2.19"
 dependencies = [
  "futures-core",
  "pin-project 0.4.29",
@@ -5660,7 +5660,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "aes",
  "bech32",
@@ -5720,7 +5720,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "bellman",
  "blake2b_simd 1.0.0",
@@ -5762,7 +5762,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "arti-client",
  "bitflags",
@@ -5797,14 +5797,14 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "zebra-chain",
 ]
 
 [[package]]
 name = "zebra-rpc"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "chrono",
  "futures",
@@ -5832,7 +5832,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "displaydoc",
  "hex",
@@ -5845,7 +5845,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "bincode",
  "chrono",
@@ -5880,7 +5880,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "color-eyre 0.5.11",
  "futures",
@@ -5904,7 +5904,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "color-eyre 0.6.1",
  "hex",
@@ -5919,7 +5919,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 dependencies = [
  "abscissa_core",
  "atty",
