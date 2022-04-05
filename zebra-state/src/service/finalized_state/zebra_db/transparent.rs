@@ -162,7 +162,7 @@ impl ZebraDb {
         addr_unspent_outputs
     }
 
-    /// Returns the locations of any transactions sent to a [`transparent::Address`],
+    /// Returns the locations of any transactions that sent or received from a [`transparent::Address`],
     /// if they are in the finalized state.
     #[allow(dead_code)]
     pub fn address_transaction_locations(
