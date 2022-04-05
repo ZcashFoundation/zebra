@@ -206,14 +206,17 @@ where
         };
 
         // run the process queue
-        let queue_task_handler = tokio::spawn(async move {
+        let mut queue_task_handler = tokio::spawn(async move {
             runner.run(mempool, state, latest_chain_tip, network).await;
         });
 
         // queue panic checker
         tokio::spawn(async move {
-            if queue_task_handler.await.is_err() {
-                panic!("Unexpected panic in the RPC queue");
+            loop {
+                let queue_task_handler = &mut queue_task_handler;
+                if queue_task_handler.await.is_err() {
+                    panic!("Unexpected panic in the RPC queue");
+                }
             }
         });
 
