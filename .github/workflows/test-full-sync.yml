@@ -7,6 +7,10 @@ on:
         default: 'Mainnet'
         description: 'Network to deploy: Mainnet or Testnet'
         required: true
+      checkpoint_sync:
+        default: 'true'
+        description: 'Configures `zebrad` to use as many checkpoints as possible'
+        required: true
   pull_request:
     branches:
       - main
