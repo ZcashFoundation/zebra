@@ -206,8 +206,15 @@ where
         };
 
         // run the process queue
-        tokio::spawn(async move {
+        let queue_task_handler = tokio::spawn(async move {
             runner.run(mempool, state, latest_chain_tip, network).await;
+        });
+
+        // queue panic checker
+        tokio::spawn(async move {
+            if queue_task_handler.await.is_err() {
+                panic!("Unexpected panic in the RPC queue");
+            }
         });
 
         rpc_impl
