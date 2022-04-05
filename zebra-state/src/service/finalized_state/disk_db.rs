@@ -502,6 +502,12 @@ impl DiskDb {
             ),
         };
 
+        // Use the new disk format.
+        //
+        // This format can be read by RocksDB 6.6.0 and later.
+        // https://github.com/facebook/rocksdb/blob/36bc3da97fcb6aa2df6e43df27552f49b762d61e/include/rocksdb/table.h#L409-L434
+        block_based_opts.set_format_version(5);
+
         // Increase the process open file limit if needed,
         // then use it to set RocksDB's limit.
         let open_file_limit = DiskDb::increase_open_file_limit();
