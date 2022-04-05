@@ -16,10 +16,6 @@ To check if any of the top-level crates need version increments, go to the zebra
 - [ ] Increment the crates that have new commits since the last version update
 - [ ] Increment any crates that depend on crates that have changed
 - [ ] Keep a list of the crates that haven't been incremented, to include in the PR
-- [ ] Use the `zebrad` crate version in the `zebra-network` user agent string
-      (currently the constant `USER_AGENT` in `zebra-network/src/constants.rs`)
-- [ ] Use the latest git tag in `README.md`
-- [ ] Use the latest git tag in `book/src/user/install.md`
 
 ### How to Increment Versions
 
@@ -32,10 +28,6 @@ Semantic versions look like: `MAJOR`.`MINOR`.`PATCH[`-`TAG`.`PRE-RELEASE]`
 Pre-Release versions have a `TAG` like "alpha" or "beta". For example: `1.0.0-alpha.0`
 
 1. Increment the `PRE-RELEASE` version for the crate.
-
-Optionally, if a `MINOR` feature pre-release breaks `MAJOR` API compatibility:
-
-2. Increment the `MAJOR` version, and reset all the other versions to zero
 
 #### Unstable Crates
 
@@ -157,7 +149,7 @@ After you have the version increments and the updated changelog:
 
 If the build fails after tagging:
 1. fix the build
-2. check if the fixes changed any extra crates, and do the required version increments
+2. increment versions again, following these instructions from the start
 3. update `README.md` with a **new** git tag
 4. update `CHANGELOG.md` with details about the fix
 5. tag a **new** release
