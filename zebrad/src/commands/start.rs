@@ -183,7 +183,7 @@ impl StartCmd {
 
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
-        let mut block_gossip_task_handle = tokio::spawn(
+        let block_gossip_task_handle = tokio::spawn(
             sync::gossip_best_tip_block_hashes(
                 sync_status.clone(),
                 chain_tip_change.clone(),
@@ -220,6 +220,7 @@ impl StartCmd {
         pin!(rpc_task_handle);
         pin!(rpc_tx_queue_task_handle);
         pin!(syncer_task_handle);
+        pin!(block_gossip_task_handle);
         pin!(mempool_crawler_task_handle);
         pin!(mempool_queue_checker_task_handle);
         pin!(tx_gossip_task_handle);
@@ -313,6 +314,7 @@ impl StartCmd {
         mempool_crawler_task_handle.abort();
         mempool_queue_checker_task_handle.abort();
         tx_gossip_task_handle.abort();
+        progress_task_handle.abort();
 
         // startup tasks
         groth16_download_handle.abort();
