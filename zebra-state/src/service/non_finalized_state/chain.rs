@@ -603,7 +603,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             // add the utxos this produced
             self.update_chain_tip_with(new_outputs)?;
             // add the utxos this consumed
-            self.update_chain_tip_with(&(inputs, spent_outputs))?;
+            self.update_chain_tip_with(&(inputs, spent_outputs, &transaction_hash))?;
 
             // add the shielded data
             self.update_chain_tip_with(joinsplit_data)?;
@@ -733,7 +733,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             // remove the utxos this produced
             self.revert_chain_with(new_outputs, position);
             // remove the utxos this consumed
-            self.revert_chain_with(&(inputs, spent_outputs), position);
+            self.revert_chain_with(&(inputs, spent_outputs, transaction_hash), position);
 
             // remove the shielded data
             self.revert_chain_with(joinsplit_data, position);
@@ -833,20 +833,23 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
     }
 }
 
-// Spending inputs and the outputs they spend
+// Spending inputs, the outputs they spend, and the transaction that spends them
 impl
     UpdateWith<(
-        // The inputs from this block
+        // The inputs from a transaction in this block
         &Vec<transparent::Input>,
         // The values of all inputs spent in this block
         &HashMap<transparent::OutPoint, transparent::Output>,
+        // The transaction that spends these inputs
+        &transaction::Hash,
     )> for Chain
 {
     fn update_chain_tip_with(
         &mut self,
-        (spending_inputs, spent_outputs): &(
+        &(spending_inputs, spent_outputs, spending_tx): &(
             &Vec<transparent::Input>,
             &HashMap<transparent::OutPoint, transparent::Output>,
+            &transaction::Hash,
         ),
     ) -> Result<(), ValidateContextError> {
         for spending_input in spending_inputs.iter() {
@@ -866,7 +869,11 @@ impl
                         .entry(spending_address)
                         .or_default();
 
-                    address_transfers.update_chain_tip_with(&(spending_input, spent_output))?;
+                    address_transfers.update_chain_tip_with(&(
+                        spending_input,
+                        spent_output,
+                        spending_tx,
+                    ))?;
                 }
             }
         }
@@ -876,13 +883,14 @@ impl
 
     fn revert_chain_with(
         &mut self,
-        (inputs, spent_outputs): &(
+        &(spending_inputs, spent_outputs, spending_tx): &(
             &Vec<transparent::Input>,
             &HashMap<transparent::OutPoint, transparent::Output>,
+            &transaction::Hash,
         ),
         position: RevertPosition,
     ) {
-        for spending_input in inputs.iter() {
+        for spending_input in spending_inputs.iter() {
             let spent_outpoint = match spending_input {
                 transparent::Input::PrevOut { outpoint, .. } => {
                     assert!(
@@ -902,7 +910,8 @@ impl
                         .get_mut(&receiving_address)
                         .expect("block has previously been applied to the chain");
 
-                    address_transfers.revert_chain_with(&(spending_input, spent_output), position);
+                    address_transfers
+                        .revert_chain_with(&(spending_input, spent_output, spending_tx), position);
 
                     // Remove this transfer if it is now empty
                     if address_transfers.is_empty() {

@@ -1,13 +1,15 @@
 //! Transparent address indexes for non-finalized chains.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
+
+use mset::MultiSet;
 
 use zebra_chain::{
     amount::{Amount, NegativeAllowed},
     transaction, transparent,
 };
 
-use crate::{OutputLocation, TransactionLocation, ValidateContextError};
+use crate::{OutputLocation, ValidateContextError};
 
 use super::{RevertPosition, UpdateWith};
 
@@ -27,8 +29,15 @@ pub struct TransparentTransfers {
     ///
     /// The `getaddresstxids` RPC needs these transaction IDs to be sorted in chain order.
     ///
-    /// TODO: use Arc<Hash> to save 24 bytes per transaction
-    tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
+    /// TODO: return as a BTreeMap<TransactionLocation, transaction::Hash>,
+    ///       so transactions are in chain order
+    ///
+    ///       replace tuple value with TransactionLocation, and look up the hash in hash_by_tx
+    ///
+    ///       use Arc<Hash> to save 24 bytes per transaction
+    //
+    // TODO: use (TransactionLocation, transaction::Hash) as part of PR #3978
+    tx_ids: MultiSet<transaction::Hash>,
 
     /// The partial list of UTXOs received by a transparent address.
     ///
@@ -75,7 +84,14 @@ impl UpdateWith<(&transparent::OutPoint, &transparent::Utxo)> for TransparentTra
 
         // TODO: lookup height and transaction index as part of PR #3978
         let output_location = OutputLocation::from_outpoint(outpoint);
-        self.created_utxos.insert(output_location, utxo.clone());
+        assert_eq!(
+            self.created_utxos.insert(output_location, utxo.clone()),
+            None,
+            "unexpected created UTXO: duplicate update or duplicate creation",
+        );
+
+        // TODO: store TransactionLocation as part of PR #3978
+        self.tx_ids.insert(outpoint.hash);
 
         Ok(())
     }
@@ -89,15 +105,33 @@ impl UpdateWith<(&transparent::OutPoint, &transparent::Utxo)> for TransparentTra
 
         // TODO: lookup height and transaction index as part of PR #3978
         let output_location = OutputLocation::from_outpoint(outpoint);
-        self.created_utxos.remove(&output_location);
+        assert!(
+            self.created_utxos.remove(&output_location).is_some(),
+            "unexpected created UTXO: duplicate revert, or revert of an output that was never updated",
+        );
+
+        assert!(
+            self.tx_ids.remove(&outpoint.hash),
+            "unexpected created UTXO transaction hash: duplicate revert, or revert that was never updated",
+        );
     }
 }
 
-// A spending input and the output it spends
-impl UpdateWith<(&transparent::Input, &transparent::Output)> for TransparentTransfers {
+// A spending input, the output it spends, and the transaction that spends it
+impl
+    UpdateWith<(
+        &transparent::Input,
+        &transparent::Output,
+        &transaction::Hash,
+    )> for TransparentTransfers
+{
     fn update_chain_tip_with(
         &mut self,
-        &(spending_input, spent_output): &(&transparent::Input, &transparent::Output),
+        &(spending_input, spent_output, spending_tx): &(
+            &transparent::Input,
+            &transparent::Output,
+            &transaction::Hash,
+        ),
     ) -> Result<(), ValidateContextError> {
         // Spending a UTXO subtracts value from the balance
         self.balance = (self.balance - spent_output.value().constrain().unwrap()).unwrap();
@@ -106,14 +140,24 @@ impl UpdateWith<(&transparent::Input, &transparent::Output)> for TransparentTran
 
         // TODO: lookup height and transaction index as part of PR #3978
         let output_location = OutputLocation::from_outpoint(&spent_outpoint);
-        self.spent_utxos.insert(output_location);
+        assert!(
+            self.spent_utxos.insert(output_location),
+            "unexpected spent output: duplicate update or duplicate spend",
+        );
+
+        // TODO: store TransactionLocation as part of PR #3978
+        self.tx_ids.insert(*spending_tx);
 
         Ok(())
     }
 
     fn revert_chain_with(
         &mut self,
-        &(spending_input, spent_output): &(&transparent::Input, &transparent::Output),
+        &(spending_input, spent_output, spending_tx): &(
+            &transparent::Input,
+            &transparent::Output,
+            &transaction::Hash,
+        ),
         _position: RevertPosition,
     ) {
         self.balance = (self.balance + spent_output.value().constrain().unwrap()).unwrap();
@@ -122,7 +166,15 @@ impl UpdateWith<(&transparent::Input, &transparent::Output)> for TransparentTran
 
         // TODO: lookup height and transaction index as part of PR #3978
         let output_location = OutputLocation::from_outpoint(&spent_outpoint);
-        self.spent_utxos.remove(&output_location);
+        assert!(
+            self.spent_utxos.remove(&output_location),
+            "unexpected spent output: duplicate revert, or revert of an output that was never updated",
+        );
+
+        assert!(
+            self.tx_ids.remove(spending_tx),
+            "unexpected spending output transaction hash: duplicate revert, or revert that was never updated",
+        );
     }
 }
 
