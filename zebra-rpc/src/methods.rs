@@ -14,8 +14,9 @@ use hex::{FromHex, ToHex};
 use indexmap::IndexMap;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
-use tokio::sync::broadcast::Sender;
+use tokio::{sync::broadcast::Sender, task::JoinHandle};
 use tower::{buffer::Buffer, Service, ServiceExt};
+use tracing::Instrument;
 
 use zebra_chain::{
     block::{self, Height, SerializedBlock},
@@ -188,7 +189,7 @@ where
         state: State,
         latest_chain_tip: Tip,
         network: Network,
-    ) -> Self
+    ) -> (Self, JoinHandle<()>)
     where
         Version: ToString,
         <Mempool as Service<mempool::Request>>::Future: Send,
@@ -206,21 +207,13 @@ where
         };
 
         // run the process queue
-        let mut queue_task_handler = tokio::spawn(async move {
-            runner.run(mempool, state, latest_chain_tip, network).await;
-        });
+        let rpc_tx_queue_task_handle = tokio::spawn(
+            runner
+                .run(mempool, state, latest_chain_tip, network)
+                .in_current_span(),
+        );
 
-        // queue panic checker
-        tokio::spawn(async move {
-            loop {
-                let queue_task_handler = &mut queue_task_handler;
-                if queue_task_handler.await.is_err() {
-                    panic!("Unexpected panic in the RPC queue");
-                }
-            }
-        });
-
-        rpc_impl
+        (rpc_impl, rpc_tx_queue_task_handle)
     }
 }
 

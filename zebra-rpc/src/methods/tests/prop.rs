@@ -34,7 +34,7 @@ proptest! {
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-            let rpc = RpcImpl::new(
+            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -82,7 +82,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -135,7 +135,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -196,7 +196,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -246,7 +246,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -295,7 +295,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -343,7 +343,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -393,7 +393,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -432,7 +432,7 @@ proptest! {
         let mut mempool = MockService::build().for_prop_tests();
         let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
         // look for an error with a `NoChainTip`
-        let rpc = RpcImpl::new(
+        let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
             "RPC test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
@@ -471,7 +471,7 @@ proptest! {
         mock_chain_tip_sender.send_best_tip_block_time(block_time);
 
         // Start RPC with the mocked `ChainTip`
-        let rpc = RpcImpl::new(
+        let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
             "RPC test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
@@ -528,7 +528,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -611,7 +611,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),

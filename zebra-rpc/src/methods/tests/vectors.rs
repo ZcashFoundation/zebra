@@ -25,7 +25,7 @@ async fn rpc_getinfo() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
-    let rpc = RpcImpl::new(
+    let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
@@ -63,7 +63,7 @@ async fn rpc_getblock() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     // Init RPC
-    let rpc = RpcImpl::new(
+    let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -92,7 +92,7 @@ async fn rpc_getblock_error() {
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     // Init RPC
-    let rpc = RpcImpl::new(
+    let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
@@ -132,7 +132,7 @@ async fn rpc_getbestblockhash() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     // Init RPC
-    let rpc = RpcImpl::new(
+    let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -168,7 +168,7 @@ async fn rpc_getrawtransaction() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     // Init RPC
-    let rpc = RpcImpl::new(
+    let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         read_state,
