@@ -142,11 +142,9 @@ jobs:
         with:
           short-length: 7
 
-      - name: Format network string
+      - name: Downcase network name for disks
         run: |
-          NETWORK_CAPS=${{ github.event.inputs.network || env.NETWORK }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
+          echo LOWER_NET_NAME="${{ github.event.inputs.network || env.NETWORK }}" | awk '{print tolower($0)}' >> $GITHUB_ENV
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
