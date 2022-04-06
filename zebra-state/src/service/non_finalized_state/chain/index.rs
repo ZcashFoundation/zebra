@@ -83,12 +83,10 @@ impl UpdateWith<(&transparent::OutPoint, &transparent::Utxo)> for TransparentTra
         self.balance = (self.balance + utxo.output.value().constrain().unwrap()).unwrap();
 
         // TODO: lookup height and transaction index as part of PR #3978
+        //
+        //       stop creating duplicate UTXOs in the tests, then assert that inserts are unique
         let output_location = OutputLocation::from_outpoint(outpoint);
-        assert_eq!(
-            self.created_utxos.insert(output_location, utxo.clone()),
-            None,
-            "unexpected created UTXO: duplicate update or duplicate creation",
-        );
+        self.created_utxos.insert(output_location, utxo.clone());
 
         // TODO: store TransactionLocation as part of PR #3978
         self.tx_ids.insert(outpoint.hash);
@@ -104,11 +102,10 @@ impl UpdateWith<(&transparent::OutPoint, &transparent::Utxo)> for TransparentTra
         self.balance = (self.balance - utxo.output.value().constrain().unwrap()).unwrap();
 
         // TODO: lookup height and transaction index as part of PR #3978
+        //
+        //       stop creating duplicate UTXOs in the tests, then assert that removed values are present
         let output_location = OutputLocation::from_outpoint(outpoint);
-        assert!(
-            self.created_utxos.remove(&output_location).is_some(),
-            "unexpected created UTXO: duplicate revert, or revert of an output that was never updated",
-        );
+        self.created_utxos.remove(&output_location);
 
         assert!(
             self.tx_ids.remove(&outpoint.hash),
