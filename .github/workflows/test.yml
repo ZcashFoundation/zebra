@@ -69,7 +69,7 @@ jobs:
         # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v3.6.2
+        uses: docker/metadata-action@v3.7.0
         with:
           # list of Docker images to use as base name for tags
           images: |
@@ -92,7 +92,7 @@ jobs:
 
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.6.0
+        uses: google-github-actions/auth@v0.7.0
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
@@ -235,7 +235,7 @@ jobs:
       # this job will take a few hours, because it will do a full rebuild.
       - name: Get specific changed files
         id: changed-files-specific
-        uses: tj-actions/changed-files@v18.4
+        uses: tj-actions/changed-files@v18.6
         with:
           files: |
             zebra-state/**/constants.rs
@@ -252,7 +252,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.6.0
+        uses: google-github-actions/auth@v0.7.0
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
@@ -372,7 +372,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.6.0
+        uses: google-github-actions/auth@v0.7.0
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
