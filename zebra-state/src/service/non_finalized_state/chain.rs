@@ -834,6 +834,8 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
 }
 
 // Spending inputs, the outputs they spend, and the transaction that spends them
+//
+// TODO: replace arguments with a struct? (after #3978)
 impl
     UpdateWith<(
         // The inputs from a transaction in this block

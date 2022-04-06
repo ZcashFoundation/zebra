@@ -75,6 +75,8 @@ pub struct TransparentTransfers {
 }
 
 // A created UTXO
+//
+// TODO: replace arguments with a struct? (after #3978)
 impl UpdateWith<(&transparent::OutPoint, &transparent::Utxo)> for TransparentTransfers {
     fn update_chain_tip_with(
         &mut self,
@@ -115,6 +117,8 @@ impl UpdateWith<(&transparent::OutPoint, &transparent::Utxo)> for TransparentTra
 }
 
 // A spending input, the output it spends, and the transaction that spends it
+//
+// TODO: replace arguments with a struct? (after #3978)
 impl
     UpdateWith<(
         &transparent::Input,
