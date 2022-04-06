@@ -354,15 +354,24 @@ impl DiskDb {
     /// stdio (3), and other OS facilities (2+).
     const RESERVED_FILE_COUNT: u64 = 48;
 
-    /// The size of the database file block RAM cache in megabytes.
+    /// The size of the database file block RAM cache in megabytes, per-database.
     ///
     /// https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning
     const FILE_RAM_CACHE_MEGABYTES: usize = 128;
 
     /// The size of the database memtable RAM cache in megabytes.
     ///
+    /// TODO: is this per-column-family, or per-database?
+    ///
     /// https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
+
+    /// The size of the point lookup hash index RAM cache in megabytes.
+    ///
+    /// TODO: is this per-column-family, or per-database?
+    ///
+    /// https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning
+    const POINT_LOOKUP_RAM_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 
     /// Opens or creates the database at `config.path` for `network`,
     /// and returns a shared low-level database wrapper.
@@ -490,6 +499,9 @@ impl DiskDb {
         // Ribbon filters aren't needed for single-valued column families, but they don't hurt either.
         block_based_opts.set_ribbon_filter(9.9);
 
+        // Add a hash-based index to improve insert and lookup speeds.
+        opts.optimize_for_point_lookup(Self::POINT_LOOKUP_RAM_CACHE_BYTES);
+
         // Use the recommended LZ4 compression type.
         // (This might be slightly faster, as of April 2022.)
         //
@@ -508,6 +520,7 @@ impl DiskDb {
         };
 
         // Tune level-style database file compaction.
+        // (This is faster, as of April 2022.)
         opts.optimize_level_style_compaction(Self::MEMTABLE_RAM_CACHE_MEGABYTES * ONE_MEGABYTE);
 
         // Increase the process open file limit if needed,
