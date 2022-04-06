@@ -18,8 +18,8 @@ pub struct TransparentTransfers {
     /// The partial chain balance for a transparent address.
     ///
     /// TODO:
-    /// To avoid [`ReadStateService`] response inconsistencies when a block has just been finalized,
-    /// revert UTXO receives and spends that are at a height less than or equal to the finalized tip.
+    /// - to avoid [`ReadStateService`] response inconsistencies when a block has just been finalized,
+    ///   revert UTXO receives and spends that are at a height less than or equal to the finalized tip.
     balance: Amount<NegativeAllowed>,
 
     /// The partial list of transactions that spent or received UTXOs to a transparent address.
@@ -29,14 +29,12 @@ pub struct TransparentTransfers {
     ///
     /// The `getaddresstxids` RPC needs these transaction IDs to be sorted in chain order.
     ///
-    /// TODO: return as a BTreeMap<TransactionLocation, transaction::Hash>,
-    ///       so transactions are in chain order
+    /// TODO:
+    /// - use (TransactionLocation, transaction::Hash) as part of PR #3978
+    /// - return as a BTreeMap<TransactionLocation, transaction::Hash>, so transactions are in chain order
     ///
-    ///       replace tuple value with TransactionLocation, and look up the hash in hash_by_tx
-    ///
-    ///       use Arc<Hash> to save 24 bytes per transaction
-    //
-    // TODO: use (TransactionLocation, transaction::Hash) as part of PR #3978
+    /// Optional:
+    /// - replace tuple value with TransactionLocation, and look up the hash in hash_by_tx
     tx_ids: MultiSet<transaction::Hash>,
 
     /// The partial list of UTXOs received by a transparent address.
@@ -45,15 +43,14 @@ pub struct TransparentTransfers {
     /// but it might in future. So Zebra does it anyway.
     ///
     /// TODO:
-    /// To avoid [`ReadStateService`] response inconsistencies when a block has just been finalized,
-    /// ignore UTXOs that are at a height less than or equal to the finalized tip.
+    /// - use BTreeMap as part of PR #3978
+    /// - to avoid [`ReadStateService`] response inconsistencies when a block has just been finalized,
+    ///   ignore UTXOs that are at a height less than or equal to the finalized tip.
     ///
-    /// TODO: use Arc<Utxo> to save 2-100 bytes per output
-    ///
-    ///       if we add an OutputLocation to UTXO, remove this OutputLocation,
-    ///       and use the inner OutputLocation to sort Utxos in chain order
-    //
-    // TODO: use BTreeMap as part of PR #3978
+    /// Optional:
+    /// - use Arc<Utxo> to save 2-100 bytes per output?
+    /// - if we add an OutputLocation to UTXO, remove this OutputLocation,
+    ///   and use the inner OutputLocation to sort Utxos in chain order?
     created_utxos: HashMap<OutputLocation, transparent::Utxo>,
 
     /// The partial list of UTXOs spent by a transparent address.
@@ -62,15 +59,14 @@ pub struct TransparentTransfers {
     /// but it might in future. So Zebra does it anyway.
     ///
     /// TODO:
-    /// To avoid [`ReadStateService`] response inconsistencies when a block has just been finalized,
-    /// ignore UTXOs that are at a height less than or equal to the finalized tip.
+    /// - use BTreeSet as part of PR #3978
+    /// - to avoid [`ReadStateService`] response inconsistencies when a block has just been finalized,
+    ///   ignore UTXOs that are at a height less than or equal to the finalized tip.
     ///
-    /// TODO: use Arc<Utxo> to save 2-100 bytes per output
-    ///
-    ///       if we add an OutputLocation to UTXO, remove this OutputLocation,
-    ///       and use the inner OutputLocation to sort Utxos in chain order
-    //
-    // TODO: use BTreeSet as part of PR #3978
+    /// Optional:
+    /// - use Arc<Utxo> to save 2-100 bytes per output
+    /// - if we add an OutputLocation to UTXO, remove this OutputLocation,
+    ///   and use the inner OutputLocation to sort Utxos in chain order
     spent_utxos: HashSet<OutputLocation>,
 }
 
