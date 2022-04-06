@@ -141,11 +141,18 @@ impl ContextuallyValidBlock {
             transaction_hashes,
         } = block.into();
 
+        // TODO: fix the tests, and stop adding unrelated inputs and outputs.
+        let spent_outputs = new_outputs
+            .iter()
+            .map(|(outpoint, ordered_utxo)| (*outpoint, ordered_utxo.utxo.output.clone()))
+            .collect();
+
         Self {
             block,
             hash,
             height,
             new_outputs: transparent::utxos_from_ordered_utxos(new_outputs),
+            spent_outputs,
             transaction_hashes,
             chain_value_pool_change: fake_chain_value_pool_change,
         }
