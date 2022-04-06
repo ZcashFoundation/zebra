@@ -93,6 +93,39 @@ impl UpdateWith<(&transparent::OutPoint, &transparent::Utxo)> for TransparentTra
     }
 }
 
+// A spending input and the output it spends
+impl UpdateWith<(&transparent::Input, &transparent::Output)> for TransparentTransfers {
+    fn update_chain_tip_with(
+        &mut self,
+        &(spending_input, spent_output): &(&transparent::Input, &transparent::Output),
+    ) -> Result<(), ValidateContextError> {
+        // Spending a UTXO subtracts value from the balance
+        self.balance = (self.balance - spent_output.value().constrain().unwrap()).unwrap();
+
+        let spent_outpoint = spending_input.outpoint().expect("checked by caller");
+
+        // TODO: lookup height and transaction index as part of PR #3978
+        let output_location = OutputLocation::from_outpoint(&spent_outpoint);
+        self.spent_utxos.insert(output_location);
+
+        Ok(())
+    }
+
+    fn revert_chain_with(
+        &mut self,
+        &(spending_input, spent_output): &(&transparent::Input, &transparent::Output),
+        _position: RevertPosition,
+    ) {
+        self.balance = (self.balance + spent_output.value().constrain().unwrap()).unwrap();
+
+        let spent_outpoint = spending_input.outpoint().expect("checked by caller");
+
+        // TODO: lookup height and transaction index as part of PR #3978
+        let output_location = OutputLocation::from_outpoint(&spent_outpoint);
+        self.spent_utxos.remove(&output_location);
+    }
+}
+
 impl TransparentTransfers {
     /// Returns true if there are no transfers for this address.
     pub fn is_empty(&self) -> bool {

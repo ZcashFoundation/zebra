@@ -521,11 +521,20 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         &mut self,
         contextually_valid: &ContextuallyValidBlock,
     ) -> Result<(), ValidateContextError> {
-        let (block, hash, height, new_outputs, transaction_hashes, chain_value_pool_change) = (
+        let (
+            block,
+            hash,
+            height,
+            new_outputs,
+            spent_outputs,
+            transaction_hashes,
+            chain_value_pool_change,
+        ) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
             contextually_valid.height,
             &contextually_valid.new_outputs,
+            &contextually_valid.spent_outputs,
             &contextually_valid.transaction_hashes,
             &contextually_valid.chain_value_pool_change,
         );
@@ -594,7 +603,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             // add the utxos this produced
             self.update_chain_tip_with(new_outputs)?;
             // add the utxos this consumed
-            self.update_chain_tip_with(inputs)?;
+            self.update_chain_tip_with(&(inputs, spent_outputs))?;
 
             // add the shielded data
             self.update_chain_tip_with(joinsplit_data)?;
@@ -644,11 +653,20 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         contextually_valid: &ContextuallyValidBlock,
         position: RevertPosition,
     ) {
-        let (block, hash, height, new_outputs, transaction_hashes, chain_value_pool_change) = (
+        let (
+            block,
+            hash,
+            height,
+            new_outputs,
+            spent_outputs,
+            transaction_hashes,
+            chain_value_pool_change,
+        ) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
             contextually_valid.height,
             &contextually_valid.new_outputs,
+            &contextually_valid.spent_outputs,
             &contextually_valid.transaction_hashes,
             &contextually_valid.chain_value_pool_change,
         );
@@ -715,7 +733,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             // remove the utxos this produced
             self.revert_chain_with(new_outputs, position);
             // remove the utxos this consumed
-            self.revert_chain_with(inputs, position);
+            self.revert_chain_with(&(inputs, spent_outputs), position);
 
             // remove the shielded data
             self.revert_chain_with(joinsplit_data, position);
@@ -815,32 +833,79 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
     }
 }
 
-impl UpdateWith<Vec<transparent::Input>> for Chain {
+// Spending inputs and the outputs they spend
+impl
+    UpdateWith<(
+        // The inputs from this block
+        &Vec<transparent::Input>,
+        // The values of all inputs spent in this block
+        &HashMap<transparent::OutPoint, transparent::Output>,
+    )> for Chain
+{
     fn update_chain_tip_with(
         &mut self,
-        inputs: &Vec<transparent::Input>,
+        (spending_inputs, spent_outputs): &(
+            &Vec<transparent::Input>,
+            &HashMap<transparent::OutPoint, transparent::Output>,
+        ),
     ) -> Result<(), ValidateContextError> {
-        for consumed_utxo in inputs {
-            match consumed_utxo {
+        for spending_input in spending_inputs.iter() {
+            let spent_outpoint = match spending_input {
                 transparent::Input::PrevOut { outpoint, .. } => {
                     self.spent_utxos.insert(*outpoint);
+                    outpoint
                 }
-                transparent::Input::Coinbase { .. } => {}
+                transparent::Input::Coinbase { .. } => continue,
+            };
+
+            let spent_output = spent_outputs
+                .get(spent_outpoint)
+                .expect("contains all spent outputs");
+
+            if let Some(spending_address) = spent_output.address(self.network) {
+                let address_transfers = self
+                    .partial_transparent_transfers
+                    .entry(spending_address)
+                    .or_default();
+
+                address_transfers.update_chain_tip_with(&(spending_input, spent_output))?;
             }
         }
+
         Ok(())
     }
 
-    fn revert_chain_with(&mut self, inputs: &Vec<transparent::Input>, _position: RevertPosition) {
-        for consumed_utxo in inputs {
-            match consumed_utxo {
+    fn revert_chain_with(
+        &mut self,
+        (inputs, spent_outputs): &(
+            &Vec<transparent::Input>,
+            &HashMap<transparent::OutPoint, transparent::Output>,
+        ),
+        position: RevertPosition,
+    ) {
+        for spending_input in inputs.iter() {
+            let spent_outpoint = match spending_input {
                 transparent::Input::PrevOut { outpoint, .. } => {
                     assert!(
                         self.spent_utxos.remove(outpoint),
                         "spent_utxos must be present if block was added to chain"
                     );
+                    outpoint
                 }
-                transparent::Input::Coinbase { .. } => {}
+                transparent::Input::Coinbase { .. } => continue,
+            };
+
+            let spent_output = spent_outputs
+                .get(spent_outpoint)
+                .expect("contains all spent outputs");
+
+            if let Some(receiving_address) = spent_output.address(self.network) {
+                let address_transfers = self
+                    .partial_transparent_transfers
+                    .get_mut(&receiving_address)
+                    .expect("block has previously been applied to the chain");
+
+                address_transfers.revert_chain_with(&(spending_input, spent_output), position);
             }
         }
     }
