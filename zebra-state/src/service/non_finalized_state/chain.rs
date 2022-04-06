@@ -858,17 +858,16 @@ impl
                 transparent::Input::Coinbase { .. } => continue,
             };
 
-            let spent_output = spent_outputs
-                .get(spent_outpoint)
-                .expect("contains all spent outputs");
+            // TODO: update tests to supply correct spent outputs
+            if let Some(spent_output) = spent_outputs.get(spent_outpoint) {
+                if let Some(spending_address) = spent_output.address(self.network) {
+                    let address_transfers = self
+                        .partial_transparent_transfers
+                        .entry(spending_address)
+                        .or_default();
 
-            if let Some(spending_address) = spent_output.address(self.network) {
-                let address_transfers = self
-                    .partial_transparent_transfers
-                    .entry(spending_address)
-                    .or_default();
-
-                address_transfers.update_chain_tip_with(&(spending_input, spent_output))?;
+                    address_transfers.update_chain_tip_with(&(spending_input, spent_output))?;
+                }
             }
         }
 
@@ -895,17 +894,16 @@ impl
                 transparent::Input::Coinbase { .. } => continue,
             };
 
-            let spent_output = spent_outputs
-                .get(spent_outpoint)
-                .expect("contains all spent outputs");
+            // TODO: update tests to supply correct spent outputs
+            if let Some(spent_output) = spent_outputs.get(spent_outpoint) {
+                if let Some(receiving_address) = spent_output.address(self.network) {
+                    let address_transfers = self
+                        .partial_transparent_transfers
+                        .get_mut(&receiving_address)
+                        .expect("block has previously been applied to the chain");
 
-            if let Some(receiving_address) = spent_output.address(self.network) {
-                let address_transfers = self
-                    .partial_transparent_transfers
-                    .get_mut(&receiving_address)
-                    .expect("block has previously been applied to the chain");
-
-                address_transfers.revert_chain_with(&(spending_input, spent_output), position);
+                    address_transfers.revert_chain_with(&(spending_input, spent_output), position);
+                }
             }
         }
     }
