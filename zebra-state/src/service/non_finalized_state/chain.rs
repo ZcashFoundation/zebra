@@ -903,6 +903,12 @@ impl
                         .expect("block has previously been applied to the chain");
 
                     address_transfers.revert_chain_with(&(spending_input, spent_output), position);
+
+                    // Remove this transfer if it is now empty
+                    if address_transfers.is_empty() {
+                        self.partial_transparent_transfers
+                            .remove(&receiving_address);
+                    }
                 }
             }
         }
