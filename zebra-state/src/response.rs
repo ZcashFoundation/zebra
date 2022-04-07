@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use zebra_chain::{
     block::{self, Block},
-    transaction::Transaction,
+    transaction::{Hash, Transaction},
     transparent,
 };
 
@@ -53,4 +53,7 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
     Transaction(Option<(Arc<Transaction>, block::Height)>),
+
+    /// Response to [`ReadRequest::TransactionsByAddresses`] with the obtained transaction ids.
+    TransactionIds(Vec<Hash>),
 }

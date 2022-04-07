@@ -22,6 +22,7 @@ use zebra_chain::{
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::{SerializationError, ZcashDeserialize},
     transaction::{self, SerializedTransaction, Transaction},
+    transparent::Address,
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
@@ -140,6 +141,28 @@ pub trait Rpc {
         txid_hex: String,
         verbose: u8,
     ) -> BoxFuture<Result<GetRawTransaction>>;
+
+    /// Returns the transaction ids made by the provided transparent addresses.
+    ///
+    /// zcashd reference: [`getaddresstxids`](https://zcash.github.io/rpc/getaddresstxids.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `addresses`: (json array of string, required) The addresses to get transactions from.
+    /// - `start`: (numeric, required) The lower height to start looking for transactions (inclusive).
+    /// - `end`: (numeric, required) The top height to stop looking for transactions (inclusive).
+    ///
+    /// # Notes
+    ///
+    /// Only the multi-argument format is used by lightwalletd and this is what we currently support:
+    /// https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102
+    #[rpc(name = "getaddresstxids")]
+    fn get_address_tx_ids(
+        &self,
+        addresses: Vec<String>,
+        start: u32,
+        end: u32,
+    ) -> BoxFuture<Result<Vec<String>>>;
 }
 
 /// RPC method implementations.
@@ -523,6 +546,52 @@ where
                 }),
                 _ => unreachable!("unmatched response to a transaction request"),
             }
+        }
+        .boxed()
+    }
+
+    fn get_address_tx_ids(
+        &self,
+        addresses: Vec<String>,
+        start: u32,
+        end: u32,
+    ) -> BoxFuture<Result<Vec<String>>> {
+        let mut state = self.state.clone();
+        let mut response_transactions = vec![];
+        let start = Height(start);
+        let end = Height(end);
+
+        async move {
+            if start > end {
+                return Err(Error::invalid_params(
+                    "End height should be at least start height",
+                ));
+            }
+
+            for address in addresses {
+                let valid_address: Address = address.parse().map_err(|_| {
+                    Error::invalid_params(format!("Provided address is not valid: {}", address))
+                })?;
+
+                let request =
+                    zebra_state::ReadRequest::TransactionsByAddresses(valid_address, start, end);
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
+
+                match response {
+                    zebra_state::ReadResponse::TransactionIds(hashes) => response_transactions
+                        .append(&mut hashes.iter().map(|h| h.to_string()).collect()),
+                    _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
+                }
+            }
+            Ok(response_transactions)
         }
         .boxed()
     }

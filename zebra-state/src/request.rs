@@ -401,4 +401,12 @@ pub enum ReadRequest {
     /// * [`Response::Transaction(Some(Arc<Transaction>))`](Response::Transaction) if the transaction is in the best chain;
     /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
     Transaction(transaction::Hash),
+
+    /// Looks up transactions hashes that were made by provided address in a blockchain height range.
+    ///
+    /// Returns
+    ///
+    /// * A vector of transaction hashes.
+    /// * An empty vector if no transactions were found for the given arguments.
+    TransactionsByAddresses(transparent::Address, block::Height, block::Height),
 }

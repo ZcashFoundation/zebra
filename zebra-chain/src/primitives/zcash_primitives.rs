@@ -152,7 +152,7 @@ pub(crate) fn auth_digest(trans: &Transaction) -> AuthDigest {
 /// Return the destination address from a transparent output.
 ///
 /// Returns None if the address type is not valid or unrecognized.
-pub(crate) fn transparent_output_address(
+pub fn transparent_output_address(
     output: &transparent::Output,
     network: Network,
 ) -> Option<transparent::Address> {
