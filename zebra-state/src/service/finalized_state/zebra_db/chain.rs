@@ -16,9 +16,7 @@ use std::{borrow::Borrow, collections::HashMap};
 use zebra_chain::{
     amount::NonNegative,
     history_tree::{HistoryTree, NonEmptyHistoryTree},
-    orchard,
-    parameters::Network,
-    sapling, transparent,
+    orchard, sapling, transparent,
     value_balance::ValueBalance,
 };
 
@@ -73,7 +71,6 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
-        network: Network,
         sapling_root: sapling::tree::Root,
         orchard_root: orchard::tree::Root,
         mut history_tree: HistoryTree,
@@ -82,7 +79,7 @@ impl DiskWriteBatch {
 
         let FinalizedBlock { block, height, .. } = finalized;
 
-        history_tree.push(network, block.clone(), sapling_root, orchard_root)?;
+        history_tree.push(self.network(), block.clone(), sapling_root, orchard_root)?;
 
         // Update the tree in state
         let current_tip_height = *height - 1;
@@ -115,17 +112,12 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
-        mut all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
+        all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
         let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
 
-        let FinalizedBlock {
-            block, new_outputs, ..
-        } = finalized;
-
-        // Some utxos are spent in the same block, so they will be in `new_outputs`.
-        all_utxos_spent_by_block.extend(new_outputs.clone());
+        let FinalizedBlock { block, .. } = finalized;
 
         let new_pool = value_pool.add_block(block.borrow(), &all_utxos_spent_by_block)?;
         self.zs_insert(&tip_chain_value_pool, (), new_pool);

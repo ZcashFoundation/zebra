@@ -3,6 +3,7 @@ source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
 expression: cf_names
 ---
 [
+  "balance_by_transparent_addr",
   "block_by_height",
   "default",
   "hash_by_height",

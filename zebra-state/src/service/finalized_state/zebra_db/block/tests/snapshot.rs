@@ -46,7 +46,9 @@ use zebra_chain::{
 
 use crate::{
     service::finalized_state::{
-        disk_format::{block::TransactionIndex, transparent::OutputLocation, TransactionLocation},
+        disk_format::{
+            block::TransactionIndex, transparent::OutputLocation, FromDisk, TransactionLocation,
+        },
         FinalizedState,
     },
     Config,
@@ -194,6 +196,7 @@ fn test_block_and_transaction_data_with_network(network: Network) {
         settings.set_snapshot_suffix(format!("{}_{}", net_suffix, height));
 
         settings.bind(|| snapshot_block_and_transaction_data(&state));
+        settings.bind(|| snapshot_transparent_address_data(&state));
     }
 }
 
@@ -216,16 +219,22 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         assert_eq!(sapling_tree, sapling::tree::NoteCommitmentTree::default());
         assert_eq!(orchard_tree, orchard::tree::NoteCommitmentTree::default());
 
+        // Blocks
         let mut stored_block_hashes = Vec::new();
         let mut stored_blocks = Vec::new();
 
-        let mut stored_sapling_trees = Vec::new();
-        let mut stored_orchard_trees = Vec::new();
-
+        // Transactions
         let mut stored_transaction_hashes = Vec::new();
         let mut stored_transactions = Vec::new();
 
+        // Transparent
+
         let mut stored_utxos = Vec::new();
+
+        // Shielded
+
+        let mut stored_sapling_trees = Vec::new();
+        let mut stored_orchard_trees = Vec::new();
 
         let sapling_tree_at_tip = state.sapling_note_commitment_tree();
         let orchard_tree_at_tip = state.orchard_note_commitment_tree();
@@ -410,6 +419,47 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         // The zcash_history types used in this tree don't support serde.
         insta::assert_debug_snapshot!("history_tree", (max_height, history_tree_at_tip));
     }
+}
+
+/// Snapshot transparent address data, using `cargo insta` and RON serialization.
+fn snapshot_transparent_address_data(state: &FinalizedState) {
+    let balance_by_transparent_addr = state.cf_handle("balance_by_transparent_addr").unwrap();
+
+    let mut stored_address_balances = Vec::new();
+
+    // TODO: UTXOs for each address (#3953)
+    //       transactions for each address (#3951)
+
+    // Correctness: Multi-key iteration causes hangs in concurrent code, but seems ok in tests.
+    let addresses =
+        state.full_iterator_cf(&balance_by_transparent_addr, rocksdb::IteratorMode::Start);
+
+    // The default raw data serialization is very verbose, so we hex-encode the bytes.
+    let addresses: Vec<transparent::Address> = addresses
+        .map(|(key, _value)| transparent::Address::from_bytes(key))
+        .collect();
+
+    for address in addresses {
+        let stored_address_balance = state
+            .address_balance_location(&address)
+            .expect("address indexes are consistent");
+
+        stored_address_balances.push((address.to_string(), stored_address_balance));
+    }
+
+    // TODO: check that the UTXO and transaction lists are in chain order.
+    /*
+       assert!(
+           is_sorted(&stored_address_utxos),
+           "unsorted: {:?}",
+           stored_address_utxos,
+       );
+    */
+
+    // We want to snapshot the order in the database,
+    // because sometimes it is significant for performance or correctness.
+    // So we don't sort the vectors before snapshotting.
+    insta::assert_ron_snapshot!("address_balances", stored_address_balances);
 }
 
 /// Return true if `list` is sorted in ascending order.

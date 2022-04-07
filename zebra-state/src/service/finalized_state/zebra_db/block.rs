@@ -11,6 +11,8 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use itertools::Itertools;
+
 use zebra_chain::{
     amount::NonNegative,
     block::{self, Block},
@@ -25,7 +27,7 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::{FromDisk, TransactionLocation},
+        disk_format::{transparent::AddressBalanceLocation, FromDisk, TransactionLocation},
         zebra_db::{metrics::block_precommit_metrics, shielded::NoteCommitmentTrees, ZebraDb},
         FinalizedBlock,
     },
@@ -188,23 +190,40 @@ impl ZebraDb {
         let finalized_hash = finalized.hash;
 
         // Get a list of the spent UTXOs, before we delete any from the database
-        let all_utxos_spent_by_block = finalized
+        let all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo> = finalized
             .block
             .transactions
             .iter()
             .flat_map(|tx| tx.inputs().iter())
             .flat_map(|input| input.outpoint())
-            .flat_map(|outpoint| self.utxo(&outpoint).map(|utxo| (outpoint, utxo)))
+            .map(|outpoint| {
+                (
+                    outpoint,
+                    // Some utxos are spent in the same block, so they will be in `new_outputs`
+                    self.utxo(&outpoint)
+                        .or_else(|| finalized.new_outputs.get(&outpoint).cloned())
+                        .expect("already checked UTXO was in state or block"),
+                )
+            })
             .collect();
 
-        let mut batch = DiskWriteBatch::new();
+        // Get the current address balances, before the transactions in this block
+        let address_balances = all_utxos_spent_by_block
+            .values()
+            .chain(finalized.new_outputs.values())
+            .filter_map(|utxo| utxo.output.address(network))
+            .unique()
+            .filter_map(|address| Some((address, self.address_balance_location(&address)?)))
+            .collect();
+
+        let mut batch = DiskWriteBatch::new(network);
 
         // In case of errors, propagate and do not write the batch.
         batch.prepare_block_batch(
             &self.db,
             finalized,
-            network,
             all_utxos_spent_by_block,
+            address_balances,
             self.note_commitment_trees(),
             history_tree,
             self.finalized_value_pool(),
@@ -235,9 +254,8 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: FinalizedBlock,
-        network: Network,
         all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
-        // TODO: make an argument struct for all the current note commitment trees & history
+        address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         mut note_commitment_trees: NoteCommitmentTrees,
         history_tree: HistoryTree,
         value_pool: ValueBalance<NonNegative>,
@@ -267,15 +285,15 @@ impl DiskWriteBatch {
         }
 
         // Commit transaction indexes
-        self.prepare_transaction_index_batch(db, &finalized, &mut note_commitment_trees)?;
-
-        self.prepare_note_commitment_batch(
+        self.prepare_transaction_index_batch(
             db,
             &finalized,
-            network,
-            note_commitment_trees,
-            history_tree,
+            &all_utxos_spent_by_block,
+            address_balances,
+            &mut note_commitment_trees,
         )?;
+
+        self.prepare_note_commitment_batch(db, &finalized, note_commitment_trees, history_tree)?;
 
         // Commit UTXOs and value pools
         self.prepare_chain_value_pools_batch(db, &finalized, all_utxos_spent_by_block, value_pool)?;
@@ -378,6 +396,8 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
+        all_utxos_spent_by_block: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         note_commitment_trees: &mut NoteCommitmentTrees,
     ) -> Result<(), BoxError> {
         let FinalizedBlock { block, .. } = finalized;
@@ -389,6 +409,11 @@ impl DiskWriteBatch {
             DiskWriteBatch::update_note_commitment_trees(transaction, note_commitment_trees)?;
         }
 
-        self.prepare_transparent_outputs_batch(db, finalized)
+        self.prepare_transparent_outputs_batch(
+            db,
+            finalized,
+            all_utxos_spent_by_block,
+            address_balances,
+        )
     }
 }

@@ -10,9 +10,12 @@ use std::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::Height,
+    parameters::Network::*,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transaction, transparent,
+    transaction,
+    transparent::{self, Address::*},
 };
 
 use crate::service::finalized_state::disk_format::{block::HEIGHT_DISK_BYTES, FromDisk, IntoDisk};
@@ -20,14 +23,17 @@ use crate::service::finalized_state::disk_format::{block::HEIGHT_DISK_BYTES, Fro
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+/// Transparent balances are stored as an 8 byte integer on disk.
+pub const BALANCE_DISK_BYTES: usize = 8;
+
 /// Output transaction locations are stored as a 32 byte transaction hash on disk.
 ///
-/// TODO: change to TransactionLocation to reduce database size and increases lookup performance (#3151)
+/// TODO: change to TransactionLocation to reduce database size and increases lookup performance (#3953)
 pub const OUTPUT_TX_HASH_DISK_BYTES: usize = 32;
 
 /// [`OutputIndex`]es are stored as 4 bytes on disk.
 ///
-/// TODO: change to 3 bytes to reduce database size and increases lookup performance (#3151)
+/// TODO: change to 3 bytes to reduce database size and increases lookup performance (#3953)
 pub const OUTPUT_INDEX_DISK_BYTES: usize = 4;
 
 // Transparent types
@@ -76,6 +82,7 @@ impl OutputIndex {
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct OutputLocation {
     /// The transaction hash.
+    #[serde(with = "hex")]
     pub hash: transaction::Hash,
 
     /// The index of the transparent output in its transaction.
@@ -102,10 +109,130 @@ impl OutputLocation {
     }
 }
 
+/// The location of the first [`transparent::Output`] sent to an address.
+///
+/// The address location stays the same, even if the corresponding output
+/// has been spent.
+///
+/// The first output location is used to represent the address in the database,
+/// because output locations are significantly smaller than addresses.
+///
+/// TODO: make this a different type to OutputLocation?
+///       derive IntoDisk and FromDisk?
+pub type AddressLocation = OutputLocation;
+
+/// Data which Zebra indexes for each [`transparent::Address`].
+///
+/// Currently, Zebra tracks this data 1:1 for each address:
+/// - the balance [`Amount`] for a transparent address, and
+/// - the [`OutputLocation`] for the first [`transparent::Output`] sent to that address
+///   (regardless of whether that output is spent or unspent).
+///
+/// All other address data is tracked multiple times for each address
+/// (UTXOs and transactions).
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+pub struct AddressBalanceLocation {
+    /// The total balance of all UTXOs sent to an address.
+    balance: Amount<NonNegative>,
+
+    /// The location of the first [`transparent::Output`] sent to an address.
+    location: AddressLocation,
+}
+
+impl AddressBalanceLocation {
+    /// Creates a new [`AddressBalanceLocation`] from the location of
+    /// the first [`transparent::Output`] sent to an address.
+    ///
+    /// The returned value has a zero initial balance.
+    pub fn new(first_output: OutputLocation) -> AddressBalanceLocation {
+        AddressBalanceLocation {
+            balance: Amount::zero(),
+            location: first_output,
+        }
+    }
+
+    /// Returns the current balance for the address.
+    pub fn balance(&self) -> Amount<NonNegative> {
+        self.balance
+    }
+
+    /// Returns a mutable reference to the current balance for the address.
+    pub fn balance_mut(&mut self) -> &mut Amount<NonNegative> {
+        &mut self.balance
+    }
+
+    /// Returns the location of the first [`transparent::Output`] sent to an address.
+    pub fn location(&self) -> AddressLocation {
+        self.location
+    }
+}
+
 // Transparent trait impls
 
-// TODO: serialize the index into a smaller number of bytes (#3152)
-//       serialize the index in big-endian order (#3150)
+/// Returns a byte representing the [`transparent::Address`] variant.
+fn address_variant(address: &transparent::Address) -> u8 {
+    // Return smaller values for more common variants.
+    //
+    // (This probably doesn't matter, but it might help slightly with data compression.)
+    match (address.network(), address) {
+        (Mainnet, PayToPublicKeyHash { .. }) => 0,
+        (Mainnet, PayToScriptHash { .. }) => 1,
+        (Testnet, PayToPublicKeyHash { .. }) => 2,
+        (Testnet, PayToScriptHash { .. }) => 3,
+    }
+}
+
+impl IntoDisk for transparent::Address {
+    type Bytes = [u8; 21];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let variant_bytes = vec![address_variant(self)];
+        let hash_bytes = self.hash_bytes().to_vec();
+
+        [variant_bytes, hash_bytes].concat().try_into().unwrap()
+    }
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl FromDisk for transparent::Address {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        let (address_variant, hash_bytes) = disk_bytes.as_ref().split_at(1);
+
+        let address_variant = address_variant[0];
+        let hash_bytes = hash_bytes.try_into().unwrap();
+
+        let network = if address_variant < 2 {
+            Mainnet
+        } else {
+            Testnet
+        };
+
+        if address_variant % 2 == 0 {
+            transparent::Address::from_pub_key_hash(network, hash_bytes)
+        } else {
+            transparent::Address::from_script_hash(network, hash_bytes)
+        }
+    }
+}
+
+impl IntoDisk for Amount<NonNegative> {
+    type Bytes = [u8; BALANCE_DISK_BYTES];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.to_bytes()
+    }
+}
+
+impl FromDisk for Amount<NonNegative> {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let array = bytes.as_ref().try_into().unwrap();
+        Amount::from_bytes(array).unwrap()
+    }
+}
+
+// TODO: serialize the index into a smaller number of bytes (#3953)
+//       serialize the index in big-endian order (#3953)
 impl IntoDisk for OutputIndex {
     type Bytes = [u8; OUTPUT_INDEX_DISK_BYTES];
 
@@ -142,7 +269,46 @@ impl FromDisk for OutputLocation {
     }
 }
 
-// TODO: just serialize the Output, and derive the Utxo data from OutputLocation (#3151)
+impl IntoDisk for AddressBalanceLocation {
+    type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_TX_HASH_DISK_BYTES + OUTPUT_INDEX_DISK_BYTES];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let balance_bytes = self.balance().as_bytes().to_vec();
+        let location_bytes = self.location().as_bytes().to_vec();
+
+        [balance_bytes, location_bytes].concat().try_into().unwrap()
+    }
+}
+
+impl FromDisk for AddressBalanceLocation {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        let (balance_bytes, location_bytes) = disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
+
+        let balance = Amount::from_bytes(balance_bytes.try_into().unwrap()).unwrap();
+        let location = AddressLocation::from_bytes(location_bytes);
+
+        let mut balance_location = AddressBalanceLocation::new(location);
+        *balance_location.balance_mut() = balance;
+
+        balance_location
+    }
+}
+
+impl IntoDisk for transparent::Output {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.zcash_serialize_to_vec().unwrap()
+    }
+}
+
+impl FromDisk for transparent::Output {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        bytes.as_ref().zcash_deserialize_into().unwrap()
+    }
+}
+
+// TODO: delete UTXO serialization (#3953)
 impl IntoDisk for transparent::Utxo {
     type Bytes = Vec<u8>;
 
