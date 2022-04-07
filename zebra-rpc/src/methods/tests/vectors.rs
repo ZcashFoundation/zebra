@@ -131,7 +131,7 @@ async fn rpc_getblock_missing_error() {
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     // Init RPC
-    let rpc = RpcImpl::new(
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
@@ -169,6 +169,10 @@ async fn rpc_getblock_missing_error() {
 
     mempool.expect_no_requests().await;
     state.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
 #[tokio::test]
