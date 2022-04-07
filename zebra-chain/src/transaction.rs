@@ -498,15 +498,6 @@ impl Transaction {
             .all(|input| matches!(input, transparent::Input::PrevOut { .. }))
     }
 
-    /// Returns `true` if transaction contains any `PrevOut` inputs.
-    ///
-    /// `PrevOut` inputs are also known as `transparent` inputs in the spec.
-    pub fn contains_prevout_input(&self) -> bool {
-        self.inputs()
-            .iter()
-            .any(|input| matches!(input, transparent::Input::PrevOut { .. }))
-    }
-
     // sprout
 
     /// Returns the Sprout `JoinSplit<Groth16Proof>`s in this transaction, regardless of version.
