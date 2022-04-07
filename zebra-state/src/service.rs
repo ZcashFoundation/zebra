@@ -12,6 +12,7 @@
 //! - [`ChainTipChange`]: a read-only channel that can asynchronously await chain tip changes.
 
 use std::{
+    convert,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -753,7 +754,12 @@ impl Service<Request> for StateService {
                 async move {
                     rsp_rx
                         .await
-                        .expect("sender is not dropped")
+                        .map_err(|_recv_error| {
+                            BoxError::from("block was dropped from the state CommitBlock queue")
+                        })
+                        // TODO: replace with Result::flatten once it stabilises
+                        // https://github.com/rust-lang/rust/issues/70142
+                        .and_then(convert::identity)
                         .map(Response::Committed)
                         .map_err(Into::into)
                 }
@@ -773,7 +779,14 @@ impl Service<Request> for StateService {
                 async move {
                     rsp_rx
                         .await
-                        .expect("sender is not dropped")
+                        .map_err(|_recv_error| {
+                            BoxError::from(
+                                "block was dropped from the state CommitFinalizedBlock queue",
+                            )
+                        })
+                        // TODO: replace with Result::flatten once it stabilises
+                        // https://github.com/rust-lang/rust/issues/70142
+                        .and_then(convert::identity)
                         .map(Response::Committed)
                         .map_err(Into::into)
                 }

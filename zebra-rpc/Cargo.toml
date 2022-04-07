@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "1.0.0-beta.6"
+version = "1.0.0-beta.7"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -28,7 +28,7 @@ jsonrpc-derive = "18.0.0"
 jsonrpc-http-server = "18.0.0"
 # zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
 serde_json = { version = "1.0.79", features = ["preserve_order"] }
-indexmap = { version = "1.8.0", features = ["serde"] }
+indexmap = { version = "1.8.1", features = ["serde"] }
 
 tokio = { version = "1.17.0", features = ["time", "rt-multi-thread", "macros", "tracing"] }
 tower = "0.4.12"

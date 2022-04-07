@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use jsonrpc_core::ErrorCode;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
@@ -93,7 +94,7 @@ async fn rpc_getblock() {
 }
 
 #[tokio::test]
-async fn rpc_getblock_error() {
+async fn rpc_getblock_parse_error() {
     zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -120,6 +121,54 @@ async fn rpc_getblock_error() {
     // The queue task should continue without errors or panics
     let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
     assert!(matches!(rpc_tx_queue_task_result, None));
+}
+
+#[tokio::test]
+async fn rpc_getblock_missing_error() {
+    zebra_test::init();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    // Init RPC
+    let rpc = RpcImpl::new(
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        NoChainTip,
+        Mainnet,
+    );
+
+    // Make sure Zebra returns the correct error code `-8` for missing blocks
+    // https://github.com/adityapk00/lightwalletd/blob/c1bab818a683e4de69cd952317000f9bb2932274/common/common.go#L251-L254
+    let block_future = tokio::spawn(rpc.get_block("0".to_string(), 0u8));
+
+    // Make the mock service respond with no block
+    let response_handler = state
+        .expect_request(zebra_state::ReadRequest::Block(Height(0).into()))
+        .await;
+    response_handler.respond(zebra_state::ReadResponse::Block(None));
+
+    let block_response = block_future.await;
+    let block_response = block_response
+        .expect("unexpected panic in spawned request future")
+        .expect_err("unexpected success from missing block state response");
+    assert_eq!(block_response.code, ErrorCode::ServerError(-8),);
+
+    // Now check the error string the way `lightwalletd` checks it
+    assert_eq!(
+        serde_json::to_string(&block_response)
+            .expect("unexpected error serializing JSON error")
+            .split(':')
+            .nth(1)
+            .expect("unexpectedly low number of error fields")
+            .split(',')
+            .next(),
+        Some("-8")
+    );
+
+    mempool.expect_no_requests().await;
+    state.expect_no_requests().await;
 }
 
 #[tokio::test]

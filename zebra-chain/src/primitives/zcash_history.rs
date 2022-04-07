@@ -9,6 +9,7 @@ mod tests;
 
 use std::{collections::BTreeMap, convert::TryInto, io, sync::Arc};
 
+use serde_big_array::BigArray;
 pub use zcash_history::{V1, V2};
 
 use crate::{
@@ -17,8 +18,6 @@ use crate::{
     parameters::{Network, NetworkUpgrade},
     sapling,
 };
-
-big_array! { BigArray; zcash_history::MAX_ENTRY_SIZE }
 
 /// A trait to represent a version of `Tree`.
 pub trait Version: zcash_history::Version {

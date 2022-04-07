@@ -775,7 +775,7 @@ impl<T> TestChild<T> {
             stream_name
         )
         .context_from(self)
-        .with_section(|| format!("{:?}", success_regexes).header("Match Regex:"));
+        .with_section(|| format!("{:#?}", success_regexes.patterns()).header("Match Regex:"));
 
         Err(report)
     }
