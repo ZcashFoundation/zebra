@@ -39,7 +39,7 @@ impl ZebraDb {
             Some(height) => {
                 let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
                 let history_tree: Option<NonEmptyHistoryTree> =
-                    self.db.zs_get(history_tree_cf, &height);
+                    self.db.zs_get(&history_tree_cf, &height);
                 if let Some(non_empty_tree) = history_tree {
                     HistoryTree::from(non_empty_tree)
                 } else {
@@ -54,7 +54,7 @@ impl ZebraDb {
     pub fn finalized_value_pool(&self) -> ValueBalance<NonNegative> {
         let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
         self.db
-            .zs_get(value_pool_cf, &())
+            .zs_get(&value_pool_cf, &())
             .unwrap_or_else(ValueBalance::zero)
     }
 }
@@ -87,7 +87,7 @@ impl DiskWriteBatch {
         // Update the tree in state
         let current_tip_height = *height - 1;
         if let Some(h) = current_tip_height {
-            self.zs_delete(history_tree_cf, h);
+            self.zs_delete(&history_tree_cf, h);
         }
 
         // TODO: if we ever need concurrent read-only access to the history tree,
@@ -96,7 +96,7 @@ impl DiskWriteBatch {
         // that was just deleted by a concurrent StateService write.
         // This requires a database version update.
         if let Some(history_tree) = history_tree.as_ref() {
-            self.zs_insert(history_tree_cf, height, history_tree);
+            self.zs_insert(&history_tree_cf, height, history_tree);
         }
 
         Ok(())
@@ -128,7 +128,7 @@ impl DiskWriteBatch {
         all_utxos_spent_by_block.extend(new_outputs.clone());
 
         let new_pool = value_pool.add_block(block.borrow(), &all_utxos_spent_by_block)?;
-        self.zs_insert(tip_chain_value_pool, (), new_pool);
+        self.zs_insert(&tip_chain_value_pool, (), new_pool);
 
         Ok(())
     }

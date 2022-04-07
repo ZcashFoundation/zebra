@@ -236,6 +236,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
         //       test the rest of the chain data (value balance).
         let history_tree_at_tip = state.history_tree();
 
+        // TODO: split out block snapshots into their own function (#3151)
         for query_height in 0..=max_height.0 {
             let query_height = Height(query_height);
 
@@ -265,8 +266,18 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             // because they are fully determined by the tip and block hashes.
             //
             // But we do it anyway, so the snapshots are more readable.
+
+            // Check that the heights are consistent.
             assert_eq!(stored_height, query_height);
 
+            assert_eq!(
+                stored_block
+                    .coinbase_height()
+                    .expect("stored blocks have valid heights"),
+                query_height,
+            );
+
+            // Check that the tips are consistent.
             if query_height == max_height {
                 assert_eq!(stored_block_hash, tip_block_hash);
 
@@ -280,13 +291,6 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 }
             }
 
-            assert_eq!(
-                stored_block
-                    .coinbase_height()
-                    .expect("stored blocks have valid heights"),
-                query_height,
-            );
-
             stored_block_hashes.push((stored_height, BlockHash(stored_block_hash.to_string())));
             stored_blocks.push(BlockData::new(stored_height, &stored_block));
 
@@ -294,26 +298,46 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             stored_orchard_trees.push((stored_height, orchard_tree_by_height));
 
             // Check block transaction hashes and transactions.
+            //
+            // TODO: split out transaction snapshots into their own function (#3151)
             for tx_index in 0..stored_block.transactions.len() {
-                let transaction = &stored_block.transactions[tx_index];
+                let block_transaction = &stored_block.transactions[tx_index];
                 let transaction_location = TransactionLocation::from_usize(query_height, tx_index);
 
-                let transaction_hash = transaction.hash();
-                let transaction_data = TransactionData::new(transaction_location, transaction);
+                let transaction_hash = block_transaction.hash();
+                let transaction_data =
+                    TransactionData::new(transaction_location, block_transaction);
 
                 // Check all the transaction column families,
                 // using transaction location queries.
-                let stored_transaction_location = state.transaction_location(transaction_hash);
 
-                // Consensus: the genesis transaction is not indexed.
-                if query_height.0 > 0 {
-                    assert_eq!(stored_transaction_location, Some(transaction_location));
-                } else {
-                    assert_eq!(stored_transaction_location, None);
-                }
+                // Check that the transaction indexes are consistent.
+                let (direct_transaction, direct_transaction_height) = state
+                    .transaction(transaction_hash)
+                    .expect("transactions in blocks must also be available directly");
+                let stored_transaction_hash = state
+                    .transaction_hash(transaction_location)
+                    .expect("hashes of transactions in blocks must be indexed by location");
+                let stored_transaction_location = state
+                    .transaction_location(transaction_hash)
+                    .expect("locations of transactions in blocks must be indexed by hash");
 
-                let stored_transaction_hash =
-                    TransactionHashByLocation::new(stored_transaction_location, transaction_hash);
+                assert_eq!(
+                    &direct_transaction, block_transaction,
+                    "transactions in block must be the same as transactions looked up directly",
+                );
+                assert_eq!(
+                    direct_transaction_height, transaction_location.height,
+                    "transaction heights must be the same as their block heights",
+                );
+                assert_eq!(stored_transaction_hash, transaction_hash);
+                assert_eq!(stored_transaction_location, transaction_location);
+
+                // TODO: snapshot TransactionLocations without Some (#3151)
+                let stored_transaction_hash = TransactionHashByLocation::new(
+                    Some(stored_transaction_location),
+                    transaction_hash,
+                );
 
                 stored_transaction_hashes.push(stored_transaction_hash);
                 stored_transactions.push(transaction_data);
@@ -328,6 +352,10 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
                     let stored_utxo = state.utxo(&outpoint);
 
+                    // # Consensus
+                    //
+                    // The genesis transaction's UTXO is not indexed.
+                    // This check also ignores spent UTXOs.
                     if let Some(stored_utxo) = &stored_utxo {
                         assert_eq!(&stored_utxo.output, output);
                         assert_eq!(stored_utxo.height, query_height);

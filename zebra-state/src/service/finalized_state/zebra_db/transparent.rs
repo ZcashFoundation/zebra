@@ -35,7 +35,7 @@ impl ZebraDb {
 
         let output_location = OutputLocation::from_outpoint(outpoint);
 
-        self.db.zs_get(utxo_by_outpoint, &output_location)
+        self.db.zs_get(&utxo_by_outpoint, &output_location)
     }
 }
 
@@ -61,7 +61,7 @@ impl DiskWriteBatch {
         for (outpoint, utxo) in new_outputs.borrow().iter() {
             let output_location = OutputLocation::from_outpoint(outpoint);
 
-            self.zs_insert(utxo_by_outpoint, output_location, utxo);
+            self.zs_insert(&utxo_by_outpoint, output_location, utxo);
         }
 
         // Mark all transparent inputs as spent.
@@ -75,7 +75,7 @@ impl DiskWriteBatch {
             .flat_map(|input| input.outpoint())
             .map(|outpoint| OutputLocation::from_outpoint(&outpoint))
         {
-            self.zs_delete(utxo_by_outpoint, output_location);
+            self.zs_delete(&utxo_by_outpoint, output_location);
         }
 
         Ok(())
