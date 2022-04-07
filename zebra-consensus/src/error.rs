@@ -63,6 +63,9 @@ pub enum TransactionError {
     #[error("coinbase inputs MUST NOT exist in mempool")]
     CoinbaseInMempool,
 
+    #[error("non-coinbase transactions MUST NOT have coinbase inputs")]
+    NonCoinbaseHasCoinbaseInput,
+
     #[error("transaction is locked until after block height {}", _0.0)]
     LockedUntilAfterBlockHeight(block::Height),
 

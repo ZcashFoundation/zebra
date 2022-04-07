@@ -111,6 +111,13 @@ pub fn transparent_spend(
 /// an attempt to spend the same satoshis twice."
 ///
 /// https://developer.bitcoin.org/devguide/block_chain.html#introduction
+///
+/// # Consensus
+///
+/// > Every non-null prevout MUST point to a unique UTXO in either a preceding block,
+/// > or a previous transaction in the same block.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 fn transparent_spend_chain_order(
     spend: transparent::OutPoint,
     spend_tx_index_in_block: usize,
@@ -229,7 +236,7 @@ pub fn remaining_transaction_value(
 ) -> Result<(), ValidateContextError> {
     for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
         // TODO: check coinbase transaction remaining value (#338, #1162)
-        if transaction.has_valid_coinbase_transaction_inputs() {
+        if transaction.is_coinbase() {
             continue;
         }
 
