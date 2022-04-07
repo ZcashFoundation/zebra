@@ -1,8 +1,6 @@
 ---
 source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
-assertion_line: 140
 expression: empty_column_families
-
 ---
 [
   "history_tree: no entries",
@@ -13,6 +11,5 @@ expression: empty_column_families
   "sprout_anchors: no entries",
   "sprout_nullifiers: no entries",
   "tip_chain_value_pool: no entries",
-  "tx_by_hash: no entries",
   "utxo_by_outpoint: no entries",
 ]

@@ -26,7 +26,7 @@ use zebra_chain::{
 use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 
 use crate::{
-    service::finalized_state::{disk_db::DiskWriteBatch, disk_format::IntoDisk, FinalizedState},
+    service::finalized_state::{disk_db::DiskWriteBatch, FinalizedState},
     Config, FinalizedBlock,
 };
 
@@ -136,9 +136,9 @@ fn test_block_db_round_trip_with(
                 stored data: {:?}\n\
                 ",
                 original_block,
-                hex::encode(original_block.as_bytes()),
+                hex::encode(original_block.zcash_serialize_to_vec().unwrap()),
                 stored_block,
-                hex::encode(stored_block.as_bytes()),
+                hex::encode(stored_block.zcash_serialize_to_vec().unwrap()),
             );
         }
 
