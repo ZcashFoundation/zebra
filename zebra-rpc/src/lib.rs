@@ -6,6 +6,7 @@
 
 pub mod config;
 pub mod methods;
+pub mod queue;
 pub mod server;
 #[cfg(test)]
 mod tests;
