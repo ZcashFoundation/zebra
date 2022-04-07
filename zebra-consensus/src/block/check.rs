@@ -50,7 +50,7 @@ pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>,
     // > A transparent input in a non-coinbase transaction MUST NOT have a null prevout
     //
     // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-    if rest.any(|tx| !tx.is_valid_non_coinbase()) {
+    if !rest.all(|tx| tx.is_valid_non_coinbase()) {
         return Err(TransactionError::CoinbaseAfterFirst)?;
     }
 
