@@ -62,7 +62,7 @@ jobs:
         # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v3.6.2
+        uses: docker/metadata-action@v3.7.0
         with:
           # list of Docker images to use as base name for tags
           images: |
@@ -85,7 +85,7 @@ jobs:
 
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.6.0
+        uses: google-github-actions/auth@v0.7.0
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
@@ -245,7 +245,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.6.0
+        uses: google-github-actions/auth@v0.7.0
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
@@ -311,7 +311,7 @@ jobs:
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
           sleep 60
 
-      - name: Regenerate stateful disks logs
+      - name: Regenerate stateful disks
         id: sync-to-checkpoint
         if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
@@ -321,6 +321,16 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
+
+          EXIT_CODE=$(\
+          gcloud compute ssh \
+          sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command="docker wait ${{ env.ZEBRA_CONTAINER }}")
+
+          exit ${EXIT_CODE}
         env:
           ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
 
@@ -365,7 +375,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.6.0
+        uses: google-github-actions/auth@v0.7.0
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
@@ -442,7 +452,7 @@ jobs:
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
           sleep 60
 
-      - name: Sync past mandatory checkpoint logs
+      - name: Sync past mandatory checkpoint
         id: sync-past-checkpoint
         run: |
           gcloud compute ssh \
@@ -451,6 +461,16 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
+
+          EXIT_CODE=$(\
+          gcloud compute ssh \
+          sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command="docker wait ${{ env.ZEBRA_CONTAINER }}")
+
+          exit ${EXIT_CODE}
         env:
           ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
 

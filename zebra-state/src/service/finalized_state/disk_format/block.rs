@@ -10,9 +10,9 @@ use std::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
 use zebra_chain::{
-    block::{self, Block, Height},
-    serialization::{ZcashDeserialize, ZcashSerialize},
-    transaction,
+    block::{self, Height},
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
+    transaction::{self, Transaction},
 };
 
 use crate::service::finalized_state::disk_format::{
@@ -64,7 +64,7 @@ pub const TX_INDEX_DISK_BYTES: usize = 2;
 pub struct TransactionIndex(u16);
 
 impl TransactionIndex {
-    /// Creates a transaction index from the native index integer type.
+    /// Creates a transaction index from a `usize`.
     pub fn from_usize(transaction_index: usize) -> TransactionIndex {
         TransactionIndex(
             transaction_index
@@ -73,11 +73,29 @@ impl TransactionIndex {
         )
     }
 
-    /// Returns this index as the native index integer type.
+    /// Returns this index as a `usize`
+    #[allow(dead_code)]
     pub fn as_usize(&self) -> usize {
         self.0
             .try_into()
             .expect("the maximum valid index fits in usize")
+    }
+
+    /// Creates a transaction index from a `u64`.
+    pub fn from_u64(transaction_index: u64) -> TransactionIndex {
+        TransactionIndex(
+            transaction_index
+                .try_into()
+                .expect("the maximum valid index fits in the inner type"),
+        )
+    }
+
+    /// Returns this index as a `u64`
+    #[allow(dead_code)]
+    pub fn as_u64(&self) -> u64 {
+        self.0
+            .try_into()
+            .expect("the maximum valid index fits in u64")
     }
 }
 
@@ -95,18 +113,26 @@ pub struct TransactionLocation {
 }
 
 impl TransactionLocation {
-    /// Creates a transaction location from a block height and index (as the native index integer type).
+    /// Creates a transaction location from a block height and `usize` index.
     pub fn from_usize(height: Height, transaction_index: usize) -> TransactionLocation {
         TransactionLocation {
             height,
             index: TransactionIndex::from_usize(transaction_index),
         }
     }
+
+    /// Creates a transaction location from a block height and `u64` index.
+    pub fn from_u64(height: Height, transaction_index: u64) -> TransactionLocation {
+        TransactionLocation {
+            height,
+            index: TransactionIndex::from_u64(transaction_index),
+        }
+    }
 }
 
 // Block trait impls
 
-impl IntoDisk for Block {
+impl IntoDisk for block::Header {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -115,9 +141,11 @@ impl IntoDisk for Block {
     }
 }
 
-impl FromDisk for Block {
+impl FromDisk for block::Header {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        Block::zcash_deserialize(bytes.as_ref())
+        bytes
+            .as_ref()
+            .zcash_deserialize_into()
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }
 }
@@ -162,6 +190,25 @@ impl FromDisk for block::Hash {
 
 // Transaction trait impls
 
+impl IntoDisk for Transaction {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.zcash_serialize_to_vec()
+            .expect("serialization to vec doesn't fail")
+    }
+}
+
+impl FromDisk for Transaction {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        bytes
+            .as_ref()
+            .zcash_deserialize_into()
+            .expect("deserialization format should match the serialization format used by IntoDisk")
+    }
+}
+
+/// TransactionIndex is only serialized as part of TransactionLocation
 impl IntoDisk for TransactionIndex {
     type Bytes = [u8; TX_INDEX_DISK_BYTES];
 
