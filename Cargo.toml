@@ -58,12 +58,12 @@ panic = "abort"
 
 # These are librustzcash file requirements specified in its workspace Cargo.toml,
 # that we must replace with git requirements
-equihash = { git = "https://github.com/zcash/librustzcash.git", rev = "9c1ed86c5aa8ae3b6d6dcc1478f2d6ba1264488f" }
-hdwallet = { git = "https://github.com/nuttycom/hdwallet", rev = "576683b9f2865f1118c309017ff36e01f84420c9" }
-zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "9c1ed86c5aa8ae3b6d6dcc1478f2d6ba1264488f" }
-zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "9c1ed86c5aa8ae3b6d6dcc1478f2d6ba1264488f" }
-zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "9c1ed86c5aa8ae3b6d6dcc1478f2d6ba1264488f" }
+equihash = { git = "https://github.com/zcash/librustzcash.git", rev = "43c18d000fcbe45363b2d53585d5102841eff99e" }
+hdwallet = { git = "https://github.com/nuttycom/hdwallet", rev = "9b4c1bdbe0517e3a7a8f285d6048a37d472ba3bc" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "43c18d000fcbe45363b2d53585d5102841eff99e" }
+zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "43c18d000fcbe45363b2d53585d5102841eff99e" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "43c18d000fcbe45363b2d53585d5102841eff99e" }
 # Currently pointing to `download-sprout-params-new` branch which contains the
-# changes from `download-sprout-params-new` rebased on top of 9c1ed86c as
+# changes from `download-sprout-params-5761bb4b` rebased on top of 5761bb4b as
 # required by `zcash/Cargo.toml`.
-zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "5761bb4b731a739ce7d156e3a586f282e9fe0eaf" }
+zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "b9df3515255b7270cb9c9aec474a1ce6d3786e23" }

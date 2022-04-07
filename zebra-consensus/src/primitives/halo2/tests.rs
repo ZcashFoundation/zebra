@@ -10,7 +10,7 @@ use orchard::{
     builder::Builder,
     bundle::Flags,
     circuit::ProvingKey,
-    keys::{FullViewingKey, SpendingKey},
+    keys::{FullViewingKey, Scope, SpendingKey},
     value::NoteValue,
     Anchor, Bundle,
 };
@@ -30,7 +30,7 @@ fn generate_test_vectors() {
     let rng = OsRng;
 
     let sk = SpendingKey::from_bytes([7; 32]).unwrap();
-    let recipient = FullViewingKey::from(&sk).address_at(0u32);
+    let recipient = FullViewingKey::from(&sk).address_at(0u32, Scope::External);
 
     let enable_spends = true;
     let enable_outputs = true;

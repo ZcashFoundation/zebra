@@ -29,9 +29,9 @@ displaydoc = "0.2.3"
 fpe = "0.5.1"
 futures = "0.3.21"
 group = "0.11.0"
-halo2 = { package = "halo2_proofs", version = "=0.1.0-beta.3" }
+halo2 = { package = "halo2_proofs", version = "=0.1.0-beta.4" }
 hex = "0.4.3"
-incrementalmerkletree = "0.3.0-beta.1"
+incrementalmerkletree = "0.3.0-beta.2"
 itertools = "0.10.3"
 jubjub = "0.8.0"
 lazy_static = "1.4.0"
@@ -39,7 +39,7 @@ rand_core = "0.6.3"
 ripemd = "0.1.1"
 serde = { version = "1.0.136", features = ["serde_derive", "rc"] }
 # Matches version used by hdwallet
-secp256k1 = { version = "0.20.3", features = ["serde"] }
+secp256k1 = { version = "0.21.3", features = ["serde"] }
 serde-big-array = "0.3.2"
 sha2 = { version = "0.9.9", features=["compress"] }
 static_assertions = "1.1.0"
@@ -48,7 +48,7 @@ thiserror = "1.0.30"
 uint = "0.9.1"
 x25519-dalek = { version = "1.2.0", features = ["serde"] }
 
-orchard = "=0.1.0-beta.2"
+orchard = "=0.1.0-beta.3"
 
 equihash = "0.1.0"
 zcash_note_encryption = "0.1"
