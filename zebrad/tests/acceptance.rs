@@ -31,7 +31,7 @@ use color_eyre::{
 };
 
 use zebra_chain::{
-    block::Height,
+    block,
     parameters::Network::{self, *},
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
@@ -531,7 +531,7 @@ fn restart_stop_at_height() -> Result<()> {
     Ok(())
 }
 
-fn restart_stop_at_height_for_network(network: Network, height: Height) -> Result<()> {
+fn restart_stop_at_height_for_network(network: Network, height: block::Height) -> Result<()> {
     let reuse_tempdir = sync_until(
         height,
         network,
@@ -566,7 +566,7 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
 #[test]
 fn activate_mempool_mainnet() -> Result<()> {
     sync_until(
-        Height(TINY_CHECKPOINT_TEST_HEIGHT.0 + 1),
+        block::Height(TINY_CHECKPOINT_TEST_HEIGHT.0 + 1),
         Mainnet,
         STOP_AT_HEIGHT_REGEX,
         TINY_CHECKPOINT_TIMEOUT,
@@ -673,7 +673,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
 
     if let Some(timeout_minutes) = timeout_argument {
         sync_until(
-            Height::MAX,
+            block::Height::MAX,
             network,
             SYNC_FINISHED_REGEX,
             Duration::from_secs(60 * timeout_minutes),
