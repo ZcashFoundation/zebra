@@ -561,12 +561,15 @@ where
         let start = Height(start);
         let end = Height(end);
 
+        let chain_height = self.latest_chain_tip.best_tip_height().ok_or(Error {
+            code: ErrorCode::ServerError(0),
+            message: "No blocks in state".to_string(),
+            data: None,
+        });
+
         async move {
-            if start > end {
-                return Err(Error::invalid_params(
-                    "End height should be at least start height",
-                ));
-            }
+            // height range checks
+            check_height_range(start, end, chain_height?)?;
 
             let mut valid_addresses = vec![];
             for address in addresses {
@@ -721,4 +724,23 @@ impl GetRawTransaction {
             Ok(GetRawTransaction::Raw(tx.into()))
         }
     }
+}
+
+/// Check if provided height range is valid
+fn check_height_range(start: Height, end: Height, chain_height: Height) -> Result<()> {
+    if start == Height(0) || end == Height(0) {
+        return Err(Error::invalid_params(
+            "Start and end are expected to be greater than zero",
+        ));
+    }
+    if end < start {
+        return Err(Error::invalid_params(
+            "End value is expected to be greater or equal than start",
+        ));
+    }
+    if start > chain_height || end > chain_height {
+        return Err(Error::invalid_params("Start or end is outside chain range"));
+    }
+
+    Ok(())
 }

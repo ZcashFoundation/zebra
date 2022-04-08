@@ -287,13 +287,22 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let rpc = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
-        NoChainTip,
+        latest_chain_tip,
         Mainnet,
     );
 
@@ -311,21 +320,46 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         format!("Provided address is not valid: {}", address)
     );
 
-    // call the method with an invalid start/end combination
+    // create a valid address
     let address = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string();
     let addresses = vec![address.clone()];
+
+    // call the method with start greater than end
     let start: u32 = 2;
     let end: u32 = 1;
+    let error = rpc
+        .get_address_tx_ids(addresses.clone(), start, end)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "End value is expected to be greater or equal than start".to_string()
+    );
+
+    // call the method with start equal zero
+    let start: u32 = 0;
+    let end: u32 = 1;
+    let error = rpc
+        .get_address_tx_ids(addresses.clone(), start, end)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "Start and end are expected to be greater than zero".to_string()
+    );
+
+    // call the method outside the chain tip height
+    let start: u32 = 1;
+    let end: u32 = 11;
     let error = rpc
         .get_address_tx_ids(addresses, start, end)
         .await
         .unwrap_err();
     assert_eq!(
         error.message,
-        "End height should be at least start height".to_string()
+        "Start or end is outside chain range".to_string()
     );
 
-    read_state.expect_no_requests().await;
     mempool.expect_no_requests().await;
 }
 
@@ -347,14 +381,14 @@ async fn rpc_getaddresstxids_response() {
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
-    let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let rpc = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
-        NoChainTip,
+        latest_chain_tip,
         Mainnet,
     );
 
