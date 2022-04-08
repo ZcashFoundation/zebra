@@ -9,7 +9,6 @@ use zebra_chain::{
     block::Block,
     chain_tip::NoChainTip,
     parameters::Network::*,
-    primitives::zcash_primitives,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::{UnminedTx, UnminedTxId},
 };
@@ -342,11 +341,9 @@ async fn rpc_getaddresstxids_response() {
     // get the first transaction of the first block
     let first_block_first_transaction = &blocks[1].transactions[0];
     // get the address, this is always `t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd`
-    let address = zcash_primitives::transparent_output_address(
-        &first_block_first_transaction.outputs()[1],
-        Mainnet,
-    )
-    .unwrap();
+    let address = &first_block_first_transaction.outputs()[1]
+        .address(Mainnet)
+        .unwrap();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
