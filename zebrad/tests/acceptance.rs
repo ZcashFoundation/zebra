@@ -1595,6 +1595,45 @@ async fn perform_full_sync_starting_from(
     )
 }
 
+/// Loads transactions from a block that's after the specified `height`.
+///
+/// Starts at the block after the block at the specified `height`, and stops when it finds a block
+/// from where it can load at least one transaction.
+///
+/// # Panics
+///
+/// If the specified `state_path` contains a chain state that's not synchronized to a tip that's
+/// after `height`.
+async fn load_transactions_from_block_after(
+    height: block::Height,
+    network: Network,
+    state_path: &Path,
+) -> Result<Vec<Arc<Transaction>>> {
+    let (_read_write_state_service, mut state, latest_chain_tip, _chain_tip_change) =
+        start_state_service(network, state_path.join("state")).await?;
+
+    let tip_height = latest_chain_tip
+        .best_tip_height()
+        .ok_or_else(|| eyre!("State directory doesn't have a chain tip block"))?;
+
+    assert!(
+        tip_height > height,
+        "Chain not synchronized to a block after the specified height"
+    );
+
+    let mut target_height = height.0;
+    let mut transactions = Vec::new();
+
+    while transactions.is_empty() {
+        transactions =
+            load_transactions_from_block(block::Height(target_height), &mut state).await?;
+
+        target_height += 1;
+    }
+
+    Ok(transactions)
+}
+
 /// Performs a request to the provided read-only `state` service to fetch all transactions from a
 /// block at the specified `height`.
 async fn load_transactions_from_block<ReadStateService>(
