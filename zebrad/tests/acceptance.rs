@@ -63,7 +63,7 @@ use common::{
     config::{default_test_config, persistent_test_config, testdir},
     launch::{ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY, LIGHTWALLETD_DELAY},
     lightwalletd::{
-        random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
+        self, random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
@@ -1542,6 +1542,11 @@ async fn fully_synced_rpc_test() -> Result<()> {
 /// Type alias for a boxed state service.
 type BoxStateService =
     BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>;
+
+/// Type alias for the RPC client to communicate with a lightwalletd instance.
+type LightwalletdRpcClient = lightwalletd::rpc::compact_tx_streamer_client::CompactTxStreamerClient<
+    tonic::transport::Channel,
+>;
 
 /// Loads transactions from a block that's after the chain tip of the cached state.
 ///
