@@ -42,9 +42,6 @@ pub enum TransactionError {
     #[error("coinbase input found in non-coinbase transaction")]
     CoinbaseAfterFirst,
 
-    #[error("coinbase transaction MUST NOT have any transparent (PrevOut) inputs")]
-    CoinbaseHasPrevOutInput,
-
     #[error("coinbase transaction MUST NOT have any JoinSplit descriptions")]
     CoinbaseHasJoinSplit,
 
