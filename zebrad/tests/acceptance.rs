@@ -44,6 +44,7 @@ use zebra_chain::{
     block,
     chain_tip::ChainTip,
     parameters::Network::{self, *},
+    serialization::ZcashSerialize,
     transaction::Transaction,
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
@@ -1786,6 +1787,18 @@ async fn connect_to_lightwalletd(lightwalletd_rpc_port: u16) -> Result<Lightwall
     let rpc_client = LightwalletdRpcClient::connect(lightwalletd_rpc_address).await?;
 
     Ok(rpc_client)
+}
+
+/// Prepare a request to send to lightwalletd that contains a transaction to be sent.
+fn prepare_send_transaction_request(
+    transaction: Arc<Transaction>,
+) -> lightwalletd::rpc::RawTransaction {
+    let transaction_bytes = transaction.zcash_serialize_to_vec().unwrap();
+
+    lightwalletd::rpc::RawTransaction {
+        data: transaction_bytes,
+        height: -1,
+    }
 }
 
 /// Recursively copy a chain state directory into a new temporary directory.
