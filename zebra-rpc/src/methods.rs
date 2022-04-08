@@ -568,29 +568,32 @@ where
                 ));
             }
 
+            let mut valid_addresses = vec![];
             for address in addresses {
                 let valid_address: Address = address.parse().map_err(|_| {
                     Error::invalid_params(format!("Provided address is not valid: {}", address))
                 })?;
-
-                let request =
-                    zebra_state::ReadRequest::TransactionsByAddresses(valid_address, start, end);
-                let response = state
-                    .ready()
-                    .and_then(|service| service.call(request))
-                    .await
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?;
-
-                match response {
-                    zebra_state::ReadResponse::TransactionIds(hashes) => response_transactions
-                        .append(&mut hashes.iter().map(|h| h.to_string()).collect()),
-                    _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
-                }
+                valid_addresses.push(valid_address);
             }
+
+            let request =
+                zebra_state::ReadRequest::TransactionsByAddresses(valid_addresses, start, end);
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                zebra_state::ReadResponse::TransactionIds(hashes) => response_transactions
+                    .append(&mut hashes.iter().map(|h| h.to_string()).collect()),
+                _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
+            }
+
             Ok(response_transactions)
         }
         .boxed()

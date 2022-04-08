@@ -981,7 +981,7 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // For the get_address_tx_ids RPC.
-            ReadRequest::TransactionsByAddresses(_address, _start, _end) => {
+            ReadRequest::TransactionsByAddresses(_addresses, _start, _end) => {
                 metrics::counter!(
                     "state.requests",
                     1,
