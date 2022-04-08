@@ -55,4 +55,10 @@ fn main() {
             vergen(config).expect("non-git vergen should succeed");
         }
     }
+
+    tonic_build::configure()
+        .build_client(true)
+        .build_server(false)
+        .compile(&["proto/service.proto"], &["proto"])
+        .expect("Failed to generate lightwalletd gRPC files");
 }
