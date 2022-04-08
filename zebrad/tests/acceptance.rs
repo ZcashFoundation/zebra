@@ -1543,6 +1543,35 @@ async fn fully_synced_rpc_test() -> Result<()> {
 type BoxStateService =
     BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>;
 
+/// Loads transactions from a block that's after the chain tip of the cached state.
+///
+/// This copies the cached state into a temporary directory when it is needed to avoid overwriting
+/// anything. Two copies are made of the cached state.
+///
+/// The first copy is used by a zebrad instance connected to the network that finishes
+/// synchronizing the chain. The transactions are loaded from this updated state.
+///
+/// The second copy of the state is returned together with the transactions. This means that the
+/// returned tuple contains the temporary directory with the partially synchronized chain, and a
+/// list of valid transactions that are not in any of the blocks present in that partially
+/// synchronized chain.
+async fn load_transactions_from_a_future_block(
+    network: Network,
+    cached_state_path: PathBuf,
+) -> Result<(Vec<Arc<Transaction>>, TempDir)> {
+    let (partial_sync_path, partial_sync_height) =
+        prepare_partial_sync(network, cached_state_path).await?;
+
+    let full_sync_path =
+        perform_full_sync_starting_from(network, partial_sync_path.as_ref()).await?;
+
+    let transactions =
+        load_transactions_from_block_after(partial_sync_height, network, full_sync_path.as_ref())
+            .await?;
+
+    Ok((transactions, partial_sync_path))
+}
+
 /// Prepares the temporary directory of the partially synchronized chain.
 ///
 /// Returns a temporary directory that can be used by a Zebra instance, as well as the chain tip
