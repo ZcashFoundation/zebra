@@ -31,7 +31,7 @@ use std::{
 };
 
 use color_eyre::{
-    eyre::{Result, WrapErr},
+    eyre::{eyre, Result, WrapErr},
     Help,
 };
 use tempfile::TempDir;
@@ -1453,7 +1453,6 @@ where
     // See #1781.
     #[cfg(target_os = "linux")]
     if node2.is_running() {
-        use color_eyre::eyre::eyre;
         return node2
             .kill_on_error::<(), _>(Err(eyre!(
                 "conflicted node2 was still running, but the test expected a panic"
