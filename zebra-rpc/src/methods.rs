@@ -571,16 +571,17 @@ where
             // height range checks
             check_height_range(start, end, chain_height?)?;
 
-            let mut valid_addresses = vec![];
-            for address in addresses {
-                let valid_address: Address = address.parse().map_err(|_| {
-                    Error::invalid_params(format!("Provided address is not valid: {}", address))
-                })?;
-                valid_addresses.push(valid_address);
-            }
+            let valid_addresses: Result<Vec<Address>> = addresses
+                .iter()
+                .map(|address| {
+                    address.parse().map_err(|_| {
+                        Error::invalid_params(format!("Provided address is not valid: {}", address))
+                    })
+                })
+                .collect();
 
             let request =
-                zebra_state::ReadRequest::TransactionsByAddresses(valid_addresses, start, end);
+                zebra_state::ReadRequest::TransactionsByAddresses(valid_addresses?, start, end);
             let response = state
                 .ready()
                 .and_then(|service| service.call(request))
