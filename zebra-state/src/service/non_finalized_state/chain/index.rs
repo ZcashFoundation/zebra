@@ -183,6 +183,43 @@ impl TransparentTransfers {
             && self.created_utxos.is_empty()
             && self.spent_utxos.is_empty()
     }
+
+    /// Returns the partial balance for this address.
+    #[allow(dead_code)]
+    pub fn balance(&self) -> Amount<NegativeAllowed> {
+        self.balance
+    }
+
+    /// Returns the [`transaction::Hash`]es that sent or received transparent tranfers to this address,
+    /// in this partial chain, TODO: in chain order.
+    ///
+    /// TODO:
+    /// - use (TransactionLocation, transaction::Hash) as part of PR #3978
+    /// - return as a BTreeMap<TransactionLocation, transaction::Hash>, so transactions are in chain order
+    #[allow(dead_code)]
+    pub fn tx_ids(&self) -> HashSet<transaction::Hash> {
+        self.tx_ids.distinct_elements().copied().collect()
+    }
+
+    /// Returns the unspent transparent outputs sent to this address,
+    /// in this partial chain, TODO: in chain order.
+    ///
+    /// TODO:
+    /// - use BTreeMap as part of PR #3978
+    #[allow(dead_code)]
+    pub fn created_utxos(&self) -> &HashMap<OutputLocation, transparent::Utxo> {
+        &self.created_utxos
+    }
+
+    /// Returns the spent transparent outputs sent to this address,
+    /// in this partial chain, TODO: in chain order.
+    ///
+    /// TODO:
+    /// - use BTreeMap as part of PR #3978
+    #[allow(dead_code)]
+    pub fn spent_utxos(&self) -> &HashSet<OutputLocation> {
+        &self.spent_utxos
+    }
 }
 
 impl Default for TransparentTransfers {

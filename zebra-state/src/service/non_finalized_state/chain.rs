@@ -100,7 +100,7 @@ pub struct Chain {
     /// The Orchard nullifiers revealed by `blocks`.
     pub(super) orchard_nullifiers: HashSet<orchard::Nullifier>,
 
-    /// Partial transparent address index data revealed by `blocks`.
+    /// Partial transparent address index data from `blocks`.
     pub(super) partial_transparent_transfers: HashMap<transparent::Address, TransparentTransfers>,
 
     /// The cumulative work represented by `blocks`.
