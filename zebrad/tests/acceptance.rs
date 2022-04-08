@@ -40,6 +40,7 @@ use tower::{util::BoxService, Service};
 
 use zebra_chain::{
     block,
+    chain_tip::ChainTip,
     parameters::Network::{self, *},
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
@@ -1538,6 +1539,21 @@ async fn fully_synced_rpc_test() -> Result<()> {
 /// Type alias for a boxed state service.
 type BoxStateService =
     BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>;
+
+/// Loads the chain tip height from the state stored in a specified directory.
+async fn load_tip_height_from_state_directory(
+    network: Network,
+    state_path: &Path,
+) -> Result<block::Height> {
+    let (_state_service, _read_state_service, latest_chain_tip, _chain_tip_change) =
+        start_state_service(network, state_path).await?;
+
+    let chain_tip_height = latest_chain_tip
+        .best_tip_height()
+        .ok_or_else(|| eyre!("State directory doesn't have a chain tip block"))?;
+
+    Ok(chain_tip_height)
+}
 
 /// Starts a state service using the provided `cache_dir` as the directory with the chain state.
 async fn start_state_service(
