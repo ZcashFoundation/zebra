@@ -27,6 +27,7 @@ use std::{
     env, io,
     net::SocketAddr,
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 
@@ -34,17 +35,19 @@ use color_eyre::{
     eyre::{eyre, Result, WrapErr},
     Help,
 };
+use futures::TryFutureExt;
 use tempfile::TempDir;
 use tokio::fs;
-use tower::{util::BoxService, Service};
+use tower::{util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
     block,
     chain_tip::ChainTip,
     parameters::Network::{self, *},
+    transaction::Transaction,
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
-use zebra_state::{constants::LOCK_FILE_ERROR, ChainTipChange, LatestChainTip};
+use zebra_state::{constants::LOCK_FILE_ERROR, ChainTipChange, HashOrHeight, LatestChainTip};
 
 use zebra_test::{
     args,
@@ -1590,6 +1593,38 @@ async fn perform_full_sync_starting_from(
         true,
         false,
     )
+}
+
+/// Performs a request to the provided read-only `state` service to fetch all transactions from a
+/// block at the specified `height`.
+async fn load_transactions_from_block<ReadStateService>(
+    height: block::Height,
+    state: &mut ReadStateService,
+) -> Result<Vec<Arc<Transaction>>>
+where
+    ReadStateService: Service<
+        zebra_state::ReadRequest,
+        Response = zebra_state::ReadResponse,
+        Error = zebra_state::BoxError,
+    >,
+{
+    let request = zebra_state::ReadRequest::Block(HashOrHeight::Height(height));
+
+    let response = state
+        .ready()
+        .and_then(|ready_service| ready_service.call(request))
+        .map_err(|error| eyre!(error))
+        .await?;
+
+    let block = match response {
+        zebra_state::ReadResponse::Block(Some(block)) => block,
+        zebra_state::ReadResponse::Block(None) => {
+            panic!("Missing block at {height:?} from state")
+        }
+        _ => unreachable!("Incorrect response from state service: {response:?}"),
+    };
+
+    Ok(block.transactions.to_vec())
 }
 
 /// Starts a state service using the provided `cache_dir` as the directory with the chain state.
