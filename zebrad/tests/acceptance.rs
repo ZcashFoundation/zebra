@@ -1749,6 +1749,31 @@ fn spawn_zebrad_for_rpc_without_initial_peers(
     Ok((zebrad, rpc_address))
 }
 
+/// Start a lightwalletd instance with its RPC server functionality enabled.
+///
+/// Returns the lightwalletd instance and the port number that it is listening for RPC connections.
+fn spawn_lightwalletd_with_rpc_server(
+    zebrad_rpc_address: SocketAddr,
+) -> Result<(TestChild<TempDir>, u16)> {
+    let lightwalletd_dir = testdir()?.with_lightwalletd_config(zebrad_rpc_address)?;
+
+    let lightwalletd_rpc_port = random_known_port();
+    let lightwalletd_rpc_address = format!("127.0.0.1:{lightwalletd_rpc_port}");
+
+    let mut arguments = args!["--grpc-bind-addr": lightwalletd_rpc_address];
+
+    if let Ok(data_dir) = env::var("LIGHTWALLETD_DATA_DIR") {
+        arguments.set_parameter("--data-dir", data_dir);
+    }
+
+    let mut lightwalletd = lightwalletd_dir.spawn_lightwalletd_child(arguments)?;
+
+    lightwalletd.expect_stdout_line_matches("Starting gRPC server")?;
+    lightwalletd.expect_stdout_line_matches("Waiting for block")?;
+
+    Ok((lightwalletd, lightwalletd_rpc_port))
+}
+
 /// Recursively copy a chain state directory into a new temporary directory.
 async fn copy_state_directory(source: impl AsRef<Path>) -> Result<TempDir> {
     let destination = testdir()?;
