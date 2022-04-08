@@ -1549,6 +1549,64 @@ type LightwalletdRpcClient = lightwalletd::rpc::compact_tx_streamer_client::Comp
     tonic::transport::Channel,
 >;
 
+/// Test sending transactions using a lightwalletd instance connected to a zebrad instance.
+///
+/// This test requires a cached chain state that is partially synchronized, i.e., it should be a
+/// few blocks below the network chain tip height.
+///
+/// The transactions to use to send are obtained from the blocks synchronized by a temporary zebrad
+/// instance that are higher than the chain tip of the cached state.
+///
+/// The zebrad instance connected to lightwalletd uses the cached state and does not connect to any
+/// external peers, which prevents it from downloading the blocks from where the test transactions
+/// were obtained. This is to ensure that zebra does not reject the transactions because they have
+/// already been seen in a block.
+#[tokio::test]
+async fn sending_transactions_using_lightwalletd() -> Result<()> {
+    zebra_test::init();
+
+    const CACHED_STATE_PATH_VAR: &str = "ZEBRA_CACHED_STATE_PATH";
+
+    let cached_state_path = match env::var_os(CACHED_STATE_PATH_VAR) {
+        Some(argument) => PathBuf::from(argument),
+        None => {
+            tracing::info!(
+                "skipped send transactions using lightwalletd test, \
+                 set the {CACHED_STATE_PATH_VAR:?} environment variable to run the test",
+            );
+            return Ok(());
+        }
+    };
+
+    let network = Network::Mainnet;
+
+    let (transactions, partial_sync_path) =
+        load_transactions_from_a_future_block(network, cached_state_path).await?;
+
+    let (_zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc_without_initial_peers(partial_sync_path)?;
+
+    let (_lightwalletd, lightwalletd_rpc_port) =
+        spawn_lightwalletd_with_rpc_server(zebra_rpc_address)?;
+
+    let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
+
+    for transaction in transactions {
+        let expected_response = lightwalletd::rpc::SendResponse {
+            error_code: 0,
+            error_message: format!("\"{}\"", transaction.hash()),
+        };
+
+        let request = prepare_send_transaction_request(transaction);
+
+        let response = rpc_client.send_transaction(request).await?.into_inner();
+
+        assert_eq!(response, expected_response);
+    }
+
+    Ok(())
+}
+
 /// Loads transactions from a block that's after the chain tip of the cached state.
 ///
 /// This copies the cached state into a temporary directory when it is needed to avoid overwriting
