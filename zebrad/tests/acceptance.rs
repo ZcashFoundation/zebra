@@ -36,6 +36,7 @@ use color_eyre::{
 };
 use tempfile::TempDir;
 use tokio::fs;
+use tower::util::BoxService;
 
 use zebra_chain::{
     block,
@@ -1534,6 +1535,10 @@ async fn fully_synced_rpc_test() -> Result<()> {
 
     Ok(())
 }
+
+/// Type alias for a boxed state service.
+type BoxStateService =
+    BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>;
 
 /// Spawns a zebrad instance to interact with lightwalletd, but without an internet connection.
 ///
