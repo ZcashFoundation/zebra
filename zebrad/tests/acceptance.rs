@@ -1540,6 +1540,21 @@ async fn fully_synced_rpc_test() -> Result<()> {
 type BoxStateService =
     BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>;
 
+/// Prepares the temporary directory of the partially synchronized chain.
+///
+/// Returns a temporary directory that can be used by a Zebra instance, as well as the chain tip
+/// height of the partially synchronized chain.
+async fn prepare_partial_sync(
+    network: Network,
+    cached_zebra_state: PathBuf,
+) -> Result<(TempDir, block::Height)> {
+    let partial_sync_path = copy_state_directory(cached_zebra_state).await?;
+    let partial_sync_state_dir = partial_sync_path.as_ref().join("state");
+    let tip_height = load_tip_height_from_state_directory(network, &partial_sync_state_dir).await?;
+
+    Ok((partial_sync_path, tip_height))
+}
+
 /// Loads the chain tip height from the state stored in a specified directory.
 async fn load_tip_height_from_state_directory(
     network: Network,
