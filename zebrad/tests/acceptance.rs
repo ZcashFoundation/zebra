@@ -22,13 +22,19 @@
 //! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
 
 use std::{
-    collections::HashSet, convert::TryInto, env, net::SocketAddr, path::PathBuf, time::Duration,
+    collections::HashSet,
+    convert::TryInto,
+    env, io,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    time::Duration,
 };
 
 use color_eyre::{
     eyre::{Result, WrapErr},
     Help,
 };
+use tokio::fs;
 
 use zebra_chain::{
     block,
@@ -1555,4 +1561,16 @@ fn spawn_zebrad_for_rpc_without_initial_peers(
     zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
 
     Ok((zebrad, rpc_address))
+}
+
+/// Removes a file if it exists.
+///
+/// Attempts to remove a file, and ignores an error that says that the file doesn't exist. Any
+/// other error is wrapped and returned back to the caller.
+async fn remove_file_if_it_exists(path: impl AsRef<Path>) -> Result<()> {
+    match fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
