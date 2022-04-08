@@ -31,6 +31,12 @@ use zebra_node_services::{mempool, BoxError};
 #[cfg(test)]
 mod tests;
 
+/// The RPC error code used by `zcashd` for missing blocks.
+///
+/// `lightwalletd` expects error code `-8` when a block is not found:
+/// <https://github.com/adityapk00/lightwalletd/blob/c1bab818a683e4de69cd952317000f9bb2932274/common/common.go#L251-L254>
+pub const MISSING_BLOCK_ERROR_CODE: ErrorCode = ErrorCode::ServerError(-8);
+
 #[rpc(server)]
 /// RPC method signatures.
 pub trait Rpc {
@@ -80,6 +86,8 @@ pub trait Rpc {
     ) -> BoxFuture<Result<SentTransactionHash>>;
 
     /// Returns the requested block by height, as a [`GetBlock`] JSON string.
+    /// If the block is not in Zebra's state, returns
+    /// [error code `-8`.](https://github.com/zcash/zcash/issues/5758)
     ///
     /// zcashd reference: [`getblock`](https://zcash.github.io/rpc/getblock.html)
     ///
@@ -93,7 +101,7 @@ pub trait Rpc {
     /// mode for all getblock calls: <https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L232>
     ///
     /// `lightwalletd` only requests blocks by height, so we don't support
-    /// getting blocks by hash but we do need to send the height number as a string.
+    /// getting blocks by hash. (But we parse the height as a JSON string, not an integer).
     ///
     /// The `verbosity` parameter is ignored but required in the call.
     #[rpc(name = "getblock")]
@@ -405,7 +413,7 @@ where
             match response {
                 zebra_state::ReadResponse::Block(Some(block)) => Ok(GetBlock(block.into())),
                 zebra_state::ReadResponse::Block(None) => Err(Error {
-                    code: ErrorCode::ServerError(0),
+                    code: MISSING_BLOCK_ERROR_CODE,
                     message: "Block not found".to_string(),
                     data: None,
                 }),

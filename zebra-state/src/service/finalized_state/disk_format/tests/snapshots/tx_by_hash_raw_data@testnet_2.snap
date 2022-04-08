@@ -11,4 +11,8 @@ expression: cf_data
     k: "d5b3ccfd5e7828c4b2d221bae3178c500e21d33399c39a2508a0a82d53c02258",
     v: "0000020000",
   ),
+  KV(
+    k: "db4d7a85b768123f1dff1d4c4cece70083b2d27e117b4ac2e31d087988a5eac4",
+    v: "0000000000",
+  ),
 ]

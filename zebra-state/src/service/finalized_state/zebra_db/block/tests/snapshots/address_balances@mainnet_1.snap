@@ -1,0 +1,13 @@
+---
+source: zebra-state/src/service/finalized_state/zebra_db/block/tests/snapshot.rs
+expression: stored_address_balances
+---
+[
+  ("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd", AddressBalanceLocation(
+    balance: Amount(12500),
+    location: OutputLocation(
+      hash: "851bf6fbf7a976327817c738c489d7fa657752445430922d94c983c0b9ed4609",
+      index: OutputIndex(1),
+    ),
+  )),
+]

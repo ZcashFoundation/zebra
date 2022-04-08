@@ -44,7 +44,7 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
     - name: Docker meta
       id: meta
-      uses: docker/metadata-action@v3.6.2
+      uses: docker/metadata-action@v3.7.0
       with:
         # list of Docker images to use as base name for tags
         images: |
@@ -63,7 +63,7 @@ jobs:
     # Setup gcloud CLI
     - name: Authenticate to Google Cloud
       id: auth
-      uses: google-github-actions/auth@v0.6.0
+      uses: google-github-actions/auth@v0.7.0
       with:
         workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
         service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
@@ -139,7 +139,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.6.0
+        uses: google-github-actions/auth@v0.7.0
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
@@ -203,7 +203,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.6.0
+        uses: google-github-actions/auth@v0.7.0
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'

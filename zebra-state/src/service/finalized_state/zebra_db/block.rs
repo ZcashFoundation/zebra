@@ -11,6 +11,8 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use itertools::Itertools;
+
 use zebra_chain::{
     amount::NonNegative,
     block::{self, Block},
@@ -18,6 +20,7 @@ use zebra_chain::{
     orchard,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     sapling,
+    serialization::TrustedPreallocate,
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
@@ -26,7 +29,7 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::{FromDisk, TransactionLocation},
+        disk_format::{transparent::AddressBalanceLocation, FromDisk, TransactionLocation},
         zebra_db::{metrics::block_precommit_metrics, shielded::NoteCommitmentTrees, ZebraDb},
         FinalizedBlock,
     },
@@ -40,17 +43,20 @@ impl ZebraDb {
     // Read block methods
 
     /// Returns true if the database is empty.
+    //
+    // TODO: move this method to the tip section
     pub fn is_empty(&self) -> bool {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
-        self.db.is_empty(hash_by_height)
+        self.db.zs_is_empty(&hash_by_height)
     }
 
     /// Returns the tip height and hash, if there is one.
+    //
+    // TODO: move this method to the tip section
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         self.db
-            .reverse_iterator(hash_by_height)
-            .next()
+            .zs_last_key_value(&hash_by_height)
             .map(|(height_bytes, hash_bytes)| {
                 let height = block::Height::from_bytes(height_bytes);
                 let hash = block::Hash::from_bytes(hash_bytes);
@@ -62,23 +68,50 @@ impl ZebraDb {
     /// Returns the finalized hash for a given `block::Height` if it is present.
     pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
-        self.db.zs_get(hash_by_height, &height)
+        self.db.zs_get(&hash_by_height, &height)
     }
 
     /// Returns the height of the given block if it exists.
     pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
-        self.db.zs_get(height_by_hash, &hash)
+        self.db.zs_get(&height_by_hash, &hash)
     }
 
     /// Returns the [`Block`] with [`block::Hash`](zebra_chain::block::Hash) or
     /// [`Height`](zebra_chain::block::Height), if it exists in the finalized chain.
+    //
+    // TODO: move this method to the start of the section
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
+        // Blocks
+        let block_header_by_height = self.db.cf_handle("block_by_height").unwrap();
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
-        let block_by_height = self.db.cf_handle("block_by_height").unwrap();
-        let height = hash_or_height.height_or_else(|hash| self.db.zs_get(height_by_hash, &hash))?;
 
-        self.db.zs_get(block_by_height, &height)
+        let height =
+            hash_or_height.height_or_else(|hash| self.db.zs_get(&height_by_hash, &hash))?;
+        let header = self.db.zs_get(&block_header_by_height, &height)?;
+
+        // Transactions
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+
+        // Fetch the entire block's transactions
+        let mut transactions = Vec::new();
+
+        // TODO: is this loop more efficient if we store the number of transactions?
+        //       is the difference large enough to matter?
+        for tx_index in 0..=Transaction::max_allocation() {
+            let tx_loc = TransactionLocation::from_u64(height, tx_index);
+
+            if let Some(tx) = self.db.zs_get(&tx_by_loc, &tx_loc) {
+                transactions.push(tx);
+            } else {
+                break;
+            }
+        }
+
+        Some(Arc::new(Block {
+            header,
+            transactions,
+        }))
     }
 
     /// Returns the Sapling
@@ -90,10 +123,9 @@ impl ZebraDb {
     ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
-        let sapling_note_commitment_tree_handle =
-            self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+        let sapling_tree_handle = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
-        self.db.zs_get(sapling_note_commitment_tree_handle, &height)
+        self.db.zs_get(&sapling_tree_handle, &height)
     }
 
     /// Returns the Orchard
@@ -105,10 +137,9 @@ impl ZebraDb {
     ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
-        let orchard_note_commitment_tree_handle =
-            self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+        let orchard_tree_handle = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        self.db.zs_get(orchard_note_commitment_tree_handle, &height)
+        self.db.zs_get(&orchard_tree_handle, &height)
     }
 
     // Read tip block methods
@@ -137,25 +168,33 @@ impl ZebraDb {
     /// Returns the [`TransactionLocation`] for [`transaction::Hash`],
     /// if it exists in the finalized chain.
     pub fn transaction_location(&self, hash: transaction::Hash) -> Option<TransactionLocation> {
-        let tx_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
-        self.db.zs_get(tx_by_hash, &hash)
+        let tx_loc_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
+        self.db.zs_get(&tx_loc_by_hash, &hash)
     }
 
-    /// Returns the [`Transaction`] with [`transaction::Hash`],
+    /// Returns the [`transaction::Hash`] for [`TransactionLocation`],
     /// if it exists in the finalized chain.
+    #[allow(dead_code)]
+    pub fn transaction_hash(&self, location: TransactionLocation) -> Option<transaction::Hash> {
+        let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
+        self.db.zs_get(&hash_by_tx_loc, &location)
+    }
+
+    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`block::Height`],
+    /// if a transaction with that hash exists in the finalized chain.
+    //
+    // TODO: move this method to the start of the section
     pub fn transaction(
         &self,
         hash: transaction::Hash,
     ) -> Option<(Arc<Transaction>, block::Height)> {
-        self.transaction_location(hash)
-            .map(|TransactionLocation { index, height }| {
-                let block = self
-                    .block(height.into())
-                    .expect("block will exist if TransactionLocation does");
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
 
-                // TODO: store transactions in a separate database index (#3151)
-                (block.transactions[index.as_usize()].clone(), height)
-            })
+        let transaction_location = self.transaction_location(hash)?;
+
+        self.db
+            .zs_get(&tx_by_loc, &transaction_location)
+            .map(|tx| (tx, transaction_location.height))
     }
 
     // Write block methods
@@ -181,23 +220,40 @@ impl ZebraDb {
         let finalized_hash = finalized.hash;
 
         // Get a list of the spent UTXOs, before we delete any from the database
-        let all_utxos_spent_by_block = finalized
+        let all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo> = finalized
             .block
             .transactions
             .iter()
             .flat_map(|tx| tx.inputs().iter())
             .flat_map(|input| input.outpoint())
-            .flat_map(|outpoint| self.utxo(&outpoint).map(|utxo| (outpoint, utxo)))
+            .map(|outpoint| {
+                (
+                    outpoint,
+                    // Some utxos are spent in the same block, so they will be in `new_outputs`
+                    self.utxo(&outpoint)
+                        .or_else(|| finalized.new_outputs.get(&outpoint).cloned())
+                        .expect("already checked UTXO was in state or block"),
+                )
+            })
             .collect();
 
-        let mut batch = DiskWriteBatch::new();
+        // Get the current address balances, before the transactions in this block
+        let address_balances = all_utxos_spent_by_block
+            .values()
+            .chain(finalized.new_outputs.values())
+            .filter_map(|utxo| utxo.output.address(network))
+            .unique()
+            .filter_map(|address| Some((address, self.address_balance_location(&address)?)))
+            .collect();
+
+        let mut batch = DiskWriteBatch::new(network);
 
         // In case of errors, propagate and do not write the batch.
         batch.prepare_block_batch(
             &self.db,
             finalized,
-            network,
             all_utxos_spent_by_block,
+            address_balances,
             self.note_commitment_trees(),
             history_tree,
             self.finalized_value_pool(),
@@ -228,9 +284,8 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: FinalizedBlock,
-        network: Network,
         all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
-        // TODO: make an argument struct for all the current note commitment trees & history
+        address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         mut note_commitment_trees: NoteCommitmentTrees,
         history_tree: HistoryTree,
         value_pool: ValueBalance<NonNegative>,
@@ -242,8 +297,8 @@ impl DiskWriteBatch {
             ..
         } = &finalized;
 
-        // Commit block and transaction data,
-        // but not transaction indexes, note commitments, or UTXOs.
+        // Commit block and transaction data.
+        // (Transaction indexes, note commitments, and UTXOs are committed later.)
         self.prepare_block_header_transactions_batch(db, &finalized)?;
 
         // # Consensus
@@ -260,15 +315,15 @@ impl DiskWriteBatch {
         }
 
         // Commit transaction indexes
-        self.prepare_transaction_index_batch(db, &finalized, &mut note_commitment_trees)?;
-
-        self.prepare_note_commitment_batch(
+        self.prepare_transaction_index_batch(
             db,
             &finalized,
-            network,
-            note_commitment_trees,
-            history_tree,
+            &all_utxos_spent_by_block,
+            address_balances,
+            &mut note_commitment_trees,
         )?;
+
+        self.prepare_note_commitment_batch(db, &finalized, note_commitment_trees, history_tree)?;
 
         // Commit UTXOs and value pools
         self.prepare_chain_value_pools_batch(db, &finalized, all_utxos_spent_by_block, value_pool)?;
@@ -290,23 +345,46 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: &FinalizedBlock,
     ) -> Result<(), BoxError> {
+        // Blocks
+        let block_header_by_height = db.cf_handle("block_by_height").unwrap();
         let hash_by_height = db.cf_handle("hash_by_height").unwrap();
         let height_by_hash = db.cf_handle("height_by_hash").unwrap();
-        let block_by_height = db.cf_handle("block_by_height").unwrap();
+
+        // Transactions
+        let tx_by_loc = db.cf_handle("tx_by_loc").unwrap();
+        let hash_by_tx_loc = db.cf_handle("hash_by_tx_loc").unwrap();
+        let tx_loc_by_hash = db.cf_handle("tx_by_hash").unwrap();
 
         let FinalizedBlock {
             block,
             hash,
             height,
+            transaction_hashes,
             ..
         } = finalized;
 
-        // Index the block
-        self.zs_insert(hash_by_height, height, hash);
-        self.zs_insert(height_by_hash, hash, height);
+        // Commit block header data
+        self.zs_insert(&block_header_by_height, height, block.header);
 
-        // Commit block and transaction data, but not UTXOs or address indexes
-        self.zs_insert(block_by_height, height, block);
+        // Index the block hash and height
+        self.zs_insert(&hash_by_height, height, hash);
+        self.zs_insert(&height_by_hash, hash, height);
+
+        for (transaction_index, (transaction, transaction_hash)) in block
+            .transactions
+            .iter()
+            .zip(transaction_hashes.iter())
+            .enumerate()
+        {
+            let transaction_location = TransactionLocation::from_usize(*height, transaction_index);
+
+            // Commit each transaction's data
+            self.zs_insert(&tx_by_loc, transaction_location, transaction);
+
+            // Index each transaction hash and location
+            self.zs_insert(&hash_by_tx_loc, transaction_location, transaction_hash);
+            self.zs_insert(&tx_loc_by_hash, transaction_hash, transaction_location);
+        }
 
         Ok(())
     }
@@ -348,32 +426,24 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
+        all_utxos_spent_by_block: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         note_commitment_trees: &mut NoteCommitmentTrees,
     ) -> Result<(), BoxError> {
-        let tx_by_hash = db.cf_handle("tx_by_hash").unwrap();
+        let FinalizedBlock { block, .. } = finalized;
 
-        let FinalizedBlock {
-            block,
-            height,
-            transaction_hashes,
-            ..
-        } = finalized;
-
-        // Index each transaction hash
-        for (transaction_index, (transaction, transaction_hash)) in block
-            .transactions
-            .iter()
-            .zip(transaction_hashes.iter())
-            .enumerate()
-        {
-            let transaction_location = TransactionLocation::from_usize(*height, transaction_index);
-            self.zs_insert(tx_by_hash, transaction_hash, transaction_location);
-
+        // Index each transaction's transparent and shielded data
+        for transaction in block.transactions.iter() {
             self.prepare_nullifier_batch(db, transaction)?;
 
             DiskWriteBatch::update_note_commitment_trees(transaction, note_commitment_trees)?;
         }
 
-        self.prepare_transparent_outputs_batch(db, finalized)
+        self.prepare_transparent_outputs_batch(
+            db,
+            finalized,
+            all_utxos_spent_by_block,
+            address_balances,
+        )
     }
 }
