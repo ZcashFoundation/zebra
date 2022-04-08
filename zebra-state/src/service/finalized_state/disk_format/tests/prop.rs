@@ -126,21 +126,36 @@ fn roundtrip_transparent_address() {
 fn roundtrip_output_location() {
     zebra_test::init();
 
-    proptest!(|(val in any::<OutputLocation>())| assert_value_properties(val));
+    proptest!(
+        |(mut val in any::<OutputLocation>())| {
+            *val.height_mut() = val.height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            assert_value_properties(val)
+        }
+    );
 }
 
 #[test]
 fn roundtrip_address_location() {
     zebra_test::init();
 
-    proptest!(|(val in any::<AddressLocation>())| assert_value_properties(val));
+    proptest!(
+        |(mut val in any::<AddressLocation>())| {
+            *val.height_mut() = val.height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            assert_value_properties(val)
+        }
+    );
 }
 
 #[test]
 fn roundtrip_address_balance_location() {
     zebra_test::init();
 
-    proptest!(|(val in any::<AddressBalanceLocation>())| assert_value_properties(val));
+    proptest!(
+        |(mut val in any::<AddressBalanceLocation>())| {
+            *val.height_mut() = val.location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            assert_value_properties(val)
+        }
+    );
 }
 
 #[test]
