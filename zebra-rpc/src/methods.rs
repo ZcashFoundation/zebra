@@ -736,7 +736,7 @@ fn check_height_range(start: Height, end: Height, chain_height: Height) -> Resul
     }
     if end < start {
         return Err(Error::invalid_params(
-            "End value is expected to be greater or equal than start",
+            "End value is expected to be greater than or equal to start",
         ));
     }
     if start > chain_height || end > chain_height {

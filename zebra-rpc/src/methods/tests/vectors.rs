@@ -333,7 +333,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         .unwrap_err();
     assert_eq!(
         error.message,
-        "End value is expected to be greater or equal than start".to_string()
+        "End value is expected to be greater than or equal to start".to_string()
     );
 
     // call the method with start equal zero
