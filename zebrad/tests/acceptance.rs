@@ -1779,6 +1779,15 @@ fn spawn_lightwalletd_with_rpc_server(
     Ok((lightwalletd, lightwalletd_rpc_port))
 }
 
+/// Connect to a lightwalletd RPC instance.
+async fn connect_to_lightwalletd(lightwalletd_rpc_port: u16) -> Result<LightwalletdRpcClient> {
+    let lightwalletd_rpc_address = format!("http://127.0.0.1:{lightwalletd_rpc_port}");
+
+    let rpc_client = LightwalletdRpcClient::connect(lightwalletd_rpc_address).await?;
+
+    Ok(rpc_client)
+}
+
 /// Recursively copy a chain state directory into a new temporary directory.
 async fn copy_state_directory(source: impl AsRef<Path>) -> Result<TempDir> {
     let destination = testdir()?;
