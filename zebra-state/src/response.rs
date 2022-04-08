@@ -54,6 +54,7 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
     Transaction(Option<(Arc<Transaction>, block::Height)>),
 
-    /// Response to [`ReadRequest::TransactionsByAddresses`] with the obtained transaction ids.
+    /// Response to [`ReadRequest::TransactionsByAddresses`] with the obtained transaction ids,
+    /// in the order they appear in blocks.
     TransactionIds(Vec<Hash>),
 }

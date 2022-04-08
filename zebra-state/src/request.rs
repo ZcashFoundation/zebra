@@ -408,5 +408,8 @@ pub enum ReadRequest {
     ///
     /// * A vector of transaction hashes.
     /// * An empty vector if no transactions were found for the given arguments.
+    ///
+    /// Returned txids are in the order they appear in blocks, which ensures that they are topologically sorted
+    /// (i.e. parent txids will appear before child txids).
     TransactionsByAddresses(transparent::Address, block::Height, block::Height),
 }

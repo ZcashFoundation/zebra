@@ -986,7 +986,7 @@ impl Service<ReadRequest> for ReadStateService {
                     "state.requests",
                     1,
                     "service" => "read_state",
-                    "type" => "transactionsbyaddresses",
+                    "type" => "transactions_by_addresses",
                 );
 
                 let _state = self.clone();
