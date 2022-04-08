@@ -1744,6 +1744,7 @@ fn spawn_zebrad_for_rpc_without_initial_peers(
     let rpc_address = config.rpc.listen_addr.unwrap();
 
     zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
+    zebrad.expect_stdout_line_matches("activating mempool")?;
 
     Ok((zebrad, rpc_address))
 }
