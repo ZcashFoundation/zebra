@@ -1570,6 +1570,28 @@ async fn load_tip_height_from_state_directory(
     Ok(chain_tip_height)
 }
 
+/// Runs a zebrad instance to synchronize the chain to the network tip.
+///
+/// The zebrad instance is executed on a copy of the partially synchronized chain state. This copy
+/// is returned afterwards, containing the fully synchronized chain state.
+async fn perform_full_sync_starting_from(
+    network: Network,
+    partial_sync_path: &Path,
+) -> Result<TempDir> {
+    let fully_synced_path = copy_state_directory(&partial_sync_path).await?;
+
+    sync_until(
+        block::Height::MAX,
+        network,
+        SYNC_FINISHED_REGEX,
+        Duration::from_secs(60 * 60),
+        fully_synced_path,
+        MempoolBehavior::ShouldAutomaticallyActivate,
+        true,
+        false,
+    )
+}
+
 /// Starts a state service using the provided `cache_dir` as the directory with the chain state.
 async fn start_state_service(
     network: Network,
