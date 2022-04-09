@@ -59,6 +59,28 @@ jobs:
         with:
           short-length: 7
 
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.7.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Before executing any further steps, validate the local state and remote version are the same,
+      # or at least that the local state version is lower than the available cached state version.
+      - name: Validate constants.rs version vs cached state version
+        id: validate-state-version
+        run: |
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
+          echo "LOCAL_STATE_VERSION: $LOCAL_STATE_VERSION"
+
+          GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-canopy" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          GCP_STATE_VERSION=$("$GCP_STATE_DISK" | grep -oE "v[0-9]+" | grep -oE "[0-9]+")
+          echo "GCP_STATE_VERSION: $GCP_STATE_VERSION"
+
+          if [[ "$LOCAL_STATE_VERSION" -lt "$GCP_STATE_VERSION" ]]; then exit 1; fi
+
         # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
@@ -82,14 +104,6 @@ jobs:
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v1
-
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v0.7.0
-        with:
-          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
-          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
 
       - name: Login to Google Artifact Registry
         uses: docker/login-action@v1.14.1
