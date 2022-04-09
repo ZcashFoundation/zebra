@@ -335,13 +335,34 @@ jobs:
 
           exit ${EXIT_CODE}
 
-      # Create image from disk that will be used to sync past mandatory checkpoint test
+      - name: Get state version from constants.rs
+        run: |
+          STATE_VERSION=""
+
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
+          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
+
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
+
+      - name: Get sync height from logs
+        run: |
+          SYNC_HEIGHT=""
+
+          while [[ ${SYNC_HEIGHT} == "" ]]; do
+              SYNC_HEIGHT=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' --order="desc" --limit=1 '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+finished initial sync to chain tip.+Height\([0-9]+\).+")' | grep -oE 'Height\([0-9]+\)' | grep -oE '[0-9]+' || [[ $? == 1 ]] )
+              echo "SYNC_HEIGHT: $SYNC_HEIGHT"
+              sleep 10
+          done
+
+          echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
+
+      # Create image from disk that will be used for the sync past mandatory checkpoint test
       # Force the image creation as the disk is still attached even though is not being used by the container
       - name: Create image from state disk
         # Only run if the earlier step succeeds
         if: steps.sync-to-checkpoint.outcome == 'success'
         run: |
-          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-canopy \
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }}-canopy \
           --force \
           --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-canopy \
           --source-disk-zone=${{ env.ZONE }} \
@@ -399,10 +420,11 @@ jobs:
         id: get-disk-name
         if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' || github.event.inputs.regenerate-disks != 'true'}}
         run: |
-          output=$(gcloud compute images list --filter="zebrad-cache" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "Disk: $output"
-          echo "Description: $(gcloud compute images describe $output --format='value(DESCRIPTION)')"
-          echo "::set-output name=sha::$output"
+          GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-canopy" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "Disk: $GCP_STATE_DISK"
+          echo "Description: $(gcloud compute images describe $GCP_STATE_DISK --format='value(DESCRIPTION)')"
+
+          echo "CACHED_DISK_NAME=$GCP_STATE_DISK" >> $GITHUB_ENV
 
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create GCP compute instance
@@ -432,8 +454,6 @@ jobs:
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
           --tags zebrad \
           --zone "${{ env.ZONE }}"
-        env:
-          CACHED_DISK_NAME: ${{ steps.get-disk-name.outputs.sha }}
 
       # TODO: this approach is very mesy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
       # This TODO relates to the following issues:

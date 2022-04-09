@@ -205,15 +205,6 @@ jobs:
 
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
 
-      - name: Get state version from constants.rs
-        run: |
-          STATE_VERSION=""
-
-          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
-          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
-
-          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
-
       - name: Full sync
         id: full-sync
         run: |
@@ -234,6 +225,15 @@ jobs:
 
           exit ${EXIT_CODE}
 
+      - name: Get state version from constants.rs
+        run: |
+          STATE_VERSION=""
+
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
+          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
+
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
+
       - name: Get sync height from logs
         run: |
           SYNC_HEIGHT=""
@@ -250,7 +250,7 @@ jobs:
       # Force the image creation as the disk is still attached, even though is not being used by the container
       - name: Create image from state disk
         run: |
-          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }} \
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }}-tip \
           --force \
           --source-disk=full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --source-disk-zone=${{ env.ZONE }} \
