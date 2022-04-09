@@ -305,7 +305,7 @@ jobs:
           INSTANCE_ID=$(gcloud compute instances describe regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
           echo "Using instance: $INSTANCE_ID"
 
-          CONTAINER_NAME=""
+         CONTAINER_NAME=""
           while [[ ${CONTAINER_NAME} != *"regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"* ]]; do
               CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
               echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
@@ -465,7 +465,7 @@ jobs:
           INSTANCE_ID=$(gcloud compute instances describe sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
           echo "Using instance: $INSTANCE_ID"
 
-          CONTAINER_NAME=""
+         CONTAINER_NAME=""
           while [[ ${CONTAINER_NAME} != *"sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"* ]]; do
               CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
               echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
