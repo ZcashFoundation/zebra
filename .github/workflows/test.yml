@@ -303,13 +303,15 @@ jobs:
         run: |
           INSTANCE_ID=$(gcloud compute instances describe regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
           echo "Using instance: $INSTANCE_ID"
+
+          CONTAINER_NAME=""
           while [[ ${CONTAINER_NAME} != *"regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"* ]]; do
               CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
               echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
               sleep 10
           done
-          CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
-          echo "::set-output name=zebra_container::$CONTAINER_NAME"
+
+          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
           sleep 60
 
       - name: Regenerate stateful disks
@@ -321,7 +323,7 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
+          --command="docker logs --follow ${{ env.CONTAINER_NAME }}"
 
           EXIT_CODE=$(\
           gcloud compute ssh \
@@ -329,11 +331,9 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker wait ${{ env.ZEBRA_CONTAINER }}")
+          --command="docker wait ${{ env.CONTAINER_NAME }}")
 
           exit ${EXIT_CODE}
-        env:
-          ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
 
       # Create image from disk that will be used to sync past mandatory checkpoint test
       # Force the image creation as the disk is still attached even though is not being used by the container
@@ -445,13 +445,15 @@ jobs:
         run: |
           INSTANCE_ID=$(gcloud compute instances describe sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
           echo "Using instance: $INSTANCE_ID"
+
+          CONTAINER_NAME=""
           while [[ ${CONTAINER_NAME} != *"sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"* ]]; do
               CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
               echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
               sleep 10
           done
-          CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
-          echo "::set-output name=zebra_container::$CONTAINER_NAME"
+
+          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
           sleep 60
 
       - name: Sync past mandatory checkpoint
@@ -462,7 +464,7 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
+          --command="docker logs --follow ${{ env.CONTAINER_NAME }}"
 
           EXIT_CODE=$(\
           gcloud compute ssh \
@@ -470,11 +472,9 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker wait ${{ env.ZEBRA_CONTAINER }}")
+          --command="docker wait ${{ env.CONTAINER_NAME }}")
 
           exit ${EXIT_CODE}
-        env:
-          ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
 
       - name: Delete test instance
         # Do not delete the instance if the sync timeouts in GitHub
