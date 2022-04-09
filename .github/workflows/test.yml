@@ -241,8 +241,8 @@ jobs:
 
       - name: Downcase network name for disks
         run: |
-          echo NETWORK_CAPS="${{ github.event.inputs.network || env.NETWORK }}" | awk '{print tolower($0)}'
-          echo "NETWORK=${NETWORK_CAPS}" >> $GITHUB_ENV
+          echo LOWERCASE_NETWORK="${{ github.event.inputs.network || env.NETWORK }}" | awk '{print tolower($0)}'
+          echo "NETWORK=${LOWERCASE_NETWORK}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -393,8 +393,8 @@ jobs:
 
       - name: Downcase network name for disks
         run: |
-          echo NETWORK_CAPS="${{ github.event.inputs.network || env.NETWORK }}" | awk '{print tolower($0)}'
-          echo "NETWORK=${NETWORK_CAPS}" >> $GITHUB_ENV
+          echo LOWERCASE_NETWORK="${{ github.event.inputs.network || env.NETWORK }}" | awk '{print tolower($0)}'
+          echo "NETWORK=${LOWERCASE_NETWORK}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
