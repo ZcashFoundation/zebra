@@ -337,6 +337,7 @@ jobs:
           exit ${EXIT_CODE}
 
       - name: Get state version from constants.rs
+        if: ${{ steps.sync-to-checkpoint.outcome == 'success' }}
         run: |
           STATE_VERSION=""
 
@@ -346,6 +347,7 @@ jobs:
           echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
 
       - name: Get sync height from logs
+        if: ${{ steps.sync-to-checkpoint.outcome == 'success' }}
         run: |
           SYNC_HEIGHT=""
 
@@ -361,7 +363,7 @@ jobs:
       # Force the image creation as the disk is still attached even though is not being used by the container
       - name: Create image from state disk
         # Only run if the earlier step succeeds
-        if: steps.sync-to-checkpoint.outcome == 'success'
+        if: ${{ steps.sync-to-checkpoint.outcome == 'success' }}
         run: |
           gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }}-canopy \
           --force \
