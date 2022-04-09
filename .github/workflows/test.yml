@@ -219,6 +219,7 @@ jobs:
           persist-credentials: false
           fetch-depth: '2'
 
+      # TODO move the `changed-files-specific` step to the build job for a better dependency tree
       # Only run this job if the database format version has (likely) changed.
       #
       # If we have accidentally changed the format, but not changed the version,
@@ -407,7 +408,6 @@ jobs:
       # Check if our destination compute instance exists and delete it
       - name: Delete existing instance with same SHA
         id: delete-old-instance
-        if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' || github.event.inputs.regenerate-disks != 'true'}}
         run: |
           INSTANCE=$(gcloud compute instances list --filter=sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
           if [ -z "${INSTANCE}" ]; then
@@ -418,7 +418,6 @@ jobs:
 
       - name: Get disk state name from gcloud
         id: get-disk-name
-        if: ${{ needs.regenerate-stateful-disks.outputs.any_changed != 'true' || github.event.inputs.regenerate-disks != 'true'}}
         run: |
           GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-canopy" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "Disk: $GCP_STATE_DISK"
