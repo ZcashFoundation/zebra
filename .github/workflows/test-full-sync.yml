@@ -210,9 +210,9 @@ jobs:
           STATE_VERSION=""
 
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
-          echo "STATE_VERSION: $STATE_VERSION"
+          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
-          echo "STATE_VERSION=$STATE_VERSION" >> $GITHUB_ENV
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
 
       - name: Full sync
         id: full-sync
