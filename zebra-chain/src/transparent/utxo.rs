@@ -17,6 +17,10 @@ use crate::{
 pub struct Utxo {
     /// The output itself.
     pub output: transparent::Output,
+
+    // TODO: replace the height and from_coinbase fields with OutputLocation,
+    //       and provide lookup/calculation methods for height and from_coinbase
+    //
     /// The height at which the output was created.
     pub height: block::Height,
     /// Whether the output originated in a coinbase transaction.
@@ -35,6 +39,8 @@ pub struct Utxo {
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
 )]
+//
+// TODO: after modifying UTXO to contain an OutputLocation, replace this type with UTXO
 pub struct OrderedUtxo {
     /// An unspent transaction output.
     pub utxo: Utxo,

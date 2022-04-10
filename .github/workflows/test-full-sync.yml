@@ -221,6 +221,16 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command="docker logs --follow ${{ env.CONTAINER_NAME }}"
 
+          EXIT_CODE=$(\
+          gcloud compute ssh \
+          full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command="docker wait ${{ env.CONTAINER_NAME }}")
+
+          exit ${EXIT_CODE}
+
       - name: Get sync height from logs
         run: |
           SYNC_HEIGHT=""

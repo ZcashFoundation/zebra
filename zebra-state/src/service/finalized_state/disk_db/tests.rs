@@ -2,7 +2,18 @@
 
 #![allow(dead_code)]
 
-use crate::service::finalized_state::disk_db::DiskDb;
+use std::ops::Deref;
+
+use crate::service::finalized_state::disk_db::{DiskDb, DB};
+
+// Enable older test code to automatically access the inner database via Deref coercion.
+impl Deref for DiskDb {
+    type Target = DB;
+
+    fn deref(&self) -> &Self::Target {
+        &self.db
+    }
+}
 
 impl DiskDb {
     /// Returns a list of column family names in this database.
