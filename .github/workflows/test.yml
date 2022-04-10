@@ -228,7 +228,7 @@ jobs:
       # this job will take a few hours, because it will do a full rebuild.
       - name: Get specific changed files
         id: changed-files-specific
-        uses: tj-actions/changed-files@v18.6
+        uses: tj-actions/changed-files@v18.7
         with:
           files: |
             zebra-state/**/constants.rs
@@ -324,7 +324,7 @@ jobs:
 
           EXIT_CODE=$(\
           gcloud compute ssh \
-          sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \

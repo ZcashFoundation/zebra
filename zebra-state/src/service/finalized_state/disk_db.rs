@@ -346,6 +346,11 @@ impl DiskDb {
     /// stdio (3), and other OS facilities (2+).
     const RESERVED_FILE_COUNT: u64 = 48;
 
+    /// The size of the database memtable RAM cache in megabytes.
+    ///
+    /// https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning
+    const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
+
     /// Opens or creates the database at `config.path` for `network`,
     /// and returns a shared low-level database wrapper.
     pub fn new(config: &Config, network: Network) -> DiskDb {
@@ -361,15 +366,15 @@ impl DiskDb {
             // Transactions
             rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("hash_by_tx_loc", db_options.clone()),
-            // TODO: rename to tx_loc_by_hash (#3151)
+            // TODO: rename to tx_loc_by_hash (#3950)
             rocksdb::ColumnFamilyDescriptor::new("tx_by_hash", db_options.clone()),
             // Transparent
             rocksdb::ColumnFamilyDescriptor::new("balance_by_transparent_addr", db_options.clone()),
-            // TODO: #3954
+            // TODO: #3951
             //rocksdb::ColumnFamilyDescriptor::new("tx_by_transparent_addr_loc", db_options.clone()),
-            // TODO: rename to utxo_by_out_loc (#3953)
+            // TODO: rename to utxo_by_out_loc (#3952)
             rocksdb::ColumnFamilyDescriptor::new("utxo_by_outpoint", db_options.clone()),
-            // TODO: #3952
+            // TODO: #3953
             //rocksdb::ColumnFamilyDescriptor::new("utxo_by_transparent_addr_loc", db_options.clone()),
             // Sprout
             rocksdb::ColumnFamilyDescriptor::new("sprout_nullifiers", db_options.clone()),
@@ -455,6 +460,8 @@ impl DiskDb {
         let mut opts = rocksdb::Options::default();
         let mut block_based_opts = rocksdb::BlockBasedOptions::default();
 
+        const ONE_MEGABYTE: usize = 1024 * 1024;
+
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
@@ -468,6 +475,11 @@ impl DiskDb {
         //
         // https://github.com/facebook/rocksdb/wiki/Compression#configuration
         opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
+
+        // Tune level-style database file compaction.
+        //
+        // This improves Zebra's initial sync speed slightly, as of April 2022.
+        opts.optimize_level_style_compaction(Self::MEMTABLE_RAM_CACHE_MEGABYTES * ONE_MEGABYTE);
 
         // Increase the process open file limit if needed,
         // then use it to set RocksDB's limit.

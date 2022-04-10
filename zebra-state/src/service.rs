@@ -497,7 +497,12 @@ impl StateService {
             .or_else(|| self.disk.db().height(hash))
     }
 
-    /// Return the [`Utxo`] pointed to by `outpoint` if it exists in any chain.
+    /// Return the [`Utxo`] pointed to by `outpoint`, if it exists in any chain,
+    /// or in any pending block.
+    ///
+    /// Some of the returned UTXOs may be invalid, because:
+    /// - they are not in the best chain, or
+    /// - their block fails contextual validation.
     pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         self.mem
             .any_utxo(outpoint)
