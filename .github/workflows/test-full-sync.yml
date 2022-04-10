@@ -148,7 +148,7 @@ jobs:
 
       - name: Downcase network name for disks
         run: |
-          echo LOWERCASE_NETWORK=("${{ github.event.inputs.network || env.NETWORK }}" | awk '{print tolower($0)}')
+          echo LOWERCASE_NETWORK="${{ github.event.inputs.network || env.NETWORK }} | awk '{print tolower($0)}'"
           echo "NETWORK=${LOWERCASE_NETWORK}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
