@@ -12,7 +12,7 @@ pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 ///
 /// For the best chain, coinbase spends are only allowed from blocks at or below
 /// the finalized tip. For other chains, coinbase spends can use outputs from
-/// early non-finalized blocks, or finalized blocks. But if that chain becomes
+/// early non-finalized blocks or finalized blocks. But if that chain becomes
 /// the best chain, all non-finalized blocks past the [`MAX_BLOCK_REORG_HEIGHT`]
 /// will be finalized. This includes all mature coinbase outputs.
 pub const MAX_BLOCK_REORG_HEIGHT: u32 = MIN_TRANSPARENT_COINBASE_MATURITY - 1;
