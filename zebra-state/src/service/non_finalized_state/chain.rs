@@ -936,11 +936,11 @@ impl
             };
 
             // Index the spent outpoint in the chain
-            let duplicate_spend = self.spent_utxos.insert(spent_outpoint);
-            // TODO: stop creating duplicate spends in the tests, then assert unconditionally
-            if !cfg!(test) {
-                assert!(!duplicate_spend);
-            }
+            let first_spend = self.spent_utxos.insert(spent_outpoint);
+            assert!(
+                first_spend,
+                "unexpected duplicate spent output: should be checked earlier"
+            );
 
             // TODO: fix tests to supply correct spent outputs, then turn this into an expect()
             let spent_output = if let Some(spent_output) = spent_outputs.get(&spent_outpoint) {
