@@ -67,7 +67,7 @@ jobs:
           token_format: 'access_token'
 
       # Before executing any further steps, validate the local state and remote version are the same,
-      # or at least that the local state version is lower than the available cached state version.
+      # or at least that the local state version is higher than the available cached state version.
       - name: Validate constants.rs version vs cached state version
         id: validate-state-version
         run: |
