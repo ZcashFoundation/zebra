@@ -93,9 +93,16 @@ impl
     ) -> Result<(), ValidateContextError> {
         self.balance = (self.balance + utxo.output.value().constrain().unwrap()).unwrap();
 
-        // TODO: stop creating duplicate UTXOs in the tests, then assert that inserts are unique
         let output_location = OutputLocation::from_outpoint(*transaction_location, outpoint);
-        self.created_utxos.insert(output_location, utxo.clone());
+        let previous_entry = self.created_utxos.insert(output_location, utxo.clone());
+
+        // TODO: stop creating duplicate UTXOs in the tests, then assert unconditionally
+        if !cfg!(test) {
+            assert_eq!(
+                previous_entry, None,
+                "unexpected created output: duplicate update or duplicate UTXO",
+            );
+        }
 
         // TODO: store TransactionLocation as part of PR #3978
         self.tx_ids.insert(outpoint.hash);
@@ -114,13 +121,18 @@ impl
     ) {
         self.balance = (self.balance - utxo.output.value().constrain().unwrap()).unwrap();
 
-        // TODO: stop creating duplicate UTXOs in the tests, then assert that removed values are present
         let output_location = OutputLocation::from_outpoint(*transaction_location, outpoint);
-        self.created_utxos.remove(&output_location);
-
+        let removed_entry = self.created_utxos.remove(&output_location);
         assert!(
-            self.tx_ids.remove(&outpoint.hash),
-            "unexpected created UTXO transaction hash: duplicate revert, or revert that was never updated",
+            removed_entry.is_some(),
+            "unexpected revert of created output: duplicate update or duplicate UTXO",
+        );
+
+        let hash_was_removed = self.tx_ids.remove(&outpoint.hash);
+        assert!(
+            hash_was_removed,
+            "unexpected revert of created output transaction hash: \
+             duplicate revert, or revert of an output that was never updated",
         );
     }
 }
@@ -155,8 +167,9 @@ impl
         let spent_outpoint = spending_input.outpoint().expect("checked by caller");
 
         let output_location = OutputLocation::from_outpoint(*spent_output_tx_loc, &spent_outpoint);
+        let spend_was_inserted = self.spent_utxos.insert(output_location);
         assert!(
-            self.spent_utxos.insert(output_location),
+            spend_was_inserted,
             "unexpected spent output: duplicate update or duplicate spend",
         );
 
@@ -181,14 +194,18 @@ impl
         let spent_outpoint = spending_input.outpoint().expect("checked by caller");
 
         let output_location = OutputLocation::from_outpoint(*spent_output_tx_loc, &spent_outpoint);
+        let spend_was_removed = self.spent_utxos.remove(&output_location);
         assert!(
-            self.spent_utxos.remove(&output_location),
-            "unexpected spent output: duplicate revert, or revert of an output that was never updated",
+            spend_was_removed,
+            "unexpected revert of spent output: \
+             duplicate revert, or revert of a spent output that was never updated",
         );
 
+        let hash_was_removed = self.tx_ids.remove(spending_tx);
         assert!(
-            self.tx_ids.remove(spending_tx),
-            "unexpected spending output transaction hash: duplicate revert, or revert that was never updated",
+            hash_was_removed,
+            "unexpected revert of spending input transaction hash: \
+             duplicate revert, or revert of an input that was never updated",
         );
     }
 }

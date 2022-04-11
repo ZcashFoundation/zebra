@@ -806,7 +806,6 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
                     .entry(receiving_address)
                     .or_default();
 
-                // TODO: fix tests to supply correct transaction IDs, and turn this into an expect()
                 if let Some(transaction_location) = self.tx_by_hash.get(&outpoint.hash) {
                     address_transfers.update_chain_tip_with(&(
                         outpoint,
@@ -814,7 +813,10 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
                         transaction_location,
                     ))?;
                 } else if !cfg!(test) {
-                    panic!("transaction must already be indexed");
+                    // TODO: fix tests to supply correct transaction IDs, and turn this into an expect()
+                    panic!(
+                        "unexpected missing transaction hash: transaction must already be indexed"
+                    );
                 }
             }
         }
@@ -885,7 +887,6 @@ impl
                 transparent::Input::Coinbase { .. } => continue,
             };
 
-            // TODO: fix tests to supply correct spent outputs, and turn this into an expect()
             if let Some(spent_output) = spent_outputs.get(spent_outpoint) {
                 if let Some(spending_address) = spent_output.address(self.network) {
                     let address_transfers = self
@@ -905,6 +906,9 @@ impl
                         spent_output_tx_loc,
                     ))?;
                 }
+            } else if !cfg!(test) {
+                // TODO: fix tests to supply correct spent outputs, and turn this into an expect()
+                panic!("unexpected missing spent output: all spent outputs must be indexed");
             }
         }
 
@@ -932,7 +936,6 @@ impl
                 transparent::Input::Coinbase { .. } => continue,
             };
 
-            // TODO: fix tests to supply correct spent outputs, and turn this into an expect()
             if let Some(spent_output) = spent_outputs.get(spent_outpoint) {
                 if let Some(receiving_address) = spent_output.address(self.network) {
                     let address_transfers = self
@@ -961,6 +964,11 @@ impl
                             .remove(&receiving_address);
                     }
                 }
+            } else if !cfg!(test) {
+                // TODO: fix tests to supply correct spent outputs, and turn this into an expect()
+                panic!(
+                    "unexpected missing reverted spent output: all spent outputs must be indexed"
+                );
             }
         }
     }
