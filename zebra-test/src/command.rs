@@ -21,9 +21,7 @@ use tracing::instrument;
 
 pub mod to_regex;
 
-use to_regex::{CollectRegexSet, ToRegex};
-
-use self::to_regex::ToRegexSet;
+use self::to_regex::{CollectRegexSet, ToRegex, ToRegexSet};
 
 /// A super-trait for [`Iterator`] + [`Debug`].
 pub trait IteratorDebug: Iterator + Debug {}
