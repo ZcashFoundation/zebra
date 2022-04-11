@@ -806,18 +806,19 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
                     .entry(receiving_address)
                     .or_default();
 
-                if let Some(transaction_location) = self.tx_by_hash.get(&outpoint.hash) {
-                    address_transfers.update_chain_tip_with(&(
-                        outpoint,
-                        utxo,
-                        transaction_location,
-                    ))?;
-                } else if !cfg!(test) {
-                    // TODO: fix tests to supply correct transaction IDs, and turn this into an expect()
-                    panic!(
+                // TODO: fix tests to supply correct transaction IDs, and turn this into an expect()
+                let transaction_location =
+                    if let Some(transaction_location) = self.tx_by_hash.get(&outpoint.hash) {
+                        transaction_location
+                    } else if !cfg!(test) {
+                        panic!(
                         "unexpected missing transaction hash: transaction must already be indexed"
                     );
-                }
+                    } else {
+                        continue;
+                    };
+
+                address_transfers.update_chain_tip_with(&(outpoint, utxo, transaction_location))?;
             }
         }
 
@@ -879,36 +880,46 @@ impl
         ),
     ) -> Result<(), ValidateContextError> {
         for spending_input in spending_inputs.iter() {
-            let spent_outpoint = match spending_input {
-                transparent::Input::PrevOut { outpoint, .. } => {
-                    self.spent_utxos.insert(*outpoint);
-                    outpoint
-                }
-                transparent::Input::Coinbase { .. } => continue,
+            let spent_outpoint = if let Some(spent_outpoint) = spending_input.outpoint() {
+                spent_outpoint
+            } else {
+                continue;
             };
 
-            if let Some(spent_output) = spent_outputs.get(spent_outpoint) {
-                if let Some(spending_address) = spent_output.address(self.network) {
-                    let address_transfers = self
-                        .partial_transparent_transfers
-                        .entry(spending_address)
-                        .or_default();
+            // Index the spent outpoint in the chain
+            let duplicate_spend = self.spent_utxos.insert(spent_outpoint);
+            // TODO: stop creating duplicate UTXOs in the tests, then assert unconditionally
+            if !cfg!(test) {
+                assert!(!duplicate_spend);
+            }
 
-                    let spent_output_tx_loc = self
-                        .tx_by_hash
-                        .get(&spent_outpoint.hash)
-                        .expect("transaction is already indexed");
-
-                    address_transfers.update_chain_tip_with(&(
-                        spending_input,
-                        spending_tx,
-                        spent_output,
-                        spent_output_tx_loc,
-                    ))?;
-                }
+            // TODO: fix tests to supply correct spent outputs, and turn this into an expect()
+            let spent_output = if let Some(spent_output) = spent_outputs.get(&spent_outpoint) {
+                spent_output
             } else if !cfg!(test) {
-                // TODO: fix tests to supply correct spent outputs, and turn this into an expect()
                 panic!("unexpected missing spent output: all spent outputs must be indexed");
+            } else {
+                continue;
+            };
+
+            // Index the spent output for the address
+            if let Some(spending_address) = spent_output.address(self.network) {
+                let address_transfers = self
+                    .partial_transparent_transfers
+                    .entry(spending_address)
+                    .or_default();
+
+                let spent_output_tx_loc = self
+                    .tx_by_hash
+                    .get(&spent_outpoint.hash)
+                    .expect("transaction is already indexed");
+
+                address_transfers.update_chain_tip_with(&(
+                    spending_input,
+                    spending_tx,
+                    spent_output,
+                    spent_output_tx_loc,
+                ))?;
             }
         }
 
@@ -925,50 +936,57 @@ impl
         position: RevertPosition,
     ) {
         for spending_input in spending_inputs.iter() {
-            let spent_outpoint = match spending_input {
-                transparent::Input::PrevOut { outpoint, .. } => {
-                    assert!(
-                        self.spent_utxos.remove(outpoint),
-                        "spent_utxos must be present if block was added to chain"
-                    );
-                    outpoint
-                }
-                transparent::Input::Coinbase { .. } => continue,
+            let spent_outpoint = if let Some(spent_outpoint) = spending_input.outpoint() {
+                spent_outpoint
+            } else {
+                continue;
             };
 
-            if let Some(spent_output) = spent_outputs.get(spent_outpoint) {
-                if let Some(receiving_address) = spent_output.address(self.network) {
-                    let address_transfers = self
-                        .partial_transparent_transfers
-                        .get_mut(&receiving_address)
-                        .expect("block has previously been applied to the chain");
+            // Revert the spent outpoint in the chain
+            let spent_outpoint_was_removed = self.spent_utxos.remove(&spent_outpoint);
+            assert!(
+                spent_outpoint_was_removed,
+                "spent_utxos must be present if block was added to chain"
+            );
 
-                    let spent_output_tx_loc = self
-                        .tx_by_hash
-                        .get(&spent_outpoint.hash)
-                        .expect("transaction is already indexed");
-
-                    address_transfers.revert_chain_with(
-                        &(
-                            spending_input,
-                            spending_tx,
-                            spent_output,
-                            spent_output_tx_loc,
-                        ),
-                        position,
-                    );
-
-                    // Remove this transfer if it is now empty
-                    if address_transfers.is_empty() {
-                        self.partial_transparent_transfers
-                            .remove(&receiving_address);
-                    }
-                }
+            // TODO: fix tests to supply correct spent outputs, and turn this into an expect()
+            let spent_output = if let Some(spent_output) = spent_outputs.get(&spent_outpoint) {
+                spent_output
             } else if !cfg!(test) {
-                // TODO: fix tests to supply correct spent outputs, and turn this into an expect()
                 panic!(
                     "unexpected missing reverted spent output: all spent outputs must be indexed"
                 );
+            } else {
+                continue;
+            };
+
+            // Revert the spent output for the address
+            if let Some(receiving_address) = spent_output.address(self.network) {
+                let address_transfers = self
+                    .partial_transparent_transfers
+                    .get_mut(&receiving_address)
+                    .expect("block has previously been applied to the chain");
+
+                let spent_output_tx_loc = self
+                    .tx_by_hash
+                    .get(&spent_outpoint.hash)
+                    .expect("transaction is already indexed");
+
+                address_transfers.revert_chain_with(
+                    &(
+                        spending_input,
+                        spending_tx,
+                        spent_output,
+                        spent_output_tx_loc,
+                    ),
+                    position,
+                );
+
+                // Remove this transfer if it is now empty
+                if address_transfers.is_empty() {
+                    self.partial_transparent_transfers
+                        .remove(&receiving_address);
+                }
             }
         }
     }
