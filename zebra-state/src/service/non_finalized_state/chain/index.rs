@@ -1,6 +1,6 @@
 //! Transparent address indexes for non-finalized chains.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use mset::MultiSet;
 
@@ -206,15 +206,31 @@ impl TransparentTransfers {
         self.balance
     }
 
-    /// Returns the [`TransactionLocation`]s of the transactions that
+    /// Returns the [`transaction::Hash`]es of the transactions that
     /// sent or received transparent tranfers to this address,
     /// in this partial chain, in chain order.
     ///
-    /// TODO:
-    /// - look up transaction hashes in `Chain.tx_by_hash`
+    /// `chain_tx_by_hash` should be the `tx_by_hash` field from the [`Chain`] containing this index.
+    ///
+    /// # Panics
+    ///
+    /// If `chain_tx_by_hash` is missing some transaction hashes from this index.
     #[allow(dead_code)]
-    pub fn tx_ids(&self) -> HashSet<transaction::Hash> {
-        self.tx_ids.distinct_elements().copied().collect()
+    pub fn tx_ids(
+        &self,
+        chain_tx_by_hash: &HashMap<transaction::Hash, TransactionLocation>,
+    ) -> BTreeMap<TransactionLocation, transaction::Hash> {
+        self.tx_ids
+            .distinct_elements()
+            .map(|tx_hash| {
+                (
+                    *chain_tx_by_hash
+                        .get(tx_hash)
+                        .expect("all hashes are indexed"),
+                    *tx_hash,
+                )
+            })
+            .collect()
     }
 
     /// Returns the unspent transparent outputs sent to this address,
