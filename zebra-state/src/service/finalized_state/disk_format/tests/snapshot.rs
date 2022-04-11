@@ -123,7 +123,8 @@ fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[Str
             .cf_handle(cf_name)
             .expect("RocksDB API provides correct names");
 
-        let mut cf_iter = db.forward_iterator(cf_handle);
+        // Correctness: Multi-key iteration causes hangs in concurrent code, but seems ok in tests.
+        let mut cf_iter = db.full_iterator_cf(&cf_handle, rocksdb::IteratorMode::Start);
 
         // The default raw data serialization is very verbose, so we hex-encode the bytes.
         let cf_data: Vec<KV> = cf_iter

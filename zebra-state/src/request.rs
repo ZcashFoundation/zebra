@@ -10,8 +10,8 @@ use zebra_chain::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
-// Allow *only* this unused import, so that rustdoc link resolution
-// will work with inline links.
+/// Allow *only* this unused import, so that rustdoc link resolution
+/// will work with inline links.
 #[allow(unused_imports)]
 use crate::Response;
 
@@ -118,10 +118,6 @@ pub struct FinalizedBlock {
     pub height: block::Height,
     /// New transparent outputs created in this block, indexed by
     /// [`Outpoint`](transparent::Outpoint).
-    ///
-    /// Each output is tagged with its transaction index in the block.
-    /// (The outputs of earlier transactions in a block can be spent by later
-    /// transactions.)
     ///
     /// Note: although these transparent outputs are newly created, they may not
     /// be unspent, since a later transaction in a block can spend outputs of an

@@ -235,7 +235,7 @@ jobs:
       # this job will take a few hours, because it will do a full rebuild.
       - name: Get specific changed files
         id: changed-files-specific
-        uses: tj-actions/changed-files@v18.6
+        uses: tj-actions/changed-files@v18.7
         with:
           files: |
             zebra-state/**/constants.rs
@@ -318,7 +318,7 @@ jobs:
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
           sleep 60
 
-      - name: Regenerate stateful disks logs
+      - name: Regenerate stateful disks
         id: sync-to-checkpoint
         if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
@@ -328,6 +328,16 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
+
+          EXIT_CODE=$(\
+          gcloud compute ssh \
+          regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command="docker wait ${{ env.ZEBRA_CONTAINER }}")
+
+          exit ${EXIT_CODE}
         env:
           ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
 
@@ -449,7 +459,7 @@ jobs:
           echo "::set-output name=zebra_container::$CONTAINER_NAME"
           sleep 60
 
-      - name: Sync past mandatory checkpoint logs
+      - name: Sync past mandatory checkpoint
         id: sync-past-checkpoint
         run: |
           gcloud compute ssh \
@@ -458,6 +468,16 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
+
+          EXIT_CODE=$(\
+          gcloud compute ssh \
+          sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command="docker wait ${{ env.ZEBRA_CONTAINER }}")
+
+          exit ${EXIT_CODE}
         env:
           ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
 
