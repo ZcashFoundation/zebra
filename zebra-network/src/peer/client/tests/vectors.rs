@@ -47,6 +47,8 @@ async fn client_service_ready_drop_ok() {
 
     let (mut client, mut harness) = ClientTestHarness::build().finish();
 
+    // If the readiness future gains a `Drop` impl, we want it to be called here.
+    #[allow(clippy::drop_non_drop)]
     std::mem::drop(client.ready());
 
     assert!(client.is_ready().await);
