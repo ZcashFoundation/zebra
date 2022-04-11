@@ -26,7 +26,9 @@ use zebra_chain::{
     work::difficulty::PartialCumulativeWork,
 };
 
-use crate::{service::check, ContextuallyValidBlock, HashOrHeight, ValidateContextError};
+use crate::{
+    service::check, ContextuallyValidBlock, HashOrHeight, TransactionLocation, ValidateContextError,
+};
 
 use self::index::TransparentTransfers;
 
@@ -43,10 +45,9 @@ pub struct Chain {
 
     /// An index of block heights for each block hash in `blocks`.
     pub height_by_hash: HashMap<block::Hash, block::Height>,
-    /// An index of block heights and transaction indexes for each transaction hash in `blocks`.
-    //
-    // TODO: replace tuple value with TransactionLocation
-    pub tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
+
+    /// An index of [`TransactionLocation`]s for each transaction hash in `blocks`.
+    pub tx_by_hash: HashMap<transaction::Hash, TransactionLocation>,
 
     /// The [`Utxo`]s created by `blocks`.
     ///
@@ -351,9 +352,12 @@ impl Chain {
         &self,
         hash: transaction::Hash,
     ) -> Option<(&Arc<Transaction>, block::Height)> {
-        self.tx_by_hash
-            .get(&hash)
-            .map(|(height, index)| (&self.blocks[height].block.transactions[*index], *height))
+        self.tx_by_hash.get(&hash).map(|tx_loc| {
+            (
+                &self.blocks[&tx_loc.height].block.transactions[tx_loc.index.as_usize()],
+                tx_loc.height,
+            )
+        })
     }
 
     /// Returns the block hash of the tip block.
@@ -592,9 +596,10 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             };
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_by_hash`
-            let prior_pair = self
-                .tx_by_hash
-                .insert(transaction_hash, (height, transaction_index));
+            let prior_pair = self.tx_by_hash.insert(
+                transaction_hash,
+                TransactionLocation::from_usize(height, transaction_index),
+            );
             assert!(
                 prior_pair.is_none(),
                 "transactions must be unique within a single chain"
@@ -603,7 +608,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             // add the utxos this produced
             self.update_chain_tip_with(new_outputs)?;
             // add the utxos this consumed
-            self.update_chain_tip_with(&(inputs, spent_outputs, &transaction_hash))?;
+            self.update_chain_tip_with(&(inputs, &transaction_hash, spent_outputs))?;
 
             // add the shielded data
             self.update_chain_tip_with(joinsplit_data)?;
@@ -724,16 +729,18 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
                 ),
             };
 
+            // remove the utxos this produced
+            // uses `tx_by_hash`
+            self.revert_chain_with(new_outputs, position);
+            // remove the utxos this consumed
+            // uses `tx_by_hash`
+            self.revert_chain_with(&(inputs, transaction_hash, spent_outputs), position);
+
             // remove `transaction.hash` from `tx_by_hash`
             assert!(
                 self.tx_by_hash.remove(transaction_hash).is_some(),
                 "transactions must be present if block was added to chain"
             );
-
-            // remove the utxos this produced
-            self.revert_chain_with(new_outputs, position);
-            // remove the utxos this consumed
-            self.revert_chain_with(&(inputs, spent_outputs, transaction_hash), position);
 
             // remove the shielded data
             self.revert_chain_with(joinsplit_data, position);
@@ -799,7 +806,16 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
                     .entry(receiving_address)
                     .or_default();
 
-                address_transfers.update_chain_tip_with(&(outpoint, utxo))?;
+                // TODO: fix tests to supply correct transaction IDs, and turn this into an expect()
+                if let Some(transaction_location) = self.tx_by_hash.get(&outpoint.hash) {
+                    address_transfers.update_chain_tip_with(&(
+                        outpoint,
+                        utxo,
+                        transaction_location,
+                    ))?;
+                } else if !cfg!(test) {
+                    panic!("transaction must already be indexed");
+                }
             }
         }
 
@@ -821,7 +837,13 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
                     .get_mut(&receiving_address)
                     .expect("block has previously been applied to the chain");
 
-                address_transfers.revert_chain_with(&(outpoint, utxo), position);
+                let transaction_location = self
+                    .tx_by_hash
+                    .get(&outpoint.hash)
+                    .expect("transaction is reverted after its UTXOs are reverted");
+
+                address_transfers
+                    .revert_chain_with(&(outpoint, utxo, transaction_location), position);
 
                 // Remove this transfer if it is now empty
                 if address_transfers.is_empty() {
@@ -833,25 +855,25 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
     }
 }
 
-// Spending inputs, the outputs they spend, and the transaction that spends them
+// Transparent inputs
 //
 // TODO: replace arguments with a struct? (after #3978)
 impl
     UpdateWith<(
         // The inputs from a transaction in this block
         &Vec<transparent::Input>,
-        // The values of all inputs spent in this block
-        &HashMap<transparent::OutPoint, transparent::Output>,
-        // The transaction that spends these inputs
+        // The transaction that the inputs are from
         &transaction::Hash,
+        // The outputs for all inputs spent in this transaction (or block)
+        &HashMap<transparent::OutPoint, transparent::Output>,
     )> for Chain
 {
     fn update_chain_tip_with(
         &mut self,
-        &(spending_inputs, spent_outputs, spending_tx): &(
+        &(spending_inputs, spending_tx, spent_outputs): &(
             &Vec<transparent::Input>,
-            &HashMap<transparent::OutPoint, transparent::Output>,
             &transaction::Hash,
+            &HashMap<transparent::OutPoint, transparent::Output>,
         ),
     ) -> Result<(), ValidateContextError> {
         for spending_input in spending_inputs.iter() {
@@ -863,7 +885,7 @@ impl
                 transparent::Input::Coinbase { .. } => continue,
             };
 
-            // TODO: update tests to supply correct spent outputs
+            // TODO: fix tests to supply correct spent outputs, and turn this into an expect()
             if let Some(spent_output) = spent_outputs.get(spent_outpoint) {
                 if let Some(spending_address) = spent_output.address(self.network) {
                     let address_transfers = self
@@ -871,10 +893,16 @@ impl
                         .entry(spending_address)
                         .or_default();
 
+                    let spent_output_tx_loc = self
+                        .tx_by_hash
+                        .get(&spent_outpoint.hash)
+                        .expect("transaction is already indexed");
+
                     address_transfers.update_chain_tip_with(&(
                         spending_input,
-                        spent_output,
                         spending_tx,
+                        spent_output,
+                        spent_output_tx_loc,
                     ))?;
                 }
             }
@@ -885,10 +913,10 @@ impl
 
     fn revert_chain_with(
         &mut self,
-        &(spending_inputs, spent_outputs, spending_tx): &(
+        &(spending_inputs, spending_tx, spent_outputs): &(
             &Vec<transparent::Input>,
-            &HashMap<transparent::OutPoint, transparent::Output>,
             &transaction::Hash,
+            &HashMap<transparent::OutPoint, transparent::Output>,
         ),
         position: RevertPosition,
     ) {
@@ -904,7 +932,7 @@ impl
                 transparent::Input::Coinbase { .. } => continue,
             };
 
-            // TODO: update tests to supply correct spent outputs
+            // TODO: fix tests to supply correct spent outputs, and turn this into an expect()
             if let Some(spent_output) = spent_outputs.get(spent_outpoint) {
                 if let Some(receiving_address) = spent_output.address(self.network) {
                     let address_transfers = self
@@ -912,8 +940,20 @@ impl
                         .get_mut(&receiving_address)
                         .expect("block has previously been applied to the chain");
 
-                    address_transfers
-                        .revert_chain_with(&(spending_input, spent_output, spending_tx), position);
+                    let spent_output_tx_loc = self
+                        .tx_by_hash
+                        .get(&spent_outpoint.hash)
+                        .expect("transaction is already indexed");
+
+                    address_transfers.revert_chain_with(
+                        &(
+                            spending_input,
+                            spending_tx,
+                            spent_output,
+                            spent_output_tx_loc,
+                        ),
+                        position,
+                    );
 
                     // Remove this transfer if it is now empty
                     if address_transfers.is_empty() {

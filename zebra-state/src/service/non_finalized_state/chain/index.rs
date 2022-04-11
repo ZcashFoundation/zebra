@@ -9,7 +9,7 @@ use zebra_chain::{
     transaction, transparent,
 };
 
-use crate::{OutputLocation, ValidateContextError};
+use crate::{OutputLocation, TransactionLocation, ValidateContextError};
 
 use super::{RevertPosition, UpdateWith};
 
@@ -72,18 +72,29 @@ pub struct TransparentTransfers {
 
 // A created UTXO
 //
-// TODO: replace arguments with a struct? (after #3978)
-impl UpdateWith<(&transparent::OutPoint, &transparent::Utxo)> for TransparentTransfers {
+// TODO: replace arguments with an Update/Revert enum?
+impl
+    UpdateWith<(
+        // The location of the UTXO
+        &transparent::OutPoint,
+        // The UTXO data
+        &transparent::Utxo,
+        // The location of the transaction that creates the UTXO
+        &TransactionLocation,
+    )> for TransparentTransfers
+{
     fn update_chain_tip_with(
         &mut self,
-        &(outpoint, utxo): &(&transparent::OutPoint, &transparent::Utxo),
+        &(outpoint, utxo, transaction_location): &(
+            &transparent::OutPoint,
+            &transparent::Utxo,
+            &TransactionLocation,
+        ),
     ) -> Result<(), ValidateContextError> {
         self.balance = (self.balance + utxo.output.value().constrain().unwrap()).unwrap();
 
-        // TODO: lookup height and transaction index as part of PR #3978
-        //
-        //       stop creating duplicate UTXOs in the tests, then assert that inserts are unique
-        let output_location = OutputLocation::from_outpoint(outpoint);
+        // TODO: stop creating duplicate UTXOs in the tests, then assert that inserts are unique
+        let output_location = OutputLocation::from_outpoint(*transaction_location, outpoint);
         self.created_utxos.insert(output_location, utxo.clone());
 
         // TODO: store TransactionLocation as part of PR #3978
@@ -94,15 +105,17 @@ impl UpdateWith<(&transparent::OutPoint, &transparent::Utxo)> for TransparentTra
 
     fn revert_chain_with(
         &mut self,
-        &(outpoint, utxo): &(&transparent::OutPoint, &transparent::Utxo),
+        &(outpoint, utxo, transaction_location): &(
+            &transparent::OutPoint,
+            &transparent::Utxo,
+            &TransactionLocation,
+        ),
         _position: RevertPosition,
     ) {
         self.balance = (self.balance - utxo.output.value().constrain().unwrap()).unwrap();
 
-        // TODO: lookup height and transaction index as part of PR #3978
-        //
-        //       stop creating duplicate UTXOs in the tests, then assert that removed values are present
-        let output_location = OutputLocation::from_outpoint(outpoint);
+        // TODO: stop creating duplicate UTXOs in the tests, then assert that removed values are present
+        let output_location = OutputLocation::from_outpoint(*transaction_location, outpoint);
         self.created_utxos.remove(&output_location);
 
         assert!(
@@ -112,22 +125,28 @@ impl UpdateWith<(&transparent::OutPoint, &transparent::Utxo)> for TransparentTra
     }
 }
 
-// A spending input, the output it spends, and the transaction that spends it
+// A transparent input
 //
-// TODO: replace arguments with a struct? (after #3978)
+// TODO: replace arguments with an Update/Revert enum?
 impl
     UpdateWith<(
+        // The transparent input data
         &transparent::Input,
-        &transparent::Output,
+        // The transaction the input is from
         &transaction::Hash,
+        // The output spent by the input
+        &transparent::Output,
+        // The location of the transaction that created that output
+        &TransactionLocation,
     )> for TransparentTransfers
 {
     fn update_chain_tip_with(
         &mut self,
-        &(spending_input, spent_output, spending_tx): &(
+        &(spending_input, spending_tx, spent_output, spent_output_tx_loc): &(
             &transparent::Input,
-            &transparent::Output,
             &transaction::Hash,
+            &transparent::Output,
+            &TransactionLocation,
         ),
     ) -> Result<(), ValidateContextError> {
         // Spending a UTXO subtracts value from the balance
@@ -135,8 +154,7 @@ impl
 
         let spent_outpoint = spending_input.outpoint().expect("checked by caller");
 
-        // TODO: lookup height and transaction index as part of PR #3978
-        let output_location = OutputLocation::from_outpoint(&spent_outpoint);
+        let output_location = OutputLocation::from_outpoint(*spent_output_tx_loc, &spent_outpoint);
         assert!(
             self.spent_utxos.insert(output_location),
             "unexpected spent output: duplicate update or duplicate spend",
@@ -150,10 +168,11 @@ impl
 
     fn revert_chain_with(
         &mut self,
-        &(spending_input, spent_output, spending_tx): &(
+        &(spending_input, spending_tx, spent_output, spent_output_tx_loc): &(
             &transparent::Input,
-            &transparent::Output,
             &transaction::Hash,
+            &transparent::Output,
+            &TransactionLocation,
         ),
         _position: RevertPosition,
     ) {
@@ -161,8 +180,7 @@ impl
 
         let spent_outpoint = spending_input.outpoint().expect("checked by caller");
 
-        // TODO: lookup height and transaction index as part of PR #3978
-        let output_location = OutputLocation::from_outpoint(&spent_outpoint);
+        let output_location = OutputLocation::from_outpoint(*spent_output_tx_loc, &spent_outpoint);
         assert!(
             self.spent_utxos.remove(&output_location),
             "unexpected spent output: duplicate revert, or revert of an output that was never updated",
