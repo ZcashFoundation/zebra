@@ -114,7 +114,7 @@ pub struct ContextuallyValidBlock {
     /// earlier transaction.
     ///
     /// This field can also contain unrelated outputs, which are ignored.
-    pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
+    pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
 
     /// The outputs spent by this block, indexed by the [`transparent::Input`]'s
     /// [`Outpoint`](transparent::Outpoint).
@@ -123,7 +123,7 @@ pub struct ContextuallyValidBlock {
     /// or earlier blocks in the chain.
     ///
     /// This field can also contain unrelated outputs, which are ignored.
-    pub(crate) spent_outputs: HashMap<transparent::OutPoint, transparent::Output>,
+    pub(crate) spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
 
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
@@ -181,7 +181,7 @@ impl ContextuallyValidBlock {
     /// [`Chain::update_chain_state_with`] returns success.
     pub fn with_block_and_spent_utxos(
         prepared: PreparedBlock,
-        mut spent_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+        mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     ) -> Result<Self, ValueBalanceError> {
         let PreparedBlock {
             block,
@@ -195,21 +195,17 @@ impl ContextuallyValidBlock {
         // but useful to make some tests pass more easily.
         //
         // TODO: fix the tests, and stop adding unrelated outputs.
-        spent_utxos.extend(utxos_from_ordered_utxos(new_outputs.clone()));
-
-        let spent_outputs = spent_utxos
-            .iter()
-            .map(|(outpoint, utxo)| (*outpoint, utxo.output.clone()))
-            .collect();
+        spent_outputs.extend(new_outputs.clone());
 
         Ok(Self {
             block: block.clone(),
             hash,
             height,
-            new_outputs: transparent::utxos_from_ordered_utxos(new_outputs),
-            spent_outputs,
+            new_outputs,
+            spent_outputs: spent_outputs.clone(),
             transaction_hashes,
-            chain_value_pool_change: block.chain_value_pool_change(&spent_utxos)?,
+            chain_value_pool_change: block
+                .chain_value_pool_change(&utxos_from_ordered_utxos(spent_outputs))?,
         })
     }
 }
@@ -261,7 +257,7 @@ impl From<ContextuallyValidBlock> for FinalizedBlock {
             block,
             hash,
             height,
-            new_outputs,
+            new_outputs: utxos_from_ordered_utxos(new_outputs),
             transaction_hashes,
         }
     }

@@ -55,7 +55,7 @@ pub struct Chain {
     /// Outputs can be spent by later transactions or blocks in the chain.
     //
     // TODO: replace OutPoint with OutputLocation?
-    pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+    pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     /// The [`OutPoint`]s spent by `blocks`,
     /// including those created by earlier transactions or blocks in the chain.
     pub(crate) spent_utxos: HashSet<transparent::OutPoint>,
@@ -442,9 +442,10 @@ impl Chain {
     /// Callers should also check the finalized state for available UTXOs.
     /// If UTXOs remain unspent when a block is finalized, they are stored in the finalized state,
     /// and removed from the relevant chain(s).
-    pub fn unspent_utxos(&self) -> HashMap<transparent::OutPoint, transparent::Utxo> {
+    pub fn unspent_utxos(&self) -> HashMap<transparent::OutPoint, transparent::OrderedUtxo> {
         let mut unspent_utxos = self.created_utxos.clone();
         unspent_utxos.retain(|out_point, _utxo| !self.spent_utxos.contains(out_point));
+
         unspent_utxos
     }
 
@@ -808,7 +809,7 @@ impl
         // The hash of the transaction that the outputs are from
         &transaction::Hash,
         // The UTXOs for all outputs created by this transaction (or block)
-        &HashMap<transparent::OutPoint, transparent::Utxo>,
+        &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     )> for Chain
 {
     fn update_chain_tip_with(
@@ -816,7 +817,7 @@ impl
         &(created_outputs, creating_tx_hash, block_created_outputs): &(
             &Vec<transparent::Output>,
             &transaction::Hash,
-            &HashMap<transparent::OutPoint, transparent::Utxo>,
+            &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         ),
     ) -> Result<(), ValidateContextError> {
         for output_index in 0..created_outputs.len() {
@@ -824,19 +825,19 @@ impl
                 hash: *creating_tx_hash,
                 index: output_index.try_into().expect("valid indexes fit in u32"),
             };
-            let utxo = block_created_outputs
+            let created_utxo = block_created_outputs
                 .get(&outpoint)
                 .expect("new_outputs contains all created UTXOs");
 
             // Update the chain's created UTXOs
-            let previous_entry = self.created_utxos.insert(outpoint, utxo.clone());
+            let previous_entry = self.created_utxos.insert(outpoint, created_utxo.clone());
             assert_eq!(
                 previous_entry, None,
                 "unexpected created output: duplicate update or duplicate UTXO",
             );
 
             // Update the address index with this UTXO
-            if let Some(receiving_address) = utxo.output.address(self.network) {
+            if let Some(receiving_address) = created_utxo.utxo.output.address(self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
                     .entry(receiving_address)
@@ -848,7 +849,7 @@ impl
 
                 address_transfers.update_chain_tip_with(&(
                     &outpoint,
-                    utxo,
+                    created_utxo,
                     transaction_location,
                 ))?;
             }
@@ -862,7 +863,7 @@ impl
         &(created_outputs, creating_tx_hash, block_created_outputs): &(
             &Vec<transparent::Output>,
             &transaction::Hash,
-            &HashMap<transparent::OutPoint, transparent::Utxo>,
+            &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         ),
         position: RevertPosition,
     ) {
@@ -871,7 +872,7 @@ impl
                 hash: *creating_tx_hash,
                 index: output_index.try_into().expect("valid indexes fit in u32"),
             };
-            let utxo = block_created_outputs
+            let created_utxo = block_created_outputs
                 .get(&outpoint)
                 .expect("new_outputs contains all created UTXOs");
 
@@ -883,7 +884,7 @@ impl
             );
 
             // Revert the address index for this UTXO
-            if let Some(receiving_address) = utxo.output.address(self.network) {
+            if let Some(receiving_address) = created_utxo.utxo.output.address(self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
                     .get_mut(&receiving_address)
@@ -895,7 +896,7 @@ impl
                     .expect("transaction is reverted after its UTXOs are reverted");
 
                 address_transfers
-                    .revert_chain_with(&(&outpoint, utxo, transaction_location), position);
+                    .revert_chain_with(&(&outpoint, created_utxo, transaction_location), position);
 
                 // Remove this transfer if it is now empty
                 if address_transfers.is_empty() {
@@ -917,7 +918,7 @@ impl
         // The hash of the transaction that the inputs are from
         &transaction::Hash,
         // The outputs for all inputs spent in this transaction (or block)
-        &HashMap<transparent::OutPoint, transparent::Output>,
+        &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     )> for Chain
 {
     fn update_chain_tip_with(
@@ -925,7 +926,7 @@ impl
         &(spending_inputs, spending_tx_hash, spent_outputs): &(
             &Vec<transparent::Input>,
             &transaction::Hash,
-            &HashMap<transparent::OutPoint, transparent::Output>,
+            &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         ),
     ) -> Result<(), ValidateContextError> {
         for spending_input in spending_inputs.iter() {
@@ -952,22 +953,16 @@ impl
             };
 
             // Index the spent output for the address
-            if let Some(spending_address) = spent_output.address(self.network) {
+            if let Some(spending_address) = spent_output.utxo.output.address(self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
                     .entry(spending_address)
                     .or_default();
 
-                let spent_output_tx_loc = self
-                    .tx_by_hash
-                    .get(&spent_outpoint.hash)
-                    .expect("transaction is already indexed");
-
                 address_transfers.update_chain_tip_with(&(
                     spending_input,
                     spending_tx_hash,
                     spent_output,
-                    spent_output_tx_loc,
                 ))?;
             }
         }
@@ -980,7 +975,7 @@ impl
         &(spending_inputs, spending_tx_hash, spent_outputs): &(
             &Vec<transparent::Input>,
             &transaction::Hash,
-            &HashMap<transparent::OutPoint, transparent::Output>,
+            &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         ),
         position: RevertPosition,
     ) {
@@ -1010,26 +1005,14 @@ impl
             };
 
             // Revert the spent output for the address
-            if let Some(receiving_address) = spent_output.address(self.network) {
+            if let Some(receiving_address) = spent_output.utxo.output.address(self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
                     .get_mut(&receiving_address)
                     .expect("block has previously been applied to the chain");
 
-                let spent_output_tx_loc = self
-                    .tx_by_hash
-                    .get(&spent_outpoint.hash)
-                    .expect("transaction is already indexed");
-
-                address_transfers.revert_chain_with(
-                    &(
-                        spending_input,
-                        spending_tx_hash,
-                        spent_output,
-                        spent_output_tx_loc,
-                    ),
-                    position,
-                );
+                address_transfers
+                    .revert_chain_with(&(spending_input, spending_tx_hash, spent_output), position);
 
                 // Remove this transfer if it is now empty
                 if address_transfers.is_empty() {

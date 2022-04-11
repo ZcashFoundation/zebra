@@ -43,7 +43,7 @@ pub struct TransparentTransfers {
     /// - store `Utxo`s in the chain, and just store the created locations for this address
     /// - if we add an OutputLocation to UTXO, remove this OutputLocation,
     ///   and use the inner OutputLocation to sort Utxos in chain order
-    created_utxos: BTreeMap<OutputLocation, transparent::Utxo>,
+    created_utxos: BTreeMap<OutputLocation, transparent::OrderedUtxo>,
 
     /// The partial list of UTXOs spent by a transparent address.
     ///
@@ -64,23 +64,26 @@ impl
         // The location of the UTXO
         &transparent::OutPoint,
         // The UTXO data
-        &transparent::Utxo,
+        &transparent::OrderedUtxo,
         // The location of the transaction that creates the UTXO
         &TransactionLocation,
     )> for TransparentTransfers
 {
     fn update_chain_tip_with(
         &mut self,
-        &(outpoint, utxo, transaction_location): &(
+        &(outpoint, created_utxo, transaction_location): &(
             &transparent::OutPoint,
-            &transparent::Utxo,
+            &transparent::OrderedUtxo,
             &TransactionLocation,
         ),
     ) -> Result<(), ValidateContextError> {
-        self.balance = (self.balance + utxo.output.value().constrain().unwrap()).unwrap();
+        self.balance =
+            (self.balance + created_utxo.utxo.output.value().constrain().unwrap()).unwrap();
 
         let output_location = OutputLocation::from_outpoint(*transaction_location, outpoint);
-        let previous_entry = self.created_utxos.insert(output_location, utxo.clone());
+        let previous_entry = self
+            .created_utxos
+            .insert(output_location, created_utxo.clone());
         assert_eq!(
             previous_entry, None,
             "unexpected created output: duplicate update or duplicate UTXO",
@@ -93,14 +96,15 @@ impl
 
     fn revert_chain_with(
         &mut self,
-        &(outpoint, utxo, transaction_location): &(
+        &(outpoint, created_utxo, transaction_location): &(
             &transparent::OutPoint,
-            &transparent::Utxo,
+            &transparent::OrderedUtxo,
             &TransactionLocation,
         ),
         _position: RevertPosition,
     ) {
-        self.balance = (self.balance - utxo.output.value().constrain().unwrap()).unwrap();
+        self.balance =
+            (self.balance - created_utxo.utxo.output.value().constrain().unwrap()).unwrap();
 
         let output_location = OutputLocation::from_outpoint(*transaction_location, outpoint);
         let removed_entry = self.created_utxos.remove(&output_location);
@@ -128,26 +132,26 @@ impl
         // The hash of the transaction the input is from
         &transaction::Hash,
         // The output spent by the input
-        &transparent::Output,
-        // The location of the transaction that created that output
-        &TransactionLocation,
+        // Includes the location of the transaction that created the output
+        &transparent::OrderedUtxo,
     )> for TransparentTransfers
 {
     fn update_chain_tip_with(
         &mut self,
-        &(spending_input, spending_tx_hash, spent_output, spent_output_tx_loc): &(
+        &(spending_input, spending_tx_hash, spent_output): &(
             &transparent::Input,
             &transaction::Hash,
-            &transparent::Output,
-            &TransactionLocation,
+            &transparent::OrderedUtxo,
         ),
     ) -> Result<(), ValidateContextError> {
         // Spending a UTXO subtracts value from the balance
-        self.balance = (self.balance - spent_output.value().constrain().unwrap()).unwrap();
+        self.balance =
+            (self.balance - spent_output.utxo.output.value().constrain().unwrap()).unwrap();
 
         let spent_outpoint = spending_input.outpoint().expect("checked by caller");
 
-        let output_location = OutputLocation::from_outpoint(*spent_output_tx_loc, &spent_outpoint);
+        let spent_output_tx_loc = transaction_location(spent_output);
+        let output_location = OutputLocation::from_outpoint(spent_output_tx_loc, &spent_outpoint);
         let spend_was_inserted = self.spent_utxos.insert(output_location);
         assert!(
             spend_was_inserted,
@@ -161,19 +165,20 @@ impl
 
     fn revert_chain_with(
         &mut self,
-        &(spending_input, spending_tx_hash, spent_output, spent_output_tx_loc): &(
+        &(spending_input, spending_tx_hash, spent_output): &(
             &transparent::Input,
             &transaction::Hash,
-            &transparent::Output,
-            &TransactionLocation,
+            &transparent::OrderedUtxo,
         ),
         _position: RevertPosition,
     ) {
-        self.balance = (self.balance + spent_output.value().constrain().unwrap()).unwrap();
+        self.balance =
+            (self.balance + spent_output.utxo.output.value().constrain().unwrap()).unwrap();
 
         let spent_outpoint = spending_input.outpoint().expect("checked by caller");
 
-        let output_location = OutputLocation::from_outpoint(*spent_output_tx_loc, &spent_outpoint);
+        let spent_output_tx_loc = transaction_location(spent_output);
+        let output_location = OutputLocation::from_outpoint(spent_output_tx_loc, &spent_outpoint);
         let spend_was_removed = self.spent_utxos.remove(&output_location);
         assert!(
             spend_was_removed,
@@ -235,7 +240,7 @@ impl TransparentTransfers {
     /// Returns the unspent transparent outputs sent to this address,
     /// in this partial chain, in chain order.
     #[allow(dead_code)]
-    pub fn created_utxos(&self) -> &BTreeMap<OutputLocation, transparent::Utxo> {
+    pub fn created_utxos(&self) -> &BTreeMap<OutputLocation, transparent::OrderedUtxo> {
         &self.created_utxos
     }
 
@@ -256,4 +261,9 @@ impl Default for TransparentTransfers {
             spent_utxos: Default::default(),
         }
     }
+}
+
+/// Returns the transaction location for an [`OrderedUtxo`].
+pub fn transaction_location(ordered_utxo: &transparent::OrderedUtxo) -> TransactionLocation {
+    TransactionLocation::from_usize(ordered_utxo.utxo.height, ordered_utxo.tx_index_in_block)
 }

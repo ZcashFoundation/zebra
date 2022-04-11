@@ -509,7 +509,12 @@ impl StateService {
         self.mem
             .any_utxo(outpoint)
             .or_else(|| self.queued_blocks.utxo(outpoint))
-            .or_else(|| self.disk.db().utxo(outpoint))
+            .or_else(|| {
+                self.disk
+                    .db()
+                    .utxo(outpoint)
+                    .map(|ordered_utxo| ordered_utxo.utxo)
+            })
     }
 
     /// Return an iterator over the relevant chain of the block identified by
