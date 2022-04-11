@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use futures::FutureExt;
 use hex::ToHex;
 use jsonrpc_core::{Error, ErrorCode};
 use proptest::prelude::*;
@@ -34,7 +35,7 @@ proptest! {
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-            let rpc = RpcImpl::new(
+            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -67,6 +68,10 @@ proptest! {
 
             prop_assert_eq!(result, Ok(hash));
 
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+
             Ok::<_, TestCaseError>(())
         })?;
     }
@@ -82,7 +87,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -122,6 +127,10 @@ proptest! {
                 "Result is not a server error: {result:?}"
             );
 
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+
             Ok::<_, TestCaseError>(())
         })?;
     }
@@ -135,7 +144,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -176,6 +185,10 @@ proptest! {
                 "Result is not a server error: {result:?}"
             );
 
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+
             Ok::<_, TestCaseError>(())
         })?;
     }
@@ -196,7 +209,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -224,6 +237,10 @@ proptest! {
                 "Result is not an invalid parameters error: {result:?}"
             );
 
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+
             Ok::<_, TestCaseError>(())
         })?;
     }
@@ -246,7 +263,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -274,6 +291,10 @@ proptest! {
                 "Result is not an invalid parameters error: {result:?}"
             );
 
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+
             Ok::<_, TestCaseError>(())
         })?;
     }
@@ -295,7 +316,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -323,6 +344,10 @@ proptest! {
 
             prop_assert_eq!(result, Ok(expected_response));
 
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+
             Ok::<_, TestCaseError>(())
         })?;
     }
@@ -343,7 +368,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -371,6 +396,10 @@ proptest! {
                 "Result is not an invalid parameters error: {result:?}"
             );
 
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+
             Ok::<_, TestCaseError>(())
         })?;
     }
@@ -393,7 +422,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-            let rpc = RpcImpl::new(
+            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
@@ -420,6 +449,11 @@ proptest! {
                 ),
                 "Result is not an invalid parameters error: {result:?}"
             );
+
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+
             Ok::<_, TestCaseError>(())
         })?;
     }
@@ -431,16 +465,23 @@ proptest! {
         let _guard = runtime.enter();
         let mut mempool = MockService::build().for_prop_tests();
         let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+
         // look for an error with a `NoChainTip`
-        let rpc = RpcImpl::new(
+        let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
             "RPC test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
             NoChainTip,
             network,
         );
+
         let response = rpc.get_blockchain_info();
         prop_assert_eq!(&response.err().unwrap().message, "No Chain tip available yet");
+
+        // The queue task should continue without errors or panics
+        let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+        prop_assert!(matches!(rpc_tx_queue_task_result, None));
+
         runtime.block_on(async move {
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
@@ -471,7 +512,7 @@ proptest! {
         mock_chain_tip_sender.send_best_tip_block_time(block_time);
 
         // Start RPC with the mocked `ChainTip`
-        let rpc = RpcImpl::new(
+        let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
             "RPC test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
@@ -504,10 +545,199 @@ proptest! {
             },
         };
 
+        // The queue task should continue without errors or panics
+        let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+        prop_assert!(matches!(rpc_tx_queue_task_result, None));
+
         // check no requests were made during this test
         runtime.block_on(async move {
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
+
+            Ok::<_, TestCaseError>(())
+        })?;
+    }
+
+    /// Test the queue functionality using `send_raw_transaction`
+    #[test]
+    fn rpc_queue_main_loop(tx in any::<Transaction>())
+    {
+        let runtime = zebra_test::init_async();
+        let _guard = runtime.enter();
+
+        let transaction_hash = tx.hash();
+
+        runtime.block_on(async move {
+            tokio::time::pause();
+
+            let mut mempool = MockService::build().for_prop_tests();
+            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+
+            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+                NoChainTip,
+                Mainnet,
+            );
+
+            // send a transaction
+            let tx_bytes = tx
+                .zcash_serialize_to_vec()
+                .expect("Transaction serializes successfully");
+            let tx_hex = hex::encode(&tx_bytes);
+            let send_task = tokio::spawn(rpc.send_raw_transaction(tx_hex));
+
+            let tx_unmined = UnminedTx::from(tx);
+            let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
+
+            // fail the mempool insertion
+            mempool
+                .expect_request(expected_request)
+                .await
+                .unwrap()
+                .respond(Err(DummyError));
+
+            let _ = send_task
+                .await
+                .expect("Sending raw transactions should not panic");
+
+            // advance enough time to have a new runner iteration
+            let spacing = chrono::Duration::seconds(150);
+            tokio::time::advance(spacing.to_std().unwrap()).await;
+
+            // the runner will made a new call to TransactionsById
+            let mut transactions_hash_set = HashSet::new();
+            transactions_hash_set.insert(tx_unmined.id);
+            let expected_request = mempool::Request::TransactionsById(transactions_hash_set);
+            let response = mempool::Response::Transactions(vec![]);
+
+            mempool
+                .expect_request(expected_request)
+                .await?
+                .respond(response);
+
+            // the runner will also query the state again for the transaction
+            let expected_request = zebra_state::ReadRequest::Transaction(transaction_hash);
+            let response = zebra_state::ReadResponse::Transaction(None);
+
+            state
+                .expect_request(expected_request)
+                .await?
+                .respond(response);
+
+            // now a retry will be sent to the mempool
+            let expected_request = mempool::Request::Queue(vec![mempool::Gossip::Tx(tx_unmined.clone())]);
+            let response = mempool::Response::Queued(vec![Ok(())]);
+
+            mempool
+                .expect_request(expected_request)
+                .await?
+                .respond(response);
+
+            // no more requets are done
+            mempool.expect_no_requests().await?;
+            state.expect_no_requests().await?;
+
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(matches!(rpc_tx_queue_task_result, None));
+
+            Ok::<_, TestCaseError>(())
+        })?;
+    }
+
+    /// Test we receive all transactions that are sent in a channel
+    #[test]
+    fn rpc_queue_receives_all_transactions_from_channel(txs in any::<[Transaction; 2]>())
+    {
+        let runtime = zebra_test::init_async();
+        let _guard = runtime.enter();
+
+        runtime.block_on(async move {
+            tokio::time::pause();
+
+            let mut mempool = MockService::build().for_prop_tests();
+            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+
+            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+                NoChainTip,
+                Mainnet,
+            );
+
+            let mut transactions_hash_set = HashSet::new();
+            for tx in txs.clone() {
+                // send a transaction
+                let tx_bytes = tx
+                    .zcash_serialize_to_vec()
+                    .expect("Transaction serializes successfully");
+                let tx_hex = hex::encode(&tx_bytes);
+                let send_task = tokio::spawn(rpc.send_raw_transaction(tx_hex));
+
+                let tx_unmined = UnminedTx::from(tx.clone());
+                let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
+
+                // inser to hs we will use later
+                transactions_hash_set.insert(tx_unmined.id);
+
+                // fail the mempool insertion
+                mempool
+                    .clone()
+                    .expect_request(expected_request)
+                    .await
+                    .unwrap()
+                    .respond(Err(DummyError));
+
+                let _ = send_task
+                    .await
+                    .expect("Sending raw transactions should not panic");
+            }
+
+            // advance enough time to have a new runner iteration
+            let spacing = chrono::Duration::seconds(150);
+            tokio::time::advance(spacing.to_std().unwrap()).await;
+
+            // the runner will made a new call to TransactionsById quering with both transactions
+            let expected_request = mempool::Request::TransactionsById(transactions_hash_set);
+            let response = mempool::Response::Transactions(vec![]);
+
+            mempool
+                .expect_request(expected_request)
+                .await?
+                .respond(response);
+
+            // the runner will also query the state again for each transaction
+            for _tx in txs.clone() {
+                let response = zebra_state::ReadResponse::Transaction(None);
+
+                // we use `expect_request_that` because we can't guarantee the state request order
+                state
+                    .expect_request_that(|request| matches!(request, zebra_state::ReadRequest::Transaction(_)))
+                    .await?
+                    .respond(response);
+            }
+
+            // each transaction will be retried
+            for tx in txs.clone() {
+                let expected_request = mempool::Request::Queue(vec![mempool::Gossip::Tx(UnminedTx::from(tx))]);
+                let response = mempool::Response::Queued(vec![Ok(())]);
+
+                mempool
+                    .expect_request(expected_request)
+                    .await?
+                    .respond(response);
+            }
+
+            // no more requets are done
+            mempool.expect_no_requests().await?;
+            state.expect_no_requests().await?;
+
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(matches!(rpc_tx_queue_task_result, None));
 
             Ok::<_, TestCaseError>(())
         })?;
