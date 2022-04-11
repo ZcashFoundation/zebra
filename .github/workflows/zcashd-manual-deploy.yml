@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       network:
-        default: 'Testnet'
+        default: 'Mainnet'
+        description: 'Network to deploy: Mainnet or Testnet'
+        required: true
       size:
-        default: 10
+        default: '10'
+        description: 'GCP Managed Instance Group size'
+        required: true
 
 env:
   PROJECT_ID: zealous-zebra
