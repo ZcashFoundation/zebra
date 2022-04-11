@@ -596,10 +596,10 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             };
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_by_hash`
-            let prior_pair = self.tx_by_hash.insert(
-                transaction_hash,
-                TransactionLocation::from_usize(height, transaction_index),
-            );
+            let transaction_location = TransactionLocation::from_usize(height, transaction_index);
+            let prior_pair = self
+                .tx_by_hash
+                .insert(transaction_hash, transaction_location);
             assert!(
                 prior_pair.is_none(),
                 "transactions must be unique within a single chain"
@@ -865,7 +865,7 @@ impl
     UpdateWith<(
         // The inputs from a transaction in this block
         &Vec<transparent::Input>,
-        // The transaction that the inputs are from
+        // The hash of the transaction that the inputs are from
         &transaction::Hash,
         // The outputs for all inputs spent in this transaction (or block)
         &HashMap<transparent::OutPoint, transparent::Output>,
@@ -873,7 +873,7 @@ impl
 {
     fn update_chain_tip_with(
         &mut self,
-        &(spending_inputs, spending_tx, spent_outputs): &(
+        &(spending_inputs, spending_tx_hash, spent_outputs): &(
             &Vec<transparent::Input>,
             &transaction::Hash,
             &HashMap<transparent::OutPoint, transparent::Output>,
@@ -916,7 +916,7 @@ impl
 
                 address_transfers.update_chain_tip_with(&(
                     spending_input,
-                    spending_tx,
+                    spending_tx_hash,
                     spent_output,
                     spent_output_tx_loc,
                 ))?;
@@ -928,7 +928,7 @@ impl
 
     fn revert_chain_with(
         &mut self,
-        &(spending_inputs, spending_tx, spent_outputs): &(
+        &(spending_inputs, spending_tx_hash, spent_outputs): &(
             &Vec<transparent::Input>,
             &transaction::Hash,
             &HashMap<transparent::OutPoint, transparent::Output>,
@@ -975,7 +975,7 @@ impl
                 address_transfers.revert_chain_with(
                     &(
                         spending_input,
-                        spending_tx,
+                        spending_tx_hash,
                         spent_output,
                         spent_output_tx_loc,
                     ),

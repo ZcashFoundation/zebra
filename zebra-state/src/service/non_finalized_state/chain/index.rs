@@ -1,6 +1,6 @@
 //! Transparent address indexes for non-finalized chains.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use mset::MultiSet;
 
@@ -28,13 +28,6 @@ pub struct TransparentTransfers {
     /// for [`ReadStateService`] response inconsistencies.
     ///
     /// The `getaddresstxids` RPC needs these transaction IDs to be sorted in chain order.
-    ///
-    /// TODO:
-    /// - use (TransactionLocation, transaction::Hash) as part of PR #3978
-    /// - return as a BTreeMap<TransactionLocation, transaction::Hash>, so transactions are in chain order
-    ///
-    /// Optional:
-    /// - replace tuple value with TransactionLocation, and look up the hash in hash_by_tx
     tx_ids: MultiSet<transaction::Hash>,
 
     /// The partial list of UTXOs received by a transparent address.
@@ -43,31 +36,20 @@ pub struct TransparentTransfers {
     /// but it might in future. So Zebra does it anyway.
     ///
     /// TODO:
-    /// - use BTreeMap as part of PR #3978
     /// - to avoid [`ReadStateService`] response inconsistencies when a block has just been finalized,
-    ///   ignore UTXOs that are at a height less than or equal to the finalized tip.
+    ///   combine the created UTXOs, combine the spent UTXOs, and then remove spent from created
     ///
     /// Optional:
     /// - use Arc<Utxo> to save 2-100 bytes per output?
     /// - if we add an OutputLocation to UTXO, remove this OutputLocation,
     ///   and use the inner OutputLocation to sort Utxos in chain order?
-    created_utxos: HashMap<OutputLocation, transparent::Utxo>,
+    created_utxos: BTreeMap<OutputLocation, transparent::Utxo>,
 
     /// The partial list of UTXOs spent by a transparent address.
     ///
     /// The `getaddressutxos` RPC doesn't need these transaction IDs to be sorted in chain order,
     /// but it might in future. So Zebra does it anyway.
-    ///
-    /// TODO:
-    /// - use BTreeSet as part of PR #3978
-    /// - to avoid [`ReadStateService`] response inconsistencies when a block has just been finalized,
-    ///   ignore UTXOs that are at a height less than or equal to the finalized tip.
-    ///
-    /// Optional:
-    /// - use Arc<Utxo> to save 2-100 bytes per output
-    /// - if we add an OutputLocation to UTXO, remove this OutputLocation,
-    ///   and use the inner OutputLocation to sort Utxos in chain order
-    spent_utxos: HashSet<OutputLocation>,
+    spent_utxos: BTreeSet<OutputLocation>,
 }
 
 // A created UTXO
@@ -104,7 +86,6 @@ impl
             );
         }
 
-        // TODO: store TransactionLocation as part of PR #3978
         self.tx_ids.insert(outpoint.hash);
 
         Ok(())
@@ -128,10 +109,10 @@ impl
             "unexpected revert of created output: duplicate update or duplicate UTXO",
         );
 
-        let hash_was_removed = self.tx_ids.remove(&outpoint.hash);
+        let tx_id_was_removed = self.tx_ids.remove(&outpoint.hash);
         assert!(
-            hash_was_removed,
-            "unexpected revert of created output transaction hash: \
+            tx_id_was_removed,
+            "unexpected revert of created output transaction: \
              duplicate revert, or revert of an output that was never updated",
         );
     }
@@ -144,7 +125,7 @@ impl
     UpdateWith<(
         // The transparent input data
         &transparent::Input,
-        // The transaction the input is from
+        // The hash of the transaction the input is from
         &transaction::Hash,
         // The output spent by the input
         &transparent::Output,
@@ -154,7 +135,7 @@ impl
 {
     fn update_chain_tip_with(
         &mut self,
-        &(spending_input, spending_tx, spent_output, spent_output_tx_loc): &(
+        &(spending_input, spending_tx_hash, spent_output, spent_output_tx_loc): &(
             &transparent::Input,
             &transaction::Hash,
             &transparent::Output,
@@ -174,14 +155,14 @@ impl
         );
 
         // TODO: store TransactionLocation as part of PR #3978
-        self.tx_ids.insert(*spending_tx);
+        self.tx_ids.insert(*spending_tx_hash);
 
         Ok(())
     }
 
     fn revert_chain_with(
         &mut self,
-        &(spending_input, spending_tx, spent_output, spent_output_tx_loc): &(
+        &(spending_input, spending_tx_hash, spent_output, spent_output_tx_loc): &(
             &transparent::Input,
             &transaction::Hash,
             &transparent::Output,
@@ -201,10 +182,10 @@ impl
              duplicate revert, or revert of a spent output that was never updated",
         );
 
-        let hash_was_removed = self.tx_ids.remove(spending_tx);
+        let tx_id_was_removed = self.tx_ids.remove(spending_tx_hash);
         assert!(
-            hash_was_removed,
-            "unexpected revert of spending input transaction hash: \
+            tx_id_was_removed,
+            "unexpected revert of spending input transaction: \
              duplicate revert, or revert of an input that was never updated",
         );
     }
@@ -225,34 +206,28 @@ impl TransparentTransfers {
         self.balance
     }
 
-    /// Returns the [`transaction::Hash`]es that sent or received transparent tranfers to this address,
-    /// in this partial chain, TODO: in chain order.
+    /// Returns the [`TransactionLocation`]s of the transactions that
+    /// sent or received transparent tranfers to this address,
+    /// in this partial chain, in chain order.
     ///
     /// TODO:
-    /// - use (TransactionLocation, transaction::Hash) as part of PR #3978
-    /// - return as a BTreeMap<TransactionLocation, transaction::Hash>, so transactions are in chain order
+    /// - look up transaction hashes in `Chain.tx_by_hash`
     #[allow(dead_code)]
     pub fn tx_ids(&self) -> HashSet<transaction::Hash> {
         self.tx_ids.distinct_elements().copied().collect()
     }
 
     /// Returns the unspent transparent outputs sent to this address,
-    /// in this partial chain, TODO: in chain order.
-    ///
-    /// TODO:
-    /// - use BTreeMap as part of PR #3978
+    /// in this partial chain, in chain order.
     #[allow(dead_code)]
-    pub fn created_utxos(&self) -> &HashMap<OutputLocation, transparent::Utxo> {
+    pub fn created_utxos(&self) -> &BTreeMap<OutputLocation, transparent::Utxo> {
         &self.created_utxos
     }
 
-    /// Returns the spent transparent outputs sent to this address,
-    /// in this partial chain, TODO: in chain order.
-    ///
-    /// TODO:
-    /// - use BTreeMap as part of PR #3978
+    /// Returns the [`OutputLocation`]s of the spent transparent outputs sent to this address,
+    /// in this partial chain, in chain order.
     #[allow(dead_code)]
-    pub fn spent_utxos(&self) -> &HashSet<OutputLocation> {
+    pub fn spent_utxos(&self) -> &BTreeSet<OutputLocation> {
         &self.spent_utxos
     }
 }
