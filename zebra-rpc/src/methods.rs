@@ -22,6 +22,7 @@ use zebra_chain::{
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::{SerializationError, ZcashDeserialize},
     transaction::{self, SerializedTransaction, Transaction},
+    transparent::Address,
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
@@ -140,6 +141,28 @@ pub trait Rpc {
         txid_hex: String,
         verbose: u8,
     ) -> BoxFuture<Result<GetRawTransaction>>;
+
+    /// Returns the transaction ids made by the provided transparent addresses.
+    ///
+    /// zcashd reference: [`getaddresstxids`](https://zcash.github.io/rpc/getaddresstxids.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `addresses`: (json array of string, required) The addresses to get transactions from.
+    /// - `start`: (numeric, required) The lower height to start looking for transactions (inclusive).
+    /// - `end`: (numeric, required) The top height to stop looking for transactions (inclusive).
+    ///
+    /// # Notes
+    ///
+    /// Only the multi-argument format is used by lightwalletd and this is what we currently support:
+    /// https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102
+    #[rpc(name = "getaddresstxids")]
+    fn get_address_tx_ids(
+        &self,
+        addresses: Vec<String>,
+        start: u32,
+        end: u32,
+    ) -> BoxFuture<Result<Vec<String>>>;
 }
 
 /// RPC method implementations.
@@ -526,6 +549,59 @@ where
         }
         .boxed()
     }
+
+    fn get_address_tx_ids(
+        &self,
+        addresses: Vec<String>,
+        start: u32,
+        end: u32,
+    ) -> BoxFuture<Result<Vec<String>>> {
+        let mut state = self.state.clone();
+        let mut response_transactions = vec![];
+        let start = Height(start);
+        let end = Height(end);
+
+        let chain_height = self.latest_chain_tip.best_tip_height().ok_or(Error {
+            code: ErrorCode::ServerError(0),
+            message: "No blocks in state".to_string(),
+            data: None,
+        });
+
+        async move {
+            // height range checks
+            check_height_range(start, end, chain_height?)?;
+
+            let valid_addresses: Result<Vec<Address>> = addresses
+                .iter()
+                .map(|address| {
+                    address.parse().map_err(|_| {
+                        Error::invalid_params(format!("Provided address is not valid: {}", address))
+                    })
+                })
+                .collect();
+
+            let request =
+                zebra_state::ReadRequest::TransactionsByAddresses(valid_addresses?, start, end);
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                zebra_state::ReadResponse::TransactionIds(hashes) => response_transactions
+                    .append(&mut hashes.iter().map(|h| h.to_string()).collect()),
+                _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
+            }
+
+            Ok(response_transactions)
+        }
+        .boxed()
+    }
 }
 
 /// Response to a `getinfo` RPC request.
@@ -649,4 +725,23 @@ impl GetRawTransaction {
             Ok(GetRawTransaction::Raw(tx.into()))
         }
     }
+}
+
+/// Check if provided height range is valid
+fn check_height_range(start: Height, end: Height, chain_height: Height) -> Result<()> {
+    if start == Height(0) || end == Height(0) {
+        return Err(Error::invalid_params(
+            "Start and end are expected to be greater than zero",
+        ));
+    }
+    if end < start {
+        return Err(Error::invalid_params(
+            "End value is expected to be greater than or equal to start",
+        ));
+    }
+    if start > chain_height || end > chain_height {
+        return Err(Error::invalid_params("Start or end is outside chain range"));
+    }
+
+    Ok(())
 }
