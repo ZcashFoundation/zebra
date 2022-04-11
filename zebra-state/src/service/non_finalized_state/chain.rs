@@ -567,6 +567,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         {
             let (
                 inputs,
+                outputs,
                 joinsplit_data,
                 sapling_shielded_data_per_spend_anchor,
                 sapling_shielded_data_shared_anchor,
@@ -574,17 +575,20 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             ) = match transaction.deref() {
                 V4 {
                     inputs,
+                    outputs,
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
                 V5 {
                     inputs,
+                    outputs,
                     sapling_shielded_data,
                     orchard_shielded_data,
                     ..
                 } => (
                     inputs,
+                    outputs,
                     &None,
                     &None,
                     sapling_shielded_data,
@@ -600,14 +604,14 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             let prior_pair = self
                 .tx_by_hash
                 .insert(transaction_hash, transaction_location);
-            assert!(
-                prior_pair.is_none(),
+            assert_eq!(
+                prior_pair, None,
                 "transactions must be unique within a single chain"
             );
 
-            // add the utxos this produced
-            self.update_chain_tip_with(new_outputs)?;
-            // add the utxos this consumed
+            // index the utxos this produced
+            self.update_chain_tip_with(&(outputs, &transaction_hash, new_outputs))?;
+            // index the utxos this consumed
             self.update_chain_tip_with(&(inputs, &transaction_hash, spent_outputs))?;
 
             // add the shielded data
@@ -701,6 +705,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         {
             let (
                 inputs,
+                outputs,
                 joinsplit_data,
                 sapling_shielded_data_per_spend_anchor,
                 sapling_shielded_data_shared_anchor,
@@ -708,17 +713,20 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             ) = match transaction.deref() {
                 V4 {
                     inputs,
+                    outputs,
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
                 V5 {
                     inputs,
+                    outputs,
                     sapling_shielded_data,
                     orchard_shielded_data,
                     ..
                 } => (
                     inputs,
+                    outputs,
                     &None,
                     &None,
                     sapling_shielded_data,
@@ -731,7 +739,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
 
             // remove the utxos this produced
             // uses `tx_by_hash`
-            self.revert_chain_with(new_outputs, position);
+            self.revert_chain_with(&(outputs, transaction_hash, new_outputs), position);
             // remove the utxos this consumed
             // uses `tx_by_hash`
             self.revert_chain_with(&(inputs, transaction_hash, spent_outputs), position);
@@ -791,15 +799,41 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
 }
 
 // Created UTXOs
-impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
+impl
+    UpdateWith<(
+        // The outputs from a transaction in this block
+        &Vec<transparent::Output>,
+        // The hash of the transaction that the outputs are from
+        &transaction::Hash,
+        // The UTXOs for all outputs created by this transaction (or block)
+        &HashMap<transparent::OutPoint, transparent::Utxo>,
+    )> for Chain
+{
     fn update_chain_tip_with(
         &mut self,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        &(created_outputs, creating_tx_hash, block_created_outputs): &(
+            &Vec<transparent::Output>,
+            &transaction::Hash,
+            &HashMap<transparent::OutPoint, transparent::Utxo>,
+        ),
     ) -> Result<(), ValidateContextError> {
-        self.created_utxos
-            .extend(utxos.iter().map(|(k, v)| (*k, v.clone())));
+        for output_index in 0..created_outputs.len() {
+            let outpoint = transparent::OutPoint {
+                hash: *creating_tx_hash,
+                index: output_index.try_into().expect("valid indexes fit in u32"),
+            };
+            let utxo = block_created_outputs
+                .get(&outpoint)
+                .expect("new_outputs contains all created UTXOs");
 
-        for (outpoint, utxo) in utxos {
+            // Update the chain's created UTXOs
+            let previous_entry = self.created_utxos.insert(outpoint, utxo.clone());
+            assert_eq!(
+                previous_entry, None,
+                "unexpected created output: duplicate update or duplicate UTXO",
+            );
+
+            // Update the address index with this UTXO
             if let Some(receiving_address) = utxo.output.address(self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
@@ -818,7 +852,11 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
                         continue;
                     };
 
-                address_transfers.update_chain_tip_with(&(outpoint, utxo, transaction_location))?;
+                address_transfers.update_chain_tip_with(&(
+                    &outpoint,
+                    utxo,
+                    transaction_location,
+                ))?;
             }
         }
 
@@ -827,13 +865,30 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
 
     fn revert_chain_with(
         &mut self,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        &(created_outputs, creating_tx_hash, block_created_outputs): &(
+            &Vec<transparent::Output>,
+            &transaction::Hash,
+            &HashMap<transparent::OutPoint, transparent::Utxo>,
+        ),
         position: RevertPosition,
     ) {
-        self.created_utxos
-            .retain(|outpoint, _| !utxos.contains_key(outpoint));
+        for output_index in 0..created_outputs.len() {
+            let outpoint = transparent::OutPoint {
+                hash: *creating_tx_hash,
+                index: output_index.try_into().expect("valid indexes fit in u32"),
+            };
+            let utxo = block_created_outputs
+                .get(&outpoint)
+                .expect("new_outputs contains all created UTXOs");
 
-        for (outpoint, utxo) in utxos {
+            // Revert the chain's created UTXOs
+            let removed_entry = self.created_utxos.remove(&outpoint);
+            assert!(
+                removed_entry.is_some(),
+                "unexpected revert of created output: duplicate revert or duplicate UTXO",
+            );
+
+            // Revert the address index for this UTXO
             if let Some(receiving_address) = utxo.output.address(self.network) {
                 let address_transfers = self
                     .partial_transparent_transfers
@@ -846,7 +901,7 @@ impl UpdateWith<HashMap<transparent::OutPoint, transparent::Utxo>> for Chain {
                     .expect("transaction is reverted after its UTXOs are reverted");
 
                 address_transfers
-                    .revert_chain_with(&(outpoint, utxo, transaction_location), position);
+                    .revert_chain_with(&(&outpoint, utxo, transaction_location), position);
 
                 // Remove this transfer if it is now empty
                 if address_transfers.is_empty() {
