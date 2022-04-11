@@ -365,7 +365,7 @@ jobs:
         # Only run if the earlier step succeeds
         if: ${{ steps.sync-to-checkpoint.outcome == 'success' }}
         run: |
-          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }}-checkpoint \
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }}-checkpoint \
           --force \
           --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint \
           --source-disk-zone=${{ env.ZONE }} \
