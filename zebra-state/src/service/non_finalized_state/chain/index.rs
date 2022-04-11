@@ -77,14 +77,10 @@ impl
 
         let output_location = OutputLocation::from_outpoint(*transaction_location, outpoint);
         let previous_entry = self.created_utxos.insert(output_location, utxo.clone());
-
-        // TODO: stop creating duplicate UTXOs in the tests, then assert unconditionally
-        if !cfg!(test) {
-            assert_eq!(
-                previous_entry, None,
-                "unexpected created output: duplicate update or duplicate UTXO",
-            );
-        }
+        assert_eq!(
+            previous_entry, None,
+            "unexpected created output: duplicate update or duplicate UTXO",
+        );
 
         self.tx_ids.insert(outpoint.hash);
 

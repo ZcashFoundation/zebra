@@ -840,17 +840,9 @@ impl
                     .entry(receiving_address)
                     .or_default();
 
-                // TODO: fix tests to supply correct transaction IDs, and turn this into an expect()
-                let transaction_location =
-                    if let Some(transaction_location) = self.tx_by_hash.get(&outpoint.hash) {
-                        transaction_location
-                    } else if !cfg!(test) {
-                        panic!(
-                        "unexpected missing transaction hash: transaction must already be indexed"
-                    );
-                    } else {
-                        continue;
-                    };
+                let transaction_location = self.tx_by_hash.get(&outpoint.hash).expect(
+                    "unexpected missing transaction hash: transaction must already be indexed",
+                );
 
                 address_transfers.update_chain_tip_with(&(
                     &outpoint,
@@ -943,12 +935,12 @@ impl
 
             // Index the spent outpoint in the chain
             let duplicate_spend = self.spent_utxos.insert(spent_outpoint);
-            // TODO: stop creating duplicate UTXOs in the tests, then assert unconditionally
+            // TODO: stop creating duplicate spends in the tests, then assert unconditionally
             if !cfg!(test) {
                 assert!(!duplicate_spend);
             }
 
-            // TODO: fix tests to supply correct spent outputs, and turn this into an expect()
+            // TODO: fix tests to supply correct spent outputs, then turn this into an expect()
             let spent_output = if let Some(spent_output) = spent_outputs.get(&spent_outpoint) {
                 spent_output
             } else if !cfg!(test) {
@@ -1004,7 +996,7 @@ impl
                 "spent_utxos must be present if block was added to chain"
             );
 
-            // TODO: fix tests to supply correct spent outputs, and turn this into an expect()
+            // TODO: fix tests to supply correct spent outputs, then turn this into an expect()
             let spent_output = if let Some(spent_output) = spent_outputs.get(&spent_outpoint) {
                 spent_output
             } else if !cfg!(test) {
