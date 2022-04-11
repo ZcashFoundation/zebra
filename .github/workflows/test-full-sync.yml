@@ -203,6 +203,7 @@ jobs:
               sleep 10
           done
 
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
 
       - name: Full sync

@@ -312,8 +312,8 @@ jobs:
               sleep 10
           done
 
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
-          sleep 60
 
       - name: Regenerate stateful disks
         id: sync-to-checkpoint
@@ -352,7 +352,7 @@ jobs:
           SYNC_HEIGHT=""
 
           while [[ ${SYNC_HEIGHT} == "" ]]; do
-              SYNC_HEIGHT=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' --order="desc" --limit=1 '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+finished initial sync to chain tip.+Height\([0-9]+\).+")' | grep -oE 'Height\([0-9]+\)' | grep -oE '[0-9]+' || [[ $? == 1 ]] )
+              SYNC_HEIGHT=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' --order="desc" --limit=1 '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+flushing database to disk height.+Height.+Height\([0-9]+\).+")' | grep -oE 'Height\([0-9]+\)' | grep -oE '[0-9]+' || [[ $? == 1 ]] )
               echo "SYNC_HEIGHT: $SYNC_HEIGHT"
               sleep 10
           done
@@ -474,8 +474,8 @@ jobs:
               sleep 10
           done
 
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
-          sleep 60
 
       - name: Sync past mandatory checkpoint
         id: sync-past-checkpoint
