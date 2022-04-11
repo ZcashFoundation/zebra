@@ -6,10 +6,13 @@ use mset::MultiSet;
 
 use zebra_chain::{
     amount::{Amount, NegativeAllowed},
+    block::Height,
     transaction, transparent,
 };
 
-use crate::{OutputLocation, TransactionLocation, ValidateContextError};
+use crate::{
+    request::ContextuallyValidBlock, OutputLocation, TransactionLocation, ValidateContextError,
+};
 
 use super::{RevertPosition, UpdateWith};
 
@@ -43,7 +46,7 @@ pub struct TransparentTransfers {
     /// - store `Utxo`s in the chain, and just store the created locations for this address
     /// - if we add an OutputLocation to UTXO, remove this OutputLocation,
     ///   and use the inner OutputLocation to sort Utxos in chain order
-    created_utxos: BTreeMap<OutputLocation, transparent::OrderedUtxo>,
+    created_utxos: BTreeMap<OutputLocation, transparent::Output>,
 
     /// The partial list of UTXOs spent by a transparent address.
     ///
@@ -83,7 +86,7 @@ impl
         let output_location = OutputLocation::from_outpoint(*transaction_location, outpoint);
         let previous_entry = self
             .created_utxos
-            .insert(output_location, created_utxo.clone());
+            .insert(output_location, created_utxo.utxo.output.clone());
         assert_eq!(
             previous_entry, None,
             "unexpected created output: duplicate update or duplicate UTXO",
@@ -239,9 +242,27 @@ impl TransparentTransfers {
 
     /// Returns the unspent transparent outputs sent to this address,
     /// in this partial chain, in chain order.
+    ///
+    /// `chain_blocks` should be the `blocks` field from the [`Chain`] containing this index.
+    ///
+    /// # Panics
+    ///
+    /// If `chain_blocks` is missing some transaction hashes from this index.
     #[allow(dead_code)]
-    pub fn created_utxos(&self) -> &BTreeMap<OutputLocation, transparent::OrderedUtxo> {
-        &self.created_utxos
+    pub fn created_utxos(
+        &self,
+        chain_blocks: &BTreeMap<Height, ContextuallyValidBlock>,
+    ) -> BTreeMap<OutputLocation, (transparent::Output, transaction::Hash)> {
+        self.created_utxos
+            .iter()
+            .map(|(output_location, output)| {
+                let tx_loc = output_location.transaction_location();
+                let transaction_hash =
+                    chain_blocks[&tx_loc.height].transaction_hashes[tx_loc.index.as_usize()];
+
+                (*output_location, (output.clone(), transaction_hash))
+            })
+            .collect()
     }
 
     /// Returns the [`OutputLocation`]s of the spent transparent outputs sent to this address,

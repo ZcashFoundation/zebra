@@ -360,6 +360,29 @@ impl Chain {
         })
     }
 
+    /// Returns the [`Transaction`] at [`TransactionLocation`], if it exists in this chain.
+    #[allow(dead_code)]
+    pub fn transaction_by_loc(&self, tx_loc: TransactionLocation) -> Option<&Arc<Transaction>> {
+        self.blocks
+            .get(&tx_loc.height)?
+            .block
+            .transactions
+            .get(tx_loc.index.as_usize())
+    }
+
+    /// Returns the [`transaction::Hash`] for the transaction at [`TransactionLocation`],
+    /// if it exists in this chain.
+    #[allow(dead_code)]
+    pub fn transaction_hash_by_loc(
+        &self,
+        tx_loc: TransactionLocation,
+    ) -> Option<&transaction::Hash> {
+        self.blocks
+            .get(&tx_loc.height)?
+            .transaction_hashes
+            .get(tx_loc.index.as_usize())
+    }
+
     /// Returns the block hash of the tip block.
     pub fn non_finalized_tip_hash(&self) -> block::Hash {
         self.blocks
