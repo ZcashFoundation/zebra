@@ -1,6 +1,3 @@
-target
-**/*.rs.bk
-*.db
 Dockerfile
 .dockerignore
 .git

@@ -272,8 +272,8 @@ jobs:
           gcloud compute instances create-with-container "regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-canopy",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path='/zebrad-cache',name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-canopy" \
+          --create-disk name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path='/zebrad-cache',name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint" \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -365,9 +365,9 @@ jobs:
         # Only run if the earlier step succeeds
         if: ${{ steps.sync-to-checkpoint.outcome == 'success' }}
         run: |
-          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }}-canopy \
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }}-checkpoint \
           --force \
-          --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-canopy \
+          --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint \
           --source-disk-zone=${{ env.ZONE }} \
           --storage-location=us \
           --description="Created from head branch ${{ env.GITHUB_HEAD_REF_SLUG_URL }} targeting ${{ env.GITHUB_BASE_REF_SLUG }} from PR ${{ env.GITHUB_REF_SLUG_URL }} with commit ${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA }}"
@@ -421,7 +421,7 @@ jobs:
       - name: Get disk state name from gcloud
         id: get-disk-name
         run: |
-          GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-canopy" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "Disk: $GCP_STATE_DISK"
           echo "Description: $(gcloud compute images describe $GCP_STATE_DISK --format='value(DESCRIPTION)')"
 
@@ -434,8 +434,8 @@ jobs:
           gcloud compute instances create-with-container "sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk=image=${{ env.CACHED_DISK_NAME }},name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-canopy,size=100GB,type=pd-ssd \
-          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-canopy \
+          --create-disk=image=${{ env.CACHED_DISK_NAME }},name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint,size=100GB,type=pd-ssd \
+          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
