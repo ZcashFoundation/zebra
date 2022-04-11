@@ -66,23 +66,10 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # If we have accidentally changed the format, but not changed the version,
-      # we want to run with the old cached state, so other jobs fails.
-      - name: Get specific changed files
-        id: changed-files-specific
-        uses: tj-actions/changed-files@v18.6
-        with:
-          files: |
-            zebra-state/**/constants.rs
-
       # Before executing any further steps, validate the local state and remote version are the same,
       # or at least that the local state version is lower than the available cached state version.
-      #
-      # This step should only be validated if there are no changes in the files specifified
-      # in the changed-files-specific step.
       - name: Validate constants.rs version vs cached state version
         id: validate-state-version
-        if: ${{ steps.changed-files-specific.outputs.any_changed != 'true' }}
         run: |
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
           echo "LOCAL_STATE_VERSION: $LOCAL_STATE_VERSION"
