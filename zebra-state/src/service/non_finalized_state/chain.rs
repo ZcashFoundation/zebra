@@ -799,6 +799,8 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
 }
 
 // Created UTXOs
+//
+// TODO: replace arguments with a struct
 impl
     UpdateWith<(
         // The outputs from a transaction in this block
@@ -907,7 +909,7 @@ impl
 
 // Transparent inputs
 //
-// TODO: replace arguments with a struct? (after #3978)
+// TODO: replace arguments with a struct
 impl
     UpdateWith<(
         // The inputs from a transaction in this block

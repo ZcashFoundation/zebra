@@ -40,21 +40,25 @@ pub struct TransparentTransfers {
     ///   combine the created UTXOs, combine the spent UTXOs, and then remove spent from created
     ///
     /// Optional:
-    /// - use Arc<Utxo> to save 2-100 bytes per output?
+    /// - store `Utxo`s in the chain, and just store the created locations for this address
     /// - if we add an OutputLocation to UTXO, remove this OutputLocation,
-    ///   and use the inner OutputLocation to sort Utxos in chain order?
+    ///   and use the inner OutputLocation to sort Utxos in chain order
     created_utxos: BTreeMap<OutputLocation, transparent::Utxo>,
 
     /// The partial list of UTXOs spent by a transparent address.
     ///
     /// The `getaddressutxos` RPC doesn't need these transaction IDs to be sorted in chain order,
     /// but it might in future. So Zebra does it anyway.
+    ///
+    /// Optional TODO:
+    /// - store spent `Utxo`s by location in the chain, use the chain spent UTXOs to filter,
+    ///   and stop storing spent UTXOs by address
     spent_utxos: BTreeSet<OutputLocation>,
 }
 
 // A created UTXO
 //
-// TODO: replace arguments with an Update/Revert enum?
+// TODO: replace arguments with a struct
 impl
     UpdateWith<(
         // The location of the UTXO
@@ -116,7 +120,7 @@ impl
 
 // A transparent input
 //
-// TODO: replace arguments with an Update/Revert enum?
+// TODO: replace arguments with a struct
 impl
     UpdateWith<(
         // The transparent input data
@@ -150,7 +154,6 @@ impl
             "unexpected spent output: duplicate update or duplicate spend",
         );
 
-        // TODO: store TransactionLocation as part of PR #3978
         self.tx_ids.insert(*spending_tx_hash);
 
         Ok(())
