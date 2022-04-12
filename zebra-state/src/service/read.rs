@@ -87,14 +87,11 @@ where
 ///
 /// If the addresses do not exist in the non-finalized `chain` or finalized `db`, returns zero.
 #[allow(dead_code)]
-pub(crate) fn transparent_balance<C>(
-    chain: Option<C>,
+pub(crate) fn transparent_balance(
+    chain: Option<Arc<Chain>>,
     db: &ZebraDb,
     addresses: HashSet<transparent::Address>,
-) -> Result<Amount<NonNegative>, BoxError>
-where
-    C: AsRef<Chain>,
-{
+) -> Result<Amount<NonNegative>, BoxError> {
     let mut balance_result = finalized_transparent_balance(db, &addresses);
 
     // Retry the finalized balance query if it was interruped by a finalizing block
@@ -153,14 +150,11 @@ fn finalized_transparent_balance(
 /// Returns the total transparent balance for the supplied [`transparent::Address`]es.
 ///
 /// If the addresses do not exist in the non-finalized `chain` or finalized `db`, returns zero.
-fn chain_transparent_balance_change<C>(
-    chain: C,
+fn chain_transparent_balance_change(
+    mut chain: Arc<Chain>,
     addresses: &HashSet<transparent::Address>,
     finalized_tip: Option<Height>,
-) -> Amount<NegativeAllowed>
-where
-    C: AsRef<Chain>,
-{
+) -> Amount<NegativeAllowed> {
     // # Correctness
     //
     // The StateService commits blocks to the finalized state before updating the latest chain,
@@ -171,7 +165,7 @@ where
         .map(|tip| (tip + 1).unwrap())
         .unwrap_or(Height(0));
 
-    let mut chain = chain.as_ref().clone();
+    let chain = Arc::make_mut(&mut chain);
 
     assert!(
         chain.non_finalized_root_height() <= required_chain_root,
@@ -189,6 +183,7 @@ where
     // Correctness: some balances might have duplicate creates or spends,
     // so we pop root blocks from `chain` until the chain root is a child of the finalized tip.
     while chain.non_finalized_root_height() < required_chain_root {
+        // TODO: just revert the transparent balances, to improve performance
         chain.pop_root();
     }
 
