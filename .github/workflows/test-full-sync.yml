@@ -143,6 +143,10 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      - uses: actions/checkout@v3.0.0
+        with:
+          persist-credentials: false
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -150,7 +154,9 @@ jobs:
 
       - name: Downcase network name for disks
         run: |
-          echo LOWER_NET_NAME="${{ github.event.inputs.network || env.NETWORK }}" | awk '{print tolower($0)}' >> $GITHUB_ENV
+          NETWORK_CAPS=${{ github.event.inputs.network || env.NETWORK }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -203,19 +209,8 @@ jobs:
               sleep 10
           done
 
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
-
-      - name: Get state version from logs
-        run: |
-          STATE_VERSION=""
-
-          while [[ ${STATE_VERSION} == "" ]]; do
-              STATE_VERSION=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+Opened Zebra state cache.+v[0-9]+.+")' | grep -oE "v[0-9]+" || [[ $? == 1 ]] )
-              echo "STATE_VERSION: $STATE_VERSION"
-              sleep 10
-          done
-
-          echo "STATE_VERSION=$STATE_VERSION" >> $GITHUB_ENV
 
       - name: Full sync
         id: full-sync
@@ -237,6 +232,15 @@ jobs:
 
           exit ${EXIT_CODE}
 
+      - name: Get state version from constants.rs
+        run: |
+          STATE_VERSION=""
+
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
+          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
+
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
+
       - name: Get sync height from logs
         run: |
           SYNC_HEIGHT=""
@@ -253,7 +257,7 @@ jobs:
       # Force the image creation as the disk is still attached, even though is not being used by the container
       - name: Create image from state disk
         run: |
-          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }} \
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }}-tip \
           --force \
           --source-disk=full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --source-disk-zone=${{ env.ZONE }} \
