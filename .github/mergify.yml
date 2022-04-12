@@ -2,7 +2,7 @@ queue_rules:
   - name: hotfix
     allow_inplace_checks: False
     allow_checks_interruption: False
-    speculative_checks: 3
+    speculative_checks: 1
     batch_size: 5
     # Just wait 2 minutes to embark hotfixes together in a merge train
     batch_max_wait_time: 120
