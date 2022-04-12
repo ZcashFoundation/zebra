@@ -31,7 +31,7 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/test.yml'
+      - '.github/workflows/integration-tests.yml'
 
 env:
   CARGO_INCREMENTAL: '1'

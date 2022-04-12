@@ -15,7 +15,7 @@ on:
       - '**/Cargo.lock'
       - '**/deny.toml'
       # workflow definitions
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/unit-tests.yml'
 
 env:
   CARGO_INCREMENTAL: 0

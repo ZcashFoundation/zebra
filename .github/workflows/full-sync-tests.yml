@@ -26,7 +26,7 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/test-full-sync.yml'
+      - '.github/workflows/full-sync-test.yml'
 
 env:
   CARGO_INCREMENTAL: '1'

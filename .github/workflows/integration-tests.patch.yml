@@ -11,7 +11,7 @@ on:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - 'docker/**'
-      - '.github/workflows/test.yml'
+      - '.github/workflows/integration-tests.yml'
 
 jobs:
   build:
