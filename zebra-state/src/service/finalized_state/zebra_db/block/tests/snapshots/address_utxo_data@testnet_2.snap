@@ -4,21 +4,13 @@ expression: stored_address_utxos
 ---
 [
   ("t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi", [
-    Utxo(
-      output: Output(
-        value: Amount(12500),
-        lock_script: Script("a914ef775f1f997f122a062fff1a2d7443abd1f9c64287"),
-      ),
-      height: Height(1),
-      from_coinbase: true,
+    Output(
+      value: Amount(12500),
+      lock_script: Script("a914ef775f1f997f122a062fff1a2d7443abd1f9c64287"),
     ),
-    Utxo(
-      output: Output(
-        value: Amount(25000),
-        lock_script: Script("a914ef775f1f997f122a062fff1a2d7443abd1f9c64287"),
-      ),
-      height: Height(2),
-      from_coinbase: true,
+    Output(
+      value: Amount(25000),
+      lock_script: Script("a914ef775f1f997f122a062fff1a2d7443abd1f9c64287"),
     ),
   ]),
 ]
