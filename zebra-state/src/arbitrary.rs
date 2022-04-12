@@ -109,7 +109,7 @@ impl ContextuallyValidBlock {
             lock_script: transparent::Script::new(&[]),
         };
 
-        let zero_utxo = transparent::OrderedUtxo::new(zero_output, block::Height(1), false, 1);
+        let zero_utxo = transparent::OrderedUtxo::new(zero_output, block::Height(1), 1);
 
         let zero_spent_utxos = block
             .block
