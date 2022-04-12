@@ -1,6 +1,6 @@
 //! Test vectors and randomised property tests for UTXO contextual validation
 
-use std::{convert::TryInto, env, sync::Arc};
+use std::{env, sync::Arc};
 
 use proptest::prelude::*;
 
@@ -43,19 +43,16 @@ fn accept_shielded_mature_coinbase_utxo_spend() {
         value: Amount::zero(),
         lock_script: transparent::Script::new(&[]),
     };
-    let utxo = transparent::Utxo {
-        output,
-        height: created_height,
-        from_coinbase: true,
-    };
+    let ordered_utxo = transparent::OrderedUtxo::new(output, created_height, 0);
 
     let min_spend_height = Height(created_height.0 + MIN_TRANSPARENT_COINBASE_MATURITY);
     let spend_restriction = transparent::CoinbaseSpendRestriction::OnlyShieldedOutputs {
         spend_height: min_spend_height,
     };
 
-    let result = check::utxo::transparent_coinbase_spend(outpoint, spend_restriction, utxo.clone());
-    assert_eq!(result, Ok(utxo));
+    let result =
+        check::utxo::transparent_coinbase_spend(outpoint, spend_restriction, ordered_utxo.clone());
+    assert_eq!(result, Ok(ordered_utxo));
 }
 
 /// Check that non-shielded spends of coinbase transparent outputs fail.
@@ -72,15 +69,11 @@ fn reject_unshielded_coinbase_utxo_spend() {
         value: Amount::zero(),
         lock_script: transparent::Script::new(&[]),
     };
-    let utxo = transparent::Utxo {
-        output,
-        height: created_height,
-        from_coinbase: true,
-    };
+    let ordered_utxo = transparent::OrderedUtxo::new(output, created_height, 0);
 
     let spend_restriction = transparent::CoinbaseSpendRestriction::SomeTransparentOutputs;
 
-    let result = check::utxo::transparent_coinbase_spend(outpoint, spend_restriction, utxo);
+    let result = check::utxo::transparent_coinbase_spend(outpoint, spend_restriction, ordered_utxo);
     assert_eq!(result, Err(UnshieldedTransparentCoinbaseSpend { outpoint }));
 }
 
@@ -98,18 +91,14 @@ fn reject_immature_coinbase_utxo_spend() {
         value: Amount::zero(),
         lock_script: transparent::Script::new(&[]),
     };
-    let utxo = transparent::Utxo {
-        output,
-        height: created_height,
-        from_coinbase: true,
-    };
+    let ordered_utxo = transparent::OrderedUtxo::new(output, created_height, 0);
 
     let min_spend_height = Height(created_height.0 + MIN_TRANSPARENT_COINBASE_MATURITY);
     let spend_height = Height(min_spend_height.0 - 1);
     let spend_restriction =
         transparent::CoinbaseSpendRestriction::OnlyShieldedOutputs { spend_height };
 
-    let result = check::utxo::transparent_coinbase_spend(outpoint, spend_restriction, utxo);
+    let result = check::utxo::transparent_coinbase_spend(outpoint, spend_restriction, ordered_utxo);
     assert_eq!(
         result,
         Err(ImmatureTransparentCoinbaseSpend {
