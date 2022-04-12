@@ -160,7 +160,7 @@ impl StartCmd {
             .service(mempool);
 
         // Launch RPC server
-        let rpc_task_handle = RpcServer::spawn(
+        let (rpc_task_handle, rpc_tx_queue_task_handle) = RpcServer::spawn(
             config.rpc,
             app_version(),
             mempool.clone(),
@@ -183,7 +183,7 @@ impl StartCmd {
 
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
-        let mut block_gossip_task_handle = tokio::spawn(
+        let block_gossip_task_handle = tokio::spawn(
             sync::gossip_best_tip_block_hashes(
                 sync_status.clone(),
                 chain_tip_change.clone(),
@@ -218,7 +218,9 @@ impl StartCmd {
 
         // ongoing tasks
         pin!(rpc_task_handle);
+        pin!(rpc_tx_queue_task_handle);
         pin!(syncer_task_handle);
+        pin!(block_gossip_task_handle);
         pin!(mempool_crawler_task_handle);
         pin!(mempool_queue_checker_task_handle);
         pin!(tx_gossip_task_handle);
@@ -237,6 +239,13 @@ impl StartCmd {
                     rpc_result
                         .expect("unexpected panic in the rpc task");
                     info!("rpc task exited");
+                    Ok(())
+                }
+
+                rpc_tx_queue_result = &mut rpc_tx_queue_task_handle => {
+                    rpc_tx_queue_result
+                        .expect("unexpected panic in the rpc transaction queue task");
+                    info!("rpc transaction queue task exited");
                     Ok(())
                 }
 
@@ -298,12 +307,14 @@ impl StartCmd {
         info!("exiting Zebra because an ongoing task exited: stopping other tasks");
 
         // ongoing tasks
+        rpc_task_handle.abort();
+        rpc_tx_queue_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
         mempool_crawler_task_handle.abort();
         mempool_queue_checker_task_handle.abort();
         tx_gossip_task_handle.abort();
-        rpc_task_handle.abort();
+        progress_task_handle.abort();
 
         // startup tasks
         groth16_download_handle.abort();
