@@ -108,7 +108,7 @@ impl ZebraDb {
     pub fn address_utxos(
         &self,
         address: &transparent::Address,
-    ) -> BTreeMap<OutputLocation, transparent::Utxo> {
+    ) -> BTreeMap<OutputLocation, transparent::Output> {
         let address_location = match self.address_location(address) {
             Some(address_location) => address_location,
             None => return BTreeMap::new(),
@@ -123,7 +123,8 @@ impl ZebraDb {
                 Some((
                     addr_out_loc.unspent_output_location(),
                     self.utxo_by_location(addr_out_loc.unspent_output_location())?
-                        .utxo,
+                        .utxo
+                        .output,
                 ))
             })
             .collect()
