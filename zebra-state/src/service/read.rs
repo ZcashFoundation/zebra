@@ -21,6 +21,13 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+/// If the transparent address balance queries are interrupted by a new finalized block,
+/// retry this many times.
+///
+/// Once we're at the tip, we expect up to 2 blocks to arrive at the same time.
+/// If any more arrive, the client should wait until we're synchronised with our peers.
+const FINALIZED_ADDRESS_BALANCE_RETRIES: usize = 3;
+
 /// Returns the [`Block`] with [`block::Hash`](zebra_chain::block::Hash) or
 /// [`Height`](zebra_chain::block::Height),
 /// if it exists in the non-finalized `chain` or finalized `db`.
@@ -88,7 +95,18 @@ pub(crate) fn transparent_balance<C>(
 where
     C: AsRef<Chain>,
 {
-    let (mut balance, finalized_tip) = finalized_transparent_balance(db, &addresses)?;
+    let mut balance_result = finalized_transparent_balance(db, &addresses);
+
+    // Retry the finalized balance query if it was interruped by a finalizing block
+    for _ in 0..FINALIZED_ADDRESS_BALANCE_RETRIES {
+        if balance_result.is_ok() {
+            break;
+        }
+
+        balance_result = finalized_transparent_balance(db, &addresses);
+    }
+
+    let (mut balance, finalized_tip) = balance_result?;
 
     if let Some(chain) = chain {
         let chain_balance_change =
@@ -123,8 +141,6 @@ fn finalized_transparent_balance(
 
     if original_finalized_tip != finalized_tip {
         // Correctness: Some balances might be from before the block, and some after
-        //
-        // TODO: retry a few times?
         return Err("unable to get balance: state was committing a block".into());
     }
 
