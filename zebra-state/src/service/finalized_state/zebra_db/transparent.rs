@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    transparent,
+    transparent::{self, Utxo},
 };
 
 use crate::{
@@ -82,7 +82,14 @@ impl ZebraDb {
     /// if it is unspent in the finalized state.
     pub fn utxo_by_location(&self, output_location: OutputLocation) -> Option<transparent::Utxo> {
         let utxo_by_out_loc = self.db.cf_handle("utxo_by_outpoint").unwrap();
-        self.db.zs_get(&utxo_by_out_loc, &output_location)
+
+        let output = self.db.zs_get(&utxo_by_out_loc, &output_location)?;
+
+        Some(Utxo::from_location(
+            output,
+            output_location.height(),
+            output_location.transaction_index().as_usize(),
+        ))
     }
 }
 
@@ -109,7 +116,8 @@ impl DiskWriteBatch {
 
         // Index all new transparent outputs, before deleting any we've spent
         for (output_location, utxo) in new_outputs_by_out_loc {
-            let receiving_address = utxo.output.address(self.network());
+            let output = utxo.output;
+            let receiving_address = output.address(self.network());
 
             // Update the address balance by adding this UTXO's value
             if let Some(receiving_address) = receiving_address {
@@ -118,13 +126,13 @@ impl DiskWriteBatch {
                     .or_insert_with(|| AddressBalanceLocation::new(output_location))
                     .balance_mut();
 
-                let new_address_balance = (*address_balance + utxo.output.value())
-                    .expect("balance overflow already checked");
+                let new_address_balance =
+                    (*address_balance + output.value()).expect("balance overflow already checked");
 
                 *address_balance = new_address_balance;
             }
 
-            self.zs_insert(&utxo_by_outpoint, output_location, utxo);
+            self.zs_insert(&utxo_by_outpoint, output_location, output);
         }
 
         // Mark all transparent inputs as spent.

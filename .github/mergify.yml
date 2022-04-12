@@ -12,7 +12,7 @@ queue_rules:
       - check-success=Test full validation sync from cached state
       - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
       - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macOS-latest
+      - check-success=Test stable on macos-latest
       # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
       # - check-success=Test stable on windows-latest
       - check-success=Clippy
@@ -31,7 +31,7 @@ queue_rules:
       - check-success=Test full validation sync from cached state
       - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
       - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macOS-latest
+      - check-success=Test stable on macos-latest
       # - check-success=Test stable on windows-latest
       - check-success=Clippy
       - check-success=Rustfmt
@@ -49,7 +49,7 @@ queue_rules:
       - check-success=Test full validation sync from cached state
       - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
       - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macOS-latest
+      - check-success=Test stable on macos-latest
       # - check-success=Test stable on windows-latest
       - check-success=Clippy
       - check-success=Rustfmt
@@ -57,11 +57,11 @@ queue_rules:
 pull_request_rules:
   - name: move to hotfix queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - "#approved-reviews-by>=1"
-      - "#review-threads-unresolved=0"
+      - '#approved-reviews-by>=1'
+      - '#review-threads-unresolved=0'
       - -draft
       - base=main
-      - "label~=^P-Critical"
+      - 'label~=^P-Critical'
       - label!=do-not-merge
     actions:
       queue:
@@ -70,13 +70,13 @@ pull_request_rules:
 
   - name: move to high queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - "#approved-reviews-by>=1"
-      - "#review-threads-unresolved=0"
+      - '#approved-reviews-by>=1'
+      - '#review-threads-unresolved=0'
       - -draft
       - base=main
       - or:
-          - "label~=^P-High"
-          - "label~=^P-Medium"
+          - 'label~=^P-High'
+          - 'label~=^P-Medium'
       - label!=do-not-merge
     actions:
       queue:
@@ -85,8 +85,8 @@ pull_request_rules:
 
   - name: move to low queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - "#approved-reviews-by>=1"
-      - "#review-threads-unresolved=0"
+      - '#approved-reviews-by>=1'
+      - '#review-threads-unresolved=0'
       - -draft
       - base=main
       - label!=do-not-merge

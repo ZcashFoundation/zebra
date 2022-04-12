@@ -1823,8 +1823,7 @@ fn mock_transparent_transfer(
         lock_script,
     };
 
-    let previous_utxo =
-        transparent::OrderedUtxo::new(previous_output, previous_utxo_height, false, 1);
+    let previous_utxo = transparent::OrderedUtxo::new(previous_output, previous_utxo_height, 1);
 
     // Use the `previous_outpoint` as input
     let input = transparent::Input::PrevOut {

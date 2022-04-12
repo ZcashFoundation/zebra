@@ -159,18 +159,6 @@ fn roundtrip_address_balance_location() {
 }
 
 #[test]
-fn roundtrip_unspent_transparent_output() {
-    zebra_test::init();
-
-    proptest!(
-        |(mut val in any::<transparent::Utxo>())| {
-            val.height = val.height.clamp(Height(0), MAX_ON_DISK_HEIGHT);
-            assert_value_properties(val)
-        }
-    );
-}
-
-#[test]
 fn roundtrip_transparent_output() {
     zebra_test::init();
 
