@@ -3,13 +3,13 @@ name: CI
 on:
   pull_request:
     paths-ignore:
-      - "**/*.rs"
-      - "**/*.txt"
-      - "**/*.snap"
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - "**/deny.toml"
-      - ".github/workflows/ci.yml"
+      - '**/*.rs'
+      - '**/*.txt'
+      - '**/*.snap'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/deny.toml'
+      - '.github/workflows/ci.yml'
 
 jobs:
   test:

@@ -7,15 +7,15 @@ on:
       - main
     paths:
       # doc source files
-      - "book/**"
-      - "**/firebase.json"
-      - "katex-header.html"
+      - 'book/**'
+      - '**/firebase.json'
+      - 'katex-header.html'
       # rustdoc source files
-      - "**/*.rs"
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
       # workflow definitions
-      - ".github/workflows/docs.yml"
+      - '.github/workflows/docs.yml'
 
 jobs:
   build:
