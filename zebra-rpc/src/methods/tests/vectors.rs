@@ -322,7 +322,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
-    let rpc = RpcImpl::new(
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
@@ -385,6 +385,10 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     );
 
     mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
 #[tokio::test]
@@ -408,7 +412,7 @@ async fn rpc_getaddresstxids_response() {
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
-    let rpc = RpcImpl::new(
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
@@ -430,4 +434,8 @@ async fn rpc_getaddresstxids_response() {
     assert_eq!(response.len(), 0);
 
     mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
 }
