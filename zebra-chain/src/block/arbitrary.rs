@@ -373,7 +373,7 @@ impl Arbitrary for Block {
 pub fn allow_all_transparent_coinbase_spends(
     _: transparent::OutPoint,
     _: transparent::CoinbaseSpendRestriction,
-    _: transparent::Utxo,
+    _: transparent::OrderedUtxo,
 ) -> Result<(), ()> {
     Ok(())
 }
@@ -400,7 +400,7 @@ impl Block {
         F: Fn(
                 transparent::OutPoint,
                 transparent::CoinbaseSpendRestriction,
-                transparent::Utxo,
+                transparent::OrderedUtxo,
             ) -> Result<T, E>
             + Copy
             + 'static,
@@ -560,7 +560,7 @@ where
     F: Fn(
             transparent::OutPoint,
             transparent::CoinbaseSpendRestriction,
-            transparent::Utxo,
+            transparent::OrderedUtxo,
         ) -> Result<T, E>
         + Copy
         + 'static,
@@ -641,7 +641,7 @@ where
     F: Fn(
             transparent::OutPoint,
             transparent::CoinbaseSpendRestriction,
-            transparent::Utxo,
+            transparent::OrderedUtxo,
         ) -> Result<T, E>
         + Copy
         + 'static,
@@ -652,8 +652,6 @@ where
 
     // choose an arbitrary spendable UTXO, in hash set order
     while let Some((candidate_outpoint, candidate_utxo)) = utxos.iter().next() {
-        let candidate_utxo = candidate_utxo.clone().utxo;
-
         attempts += 1;
 
         // Avoid O(n^2) algorithmic complexity by giving up early,

@@ -233,6 +233,7 @@ impl ZebraDb {
                             lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
                         }),
                         self.utxo(&outpoint)
+                            .map(|ordered_utxo| ordered_utxo.utxo)
                             .or_else(|| finalized.new_outputs.get(&outpoint).cloned())
                             .expect("already checked UTXO was in state or block"),
                     )

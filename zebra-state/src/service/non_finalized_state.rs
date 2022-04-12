@@ -275,12 +275,12 @@ impl NonFinalizedState {
         self.chain_set.iter().rev().find(|chain| predicate(chain))
     }
 
-    /// Returns the `transparent::Output` pointed to by the given
-    /// `transparent::OutPoint` if it is present in any chain.
+    /// Returns the [`transparent::Utxo`] pointed to by the given
+    /// [`transparent::OutPoint`] if it is present in any chain.
     pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         for chain in self.chain_set.iter().rev() {
             if let Some(utxo) = chain.created_utxos.get(outpoint) {
-                return Some(utxo.clone());
+                return Some(utxo.utxo.clone());
             }
         }
 

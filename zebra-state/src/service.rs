@@ -66,6 +66,8 @@ pub mod arbitrary;
 #[cfg(test)]
 mod tests;
 
+pub use finalized_state::{OutputLocation, TransactionLocation};
+
 pub type QueuedBlock = (
     PreparedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
@@ -507,7 +509,12 @@ impl StateService {
         self.mem
             .any_utxo(outpoint)
             .or_else(|| self.queued_blocks.utxo(outpoint))
-            .or_else(|| self.disk.db().utxo(outpoint))
+            .or_else(|| {
+                self.disk
+                    .db()
+                    .utxo(outpoint)
+                    .map(|ordered_utxo| ordered_utxo.utxo)
+            })
     }
 
     /// Return an iterator over the relevant chain of the block identified by
