@@ -374,22 +374,25 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                     // The genesis transaction's UTXO is not indexed.
                     // This check also ignores spent UTXOs.
                     if let Some(stored_utxo) = &stored_utxo_by_out_loc {
-                        assert_eq!(&stored_utxo.output, output);
-                        assert_eq!(stored_utxo.height, query_height);
+                        assert_eq!(&stored_utxo.utxo.output, output);
+                        assert_eq!(stored_utxo.utxo.height, query_height);
 
                         assert_eq!(
-                            stored_utxo.from_coinbase,
+                            stored_utxo.utxo.from_coinbase,
                             transaction_location.index == TransactionIndex::from_usize(0),
                             "coinbase transactions must be the first transaction in a block:\n\
                              from_coinbase was: {from_coinbase},\n\
                              but transaction index was: {tx_index},\n\
                              at: {transaction_location:?},\n\
                              {output_location:?}",
-                            from_coinbase = stored_utxo.from_coinbase,
+                            from_coinbase = stored_utxo.utxo.from_coinbase,
                         );
                     }
 
-                    stored_utxos.push((output_location, stored_utxo_by_out_loc));
+                    stored_utxos.push((
+                        output_location,
+                        stored_utxo_by_out_loc.map(|ordered_utxo| ordered_utxo.utxo),
+                    ));
                 }
             }
         }
