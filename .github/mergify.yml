@@ -4,6 +4,8 @@ queue_rules:
     allow_checks_interruption: False
     speculative_checks: 3
     batch_size: 5
+    # Just wait 2 minutes to embark hotfixes together in a merge train
+    batch_max_wait_time: 120
     conditions:
       - check-success=Test all
       - check-success=Test with fake activation heights
@@ -21,6 +23,8 @@ queue_rules:
     allow_checks_interruption: True
     speculative_checks: 3
     batch_size: 5
+    # Wait 10 minutes to embark high priority tickets together in a merge train
+    batch_max_wait_time: 300
     conditions:
       - check-success=Test all
       - check-success=Test with fake activation heights
@@ -37,6 +41,8 @@ queue_rules:
     allow_checks_interruption: True
     speculative_checks: 3
     batch_size: 5
+    # Wait 1 hour to embark low priority tickets together in a merge train
+    batch_max_wait_time: 3600
     conditions:
       - check-success=Test all
       - check-success=Test with fake activation heights
