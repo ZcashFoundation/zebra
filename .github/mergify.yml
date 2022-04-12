@@ -2,8 +2,8 @@ queue_rules:
   - name: hotfix
     allow_inplace_checks: False
     allow_checks_interruption: False
-    speculative_checks: 2
-    batch_size: 2
+    speculative_checks: 3
+    batch_size: 5
     conditions:
       - check-success=Test all
       - check-success=Test with fake activation heights
@@ -19,8 +19,8 @@ queue_rules:
   - name: high
     allow_inplace_checks: False
     allow_checks_interruption: False
-    speculative_checks: 2
-    batch_size: 3
+    speculative_checks: 3
+    batch_size: 5
     conditions:
       - check-success=Test all
       - check-success=Test with fake activation heights
@@ -35,8 +35,8 @@ queue_rules:
   - name: low
     allow_inplace_checks: False
     allow_checks_interruption: False
-    speculative_checks: 2
-    batch_size: 4
+    speculative_checks: 3
+    batch_size: 5
     conditions:
       - check-success=Test all
       - check-success=Test with fake activation heights
