@@ -762,10 +762,8 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             };
 
             // remove the utxos this produced
-            // uses `tx_by_hash`
             self.revert_chain_with(&(outputs, transaction_hash, new_outputs), position);
             // remove the utxos this consumed
-            // uses `tx_by_hash`
             self.revert_chain_with(&(inputs, transaction_hash, spent_outputs), position);
 
             // remove `transaction.hash` from `tx_by_hash`
@@ -866,15 +864,7 @@ impl
                     .entry(receiving_address)
                     .or_default();
 
-                let transaction_location = self.tx_by_hash.get(&outpoint.hash).expect(
-                    "unexpected missing transaction hash: transaction must already be indexed",
-                );
-
-                address_transfers.update_chain_tip_with(&(
-                    &outpoint,
-                    created_utxo,
-                    transaction_location,
-                ))?;
+                address_transfers.update_chain_tip_with(&(&outpoint, created_utxo))?;
             }
         }
 
@@ -913,13 +903,7 @@ impl
                     .get_mut(&receiving_address)
                     .expect("block has previously been applied to the chain");
 
-                let transaction_location = self
-                    .tx_by_hash
-                    .get(&outpoint.hash)
-                    .expect("transaction is reverted after its UTXOs are reverted");
-
-                address_transfers
-                    .revert_chain_with(&(&outpoint, created_utxo, transaction_location), position);
+                address_transfers.revert_chain_with(&(&outpoint, created_utxo), position);
 
                 // Remove this transfer if it is now empty
                 if address_transfers.is_empty() {

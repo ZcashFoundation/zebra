@@ -67,23 +67,20 @@ impl
         // The location of the UTXO
         &transparent::OutPoint,
         // The UTXO data
+        // Includes the location of the transaction that created the output
         &transparent::OrderedUtxo,
-        // The location of the transaction that creates the UTXO
-        &TransactionLocation,
     )> for TransparentTransfers
 {
     fn update_chain_tip_with(
         &mut self,
-        &(outpoint, created_utxo, transaction_location): &(
-            &transparent::OutPoint,
-            &transparent::OrderedUtxo,
-            &TransactionLocation,
-        ),
+        &(outpoint, created_utxo): &(&transparent::OutPoint, &transparent::OrderedUtxo),
     ) -> Result<(), ValidateContextError> {
         self.balance =
             (self.balance + created_utxo.utxo.output.value().constrain().unwrap()).unwrap();
 
-        let output_location = OutputLocation::from_outpoint(*transaction_location, outpoint);
+        let transaction_location = transaction_location(created_utxo);
+        let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
+
         let previous_entry = self
             .created_utxos
             .insert(output_location, created_utxo.utxo.output.clone());
@@ -99,17 +96,15 @@ impl
 
     fn revert_chain_with(
         &mut self,
-        &(outpoint, created_utxo, transaction_location): &(
-            &transparent::OutPoint,
-            &transparent::OrderedUtxo,
-            &TransactionLocation,
-        ),
+        &(outpoint, created_utxo): &(&transparent::OutPoint, &transparent::OrderedUtxo),
         _position: RevertPosition,
     ) {
         self.balance =
             (self.balance - created_utxo.utxo.output.value().constrain().unwrap()).unwrap();
 
-        let output_location = OutputLocation::from_outpoint(*transaction_location, outpoint);
+        let transaction_location = transaction_location(created_utxo);
+        let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
+
         let removed_entry = self.created_utxos.remove(&output_location);
         assert!(
             removed_entry.is_some(),
