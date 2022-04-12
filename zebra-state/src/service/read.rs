@@ -108,9 +108,10 @@ where
 
     let (mut balance, finalized_tip) = balance_result?;
 
+    // Apply the non-finalized balance changes
     if let Some(chain) = chain {
         let chain_balance_change =
-            chain_transparent_balance_change(chain, &addresses, finalized_tip)?;
+            chain_transparent_balance_change(chain, &addresses, finalized_tip);
 
         balance = apply_balance_change(balance, chain_balance_change).expect(
             "unexpected amount overflow: value balances are valid, so partial sum should be valid",
@@ -156,7 +157,7 @@ fn chain_transparent_balance_change<C>(
     chain: C,
     addresses: &HashSet<transparent::Address>,
     finalized_tip: Option<Height>,
-) -> Result<Amount<NegativeAllowed>, BoxError>
+) -> Amount<NegativeAllowed>
 where
     C: AsRef<Chain>,
 {
@@ -170,16 +171,28 @@ where
         .map(|tip| (tip + 1).unwrap())
         .unwrap_or(Height(0));
 
-    if chain.as_ref().non_finalized_root_height() != required_chain_root {
-        // Correctness: some balances might have duplicate creates or spends
-        //
-        // TODO: pop root blocks from `chain` until the chain root is a child of the finalized tip
-        return Err("unable to get balance: finalized state doesn't match partial chain".into());
+    let mut chain = chain.as_ref().clone();
+
+    assert!(
+        chain.non_finalized_root_height() <= required_chain_root,
+        "unexpected chain gap: the best chain is updated after its previous root is finalized"
+    );
+
+    let chain_tip = chain.non_finalized_tip_height();
+
+    // If we've already committed this entire chain, ignore its balance changes.
+    // This is more likely if the non-finalized state is just getting started.
+    if chain_tip < required_chain_root {
+        return Amount::zero();
     }
 
-    let balance_change = chain.as_ref().partial_transparent_balance_change(addresses);
+    // Correctness: some balances might have duplicate creates or spends,
+    // so we pop root blocks from `chain` until the chain root is a child of the finalized tip.
+    while chain.non_finalized_root_height() < required_chain_root {
+        chain.pop_root();
+    }
 
-    Ok(balance_change)
+    chain.partial_transparent_balance_change(addresses)
 }
 
 /// Add the supplied finalized and non-finalized balances together,
