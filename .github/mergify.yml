@@ -1,5 +1,5 @@
 queue_rules:
-  - name: urgent
+  - name: hotfix
     allow_inplace_checks: False
     allow_checks_interruption: False
     speculative_checks: 2
@@ -16,7 +16,7 @@ queue_rules:
       - check-success=Clippy
       - check-success=Rustfmt
 
-  - name: medium
+  - name: high
     allow_inplace_checks: False
     allow_checks_interruption: False
     speculative_checks: 2
@@ -49,32 +49,32 @@ queue_rules:
       - check-success=Rustfmt
 
 pull_request_rules:
-  - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
+  - name: move to hotfix queue when CI passes with 1 review and not WIP targeting main
+    conditions:
+      - "#approved-reviews-by>=1"
+      - "#review-threads-unresolved=0"
+      - -draft
+      - base=main
+      - "label~=^P-Critical"
+      - label!=do-not-merge
+    actions:
+      queue:
+        name: hotfix
+        method: squash
+
+  - name: move to high queue when CI passes with 1 review and not WIP targeting main
     conditions:
       - "#approved-reviews-by>=1"
       - "#review-threads-unresolved=0"
       - -draft
       - base=main
       - or:
-          - "label~=^P-Critical"
           - "label~=^P-High"
+          - "label~=^P-Medium"
       - label!=do-not-merge
     actions:
       queue:
-        name: urgent
-        method: squash
-
-  - name: move to medium queue when CI passes with 1 review and not WIP targeting main
-    conditions:
-      - "#approved-reviews-by>=1"
-      - "#review-threads-unresolved=0"
-      - -draft
-      - base=main
-      - "label~=^P-Medium"
-      - label!=do-not-merge
-    actions:
-      queue:
-        name: medium
+        name: high
         method: squash
 
   - name: move to low queue when CI passes with 1 review and not WIP targeting main
