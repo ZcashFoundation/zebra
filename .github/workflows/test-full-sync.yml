@@ -5,6 +5,12 @@ on:
     inputs:
       network:
         default: 'Mainnet'
+        description: 'Network to deploy: Mainnet or Testnet'
+        required: true
+      checkpoint_sync:
+        default: 'true'
+        description: 'Configures `zebrad` to use as many checkpoints as possible'
+        required: true
   pull_request:
     branches:
       - main
@@ -24,7 +30,7 @@ on:
 
 env:
   CARGO_INCREMENTAL: '1'
-  ZEBRA_SKIP_IPV6_TESTS: "1"
+  ZEBRA_SKIP_IPV6_TESTS: '1'
   RUST_BACKTRACE: full
   RUST_LIB_BACKTRACE: full
   COLORBT_SHOW_HIDDEN: '1'
@@ -41,7 +47,7 @@ jobs:
   build:
     # only run on Mergify head branches, and on manual dispatch:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if:  startsWith(github.head_ref, 'mergify/merge-queue/') || github.event_name == 'workflow_dispatch'
+    if: startsWith(github.head_ref, 'mergify/merge-queue/') || github.event_name == 'workflow_dispatch'
     name: Build images
     timeout-minutes: 210
     runs-on: ubuntu-latest
@@ -146,7 +152,7 @@ jobs:
   test-full-sync:
     name: Test full Mainnet sync
     runs-on: ubuntu-latest
-    needs: [ build ]
+    needs: [build]
     permissions:
       contents: 'read'
       id-token: 'write'

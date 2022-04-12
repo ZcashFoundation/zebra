@@ -9,6 +9,7 @@
 
 use jsonrpc_core;
 use jsonrpc_http_server::ServerBuilder;
+use tokio::task::JoinHandle;
 use tower::{buffer::Buffer, Service};
 use tracing::*;
 use tracing_futures::Instrument;
@@ -37,7 +38,7 @@ impl RpcServer {
         state: State,
         latest_chain_tip: Tip,
         network: Network,
-    ) -> tokio::task::JoinHandle<()>
+    ) -> (JoinHandle<()>, JoinHandle<()>)
     where
         Version: ToString,
         Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
@@ -52,13 +53,14 @@ impl RpcServer {
             + Sync
             + 'static,
         State::Future: Send,
-        Tip: ChainTip + Send + Sync + 'static,
+        Tip: ChainTip + Clone + Send + Sync + 'static,
     {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
             // Initialize the rpc methods with the zebra version
-            let rpc_impl = RpcImpl::new(app_version, mempool, state, latest_chain_tip, network);
+            let (rpc_impl, rpc_tx_queue_task_handle) =
+                RpcImpl::new(app_version, mempool, state, latest_chain_tip, network);
 
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io =
@@ -87,10 +89,16 @@ impl RpcServer {
                 })
             };
 
-            tokio::task::spawn_blocking(server)
+            (
+                tokio::task::spawn_blocking(server),
+                rpc_tx_queue_task_handle,
+            )
         } else {
-            // There is no RPC port, so the RPC task does nothing.
-            tokio::task::spawn(futures::future::pending().in_current_span())
+            // There is no RPC port, so the RPC tasks do nothing.
+            (
+                tokio::task::spawn(futures::future::pending().in_current_span()),
+                tokio::task::spawn(futures::future::pending().in_current_span()),
+            )
         }
     }
 }

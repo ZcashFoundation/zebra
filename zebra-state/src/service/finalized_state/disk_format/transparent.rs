@@ -18,9 +18,7 @@ use zebra_chain::{
 };
 
 use crate::service::finalized_state::disk_format::{
-    block::{
-        TransactionIndex, TransactionLocation, HEIGHT_DISK_BYTES, TRANSACTION_LOCATION_DISK_BYTES,
-    },
+    block::{TransactionIndex, TransactionLocation, TRANSACTION_LOCATION_DISK_BYTES},
     expand_zero_be_bytes, truncate_zero_be_bytes, FromDisk, IntoDisk,
 };
 
@@ -153,13 +151,11 @@ impl OutputLocation {
     }
 
     /// Returns the height of this [`transparent::Output`].
-    #[allow(dead_code)]
     pub fn height(&self) -> Height {
         self.transaction_location.height
     }
 
     /// Returns the transaction index of this [`transparent::Output`].
-    #[allow(dead_code)]
     pub fn transaction_index(&self) -> TransactionIndex {
         self.transaction_location.index
     }
@@ -402,40 +398,5 @@ impl IntoDisk for transparent::Output {
 impl FromDisk for transparent::Output {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         bytes.as_ref().zcash_deserialize_into().unwrap()
-    }
-}
-
-// TODO: delete UTXO serialization (#3953)
-impl IntoDisk for transparent::Utxo {
-    type Bytes = Vec<u8>;
-
-    fn as_bytes(&self) -> Self::Bytes {
-        let height_bytes = self.height.as_bytes().to_vec();
-        let coinbase_flag_bytes = [self.from_coinbase as u8].to_vec();
-        let output_bytes = self
-            .output
-            .zcash_serialize_to_vec()
-            .expect("serialization to vec doesn't fail");
-
-        [height_bytes, coinbase_flag_bytes, output_bytes].concat()
-    }
-}
-
-impl FromDisk for transparent::Utxo {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let (height_bytes, rest_bytes) = bytes.as_ref().split_at(HEIGHT_DISK_BYTES);
-        let (coinbase_flag_bytes, output_bytes) = rest_bytes.split_at(1);
-
-        let height = Height::from_bytes(height_bytes);
-        let from_coinbase = coinbase_flag_bytes[0] == 1u8;
-        let output = output_bytes
-            .zcash_deserialize_into()
-            .expect("db has valid serialized data");
-
-        Self {
-            output,
-            height,
-            from_coinbase,
-        }
     }
 }
