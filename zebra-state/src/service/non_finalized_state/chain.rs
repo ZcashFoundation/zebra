@@ -236,7 +236,7 @@ impl Chain {
     /// Remove the lowest height block of the non-finalized portion of a chain.
     #[instrument(level = "debug", skip(self))]
     pub(crate) fn pop_root(&mut self) -> ContextuallyValidBlock {
-        let block_height = self.lowest_height();
+        let block_height = self.non_finalized_root_height();
 
         // remove the lowest height block from self.blocks
         let block = self
@@ -251,7 +251,8 @@ impl Chain {
         block
     }
 
-    fn lowest_height(&self) -> block::Height {
+    /// Returns the height of the chain root.
+    pub fn non_finalized_root_height(&self) -> block::Height {
         self.blocks
             .keys()
             .next()
@@ -383,6 +384,15 @@ impl Chain {
             .get(tx_loc.index.as_usize())
     }
 
+    /// Returns the non-finalized tip block hash and height.
+    #[allow(dead_code)]
+    pub fn non_finalized_tip(&self) -> (block::Hash, block::Height) {
+        (
+            self.non_finalized_tip_hash(),
+            self.non_finalized_tip_height(),
+        )
+    }
+
     /// Returns the block hash of the tip block.
     pub fn non_finalized_tip_hash(&self) -> block::Hash {
         self.blocks
@@ -390,6 +400,15 @@ impl Chain {
             .next_back()
             .expect("only called while blocks is populated")
             .hash
+    }
+
+    /// Returns the non-finalized root block hash and height.
+    #[allow(dead_code)]
+    pub fn non_finalized_root(&self) -> (block::Hash, block::Height) {
+        (
+            self.non_finalized_root_hash(),
+            self.non_finalized_root_height(),
+        )
     }
 
     /// Returns the block hash of the non-finalized root block.
@@ -403,7 +422,7 @@ impl Chain {
 
     /// Returns the block hash of the `n`th block from the non-finalized root.
     ///
-    /// This is the block at `lowest_height() + n`.
+    /// This is the block at `non_finalized_root_height() + n`.
     #[allow(dead_code)]
     pub fn non_finalized_nth_hash(&self, n: usize) -> Option<block::Hash> {
         self.blocks.values().nth(n).map(|block| block.hash)
