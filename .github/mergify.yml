@@ -4,49 +4,18 @@ queue_rules:
     allow_checks_interruption: False
     speculative_checks: 2
     batch_size: 2
-    conditions:
-      - check-success=Test all
-      - check-success=Test with fake activation heights
-      - check-success=Test full validation sync from cached state
-      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
-      - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macos-latest
-      # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
-      # - check-success=Test stable on windows-latest
-      - check-success=Clippy
-      - check-success=Rustfmt
 
   - name: medium
     allow_inplace_checks: False
     allow_checks_interruption: False
     speculative_checks: 2
     batch_size: 3
-    conditions:
-      - check-success=Test all
-      - check-success=Test with fake activation heights
-      - check-success=Test full validation sync from cached state
-      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
-      - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macos-latest
-      # - check-success=Test stable on windows-latest
-      - check-success=Clippy
-      - check-success=Rustfmt
 
   - name: low
     allow_inplace_checks: False
     allow_checks_interruption: False
     speculative_checks: 2
     batch_size: 4
-    conditions:
-      - check-success=Test all
-      - check-success=Test with fake activation heights
-      - check-success=Test full validation sync from cached state
-      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
-      - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macos-latest
-      # - check-success=Test stable on windows-latest
-      - check-success=Clippy
-      - check-success=Rustfmt
 
 pull_request_rules:
   - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
