@@ -4,8 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       network:
-        default: "Mainnet"
-        description: "Network to deploy: Mainnet or Testnet"
+        default: 'Mainnet'
+        description: 'Network to deploy: Mainnet or Testnet'
+        required: true
+      checkpoint_sync:
+        default: 'true'
+        description: 'Configures `zebrad` to use as many checkpoints as possible'
         required: true
   pull_request:
     branches:
@@ -13,23 +17,23 @@ on:
     paths:
       # code and tests (including full sync acceptance test changes)
       # TODO: ignore changes in test code that isn't used in the full sync test
-      - "**/*.rs"
+      - '**/*.rs'
       # hard-coded checkpoints
       # TODO: ignore changes to proptest seed .txt files
-      - "**/*.txt"
+      - '**/*.txt'
       # dependencies
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
       # workflow definitions
-      - "docker/**"
-      - ".github/workflows/test-full-sync.yml"
+      - 'docker/**'
+      - '.github/workflows/test-full-sync.yml'
 
 env:
-  CARGO_INCREMENTAL: "1"
-  ZEBRA_SKIP_IPV6_TESTS: "1"
+  CARGO_INCREMENTAL: '1'
+  ZEBRA_SKIP_IPV6_TESTS: '1'
   RUST_BACKTRACE: full
   RUST_LIB_BACKTRACE: full
-  COLORBT_SHOW_HIDDEN: "1"
+  COLORBT_SHOW_HIDDEN: '1'
   NETWORK: Mainnet
   PROJECT_ID: zealous-zebra
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
@@ -48,8 +52,8 @@ jobs:
     timeout-minutes: 210
     runs-on: ubuntu-latest
     permissions:
-      contents: "read"
-      id-token: "write"
+      contents: 'read'
+      id-token: 'write'
     steps:
       - uses: actions/checkout@v3.0.0
         with:
@@ -63,7 +67,7 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v3.6.2
+        uses: docker/metadata-action@v3.7.0
         with:
           # list of Docker images to use as base name for tags
           images: |
@@ -86,11 +90,11 @@ jobs:
 
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.6.0
+        uses: google-github-actions/auth@v0.7.0
         with:
-          workload_identity_provider: "projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc"
-          service_account: "github-service-account@zealous-zebra.iam.gserviceaccount.com"
-          token_format: "access_token"
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
       - name: Login to Google Artifact Registry
         uses: docker/login-action@v1.14.1
@@ -127,8 +131,8 @@ jobs:
             RUST_LOG=debug
             SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
           push: true
-          cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache
+          cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache,mode=max
 
   # Test that Zebra can run a full mainnet sync after a PR is approved
   test-full-sync:
@@ -136,26 +140,34 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build]
     permissions:
-      contents: "read"
-      id-token: "write"
+      contents: 'read'
+      id-token: 'write'
     steps:
+      - uses: actions/checkout@v3.0.0
+        with:
+          persist-credentials: false
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
 
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ github.event.inputs.network || env.NETWORK }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.6.0
+        uses: google-github-actions/auth@v0.7.0
         with:
-          workload_identity_provider: "projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc"
-          service_account: "github-service-account@zealous-zebra.iam.gserviceaccount.com"
-          token_format: "access_token"
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
       # Check if our destination compute instance exists and delete it
       - name: Delete existing instance with same SHA
-        id: delete-old-instance
         run: |
           INSTANCE=$(gcloud compute instances list --filter=full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
           if [ -z "${INSTANCE}" ]; then
@@ -166,7 +178,6 @@ jobs:
 
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create GCP compute instance
-        id: create-instance
         run: |
           gcloud compute instances create-with-container "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
@@ -182,41 +193,80 @@ jobs:
           --tags zebrad \
           --zone "${{ env.ZONE }}"
 
-      # TODO: this approach is very mesy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
+      # TODO: this approach is very messy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
       # This TODO relates to the following issues:
       # https://github.com/actions/runner/issues/241
       # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
       - name: Get container name from logs
-        id: get-container-name
-        if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           INSTANCE_ID=$(gcloud compute instances describe full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
-          echo "Using instance: $INSTANCE_ID"
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+
+          CONTAINER_NAME=""
           while [[ ${CONTAINER_NAME} != *"full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"* ]]; do
               CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
               echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
               sleep 10
           done
-          CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
-          echo "::set-output name=zebra_container::$CONTAINER_NAME"
-          sleep 60
 
-      - name: Full sync mainnet
-        id: full-sync-mainnet
-        if: ${{ steps.create-instance.outcome == 'success' }}
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
+
+      - name: Full sync
+        id: full-sync
         run: |
           gcloud compute ssh \
           full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker logs --follow ${{ env.ZEBRA_CONTAINER }}"
-        env:
-          ZEBRA_CONTAINER: ${{ steps.get-container-name.outputs.zebra_container }}
+          --command="docker logs --follow ${{ env.CONTAINER_NAME }}"
+
+          EXIT_CODE=$(\
+          gcloud compute ssh \
+          full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command="docker wait ${{ env.CONTAINER_NAME }}")
+
+          exit ${EXIT_CODE}
+
+      - name: Get state version from constants.rs
+        run: |
+          STATE_VERSION=""
+
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
+          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
+
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
+
+      - name: Get sync height from logs
+        run: |
+          SYNC_HEIGHT=""
+
+          while [[ ${SYNC_HEIGHT} == "" ]]; do
+              SYNC_HEIGHT=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' --order="desc" --limit=1 '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+finished initial sync to chain tip.+Height\([0-9]+\).+")' | grep -oE 'Height\([0-9]+\)' | grep -oE '[0-9]+' || [[ $? == 1 ]] )
+              echo "SYNC_HEIGHT: $SYNC_HEIGHT"
+              sleep 10
+          done
+
+          echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
+
+      # Create image from disk
+      # Force the image creation as the disk is still attached, even though is not being used by the container
+      - name: Create image from state disk
+        run: |
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }}-tip \
+          --force \
+          --source-disk=full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --source-disk-zone=${{ env.ZONE }} \
+          --storage-location=us \
+          --description="Created from head branch ${{ env.GITHUB_HEAD_REF_SLUG_URL }} targeting ${{ env.GITHUB_BASE_REF_SLUG }} from PR ${{ env.GITHUB_REF_SLUG_URL }} with commit ${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA }}"
 
       - name: Delete test instance
         # Do not delete the instance if the sync timeouts in GitHub
-        if: ${{ steps.full-sync-mainnet.outcome == 'success' || steps.full-sync-mainnet.outcome == 'failure' }}
+        if: ${{ steps.full-sync.outcome == 'success' || steps.full-sync.outcome == 'failure' }}
         continue-on-error: true
         run: |
           gcloud compute instances delete "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --zone "${{ env.ZONE }}" --delete-disks all --quiet

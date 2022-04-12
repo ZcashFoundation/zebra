@@ -25,6 +25,9 @@ pub trait ChainTip {
     /// Return the block hash of the best chain tip.
     fn best_tip_hash(&self) -> Option<block::Hash>;
 
+    /// Return the height and the hash of the best chain tip.
+    fn best_tip_height_and_hash(&self) -> Option<(block::Height, block::Hash)>;
+
     /// Return the block time of the best chain tip.
     fn best_tip_block_time(&self) -> Option<DateTime<Utc>>;
 
@@ -67,6 +70,10 @@ impl ChainTip for NoChainTip {
     }
 
     fn best_tip_hash(&self) -> Option<block::Hash> {
+        None
+    }
+
+    fn best_tip_height_and_hash(&self) -> Option<(block::Height, block::Hash)> {
         None
     }
 

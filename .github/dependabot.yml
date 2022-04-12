@@ -1,22 +1,22 @@
 version: 2
 updates:
-- package-ecosystem: cargo
-  directory: "/"
-  schedule:
-    interval: daily
-    timezone: America/New_York
-  open-pull-requests-limit: 10
-  labels:
-  - "A-dependencies"
-  - "A-rust"
-  - "P-Low :snowflake:"
-- package-ecosystem: github-actions
-  directory: "/"
-  schedule:
-    interval: daily
-    timezone: America/New_York
-  open-pull-requests-limit: 10
-  labels:
-  - "A-infrastructure"
-  - "A-dependencies"
-  - "P-Low :snowflake:"
+  - package-ecosystem: cargo
+    directory: '/'
+    schedule:
+      interval: daily
+      timezone: America/New_York
+    open-pull-requests-limit: 10
+    labels:
+      - 'A-dependencies'
+      - 'A-rust'
+      - 'P-Low :snowflake:'
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: daily
+      timezone: America/New_York
+    open-pull-requests-limit: 10
+    labels:
+      - 'A-infrastructure'
+      - 'A-dependencies'
+      - 'P-Low :snowflake:'

@@ -59,7 +59,7 @@ jobs:
           # Exclude zebra-utils, it is not for library or app users
           cargo doc --no-deps --workspace --exclude zebra-utils
         env:
-          RUSTDOCFLAGS: "--html-in-header katex-header.html"
+          RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
       - name: Deploy external docs to firebase
         uses: w9jds/firebase-action@v2.0.0
@@ -73,7 +73,7 @@ jobs:
         run: |
           cargo doc --no-deps --document-private-items
         env:
-          RUSTDOCFLAGS: "--html-in-header katex-header.html"
+          RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
       - name: Deploy internal docs to firebase
         uses: w9jds/firebase-action@v2.0.0

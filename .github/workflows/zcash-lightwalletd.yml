@@ -4,21 +4,21 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - "main"
+      - 'main'
     paths:
       # rebuild lightwalletd whenever the related Zebra code changes
       #
       # TODO: this code isn't compiled in this docker image
       #       rebuild whenever the actual code at adityapk00/lightwalletd/master changes
-      - "zebra-rpc/**"
-      - "zebrad/tests/acceptance.rs"
-      - "zebrad/src/config.rs"
-      - "zebrad/src/commands/start.rs"
+      - 'zebra-rpc/**'
+      - 'zebrad/tests/acceptance.rs'
+      - 'zebrad/src/config.rs'
+      - 'zebrad/src/commands/start.rs'
       # workflow definitions
       #
       # unlike the Zebra code, these workflow definitions do change the docker image
-      - "docker/zcash-lightwalletd/Dockerfile"
-      - ".github/workflows/zcash-lightwalletd.yml"
+      - 'docker/zcash-lightwalletd/Dockerfile'
+      - '.github/workflows/zcash-lightwalletd.yml'
 
 env:
   PROJECT_ID: zealous-zebra
@@ -31,14 +31,14 @@ jobs:
     name: Build images
     runs-on: ubuntu-latest
     permissions:
-      contents: "read"
-      id-token: "write"
+      contents: 'read'
+      id-token: 'write'
 
     steps:
       - uses: actions/checkout@v3.0.0
         with:
           repository: adityapk00/lightwalletd
-          ref: "master"
+          ref: 'master'
           persist-credentials: false
 
       - uses: actions/checkout@v3.0.0
@@ -51,10 +51,10 @@ jobs:
         with:
           short-length: 7
 
-        # Automatic tag management and OCI Image Format Specification for labels
+      # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v3.6.2
+        uses: docker/metadata-action@v3.7.0
         with:
           # list of Docker images to use as base name for tags
           images: |
@@ -84,11 +84,11 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.6.0
+        uses: google-github-actions/auth@v0.7.0
         with:
-          workload_identity_provider: "projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc"
-          service_account: "github-service-account@zealous-zebra.iam.gserviceaccount.com"
-          token_format: "access_token"
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
       - name: Login to Google Artifact Registry
         uses: docker/login-action@v1.14.1

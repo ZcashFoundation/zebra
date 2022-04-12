@@ -1,17 +1,16 @@
 name: Lint Rust files
 
 on:
-  push:
+  pull_request:
     branches:
-      - "**"
-      - "!main"
+      - 'main'
     paths-ignore:
-      - "**/*.rs"
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - "clippy.toml"
-      - ".cargo/config.toml"
-      - ".github/workflows/lint.yml"
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'clippy.toml'
+      - '.cargo/config.toml'
+      - '.github/workflows/*.yml'
 
 jobs:
   clippy:

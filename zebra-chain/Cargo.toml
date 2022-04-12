@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.7"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -39,7 +39,7 @@ rand_core = "0.6.3"
 ripemd160 = "0.9"
 serde = { version = "1.0.136", features = ["serde_derive", "rc"] }
 secp256k1 = { version = "0.21.3", features = ["serde"] }
-serde-big-array = "0.3.2"
+serde-big-array = "0.4.1"
 sha2 = { version = "0.9.9", features=["compress"] }
 static_assertions = "1.1.0"
 subtle = "2.4.1"

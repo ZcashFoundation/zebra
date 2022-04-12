@@ -12,6 +12,7 @@
 //! - [`ChainTipChange`]: a read-only channel that can asynchronously await chain tip changes.
 
 use std::{
+    convert,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -467,7 +468,7 @@ impl StateService {
     /// Returns the [`Transaction`] with [`transaction::Hash`],
     /// if it exists in the current best chain.
     pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
-        read::transaction(self.mem.best_chain(), self.disk.db(), hash)
+        read::transaction(self.mem.best_chain(), self.disk.db(), hash).map(|(tx, _height)| tx)
     }
 
     /// Return the hash for the block at `height` in the current best chain.
@@ -496,7 +497,12 @@ impl StateService {
             .or_else(|| self.disk.db().height(hash))
     }
 
-    /// Return the [`Utxo`] pointed to by `outpoint` if it exists in any chain.
+    /// Return the [`Utxo`] pointed to by `outpoint`, if it exists in any chain,
+    /// or in any pending block.
+    ///
+    /// Some of the returned UTXOs may be invalid, because:
+    /// - they are not in the best chain, or
+    /// - their block fails contextual validation.
     pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         self.mem
             .any_utxo(outpoint)
@@ -753,7 +759,12 @@ impl Service<Request> for StateService {
                 async move {
                     rsp_rx
                         .await
-                        .expect("sender is not dropped")
+                        .map_err(|_recv_error| {
+                            BoxError::from("block was dropped from the state CommitBlock queue")
+                        })
+                        // TODO: replace with Result::flatten once it stabilises
+                        // https://github.com/rust-lang/rust/issues/70142
+                        .and_then(convert::identity)
                         .map(Response::Committed)
                         .map_err(Into::into)
                 }
@@ -773,7 +784,14 @@ impl Service<Request> for StateService {
                 async move {
                     rsp_rx
                         .await
-                        .expect("sender is not dropped")
+                        .map_err(|_recv_error| {
+                            BoxError::from(
+                                "block was dropped from the state CommitFinalizedBlock queue",
+                            )
+                        })
+                        // TODO: replace with Result::flatten once it stabilises
+                        // https://github.com/rust-lang/rust/issues/70142
+                        .and_then(convert::identity)
                         .map(Response::Committed)
                         .map_err(Into::into)
                 }
@@ -957,11 +975,12 @@ impl Service<ReadRequest> for ReadStateService {
                 let state = self.clone();
 
                 async move {
-                    let transaction = state.best_chain_receiver.with_watch_data(|best_chain| {
-                        read::transaction(best_chain, &state.db, hash)
-                    });
+                    let transaction_and_height =
+                        state.best_chain_receiver.with_watch_data(|best_chain| {
+                            read::transaction(best_chain, &state.db, hash)
+                        });
 
-                    Ok(ReadResponse::Transaction(transaction))
+                    Ok(ReadResponse::Transaction(transaction_and_height))
                 }
                 .boxed()
             }

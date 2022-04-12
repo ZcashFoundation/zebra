@@ -56,7 +56,9 @@ fn peer_set_ready_single_connection() {
         // Get a ready future
         let peer_ready_future = peer_set.ready();
 
-        // Drop the future
+        // If the readiness future gains a `Drop` impl, we want it to be called here.
+        #[allow(unknown_lints)]
+        #[allow(clippy::drop_non_drop)]
         std::mem::drop(peer_ready_future);
 
         // Peer set will remain ready for requests

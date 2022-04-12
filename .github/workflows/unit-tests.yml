@@ -159,7 +159,7 @@ jobs:
       - name: Run tests with fake activation heights
         uses: actions-rs/cargo@v1.0.3
         env:
-          TEST_FAKE_ACTIVATION_HEIGHTS: ""
+          TEST_FAKE_ACTIVATION_HEIGHTS: ''
         with:
           command: test
           # Note: this only runs the zebra-state crate tests,
@@ -195,6 +195,28 @@ jobs:
       - name: Run build without features enabled
         working-directory: ./zebra-chain
         run: cargo build --verbose --no-default-features
+
+  install-from-lockfile-no-cache:
+    name: Install zebrad from lockfile without cache on ubuntu-latest
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3.0.0
+        with:
+          persist-credentials: false
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Install
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: install
+          args: --locked --path ./zebrad/ zebrad
 
   build:
     name: Build stable on ubuntu-latest

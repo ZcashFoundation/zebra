@@ -15,7 +15,7 @@ pub mod transparent;
 #[cfg(test)]
 mod tests;
 
-pub use block::TransactionLocation;
+pub use block::{TransactionIndex, TransactionLocation};
 
 /// Helper type for writing types to disk as raw bytes.
 /// Also used to convert key types to raw bytes for disk lookups.
