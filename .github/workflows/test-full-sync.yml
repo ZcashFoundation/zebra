@@ -81,10 +81,10 @@ jobs:
           echo "LOCAL_STATE_VERSION: $LOCAL_STATE_VERSION"
 
           GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          GCP_STATE_VERSION=$("$GCP_STATE_DISK" | grep -oE "v[0-9]+" | grep -oE "[0-9]+")
+          GCP_STATE_VERSION=$(echo "$GCP_STATE_DISK" | grep -oE "v[0-9]+" | grep -oE "[0-9]+")
           echo "GCP_STATE_VERSION: $GCP_STATE_VERSION"
 
-          if [[ "$LOCAL_STATE_VERSION" -lt "$GCP_STATE_VERSION" ]]; then exit 1; fi
+          if [[ "$LOCAL_STATE_VERSION" -lt "$GCP_STATE_VERSION" ]]; then echo "Local version is lower than cached version" && exit 1; fi
 
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
