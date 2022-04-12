@@ -11,10 +11,10 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
+    amount::{self, Amount, NonNegative},
     transaction, transparent,
 };
 
@@ -49,7 +49,6 @@ impl ZebraDb {
 
     /// Returns the balance for a [`transparent::Address`],
     /// if it is in the finalized state.
-    #[allow(dead_code)]
     pub fn address_balance(&self, address: &transparent::Address) -> Option<Amount<NonNegative>> {
         self.address_balance_location(address)
             .map(|abl| abl.balance())
@@ -244,6 +243,32 @@ impl ZebraDb {
         }
 
         addr_transactions
+    }
+
+    // Address index queries
+
+    /// Returns the total transparent balance for `addresses` in the finalized chain.
+    ///
+    /// If none of the addresses has a balance, returns zero.
+    ///
+    /// # Correctness
+    ///
+    /// Callers should apply the non-finalized balance change for `addresses` to the returned balance.
+    ///
+    /// The total balance will only be correct if this partial chain matches the finalized state.
+    /// Specifically, the root of this partial chain must be a child block of the finalized tip.
+    pub fn partial_finalized_transparent_balance(
+        &self,
+        addresses: &HashSet<transparent::Address>,
+    ) -> Amount<NonNegative> {
+        let balance: amount::Result<Amount<NonNegative>> = addresses
+            .iter()
+            .filter_map(|address| self.address_balance(address))
+            .sum();
+
+        balance.expect(
+            "unexpected amount overflow: value balances are valid, so partial sum should be valid",
+        )
     }
 }
 
