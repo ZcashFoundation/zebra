@@ -4,16 +4,18 @@
 //! to read from the best [`Chain`] in the [`NonFinalizedState`],
 //! and the database in the [`FinalizedState`].
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::{self, Block},
     transaction::{self, Transaction},
+    transparent,
 };
 
 use crate::{
     service::{finalized_state::ZebraDb, non_finalized_state::Chain},
-    HashOrHeight,
+    BoxError, HashOrHeight,
 };
 
 #[cfg(test)]
@@ -72,4 +74,33 @@ where
                 .map(|(tx, height)| (tx.clone(), height))
         })
         .or_else(|| db.transaction(hash))
+}
+
+/// Returns the total transparent balance for the supplied [`transparent::Address`]es.
+///
+/// If they do not exist in the non-finalized `chain` or finalized `db`, returns zero.
+#[allow(dead_code)]
+pub(crate) fn transparent_balance<C>(
+    chain: Option<C>,
+    _db: &ZebraDb,
+    addresses: HashSet<transparent::Address>,
+) -> Result<Amount<NonNegative>, BoxError>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // The StateService commits blocks to the finalized state before updating the latest chain,
+    // and it can commit additional blocks after we've cloned this `chain` variable.
+    //
+    // TODO: pop root blocks from `chain` until the chain root is a child of the finalized tip
+
+    let _partial_transparent_balance_change = chain
+        .as_ref()
+        .map(|chain| chain.as_ref().partial_transparent_balance_change(addresses))
+        .unwrap_or_else(Amount::zero);
+
+    //.or_else(|| db.finalized_transparent_balance(addresses))
+
+    Err("unimplemented".into())
 }

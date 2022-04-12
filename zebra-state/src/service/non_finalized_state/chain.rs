@@ -12,7 +12,7 @@ use mset::MultiSet;
 use tracing::instrument;
 
 use zebra_chain::{
-    amount::{NegativeAllowed, NonNegative},
+    amount::{self, Amount, NegativeAllowed, NonNegative},
     block,
     history_tree::HistoryTree,
     orchard,
@@ -470,6 +470,39 @@ impl Chain {
         unspent_utxos.retain(|out_point, _utxo| !self.spent_utxos.contains(out_point));
 
         unspent_utxos
+    }
+
+    // Address index queries
+
+    /// Returns the transparent balance change for `addresses` in this non-finalized chain.
+    ///
+    /// If the balance doesn't change for any of the addresses, returns zero.
+    ///
+    /// # Correctness
+    ///
+    /// Callers should apply this balance change to the finalized state balance for `addresses`.
+    ///
+    /// The total balance will only be correct if this partial chain matches the finalized state.
+    /// Specifically, the root of this partial chain must be a child block of the finalized tip.
+    pub fn partial_transparent_balance_change(
+        &self,
+        addresses: &HashSet<transparent::Address>,
+    ) -> Amount<NegativeAllowed> {
+        let balance_change: amount::Result<Amount<NegativeAllowed>> = self
+            .partial_transparent_transfers
+            .iter()
+            .filter_map(|(address, transfers)| {
+                if addresses.contains(address) {
+                    Some(transfers.balance())
+                } else {
+                    None
+                }
+            })
+            .sum();
+
+        balance_change.expect(
+            "unexpected amount overflow: value balances are valid, so partial sum should be valid",
+        )
     }
 
     /// Clone the Chain but not the history and note commitment trees, using
