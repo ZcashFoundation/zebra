@@ -54,20 +54,53 @@ pub struct OrderedUtxo {
     pub tx_index_in_block: usize,
 }
 
+impl Utxo {
+    /// Create a new UTXO from its fields.
+    pub fn new(output: transparent::Output, height: block::Height, from_coinbase: bool) -> Utxo {
+        Utxo {
+            output,
+            height,
+            from_coinbase,
+        }
+    }
+
+    /// Create a new UTXO from an output and its transaction location.
+    pub fn from_location(
+        output: transparent::Output,
+        height: block::Height,
+        tx_index_in_block: usize,
+    ) -> Utxo {
+        // Coinbase transactions are always the first transaction in their block,
+        // we check the other consensus rules separately.
+        let from_coinbase = tx_index_in_block == 0;
+
+        Utxo {
+            output,
+            height,
+            from_coinbase,
+        }
+    }
+}
+
 impl OrderedUtxo {
     /// Create a new ordered UTXO from its fields.
     pub fn new(
         output: transparent::Output,
         height: block::Height,
-        from_coinbase: bool,
         tx_index_in_block: usize,
     ) -> OrderedUtxo {
-        let utxo = Utxo {
-            output,
-            height,
-            from_coinbase,
-        };
+        // Coinbase transactions are always the first transaction in their block,
+        // we check the other consensus rules separately.
+        let from_coinbase = tx_index_in_block == 0;
 
+        OrderedUtxo {
+            utxo: Utxo::new(output, height, from_coinbase),
+            tx_index_in_block,
+        }
+    }
+
+    /// Create a new ordered UTXO from a UTXO and transaction index.
+    pub fn from_utxo(utxo: Utxo, tx_index_in_block: usize) -> OrderedUtxo {
         OrderedUtxo {
             utxo,
             tx_index_in_block,
@@ -194,17 +227,17 @@ pub fn new_transaction_ordered_outputs(
 ) -> HashMap<transparent::OutPoint, OrderedUtxo> {
     let mut new_ordered_outputs = HashMap::new();
 
-    let from_coinbase = transaction.has_valid_coinbase_transaction_inputs();
     for (output_index_in_transaction, output) in transaction.outputs().iter().cloned().enumerate() {
         let output_index_in_transaction = output_index_in_transaction
             .try_into()
             .expect("unexpectedly large number of outputs");
+
         new_ordered_outputs.insert(
             transparent::OutPoint {
                 hash,
                 index: output_index_in_transaction,
             },
-            OrderedUtxo::new(output, height, from_coinbase, tx_index_in_block),
+            OrderedUtxo::new(output, height, tx_index_in_block),
         );
     }
 
