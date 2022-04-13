@@ -573,6 +573,28 @@ impl Chain {
         (created_utxos, spent_utxos)
     }
 
+    /// Returns the [`transaction::Hash`]es used by `addresses` to receive or spend funds.
+    ///
+    /// If none of the addresses receive or spend funds in this partial chain, returns an empty list.
+    ///
+    /// # Correctness
+    ///
+    /// Callers should combine these non-finalized UTXO changes to the finalized state UTXOs.
+    ///
+    /// The UTXOs will only be correct if the non-finalized chain matches or overlaps with
+    /// the finalized state.
+    ///
+    /// Specifically, a block in the partial chain must be a child block of the finalized tip.
+    /// (But the child block does not have to be the partial chain root.)
+    pub fn partial_transparent_transaction_ids(
+        &self,
+        addresses: &HashSet<transparent::Address>,
+    ) -> BTreeMap<TransactionLocation, transaction::Hash> {
+        self.partial_transparent_indexes(addresses)
+            .flat_map(|transfers| transfers.tx_ids(&self.tx_by_hash))
+            .collect()
+    }
+
     // Cloning
 
     /// Clone the Chain but not the history and note commitment trees, using

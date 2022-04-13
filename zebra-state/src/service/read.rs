@@ -244,14 +244,12 @@ where
             chain_transparent_utxo_changes(chain.as_ref(), &addresses, finalized_tip_range);
 
         // If the UTXOs are valid, return them, otherwise, retry or return an error.
-        //
-        // TODO:
-        // - lookup transaction IDs
         match chain_utxo_changes {
             Ok(chain_utxo_changes) => {
                 let utxos = apply_utxo_changes(finalized_utxos, chain_utxo_changes);
+                let tx_ids = lookup_tx_ids_for_utxos(chain, db, &addresses, &utxos);
 
-                return Ok((utxos, todo!()));
+                return Ok((utxos, tx_ids));
             }
             Err(error) => utxo_error = Some(Err(error)),
         }
@@ -400,5 +398,50 @@ fn apply_utxo_changes(
         .into_iter()
         .chain(created_chain_utxos.into_iter())
         .filter(|(utxo_location, _output)| !spent_chain_utxos.contains(utxo_location))
+        .collect()
+}
+
+/// Returns the [`transaction::Hash`]es containing the supplied UTXOs,
+/// from the non-finalized `chain` and finalized `db`.
+///
+/// # Panics
+///
+/// If any UTXO is not in the supplied state.
+fn lookup_tx_ids_for_utxos<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    addresses: &HashSet<transparent::Address>,
+    utxos: &BTreeMap<OutputLocation, transparent::Output>,
+) -> BTreeMap<TransactionLocation, transaction::Hash>
+where
+    C: AsRef<Chain>,
+{
+    // Get the unique set of transaction locations
+    let transaction_locations: BTreeSet<TransactionLocation> = utxos
+        .keys()
+        .map(|output_location| output_location.transaction_location())
+        .collect();
+
+    let chain_tx_ids = chain
+        .as_ref()
+        .map(|chain| {
+            chain
+                .as_ref()
+                .partial_transparent_transaction_ids(addresses)
+        })
+        .unwrap_or_default();
+
+    // First try the in-memory chain, then the disk database
+    transaction_locations
+        .iter()
+        .map(|tx_loc| {
+            (
+                *tx_loc,
+                chain_tx_ids.get(tx_loc).cloned().unwrap_or_else(|| {
+                    db.transaction_hash(*tx_loc)
+                        .expect("unexpected inconsistent UTXO indexes")
+                }),
+            )
+        })
         .collect()
 }
