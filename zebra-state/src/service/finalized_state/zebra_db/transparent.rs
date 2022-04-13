@@ -15,14 +15,18 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    transparent,
+    transaction, transparent,
 };
 
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::transparent::{
-            AddressBalanceLocation, AddressLocation, AddressUnspentOutput, OutputLocation,
+        disk_format::{
+            transparent::{
+                AddressBalanceLocation, AddressLocation, AddressTransaction, AddressUnspentOutput,
+                OutputLocation,
+            },
+            TransactionLocation,
         },
         zebra_db::ZebraDb,
     },
@@ -166,6 +170,80 @@ impl ZebraDb {
 
         addr_unspent_outputs
     }
+
+    /// Returns the transaction hash for an [`TransactionLocation`].
+    pub fn tx_id_by_location(&self, tx_location: TransactionLocation) -> Option<transaction::Hash> {
+        let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
+
+        self.db.zs_get(&hash_by_tx_loc, &tx_location)
+    }
+
+    /// Returns the [`transaction::Hash`]es that created or spent outputs for a [`transparent::Address`],
+    /// in chain order, if they are in the finalized state.
+    #[allow(dead_code)]
+    pub fn address_tx_ids(
+        &self,
+        address: &transparent::Address,
+    ) -> BTreeMap<TransactionLocation, transaction::Hash> {
+        let address_location = match self.address_location(address) {
+            Some(address_location) => address_location,
+            None => return BTreeMap::new(),
+        };
+
+        let transaction_locations = self.address_transaction_locations(address_location);
+
+        transaction_locations
+            .iter()
+            .map(|&tx_loc| {
+                (
+                    tx_loc.transaction_location(),
+                    self.tx_id_by_location(tx_loc.transaction_location())
+                        .expect("transactions whose locations are stored must exist"),
+                )
+            })
+            .collect()
+    }
+
+    /// Returns the locations of any transactions that sent or received from a [`transparent::Address`],
+    /// if they are in the finalized state.
+    #[allow(dead_code)]
+    pub fn address_transaction_locations(
+        &self,
+        address_location: AddressLocation,
+    ) -> BTreeSet<AddressTransaction> {
+        let tx_loc_by_transparent_addr_loc =
+            self.db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
+
+        // Manually fetch the entire addresses' transaction locations
+        let mut addr_transactions = BTreeSet::new();
+
+        // An invalid key representing the minimum possible transaction
+        let mut transaction_location = AddressTransaction::address_iterator_start(address_location);
+
+        loop {
+            // A valid key representing an entry for this address or the next
+            transaction_location = match self
+                .db
+                .zs_next_key_value_from(&tx_loc_by_transparent_addr_loc, &transaction_location)
+            {
+                Some((unspent_output, ())) => unspent_output,
+                // We're finished with the final address in the column family
+                None => break,
+            };
+
+            // We found the next address, so we're finished with this address
+            if transaction_location.address_location() != address_location {
+                break;
+            }
+
+            addr_transactions.insert(transaction_location);
+
+            // A potentially invalid key representing the next possible output
+            transaction_location.address_iterator_next();
+        }
+
+        addr_transactions
+    }
 }
 
 impl DiskWriteBatch {
@@ -174,8 +252,6 @@ impl DiskWriteBatch {
     /// - UTXO changes, and
     /// - transparent address index changes,
     /// and return it (without actually writing anything).
-    ///
-    /// TODO: transparent address transaction index (#3951)
     ///
     /// # Errors
     ///
@@ -190,6 +266,8 @@ impl DiskWriteBatch {
         let utxo_by_out_loc = db.cf_handle("utxo_by_outpoint").unwrap();
         let utxo_loc_by_transparent_addr_loc =
             db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
+        let tx_loc_by_transparent_addr_loc =
+            db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
 
         // Index all new transparent outputs, before deleting any we've spent
         for (new_output_location, utxo) in new_outputs_by_out_loc {
@@ -223,6 +301,14 @@ impl DiskWriteBatch {
                     address_unspent_output,
                     (),
                 );
+
+                // Create a link from the AddressLocation to the new TransactionLocation in the database.
+                // Unlike the OutputLocation link, this will never be deleted.
+                let address_transaction = AddressTransaction::new(
+                    receiving_address_location,
+                    new_output_location.transaction_location(),
+                );
+                self.zs_insert(&tx_loc_by_transparent_addr_loc, address_transaction, ());
             }
 
             // Use the OutputLocation to store a copy of the new Output in the database.
@@ -248,6 +334,7 @@ impl DiskWriteBatch {
                 address_balance_location
                     .spend_output(&spent_output)
                     .expect("balance underflow already checked");
+                let sending_address_location = address_balance_location.address_location();
 
                 // Delete the link from the AddressLocation to the spent OutputLocation in the database.
                 let address_spent_output = AddressUnspentOutput::new(
@@ -255,6 +342,14 @@ impl DiskWriteBatch {
                     spent_output_location,
                 );
                 self.zs_delete(&utxo_loc_by_transparent_addr_loc, address_spent_output);
+
+                // Create a link from the AddressLocation to the spent TransactionLocation in the database.
+                // Unlike the OutputLocation link, this will never be deleted.
+                let address_transaction = AddressTransaction::new(
+                    sending_address_location,
+                    spent_output_location.transaction_location(),
+                );
+                self.zs_insert(&tx_loc_by_transparent_addr_loc, address_transaction, ());
             }
 
             // Delete the OutputLocation, and the copy of the spent Output in the database.

@@ -67,7 +67,7 @@ pub const TRANSACTION_LOCATION_DISK_BYTES: usize = HEIGHT_DISK_BYTES + TX_INDEX_
     any(test, feature = "proptest-impl"),
     derive(Arbitrary, Serialize, Deserialize)
 )]
-pub struct TransactionIndex(u16);
+pub struct TransactionIndex(pub(super) u16);
 
 impl TransactionIndex {
     /// Creates a transaction index from the inner type.
