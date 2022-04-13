@@ -33,6 +33,23 @@ on:
       - 'docker/**'
       - '.github/workflows/test.yml'
 
+  push:
+    branches:
+      - main
+    paths:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
+      - 'docker/**'
+      - '.github/workflows/test.yml'
+
 env:
   CARGO_INCREMENTAL: '1'
   ZEBRA_SKIP_IPV6_TESTS: '1'
