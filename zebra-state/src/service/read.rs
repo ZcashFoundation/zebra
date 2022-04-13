@@ -21,12 +21,12 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// If the transparent address balance queries are interrupted by a new finalized block,
+/// If the transparent address index queries are interrupted by a new finalized block,
 /// retry this many times.
 ///
 /// Once we're at the tip, we expect up to 2 blocks to arrive at the same time.
 /// If any more arrive, the client should wait until we're synchronised with our peers.
-const FINALIZED_ADDRESS_BALANCE_RETRIES: usize = 3;
+const FINALIZED_ADDRESS_INDEX_RETRIES: usize = 3;
 
 /// Returns the [`Block`] with [`block::Hash`](zebra_chain::block::Hash) or
 /// [`Height`](zebra_chain::block::Height),
@@ -95,7 +95,7 @@ pub(crate) fn transparent_balance(
     let mut balance_result = finalized_transparent_balance(db, &addresses);
 
     // Retry the finalized balance query if it was interruped by a finalizing block
-    for _ in 0..FINALIZED_ADDRESS_BALANCE_RETRIES {
+    for _ in 0..FINALIZED_ADDRESS_INDEX_RETRIES {
         if balance_result.is_ok() {
             break;
         }
@@ -121,7 +121,9 @@ pub(crate) fn transparent_balance(
 /// Returns the total transparent balance for `addresses` in the finalized chain,
 /// and the finalized tip height the balances were queried at.
 ///
-/// If the addresses do not exist in the non-finalized `chain` or finalized `db`, returns zero.
+/// If the addresses do not exist in the finalized `db`, returns zero.
+//
+// TODO: turn the return type into a struct?
 fn finalized_transparent_balance(
     db: &ZebraDb,
     addresses: &HashSet<transparent::Address>,
@@ -147,9 +149,10 @@ fn finalized_transparent_balance(
     Ok((finalized_balance, finalized_tip))
 }
 
-/// Returns the total transparent balance for the supplied [`transparent::Address`]es.
+/// Returns the total transparent balance change for `addresses` in the non-finalized chain,
+/// matching the balance for the `finalized_tip`.
 ///
-/// If the addresses do not exist in the non-finalized `chain` or finalized `db`, returns zero.
+/// If the addresses do not exist in the non-finalized `chain`, returns zero.
 fn chain_transparent_balance_change(
     mut chain: Arc<Chain>,
     addresses: &HashSet<transparent::Address>,

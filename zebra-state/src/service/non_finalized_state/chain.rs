@@ -12,7 +12,7 @@ use mset::MultiSet;
 use tracing::instrument;
 
 use zebra_chain::{
-    amount::{self, Amount, NegativeAllowed, NonNegative},
+    amount::{Amount, NegativeAllowed, NonNegative},
     block,
     history_tree::HistoryTree,
     orchard,
@@ -493,6 +493,26 @@ impl Chain {
 
     // Address index queries
 
+    /// Returns the transparent transfers for `addresses` in this non-finalized chain.
+    ///
+    /// If none of the addresses have an address index, returns an empty iterator.
+    ///
+    /// # Correctness
+    ///
+    /// Callers should apply the returned indexes to the corresponding finalized state indexes.
+    ///
+    /// The combined result will only be correct if the chains match.
+    /// The exact type of match varies by query.
+    pub fn partial_transparent_indexes<'a>(
+        &'a self,
+        addresses: &'a HashSet<transparent::Address>,
+    ) -> impl Iterator<Item = &TransparentTransfers> {
+        addresses
+            .iter()
+            .copied()
+            .flat_map(|address| self.partial_transparent_transfers.get(&address))
+    }
+
     /// Returns the transparent balance change for `addresses` in this non-finalized chain.
     ///
     /// If the balance doesn't change for any of the addresses, returns zero.
@@ -507,16 +527,9 @@ impl Chain {
         &self,
         addresses: &HashSet<transparent::Address>,
     ) -> Amount<NegativeAllowed> {
-        let balance_change: amount::Result<Amount<NegativeAllowed>> = self
-            .partial_transparent_transfers
-            .iter()
-            .filter_map(|(address, transfers)| {
-                if addresses.contains(address) {
-                    Some(transfers.balance())
-                } else {
-                    None
-                }
-            })
+        let balance_change: Result<Amount<NegativeAllowed>, _> = self
+            .partial_transparent_indexes(addresses)
+            .map(|transfers| transfers.balance())
             .sum();
 
         balance_change.expect(

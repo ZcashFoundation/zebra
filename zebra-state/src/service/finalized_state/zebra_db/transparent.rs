@@ -255,8 +255,8 @@ impl ZebraDb {
     ///
     /// Callers should apply the non-finalized balance change for `addresses` to the returned balance.
     ///
-    /// The total balance will only be correct if this partial chain matches the finalized state.
-    /// Specifically, the root of this partial chain must be a child block of the finalized tip.
+    /// The total balance will only be correct if the non-finalized chain matches the finalized state.
+    /// Specifically, the root of the partial non-finalized chain must be a child block of the finalized tip.
     pub fn partial_finalized_transparent_balance(
         &self,
         addresses: &HashSet<transparent::Address>,
