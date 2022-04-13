@@ -1,4 +1,4 @@
-name: Clean
+name: Merge cleanup
 
 on:
   workflow_dispatch:

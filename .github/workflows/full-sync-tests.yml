@@ -1,4 +1,4 @@
-name: Full sync test
+name: Full sync tests
 
 on:
   workflow_dispatch:

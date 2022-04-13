@@ -1,4 +1,4 @@
-name: Test
+name: CI
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ on:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - 'docker/**'
-      - '.github/workflows/integration-tests.yml'
+      - '.github/workflows/continous-integration.yml'
 
 jobs:
   build:

@@ -1,4 +1,4 @@
-name: CI
+name: OS tests
 
 on:
   pull_request:
