@@ -23,4 +23,5 @@ expression: cf_names
   "tx_by_hash",
   "tx_by_loc",
   "utxo_by_outpoint",
+  "utxo_loc_by_transparent_addr_loc",
 ]
