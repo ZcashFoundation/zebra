@@ -21,7 +21,7 @@ queue_rules:
   - name: high
     allow_inplace_checks: False
     allow_checks_interruption: True
-    speculative_checks: 3
+    speculative_checks: 1
     batch_size: 5
     # Wait 10 minutes to embark high priority tickets together in a merge train
     batch_max_wait_time: 300
@@ -39,7 +39,7 @@ queue_rules:
   - name: low
     allow_inplace_checks: False
     allow_checks_interruption: True
-    speculative_checks: 3
+    speculative_checks: 1
     batch_size: 5
     # Wait 10 minutes to embark low priority tickets together in a merge train
     batch_max_wait_time: 300
