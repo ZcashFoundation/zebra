@@ -7,10 +7,8 @@
 
 use std::fmt::Debug;
 
-use serde::{Deserialize, Serialize};
-
 use zebra_chain::{
-    amount::{Amount, NonNegative},
+    amount::{self, Amount, NonNegative},
     block::Height,
     parameters::Network::*,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
@@ -24,6 +22,8 @@ use crate::service::finalized_state::disk_format::{
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+#[cfg(any(test, feature = "proptest-impl"))]
+use serde::{Deserialize, Serialize};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -46,7 +46,8 @@ pub const OUTPUT_LOCATION_DISK_BYTES: usize =
 // Transparent types
 
 /// A transparent output's index in its transaction.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize, Deserialize))]
 pub struct OutputIndex(u32);
 
 impl OutputIndex {
@@ -101,8 +102,11 @@ impl OutputIndex {
 ///
 /// [`OutputLocation`]s are sorted in increasing chain order, by height, transaction index,
 /// and output index.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
 pub struct OutputLocation {
     /// The location of the transparent input's transaction.
     transaction_location: TransactionLocation,
@@ -194,13 +198,16 @@ pub type AddressLocation = OutputLocation;
 ///
 /// Currently, Zebra tracks this data 1:1 for each address:
 /// - the balance [`Amount`] for a transparent address, and
-/// - the [`OutputLocation`] for the first [`transparent::Output`] sent to that address
+/// - the [`AddressLocation`] for the first [`transparent::Output`] sent to that address
 ///   (regardless of whether that output is spent or unspent).
 ///
 /// All other address data is tracked multiple times for each address
 /// (UTXOs and transactions).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
 pub struct AddressBalanceLocation {
     /// The total balance of all UTXOs sent to an address.
     balance: Amount<NonNegative>,
@@ -231,8 +238,28 @@ impl AddressBalanceLocation {
         &mut self.balance
     }
 
+    /// Updates the current balance by adding the supplied output's value.
+    pub fn receive_output(
+        &mut self,
+        unspent_output: &transparent::Output,
+    ) -> Result<(), amount::Error> {
+        self.balance = (self.balance + unspent_output.value())?;
+
+        Ok(())
+    }
+
+    /// Updates the current balance by subtracting the supplied output's value.
+    pub fn spend_output(
+        &mut self,
+        spent_output: &transparent::Output,
+    ) -> Result<(), amount::Error> {
+        self.balance = (self.balance - spent_output.value())?;
+
+        Ok(())
+    }
+
     /// Returns the location of the first [`transparent::Output`] sent to an address.
-    pub fn location(&self) -> AddressLocation {
+    pub fn address_location(&self) -> AddressLocation {
         self.location
     }
 
@@ -241,6 +268,96 @@ impl AddressBalanceLocation {
     #[allow(dead_code)]
     pub fn height_mut(&mut self) -> &mut Height {
         &mut self.location.transaction_location.height
+    }
+}
+
+/// A single unspent output for a [`transparent::Address`].
+///
+/// We store both the address location key and unspend output location value
+/// in the RocksDB column family key. This improves insert and delete performance.
+///
+/// This requires 8 extra bytes for each unspent output,
+/// because we repeat the key for each value.
+/// But RocksDB compression reduces the duplicate data size on disk.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
+pub struct AddressUnspentOutput {
+    /// The location of the first [`transparent::Output`] sent to the address in `output`.
+    address_location: AddressLocation,
+
+    /// The location of this unspent output.
+    unspent_output_location: OutputLocation,
+}
+
+impl AddressUnspentOutput {
+    /// Create a new [`AddressUnspentOutput`] from an address location,
+    /// and an unspent output location.
+    pub fn new(
+        address_location: AddressLocation,
+        unspent_output_location: OutputLocation,
+    ) -> AddressUnspentOutput {
+        AddressUnspentOutput {
+            address_location,
+            unspent_output_location,
+        }
+    }
+
+    /// Create an [`AddressUnspentOutput`] which starts iteration for the supplied address.
+    /// Used to look up the first output with [`ReadDisk::zs_next_key_value_from`].
+    ///
+    /// The unspent output location is before all unspent output locations in the index.
+    /// It is always invalid, due to the genesis consensus rules. But this is not an issue
+    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
+    pub fn address_iterator_start(address_location: AddressLocation) -> AddressUnspentOutput {
+        // Iterating from the lowest possible output location gets us the first output.
+        let zero_output_location = OutputLocation::from_usize(Height(0), 0, 0);
+
+        AddressUnspentOutput {
+            address_location,
+            unspent_output_location: zero_output_location,
+        }
+    }
+
+    /// Update the unspent output location to the next possible output for the supplied address.
+    /// Used to look up the next output with [`ReadDisk::zs_next_key_value_from`].
+    ///
+    /// The updated unspent output location may be invalid, which is not an issue
+    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
+    pub fn address_iterator_next(&mut self) {
+        // Iterating from the next possible output location gets us the next output,
+        // even if it is in a later block or transaction.
+        //
+        // Consensus: the block size limit is 2MB, which is much lower than the index range.
+        self.unspent_output_location.output_index.0 += 1;
+    }
+
+    /// The location of the first [`transparent::Output`] sent to the address of this output.
+    ///
+    /// This can be used to look up the address.
+    pub fn address_location(&self) -> AddressLocation {
+        self.address_location
+    }
+
+    /// The location of this unspent output.
+    pub fn unspent_output_location(&self) -> OutputLocation {
+        self.unspent_output_location
+    }
+
+    /// Allows tests to modify the address location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn address_location_mut(&mut self) -> &mut AddressLocation {
+        &mut self.address_location
+    }
+
+    /// Allows tests to modify the unspent output location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn unspent_output_location_mut(&mut self) -> &mut OutputLocation {
+        &mut self.unspent_output_location
     }
 }
 
@@ -367,23 +484,27 @@ impl IntoDisk for AddressBalanceLocation {
 
     fn as_bytes(&self) -> Self::Bytes {
         let balance_bytes = self.balance().as_bytes().to_vec();
-        let location_bytes = self.location().as_bytes().to_vec();
+        let address_location_bytes = self.address_location().as_bytes().to_vec();
 
-        [balance_bytes, location_bytes].concat().try_into().unwrap()
+        [balance_bytes, address_location_bytes]
+            .concat()
+            .try_into()
+            .unwrap()
     }
 }
 
 impl FromDisk for AddressBalanceLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let (balance_bytes, location_bytes) = disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
+        let (balance_bytes, address_location_bytes) =
+            disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
 
         let balance = Amount::from_bytes(balance_bytes.try_into().unwrap()).unwrap();
-        let location = AddressLocation::from_bytes(location_bytes);
+        let address_location = AddressLocation::from_bytes(address_location_bytes);
 
-        let mut balance_location = AddressBalanceLocation::new(location);
-        *balance_location.balance_mut() = balance;
+        let mut address_balance_location = AddressBalanceLocation::new(address_location);
+        *address_balance_location.balance_mut() = balance;
 
-        balance_location
+        address_balance_location
     }
 }
 
@@ -398,5 +519,31 @@ impl IntoDisk for transparent::Output {
 impl FromDisk for transparent::Output {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         bytes.as_ref().zcash_deserialize_into().unwrap()
+    }
+}
+
+impl IntoDisk for AddressUnspentOutput {
+    type Bytes = [u8; OUTPUT_LOCATION_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let address_location_bytes = self.address_location().as_bytes();
+        let unspent_output_location_bytes = self.unspent_output_location().as_bytes();
+
+        [address_location_bytes, unspent_output_location_bytes]
+            .concat()
+            .try_into()
+            .unwrap()
+    }
+}
+
+impl FromDisk for AddressUnspentOutput {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        let (address_location_bytes, unspent_output_location_bytes) =
+            disk_bytes.as_ref().split_at(OUTPUT_LOCATION_DISK_BYTES);
+
+        let address_location = AddressLocation::from_bytes(address_location_bytes);
+        let unspent_output_location = AddressLocation::from_bytes(unspent_output_location_bytes);
+
+        AddressUnspentOutput::new(address_location, unspent_output_location)
     }
 }

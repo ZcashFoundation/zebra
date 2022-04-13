@@ -61,6 +61,7 @@ skip-tree = [
 
     # upgrade abscissa and arti
     { name = "darling", version = "=0.10.2" },
+    { name = "darling", version = "=0.12.4" },
 
     # recent major version bumps
     # we should re-check these dependencies in February 2022
