@@ -22,8 +22,12 @@ use crate::{
     BoxError, HashOrHeight, OutputLocation, TransactionLocation,
 };
 
+pub mod utxo;
+
 #[cfg(test)]
 mod tests;
+
+pub use utxo::AddressUtxos;
 
 /// If the transparent address index queries are interrupted by a new finalized block,
 /// retry this many times.
@@ -211,24 +215,14 @@ fn apply_balance_change(
 /// Returns the unspent transparent outputs (UTXOs) for the supplied [`transparent::Address`]es,
 /// in chain order; and the transaction IDs for the transactions containing those UTXOs.
 ///
-/// The transaction IDs can be looked up using [`OutputLocation::transaction_location()`].
-///
 /// If the addresses do not exist in the non-finalized `chain` or finalized `db`,
 /// returns an empty list.
-//
-// TODO: turn the return type into a struct, and add convenience methods
 #[allow(dead_code)]
 pub(crate) fn transparent_utxos<C>(
     chain: Option<C>,
     db: &ZebraDb,
     addresses: HashSet<transparent::Address>,
-) -> Result<
-    (
-        BTreeMap<OutputLocation, transparent::Output>,
-        BTreeMap<TransactionLocation, transaction::Hash>,
-    ),
-    BoxError,
->
+) -> Result<AddressUtxos, BoxError>
 where
     C: AsRef<Chain>,
 {
@@ -249,7 +243,7 @@ where
                 let utxos = apply_utxo_changes(finalized_utxos, chain_utxo_changes);
                 let tx_ids = lookup_tx_ids_for_utxos(chain, db, &addresses, &utxos);
 
-                return Ok((utxos, tx_ids));
+                return Ok(AddressUtxos::new(utxos, tx_ids));
             }
             Err(error) => utxo_error = Some(Err(error)),
         }
