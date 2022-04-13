@@ -4,30 +4,37 @@ queue_rules:
     allow_checks_interruption: False
     speculative_checks: 2
     batch_size: 2
+    conditions:
+      # Mergify automatically applies status check, approval, and conversation rules,
+      # which are the same as the GitHub main branch protection rules
+      # https://docs.mergify.com/conditions/#about-branch-protection
+      - base=main
 
   - name: medium
     allow_inplace_checks: False
     allow_checks_interruption: False
     speculative_checks: 2
     batch_size: 3
+    conditions:
+      - base=main
 
   - name: low
     allow_inplace_checks: False
     allow_checks_interruption: False
     speculative_checks: 2
     batch_size: 4
+    conditions:
+      - base=main
 
 pull_request_rules:
   - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - '#approved-reviews-by>=1'
-      - '#review-threads-unresolved=0'
-      - -draft
       - base=main
+      - -draft
+      - label!=do-not-merge
       - or:
           - 'label~=^P-Critical'
           - 'label~=^P-High'
-      - label!=do-not-merge
     actions:
       queue:
         name: urgent
@@ -35,12 +42,10 @@ pull_request_rules:
 
   - name: move to medium queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - '#approved-reviews-by>=1'
-      - '#review-threads-unresolved=0'
-      - -draft
       - base=main
-      - 'label~=^P-Medium'
+      - -draft
       - label!=do-not-merge
+      - 'label~=^P-Medium'
     actions:
       queue:
         name: medium
@@ -48,10 +53,8 @@ pull_request_rules:
 
   - name: move to low queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - '#approved-reviews-by>=1'
-      - '#review-threads-unresolved=0'
-      - -draft
       - base=main
+      - -draft
       - label!=do-not-merge
       # This queue handles Low, Optional, and PRs with no priority label,
       # including automated dependabot PRs.
