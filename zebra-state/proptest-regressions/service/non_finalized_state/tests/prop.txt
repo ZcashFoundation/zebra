@@ -1,1 +1,2 @@
 cc 693962399f2771634758dccac882604c14751015ac280113fa9127fa96376c3a # entered unreachable code: older transaction versions only exist in finalized blocks pre sapling; PreparedBlock { .. , Block { .. , transactions: [V2 { .. }, .. ] } };
+cc fef34a78971f81b3342e4530136fa7dccfdd7e1381b365f2231840181f510e7d # shrinks to (vec1, vec2) = (alloc::vec::Vec<alloc::sync::Arc<zebra_chain::block::Block>><alloc::sync::Arc<zebra_chain::block::Block>>, len=2, alloc::vec::Vec<alloc::sync::Arc<zebra_chain::block::Block>><alloc::sync::Arc<zebra_chain::block::Block>>, len=2)

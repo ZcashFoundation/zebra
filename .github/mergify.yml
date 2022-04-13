@@ -7,16 +7,10 @@ queue_rules:
     # Just wait 2 minutes to embark hotfixes together in a merge train
     batch_max_wait_time: 120
     conditions:
-      - check-success=Test all
-      - check-success=Test with fake activation heights
-      - check-success=Test full validation sync from cached state
-      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
-      - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macos-latest
-      # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
-      # - check-success=Test stable on windows-latest
-      - check-success=Clippy
-      - check-success=Rustfmt
+      # Mergify automatically applies status check, approval, and conversation rules,
+      # which are the same as the GitHub main branch protection rules
+      # https://docs.mergify.com/conditions/#about-branch-protection
+      - base=main
 
   - name: high
     allow_inplace_checks: False
@@ -26,15 +20,7 @@ queue_rules:
     # Wait 10 minutes to embark high priority tickets together in a merge train
     batch_max_wait_time: 300
     conditions:
-      - check-success=Test all
-      - check-success=Test with fake activation heights
-      - check-success=Test full validation sync from cached state
-      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
-      - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macos-latest
-      # - check-success=Test stable on windows-latest
-      - check-success=Clippy
-      - check-success=Rustfmt
+      - base=main
 
   - name: low
     allow_inplace_checks: False
@@ -44,25 +30,15 @@ queue_rules:
     # Wait 10 minutes to embark low priority tickets together in a merge train
     batch_max_wait_time: 300
     conditions:
-      - check-success=Test all
-      - check-success=Test with fake activation heights
-      - check-success=Test full validation sync from cached state
-      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
-      - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macos-latest
-      # - check-success=Test stable on windows-latest
-      - check-success=Clippy
-      - check-success=Rustfmt
+      - base=main
 
 pull_request_rules:
   - name: move to hotfix queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - '#approved-reviews-by>=1'
-      - '#review-threads-unresolved=0'
-      - -draft
       - base=main
-      - 'label~=^P-Critical'
+      - -draft
       - label!=do-not-merge
+      - 'label~=^P-Critical'
     actions:
       queue:
         name: hotfix
@@ -70,14 +46,12 @@ pull_request_rules:
 
   - name: move to high queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - '#approved-reviews-by>=1'
-      - '#review-threads-unresolved=0'
-      - -draft
       - base=main
+      - -draft
+      - label!=do-not-merge
       - or:
           - 'label~=^P-High'
           - 'label~=^P-Medium'
-      - label!=do-not-merge
     actions:
       queue:
         name: high
@@ -85,10 +59,8 @@ pull_request_rules:
 
   - name: move to low queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - '#approved-reviews-by>=1'
-      - '#review-threads-unresolved=0'
-      - -draft
       - base=main
+      - -draft
       - label!=do-not-merge
       # This queue handles Low, Optional, and PRs with no priority label,
       # including automated dependabot PRs.

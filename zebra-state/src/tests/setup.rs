@@ -1,3 +1,5 @@
+//! Initialization and arbitrary data generation functions for zebra-state.
+
 use std::sync::Arc;
 
 use proptest::prelude::*;

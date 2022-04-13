@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// An unspent `transparent::Output`, with accompanying metadata.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary, serde::Serialize)

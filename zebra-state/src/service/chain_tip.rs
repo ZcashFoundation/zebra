@@ -76,10 +76,10 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
             block,
             hash,
             height,
-            new_outputs: _,
             transaction_hashes,
-            chain_value_pool_change: _,
+            ..
         } = contextually_valid;
+
         Self {
             hash,
             height,
@@ -96,8 +96,8 @@ impl From<FinalizedBlock> for ChainTipBlock {
             block,
             hash,
             height,
-            new_outputs: _,
             transaction_hashes,
+            ..
         } = finalized;
         Self {
             hash,
