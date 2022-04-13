@@ -429,7 +429,7 @@ async fn rpc_getaddresstxids_response() {
         .await
         .expect("arguments are valid so no error can happen here");
 
-    // TODO: The lenght of the response should be 1
+    // TODO: The length of the response should be 1
     // Fix in the context of #3147
     assert_eq!(response.len(), 0);
 
