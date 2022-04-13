@@ -13,6 +13,7 @@ use std::{
 use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
     block::{self, Block, Height},
+    parameters::Network,
     transaction::{self, Transaction},
     transparent,
 };
@@ -219,6 +220,7 @@ fn apply_balance_change(
 /// returns an empty list.
 #[allow(dead_code)]
 pub(crate) fn transparent_utxos<C>(
+    network: Network,
     chain: Option<C>,
     db: &ZebraDb,
     addresses: HashSet<transparent::Address>,
@@ -243,8 +245,9 @@ where
                 let utxos = apply_utxo_changes(finalized_utxos, chain_utxo_changes);
                 let tx_ids = lookup_tx_ids_for_utxos(chain, db, &addresses, &utxos);
 
-                return Ok(AddressUtxos::new(utxos, tx_ids));
+                return Ok(AddressUtxos::new(network, utxos, tx_ids));
             }
+
             Err(error) => utxo_error = Some(Err(error)),
         }
     }
