@@ -5,16 +5,10 @@ queue_rules:
     speculative_checks: 2
     batch_size: 2
     conditions:
-      - check-success=Test all
-      - check-success=Test with fake activation heights
-      - check-success=Test full validation sync from cached state
-      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
-      - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macos-latest
-      # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
-      # - check-success=Test stable on windows-latest
-      - check-success=Clippy
-      - check-success=Rustfmt
+      # Mergify automatically applies status check, approval, and conversation rules,
+      # which are the same as the GitHub main branch protection rules
+      # https://docs.mergify.com/conditions/#about-branch-protection
+      - base=main
 
   - name: medium
     allow_inplace_checks: False
@@ -22,15 +16,7 @@ queue_rules:
     speculative_checks: 2
     batch_size: 3
     conditions:
-      - check-success=Test all
-      - check-success=Test with fake activation heights
-      - check-success=Test full validation sync from cached state
-      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
-      - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macos-latest
-      # - check-success=Test stable on windows-latest
-      - check-success=Clippy
-      - check-success=Rustfmt
+      - base=main
 
   - name: low
     allow_inplace_checks: False
@@ -38,27 +24,17 @@ queue_rules:
     speculative_checks: 2
     batch_size: 4
     conditions:
-      - check-success=Test all
-      - check-success=Test with fake activation heights
-      - check-success=Test full validation sync from cached state
-      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
-      - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macos-latest
-      # - check-success=Test stable on windows-latest
-      - check-success=Clippy
-      - check-success=Rustfmt
+      - base=main
 
 pull_request_rules:
   - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - '#approved-reviews-by>=1'
-      - '#review-threads-unresolved=0'
-      - -draft
       - base=main
+      - -draft
+      - label!=do-not-merge
       - or:
           - 'label~=^P-Critical'
           - 'label~=^P-High'
-      - label!=do-not-merge
     actions:
       queue:
         name: urgent
@@ -66,12 +42,10 @@ pull_request_rules:
 
   - name: move to medium queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - '#approved-reviews-by>=1'
-      - '#review-threads-unresolved=0'
-      - -draft
       - base=main
-      - 'label~=^P-Medium'
+      - -draft
       - label!=do-not-merge
+      - 'label~=^P-Medium'
     actions:
       queue:
         name: medium
@@ -79,10 +53,8 @@ pull_request_rules:
 
   - name: move to low queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - '#approved-reviews-by>=1'
-      - '#review-threads-unresolved=0'
-      - -draft
       - base=main
+      - -draft
       - label!=do-not-merge
       # This queue handles Low, Optional, and PRs with no priority label,
       # including automated dependabot PRs.

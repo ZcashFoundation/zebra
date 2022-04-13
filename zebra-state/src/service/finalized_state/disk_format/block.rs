@@ -5,8 +5,6 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use serde::{Deserialize, Serialize};
-
 use zebra_chain::{
     block::{self, Height},
     serialization::{ZcashDeserializeInto, ZcashSerialize},
@@ -19,6 +17,8 @@ use crate::service::finalized_state::disk_format::{
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+#[cfg(any(test, feature = "proptest-impl"))]
+use serde::{Deserialize, Serialize};
 
 /// The maximum value of an on-disk serialized [`Height`].
 ///
@@ -62,8 +62,11 @@ pub const TRANSACTION_LOCATION_DISK_BYTES: usize = HEIGHT_DISK_BYTES + TX_INDEX_
 /// blocks larger than this size are rejected before reaching the database.
 ///
 /// (The maximum transaction count is tested by the large generated block serialization tests.)
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
 pub struct TransactionIndex(u16);
 
 impl TransactionIndex {
@@ -114,8 +117,11 @@ impl TransactionIndex {
 /// A transaction's location in the chain, by block height and transaction index.
 ///
 /// This provides a chain-order list of transactions.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
 pub struct TransactionLocation {
     /// The block height of the transaction.
     pub height: Height,

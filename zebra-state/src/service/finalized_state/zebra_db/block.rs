@@ -10,7 +10,7 @@
 //! be incremented each time the database format (column, serialization, etc) changes.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -33,7 +33,6 @@ use crate::{
         disk_format::{
             block::TransactionLocation,
             transparent::{AddressBalanceLocation, OutputLocation},
-            FromDisk,
         },
         zebra_db::{metrics::block_precommit_metrics, shielded::NoteCommitmentTrees, ZebraDb},
         FinalizedBlock,
@@ -60,14 +59,7 @@ impl ZebraDb {
     // TODO: move this method to the tip section
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
-        self.db
-            .zs_last_key_value(&hash_by_height)
-            .map(|(height_bytes, hash_bytes)| {
-                let height = block::Height::from_bytes(height_bytes);
-                let hash = block::Hash::from_bytes(hash_bytes);
-
-                (height, hash)
-            })
+        self.db.zs_last_key_value(&hash_by_height)
     }
 
     /// Returns the finalized hash for a given `block::Height` if it is present.
@@ -98,7 +90,7 @@ impl ZebraDb {
         // Transactions
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
 
-        // Fetch the entire block's transactions
+        // Manually fetch the entire block's transactions
         let mut transactions = Vec::new();
 
         // TODO: is this loop more efficient if we store the number of transactions?
@@ -233,6 +225,7 @@ impl ZebraDb {
                             lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
                         }),
                         self.utxo(&outpoint)
+                            .map(|ordered_utxo| ordered_utxo.utxo)
                             .or_else(|| finalized.new_outputs.get(&outpoint).cloned())
                             .expect("already checked UTXO was in state or block"),
                     )
@@ -249,14 +242,20 @@ impl ZebraDb {
             .map(|(_outpoint, out_loc, utxo)| (out_loc, utxo))
             .collect();
 
-        // Get the current address balances, before the transactions in this block
-        let address_balances = spent_utxos_by_out_loc
+        // Get the transparent addresses with changed balances/UTXOs
+        let changed_addresses: HashSet<transparent::Address> = spent_utxos_by_out_loc
             .values()
             .chain(finalized.new_outputs.values())
             .filter_map(|utxo| utxo.output.address(network))
             .unique()
-            .filter_map(|address| Some((address, self.address_balance_location(&address)?)))
             .collect();
+
+        // Get the current address balances, before the transactions in this block
+        let address_balances: HashMap<transparent::Address, AddressBalanceLocation> =
+            changed_addresses
+                .into_iter()
+                .filter_map(|address| Some((address, self.address_balance_location(&address)?)))
+                .collect();
 
         let mut batch = DiskWriteBatch::new(network);
 
@@ -310,6 +309,8 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating history tree, note commitment trees, or value pools
+    //
+    // TODO: move db, finalized, and maybe other arguments into DiskWriteBatch
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
         &mut self,
@@ -456,6 +457,8 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating note commitment trees
+    //
+    // TODO: move db, finalized, and maybe other arguments into DiskWriteBatch
     pub fn prepare_transaction_index_batch(
         &mut self,
         db: &DiskDb,

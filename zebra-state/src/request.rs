@@ -80,6 +80,8 @@ pub struct PreparedBlock {
     /// Note: although these transparent outputs are newly created, they may not
     /// be unspent, since a later transaction in a block can spend outputs of an
     /// earlier transaction.
+    ///
+    /// This field can also contain unrelated outputs, which are ignored.
     pub new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
@@ -95,11 +97,38 @@ pub struct PreparedBlock {
 /// Used by the state service and non-finalized [`Chain`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContextuallyValidBlock {
+    /// The block to commit to the state.
     pub(crate) block: Arc<Block>,
+
+    /// The hash of the block.
     pub(crate) hash: block::Hash,
+
+    /// The height of the block.
     pub(crate) height: block::Height,
-    pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
+
+    /// New transparent outputs created in this block, indexed by
+    /// [`Outpoint`](transparent::Outpoint).
+    ///
+    /// Note: although these transparent outputs are newly created, they may not
+    /// be unspent, since a later transaction in a block can spend outputs of an
+    /// earlier transaction.
+    ///
+    /// This field can also contain unrelated outputs, which are ignored.
+    pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+
+    /// The outputs spent by this block, indexed by the [`transparent::Input`]'s
+    /// [`Outpoint`](transparent::Outpoint).
+    ///
+    /// Note: these inputs can come from earlier transactions in this block,
+    /// or earlier blocks in the chain.
+    ///
+    /// This field can also contain unrelated outputs, which are ignored.
+    pub(crate) spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+
+    /// A precomputed list of the hashes of the transactions in this block,
+    /// in the same order as `block.transactions`.
     pub(crate) transaction_hashes: Arc<[transaction::Hash]>,
+
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
 }
@@ -122,6 +151,8 @@ pub struct FinalizedBlock {
     /// Note: although these transparent outputs are newly created, they may not
     /// be unspent, since a later transaction in a block can spend outputs of an
     /// earlier transaction.
+    ///
+    /// This field can also contain unrelated outputs, which are ignored.
     pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::Utxo>,
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
@@ -150,7 +181,7 @@ impl ContextuallyValidBlock {
     /// [`Chain::update_chain_state_with`] returns success.
     pub fn with_block_and_spent_utxos(
         prepared: PreparedBlock,
-        mut spent_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+        mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     ) -> Result<Self, ValueBalanceError> {
         let PreparedBlock {
             block,
@@ -162,15 +193,19 @@ impl ContextuallyValidBlock {
 
         // This is redundant for the non-finalized state,
         // but useful to make some tests pass more easily.
-        spent_utxos.extend(utxos_from_ordered_utxos(new_outputs.clone()));
+        //
+        // TODO: fix the tests, and stop adding unrelated outputs.
+        spent_outputs.extend(new_outputs.clone());
 
         Ok(Self {
             block: block.clone(),
             hash,
             height,
-            new_outputs: transparent::utxos_from_ordered_utxos(new_outputs),
+            new_outputs,
+            spent_outputs: spent_outputs.clone(),
             transaction_hashes,
-            chain_value_pool_change: block.chain_value_pool_change(&spent_utxos)?,
+            chain_value_pool_change: block
+                .chain_value_pool_change(&utxos_from_ordered_utxos(spent_outputs))?,
         })
     }
 }
@@ -213,14 +248,16 @@ impl From<ContextuallyValidBlock> for FinalizedBlock {
             hash,
             height,
             new_outputs,
+            spent_outputs: _,
             transaction_hashes,
             chain_value_pool_change: _,
         } = contextually_valid;
+
         Self {
             block,
             hash,
             height,
-            new_outputs,
+            new_outputs: utxos_from_ordered_utxos(new_outputs),
             transaction_hashes,
         }
     }
@@ -376,7 +413,7 @@ pub enum Request {
     },
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 /// A read-only query about the chain state, via the [`ReadStateService`].
 pub enum ReadRequest {
     /// Looks up a block by hash or height in the current best chain.
@@ -397,4 +434,15 @@ pub enum ReadRequest {
     /// * [`Response::Transaction(Some(Arc<Transaction>))`](Response::Transaction) if the transaction is in the best chain;
     /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
     Transaction(transaction::Hash),
+
+    /// Looks up transactions hashes that were made by provided addresses in a blockchain height range.
+    ///
+    /// Returns
+    ///
+    /// * A vector of transaction hashes.
+    /// * An empty vector if no transactions were found for the given arguments.
+    ///
+    /// Returned txids are in the order they appear in blocks, which ensures that they are topologically sorted
+    /// (i.e. parent txids will appear before child txids).
+    TransactionsByAddresses(Vec<transparent::Address>, block::Height, block::Height),
 }
