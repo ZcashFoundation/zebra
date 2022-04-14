@@ -579,13 +579,18 @@ impl Chain {
     ///
     /// # Correctness
     ///
-    /// Callers should combine these non-finalized UTXO changes to the finalized state UTXOs.
+    /// Callers should combine these non-finalized transactions with the finalized state transactions.
     ///
-    /// The UTXOs will only be correct if the non-finalized chain matches or overlaps with
+    /// The transaction IDs will only be correct if the non-finalized chain matches or overlaps with
     /// the finalized state.
     ///
     /// Specifically, a block in the partial chain must be a child block of the finalized tip.
     /// (But the child block does not have to be the partial chain root.)
+    ///
+    /// This condition does not apply if there is only one address.
+    /// Since address transactions are only appended by blocks,
+    /// and the finalized state query reads them in order,
+    /// it is impossible to get inconsistent transactions for a single address.
     pub fn partial_transparent_transaction_ids(
         &self,
         addresses: &HashSet<transparent::Address>,
