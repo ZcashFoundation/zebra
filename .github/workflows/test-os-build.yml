@@ -1,4 +1,4 @@
-name: OS tests
+name: Test OS builds
 
 on:
   workflow_dispatch:
