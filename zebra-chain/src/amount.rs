@@ -22,7 +22,8 @@ pub mod arbitrary;
 #[cfg(test)]
 mod tests;
 
-type Result<T, E = Error> = std::result::Result<T, E>;
+/// The result of an amount operation.
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
 #[derive(Clone, Copy, Serialize, Deserialize)]

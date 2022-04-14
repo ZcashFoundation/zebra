@@ -6,13 +6,10 @@ use mset::MultiSet;
 
 use zebra_chain::{
     amount::{Amount, NegativeAllowed},
-    block::Height,
     transaction, transparent,
 };
 
-use crate::{
-    request::ContextuallyValidBlock, OutputLocation, TransactionLocation, ValidateContextError,
-};
+use crate::{OutputLocation, TransactionLocation, ValidateContextError};
 
 use super::{RevertPosition, UpdateWith};
 
@@ -67,23 +64,20 @@ impl
         // The location of the UTXO
         &transparent::OutPoint,
         // The UTXO data
+        // Includes the location of the transaction that created the output
         &transparent::OrderedUtxo,
-        // The location of the transaction that creates the UTXO
-        &TransactionLocation,
     )> for TransparentTransfers
 {
     fn update_chain_tip_with(
         &mut self,
-        &(outpoint, created_utxo, transaction_location): &(
-            &transparent::OutPoint,
-            &transparent::OrderedUtxo,
-            &TransactionLocation,
-        ),
+        &(outpoint, created_utxo): &(&transparent::OutPoint, &transparent::OrderedUtxo),
     ) -> Result<(), ValidateContextError> {
         self.balance =
             (self.balance + created_utxo.utxo.output.value().constrain().unwrap()).unwrap();
 
-        let output_location = OutputLocation::from_outpoint(*transaction_location, outpoint);
+        let transaction_location = transaction_location(created_utxo);
+        let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
+
         let previous_entry = self
             .created_utxos
             .insert(output_location, created_utxo.utxo.output.clone());
@@ -99,17 +93,15 @@ impl
 
     fn revert_chain_with(
         &mut self,
-        &(outpoint, created_utxo, transaction_location): &(
-            &transparent::OutPoint,
-            &transparent::OrderedUtxo,
-            &TransactionLocation,
-        ),
+        &(outpoint, created_utxo): &(&transparent::OutPoint, &transparent::OrderedUtxo),
         _position: RevertPosition,
     ) {
         self.balance =
             (self.balance - created_utxo.utxo.output.value().constrain().unwrap()).unwrap();
 
-        let output_location = OutputLocation::from_outpoint(*transaction_location, outpoint);
+        let transaction_location = transaction_location(created_utxo);
+        let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
+
         let removed_entry = self.created_utxos.remove(&output_location);
         assert!(
             removed_entry.is_some(),
@@ -240,29 +232,14 @@ impl TransparentTransfers {
             .collect()
     }
 
-    /// Returns the unspent transparent outputs sent to this address,
+    /// Returns the new transparent outputs sent to this address,
     /// in this partial chain, in chain order.
     ///
-    /// `chain_blocks` should be the `blocks` field from the [`Chain`] containing this index.
-    ///
-    /// # Panics
-    ///
-    /// If `chain_blocks` is missing some transaction hashes from this index.
+    /// Some of these outputs might already be spent.
+    /// [`TransparentTransfers::spent_utxos`] returns spent UTXOs.
     #[allow(dead_code)]
-    pub fn created_utxos(
-        &self,
-        chain_blocks: &BTreeMap<Height, ContextuallyValidBlock>,
-    ) -> BTreeMap<OutputLocation, (transparent::Output, transaction::Hash)> {
-        self.created_utxos
-            .iter()
-            .map(|(output_location, output)| {
-                let tx_loc = output_location.transaction_location();
-                let transaction_hash =
-                    chain_blocks[&tx_loc.height].transaction_hashes[tx_loc.index.as_usize()];
-
-                (*output_location, (output.clone(), transaction_hash))
-            })
-            .collect()
+    pub fn created_utxos(&self) -> &BTreeMap<OutputLocation, transparent::Output> {
+        &self.created_utxos
     }
 
     /// Returns the [`OutputLocation`]s of the spent transparent outputs sent to this address,
