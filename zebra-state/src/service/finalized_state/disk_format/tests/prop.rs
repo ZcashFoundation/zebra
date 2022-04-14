@@ -15,10 +15,23 @@ use crate::service::finalized_state::{
     arbitrary::assert_value_properties,
     disk_format::{
         block::MAX_ON_DISK_HEIGHT,
-        transparent::{AddressBalanceLocation, AddressLocation, OutputLocation},
+        transparent::{
+            AddressBalanceLocation, AddressLocation, AddressTransaction, AddressUnspentOutput,
+            OutputLocation,
+        },
         IntoDisk, TransactionLocation,
     },
 };
+
+// Common
+
+// TODO: turn this into a unit test, it has a fixed value
+#[test]
+fn roundtrip_unit_type() {
+    zebra_test::init();
+
+    proptest!(|(val in any::<()>())| assert_value_properties(val));
+}
 
 // Block
 // TODO: split these tests into the disk_format sub-modules
@@ -152,7 +165,7 @@ fn roundtrip_address_balance_location() {
 
     proptest!(
         |(mut val in any::<AddressBalanceLocation>())| {
-            *val.height_mut() = val.location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            *val.height_mut() = val.address_location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
             assert_value_properties(val)
         }
     );
@@ -163,6 +176,34 @@ fn roundtrip_transparent_output() {
     zebra_test::init();
 
     proptest!(|(val in any::<transparent::Output>())| assert_value_properties(val));
+}
+
+#[test]
+fn roundtrip_address_unspent_output() {
+    zebra_test::init();
+
+    proptest!(
+        |(mut val in any::<AddressUnspentOutput>())| {
+            *val.address_location_mut().height_mut() = val.address_location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            *val.unspent_output_location_mut().height_mut() = val.unspent_output_location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+
+            assert_value_properties(val)
+        }
+    );
+}
+
+#[test]
+fn roundtrip_address_transaction() {
+    zebra_test::init();
+
+    proptest!(
+        |(mut val in any::<AddressTransaction>())| {
+            *val.address_location_mut().height_mut() = val.address_location().height().clamp(Height(0), MAX_ON_DISK_HEIGHT);
+            val.transaction_location_mut().height = val.transaction_location().height.clamp(Height(0), MAX_ON_DISK_HEIGHT);
+
+            assert_value_properties(val)
+        }
+    );
 }
 
 #[test]

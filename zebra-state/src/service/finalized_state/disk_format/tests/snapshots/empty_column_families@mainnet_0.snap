@@ -12,5 +12,7 @@ expression: empty_column_families
   "sprout_anchors: no entries",
   "sprout_nullifiers: no entries",
   "tip_chain_value_pool: no entries",
+  "tx_loc_by_transparent_addr_loc: no entries",
   "utxo_by_outpoint: no entries",
+  "utxo_loc_by_transparent_addr_loc: no entries",
 ]

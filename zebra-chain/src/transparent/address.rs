@@ -43,7 +43,11 @@ mod magics {
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(proptest_derive::Arbitrary)
+    derive(
+        proptest_derive::Arbitrary,
+        serde_with::SerializeDisplay,
+        serde_with::DeserializeFromStr
+    )
 )]
 pub enum Address {
     /// P2SH (Pay to Script Hash) addresses
@@ -53,6 +57,7 @@ pub enum Address {
         /// 20 bytes specifying a script hash.
         script_hash: [u8; 20],
     },
+
     /// P2PKH (Pay to Public Key Hash) addresses
     PayToPublicKeyHash {
         /// Production, test, or other network

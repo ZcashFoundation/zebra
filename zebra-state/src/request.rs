@@ -413,7 +413,7 @@ pub enum Request {
     },
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 /// A read-only query about the chain state, via the [`ReadStateService`].
 pub enum ReadRequest {
     /// Looks up a block by hash or height in the current best chain.
@@ -434,4 +434,15 @@ pub enum ReadRequest {
     /// * [`Response::Transaction(Some(Arc<Transaction>))`](Response::Transaction) if the transaction is in the best chain;
     /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
     Transaction(transaction::Hash),
+
+    /// Looks up transactions hashes that were made by provided addresses in a blockchain height range.
+    ///
+    /// Returns
+    ///
+    /// * A vector of transaction hashes.
+    /// * An empty vector if no transactions were found for the given arguments.
+    ///
+    /// Returned txids are in the order they appear in blocks, which ensures that they are topologically sorted
+    /// (i.e. parent txids will appear before child txids).
+    TransactionsByAddresses(Vec<transparent::Address>, block::Height, block::Height),
 }
