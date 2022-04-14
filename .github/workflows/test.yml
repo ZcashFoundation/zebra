@@ -338,6 +338,7 @@ jobs:
 
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
+          sleep 90
 
       - name: Regenerate stateful disks
         id: sync-to-checkpoint
@@ -500,6 +501,7 @@ jobs:
 
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
+          sleep 90
 
       - name: Sync past mandatory checkpoint
         id: sync-past-checkpoint
