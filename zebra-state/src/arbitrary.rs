@@ -1,3 +1,5 @@
+//! Randomised data generation for state data.
+
 use std::sync::Arc;
 
 use zebra_chain::{
@@ -102,14 +104,12 @@ impl ContextuallyValidBlock {
     pub fn test_with_zero_spent_utxos(block: impl Into<PreparedBlock>) -> Self {
         let block = block.into();
 
-        let zero_utxo = transparent::Utxo {
-            output: transparent::Output {
-                value: Amount::zero(),
-                lock_script: transparent::Script::new(&[]),
-            },
-            height: block::Height(1),
-            from_coinbase: false,
+        let zero_output = transparent::Output {
+            value: Amount::zero(),
+            lock_script: transparent::Script::new(&[]),
         };
+
+        let zero_utxo = transparent::OrderedUtxo::new(zero_output, block::Height(1), 1);
 
         let zero_spent_utxos = block
             .block
@@ -145,7 +145,11 @@ impl ContextuallyValidBlock {
             block,
             hash,
             height,
-            new_outputs: transparent::utxos_from_ordered_utxos(new_outputs),
+            new_outputs: new_outputs.clone(),
+            // Just re-use the outputs we created in this block, even though that's incorrect.
+            //
+            // TODO: fix the tests, and stop adding unrelated inputs and outputs.
+            spent_outputs: new_outputs,
             transaction_hashes,
             chain_value_pool_change: fake_chain_value_pool_change,
         }

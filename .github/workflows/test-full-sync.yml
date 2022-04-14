@@ -27,6 +27,22 @@ on:
       # workflow definitions
       - 'docker/**'
       - '.github/workflows/test-full-sync.yml'
+  push:
+    branches:
+      - main
+    paths:
+      # code and tests (including full sync acceptance test changes)
+      # TODO: ignore changes in test code that isn't used in the full sync test
+      - '**/*.rs'
+      # hard-coded checkpoints
+      # TODO: ignore changes to proptest seed .txt files
+      - '**/*.txt'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
+      - 'docker/**'
+      - '.github/workflows/test-full-sync.yml'
 
 env:
   CARGO_INCREMENTAL: '1'
@@ -45,9 +61,10 @@ env:
 
 jobs:
   build:
+    # TODO add `startsWith(github.head_ref, 'mergify/merge-queue/')` to the condition to
     # only run on Mergify head branches, and on manual dispatch:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if: startsWith(github.head_ref, 'mergify/merge-queue/') || github.event_name == 'workflow_dispatch'
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     name: Build images
     timeout-minutes: 210
     runs-on: ubuntu-latest
@@ -271,12 +288,12 @@ jobs:
       # Force the image creation as the disk is still attached, even though is not being used by the container
       - name: Create image from state disk
         run: |
-          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }}-tip \
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-tip \
           --force \
           --source-disk=full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --source-disk-zone=${{ env.ZONE }} \
           --storage-location=us \
-          --description="Created from head branch ${{ env.GITHUB_HEAD_REF_SLUG_URL }} targeting ${{ env.GITHUB_BASE_REF_SLUG }} from PR ${{ env.GITHUB_REF_SLUG_URL }} with commit ${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA }}"
+          --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
 
       - name: Delete test instance
         # Do not delete the instance if the sync timeouts in GitHub
