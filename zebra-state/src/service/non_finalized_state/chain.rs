@@ -12,7 +12,7 @@ use mset::MultiSet;
 use tracing::instrument;
 
 use zebra_chain::{
-    amount::{NegativeAllowed, NonNegative},
+    amount::{Amount, NegativeAllowed, NonNegative},
     block,
     history_tree::HistoryTree,
     orchard,
@@ -236,7 +236,7 @@ impl Chain {
     /// Remove the lowest height block of the non-finalized portion of a chain.
     #[instrument(level = "debug", skip(self))]
     pub(crate) fn pop_root(&mut self) -> ContextuallyValidBlock {
-        let block_height = self.lowest_height();
+        let block_height = self.non_finalized_root_height();
 
         // remove the lowest height block from self.blocks
         let block = self
@@ -251,7 +251,8 @@ impl Chain {
         block
     }
 
-    fn lowest_height(&self) -> block::Height {
+    /// Returns the height of the chain root.
+    pub fn non_finalized_root_height(&self) -> block::Height {
         self.blocks
             .keys()
             .next()
@@ -383,6 +384,15 @@ impl Chain {
             .get(tx_loc.index.as_usize())
     }
 
+    /// Returns the non-finalized tip block hash and height.
+    #[allow(dead_code)]
+    pub fn non_finalized_tip(&self) -> (block::Hash, block::Height) {
+        (
+            self.non_finalized_tip_hash(),
+            self.non_finalized_tip_height(),
+        )
+    }
+
     /// Returns the block hash of the tip block.
     pub fn non_finalized_tip_hash(&self) -> block::Hash {
         self.blocks
@@ -390,6 +400,15 @@ impl Chain {
             .next_back()
             .expect("only called while blocks is populated")
             .hash
+    }
+
+    /// Returns the non-finalized root block hash and height.
+    #[allow(dead_code)]
+    pub fn non_finalized_root(&self) -> (block::Hash, block::Height) {
+        (
+            self.non_finalized_root_hash(),
+            self.non_finalized_root_height(),
+        )
     }
 
     /// Returns the block hash of the non-finalized root block.
@@ -403,7 +422,7 @@ impl Chain {
 
     /// Returns the block hash of the `n`th block from the non-finalized root.
     ///
-    /// This is the block at `lowest_height() + n`.
+    /// This is the block at `non_finalized_root_height() + n`.
     #[allow(dead_code)]
     pub fn non_finalized_nth_hash(&self, n: usize) -> Option<block::Hash> {
         self.blocks.values().nth(n).map(|block| block.hash)
@@ -470,6 +489,52 @@ impl Chain {
         unspent_utxos.retain(|out_point, _utxo| !self.spent_utxos.contains(out_point));
 
         unspent_utxos
+    }
+
+    // Address index queries
+
+    /// Returns the transparent transfers for `addresses` in this non-finalized chain.
+    ///
+    /// If none of the addresses have an address index, returns an empty iterator.
+    ///
+    /// # Correctness
+    ///
+    /// Callers should apply the returned indexes to the corresponding finalized state indexes.
+    ///
+    /// The combined result will only be correct if the chains match.
+    /// The exact type of match varies by query.
+    pub fn partial_transparent_indexes<'a>(
+        &'a self,
+        addresses: &'a HashSet<transparent::Address>,
+    ) -> impl Iterator<Item = &TransparentTransfers> {
+        addresses
+            .iter()
+            .copied()
+            .flat_map(|address| self.partial_transparent_transfers.get(&address))
+    }
+
+    /// Returns the transparent balance change for `addresses` in this non-finalized chain.
+    ///
+    /// If the balance doesn't change for any of the addresses, returns zero.
+    ///
+    /// # Correctness
+    ///
+    /// Callers should apply this balance change to the finalized state balance for `addresses`.
+    ///
+    /// The total balance will only be correct if this partial chain matches the finalized state.
+    /// Specifically, the root of this partial chain must be a child block of the finalized tip.
+    pub fn partial_transparent_balance_change(
+        &self,
+        addresses: &HashSet<transparent::Address>,
+    ) -> Amount<NegativeAllowed> {
+        let balance_change: Result<Amount<NegativeAllowed>, _> = self
+            .partial_transparent_indexes(addresses)
+            .map(|transfers| transfers.balance())
+            .sum();
+
+        balance_change.expect(
+            "unexpected amount overflow: value balances are valid, so partial sum should be valid",
+        )
     }
 
     /// Clone the Chain but not the history and note commitment trees, using
@@ -762,10 +827,8 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             };
 
             // remove the utxos this produced
-            // uses `tx_by_hash`
             self.revert_chain_with(&(outputs, transaction_hash, new_outputs), position);
             // remove the utxos this consumed
-            // uses `tx_by_hash`
             self.revert_chain_with(&(inputs, transaction_hash, spent_outputs), position);
 
             // remove `transaction.hash` from `tx_by_hash`
@@ -866,15 +929,7 @@ impl
                     .entry(receiving_address)
                     .or_default();
 
-                let transaction_location = self.tx_by_hash.get(&outpoint.hash).expect(
-                    "unexpected missing transaction hash: transaction must already be indexed",
-                );
-
-                address_transfers.update_chain_tip_with(&(
-                    &outpoint,
-                    created_utxo,
-                    transaction_location,
-                ))?;
+                address_transfers.update_chain_tip_with(&(&outpoint, created_utxo))?;
             }
         }
 
@@ -913,13 +968,7 @@ impl
                     .get_mut(&receiving_address)
                     .expect("block has previously been applied to the chain");
 
-                let transaction_location = self
-                    .tx_by_hash
-                    .get(&outpoint.hash)
-                    .expect("transaction is reverted after its UTXOs are reverted");
-
-                address_transfers
-                    .revert_chain_with(&(&outpoint, created_utxo, transaction_location), position);
+                address_transfers.revert_chain_with(&(&outpoint, created_utxo), position);
 
                 // Remove this transfer if it is now empty
                 if address_transfers.is_empty() {
