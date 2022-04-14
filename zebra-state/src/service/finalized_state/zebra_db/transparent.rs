@@ -292,6 +292,34 @@ impl ZebraDb {
             .flat_map(|address| self.address_utxos(address))
             .collect()
     }
+
+    /// Returns the transaction IDs that sent or received funds to `addresses` in the finalized chain.
+    ///
+    /// If none of the addresses has finalized sends or receives, returns an empty list.
+    ///
+    /// # Correctness
+    ///
+    /// Callers should combine the non-finalized transactions for `addresses`
+    /// with the returned transactions.
+    ///
+    /// The transaction IDs will only be correct if the non-finalized chain matches or overlaps with
+    /// the finalized state.
+    ///
+    /// Specifically, a block in the partial chain must be a child block of the finalized tip.
+    /// (But the child block does not have to be the partial chain root.)
+    ///
+    /// This condition does not apply if there is only one address.
+    /// Since address transactions are only appended by blocks, and this query reads them in order,
+    /// it is impossible to get inconsistent transactions for a single address.
+    pub fn partial_finalized_transparent_tx_ids(
+        &self,
+        addresses: &HashSet<transparent::Address>,
+    ) -> BTreeMap<TransactionLocation, transaction::Hash> {
+        addresses
+            .iter()
+            .flat_map(|address| self.address_tx_ids(address))
+            .collect()
+    }
 }
 
 impl DiskWriteBatch {
