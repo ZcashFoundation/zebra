@@ -1,54 +1,60 @@
 queue_rules:
-  - name: urgent
+  - name: hotfix
     allow_inplace_checks: False
     allow_checks_interruption: False
-    speculative_checks: 2
-    batch_size: 2
+    speculative_checks: 1
+    batch_size: 5
+    # Just wait 2 minutes to embark hotfixes together in a merge train
+    batch_max_wait_time: 120
     conditions:
       # Mergify automatically applies status check, approval, and conversation rules,
       # which are the same as the GitHub main branch protection rules
       # https://docs.mergify.com/conditions/#about-branch-protection
       - base=main
 
-  - name: medium
+  - name: high
     allow_inplace_checks: False
-    allow_checks_interruption: False
-    speculative_checks: 2
-    batch_size: 3
+    allow_checks_interruption: True
+    speculative_checks: 1
+    batch_size: 5
+    # Wait 10 minutes to embark high priority tickets together in a merge train
+    batch_max_wait_time: 300
     conditions:
       - base=main
 
   - name: low
     allow_inplace_checks: False
-    allow_checks_interruption: False
-    speculative_checks: 2
-    batch_size: 4
+    allow_checks_interruption: True
+    speculative_checks: 1
+    batch_size: 5
+    # Wait 10 minutes to embark low priority tickets together in a merge train
+    batch_max_wait_time: 300
     conditions:
       - base=main
 
 pull_request_rules:
-  - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
+  - name: move to hotfix queue when CI passes with 1 review and not WIP targeting main
+    conditions:
+      - base=main
+      - -draft
+      - label!=do-not-merge
+      - 'label~=^P-Critical'
+    actions:
+      queue:
+        name: hotfix
+        method: squash
+
+  - name: move to high queue when CI passes with 1 review and not WIP targeting main
     conditions:
       - base=main
       - -draft
       - label!=do-not-merge
       - or:
-          - 'label~=^P-Critical'
           - 'label~=^P-High'
+          - 'label~=^P-Medium'
     actions:
       queue:
-        name: urgent
-        method: squash
-
-  - name: move to medium queue when CI passes with 1 review and not WIP targeting main
-    conditions:
-      - base=main
-      - -draft
-      - label!=do-not-merge
-      - 'label~=^P-Medium'
-    actions:
-      queue:
-        name: medium
+        name: high
         method: squash
 
   - name: move to low queue when CI passes with 1 review and not WIP targeting main
