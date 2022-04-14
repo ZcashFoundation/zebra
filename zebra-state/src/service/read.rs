@@ -421,11 +421,7 @@ where
 
     let chain_tx_ids = chain
         .as_ref()
-        .map(|chain| {
-            chain
-                .as_ref()
-                .partial_transparent_transaction_ids(addresses)
-        })
+        .map(|chain| chain.as_ref().partial_transparent_tx_ids(addresses))
         .unwrap_or_default();
 
     // First try the in-memory chain, then the disk database

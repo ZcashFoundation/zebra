@@ -591,7 +591,7 @@ impl Chain {
     /// Since address transactions are only appended by blocks,
     /// and the finalized state query reads them in order,
     /// it is impossible to get inconsistent transactions for a single address.
-    pub fn partial_transparent_transaction_ids(
+    pub fn partial_transparent_tx_ids(
         &self,
         addresses: &HashSet<transparent::Address>,
     ) -> BTreeMap<TransactionLocation, transaction::Hash> {
