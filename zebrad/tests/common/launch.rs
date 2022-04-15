@@ -11,7 +11,10 @@ use color_eyre::eyre::Result;
 
 use zebrad::config::ZebradConfig;
 
-use zebra_test::{command::TestDirExt, prelude::*};
+use zebra_test::{
+    command::{Arguments, TestDirExt},
+    prelude::*,
+};
 
 /// After we launch `zebrad`, wait this long for the command to start up,
 /// take the actions expected by the tests, and log the expected logs.
@@ -44,7 +47,7 @@ where
     /// child process.
     ///
     /// If there is a config in the test directory, pass it to `zebrad`.
-    fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>>;
+    fn spawn_child(self, args: Arguments) -> Result<TestChild<Self>>;
 
     /// Create a config file and use it for all subsequently spawned `zebrad` processes.
     /// Returns an error if the config already exists.
@@ -89,23 +92,27 @@ impl<T> ZebradTestDirExt for T
 where
     Self: TestDirExt + AsRef<Path> + Sized,
 {
-    fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>> {
+    fn spawn_child(self, extra_args: Arguments) -> Result<TestChild<Self>> {
         let dir = self.as_ref();
         let default_config_path = dir.join("zebrad.toml");
+        let mut args = Arguments::new();
 
         if default_config_path.exists() {
-            let mut extra_args: Vec<_> = vec![
+            args.set_parameter(
                 "-c",
                 default_config_path
                     .as_path()
                     .to_str()
                     .expect("Path is valid Unicode"),
-            ];
-            extra_args.extend_from_slice(args);
-            self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), &extra_args)
-        } else {
-            self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), args)
+            );
         }
+
+        args.merge_with(extra_args);
+
+        let args: Vec<_> = args.into_arguments().collect();
+        let args: Vec<_> = args.iter().map(|string| string.as_ref()).collect();
+
+        self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), &args)
     }
 
     fn with_config(self, config: &mut ZebradConfig) -> Result<Self> {

@@ -36,6 +36,7 @@ use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::LOCK_FILE_ERROR;
 
 use zebra_test::{
+    args,
     command::{ContextFrom, NO_MATCHES_REGEX_ITER},
     net::random_known_port,
     prelude::*,
@@ -64,7 +65,7 @@ fn generate_no_args() -> Result<()> {
 
     let child = testdir()?
         .with_config(&mut default_test_config()?)?
-        .spawn_child(&["generate"])?;
+        .spawn_child(args!["generate"])?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
@@ -83,17 +84,17 @@ fn generate_args() -> Result<()> {
     let testdir = &testdir;
 
     // unexpected free argument `argument`
-    let child = testdir.spawn_child(&["generate", "argument"])?;
+    let child = testdir.spawn_child(args!["generate", "argument"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = testdir.spawn_child(&["generate", "-f"])?;
+    let child = testdir.spawn_child(args!["generate", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // missing argument to option `-o`
-    let child = testdir.spawn_child(&["generate", "-o"])?;
+    let child = testdir.spawn_child(args!["generate", "-o"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -102,7 +103,7 @@ fn generate_args() -> Result<()> {
 
     // Valid
     let child =
-        testdir.spawn_child(&["generate", "-o", generated_config_path.to_str().unwrap()])?;
+        testdir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
@@ -127,7 +128,7 @@ fn help_no_args() -> Result<()> {
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
-    let child = testdir.spawn_child(&["help"])?;
+    let child = testdir.spawn_child(args!["help"])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -153,12 +154,12 @@ fn help_args() -> Result<()> {
     let testdir = &testdir;
 
     // The subcommand "argument" wasn't recognized.
-    let child = testdir.spawn_child(&["help", "argument"])?;
+    let child = testdir.spawn_child(args!["help", "argument"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // option `-f` does not accept an argument
-    let child = testdir.spawn_child(&["help", "-f"])?;
+    let child = testdir.spawn_child(args!["help", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -172,7 +173,7 @@ fn start_no_args() -> Result<()> {
     // start caches state, so run one of the start tests with persistent state
     let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
 
-    let mut child = testdir.spawn_child(&["-v", "start"])?;
+    let mut child = testdir.spawn_child(args!["-v", "start"])?;
 
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
@@ -200,7 +201,7 @@ fn start_args() -> Result<()> {
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
     let testdir = &testdir;
 
-    let mut child = testdir.spawn_child(&["start"])?;
+    let mut child = testdir.spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
@@ -212,7 +213,7 @@ fn start_args() -> Result<()> {
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = testdir.spawn_child(&["start", "-f"])?;
+    let child = testdir.spawn_child(args!["start", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -226,7 +227,7 @@ fn persistent_mode() -> Result<()> {
     let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
     let testdir = &testdir;
 
-    let mut child = testdir.spawn_child(&["-v", "start"])?;
+    let mut child = testdir.spawn_child(args!["-v", "start"])?;
 
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
@@ -295,7 +296,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     let mut child = run_dir
         .path()
         .with_config(&mut config)?
-        .spawn_child(&["start"])?;
+        .spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
@@ -370,7 +371,7 @@ fn app_no_args() -> Result<()> {
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
-    let child = testdir.spawn_child(&[])?;
+    let child = testdir.spawn_child(args![])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -385,7 +386,7 @@ fn version_no_args() -> Result<()> {
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
-    let child = testdir.spawn_child(&["version"])?;
+    let child = testdir.spawn_child(args!["version"])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -408,12 +409,12 @@ fn version_args() -> Result<()> {
     let testdir = &testdir;
 
     // unexpected free argument `argument`
-    let child = testdir.spawn_child(&["version", "argument"])?;
+    let child = testdir.spawn_child(args!["version", "argument"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = testdir.spawn_child(&["version", "-f"])?;
+    let child = testdir.spawn_child(args!["version", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -441,7 +442,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
 
     // Generate configuration in temp dir path
     let child =
-        testdir.spawn_child(&["generate", "-o", generated_config_path.to_str().unwrap()])?;
+        testdir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
@@ -453,7 +454,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
     );
 
     // Run command using temp dir and kill it after a few seconds
-    let mut child = testdir.spawn_child(&[command])?;
+    let mut child = testdir.spawn_child(args![command])?;
     std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
 
@@ -792,7 +793,7 @@ async fn metrics_endpoint() -> Result<()> {
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
-    let child = dir.spawn_child(&["start"])?;
+    let child = dir.spawn_child(args!["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
     // Since we're an async function, we have to use a sleep future, not thread sleep.
@@ -848,7 +849,7 @@ async fn tracing_endpoint() -> Result<()> {
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
-    let child = dir.spawn_child(&["start"])?;
+    let child = dir.spawn_child(args!["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
     // Since we're an async function, we have to use a sleep future, not thread sleep.
@@ -941,7 +942,7 @@ async fn rpc_endpoint() -> Result<()> {
     let url = format!("http://{}", config.rpc.listen_addr.unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
-    let mut child = dir.spawn_child(&["start"])?;
+    let mut child = dir.spawn_child(args!["start"])?;
 
     // Wait until port is open.
     child.expect_stdout_line_matches(
@@ -1132,7 +1133,7 @@ fn lightwalletd_integration() -> Result<()> {
 
     let zdir = testdir()?.with_config(&mut config)?;
     let mut zebrad = zdir
-        .spawn_child(&["start"])?
+        .spawn_child(args!["start"])?
         .with_timeout(LAUNCH_DELAY)
         .with_failure_regex_iter(
             // TODO: replace with a function that returns the full list and correct return type
@@ -1417,7 +1418,7 @@ where
     U: ZebradTestDirExt,
 {
     // Start the first node
-    let mut node1 = first_dir.spawn_child(&["start"])?;
+    let mut node1 = first_dir.spawn_child(args!["start"])?;
 
     // Wait until node1 has used the conflicting resource.
     node1.expect_stdout_line_matches(first_stdout_regex)?;
@@ -1426,7 +1427,7 @@ where
     std::thread::sleep(BETWEEN_NODES_DELAY);
 
     // Spawn the second node
-    let node2 = second_dir.spawn_child(&["start"]);
+    let node2 = second_dir.spawn_child(args!["start"]);
     let (node2, mut node1) = node1.kill_on_error(node2)?;
 
     // Wait a few seconds and kill first node.
