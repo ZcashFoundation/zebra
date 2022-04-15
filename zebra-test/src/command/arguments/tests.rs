@@ -46,29 +46,7 @@ proptest! {
         let arguments = collect_arguments(arguments_to_add.clone());
         let argument_strings: Vec<_> = arguments.into_arguments().collect();
 
-        let mut overriden_list = Vec::new();
-
-        for override_argument in arguments_to_add {
-            let search_term = match &override_argument {
-                Argument::LoneArgument(argument) => argument,
-                Argument::KeyValuePair(key, _value) => key,
-            };
-
-            let argument_to_override =
-                overriden_list
-                    .iter_mut()
-                    .find(|existing_argument| match existing_argument {
-                        Argument::LoneArgument(argument) => argument == search_term,
-                        Argument::KeyValuePair(key, _value) => key == search_term,
-                    });
-
-            if let Some(argument_to_override) = argument_to_override {
-                *argument_to_override = override_argument;
-            } else {
-                overriden_list.push(override_argument);
-            }
-        }
-
+        let overriden_list = handle_overrides(arguments_to_add);
         let expected_strings = expand_arguments(overriden_list);
 
         assert_eq!(argument_strings, expected_strings);
@@ -104,6 +82,38 @@ fn expand_arguments(argument_list: Vec<Argument>) -> Vec<String> {
     }
 
     expected_strings
+}
+
+/// Processes a list of [`Argument`] items handling overrides, returning a new list of [`Argument`]
+/// items without duplicate arguments.
+///
+/// This follows the behavior of [`Arguments`] when handling overrides, so that the returned list
+/// is equivalent to an [`Arguments`] instance built from the same input list.
+fn handle_overrides(argument_list: Vec<Argument>) -> Vec<Argument> {
+    let mut overriden_list = Vec::new();
+
+    for override_argument in argument_list {
+        let search_term = match &override_argument {
+            Argument::LoneArgument(argument) => argument,
+            Argument::KeyValuePair(key, _value) => key,
+        };
+
+        let argument_to_override =
+            overriden_list
+                .iter_mut()
+                .find(|existing_argument| match existing_argument {
+                    Argument::LoneArgument(argument) => argument == search_term,
+                    Argument::KeyValuePair(key, _value) => key == search_term,
+                });
+
+        if let Some(argument_to_override) = argument_to_override {
+            *argument_to_override = override_argument;
+        } else {
+            overriden_list.push(override_argument);
+        }
+    }
+
+    overriden_list
 }
 
 /// A helper type to generate argument items.
