@@ -133,10 +133,7 @@ where
         // apply user provided arguments
         args.merge_with(extra_args);
 
-        let args: Vec<_> = args.into_arguments().collect();
-        let args: Vec<_> = args.iter().map(|string| string.as_ref()).collect();
-
-        self.spawn_child_with_command("lightwalletd", &args)
+        self.spawn_child_with_command("lightwalletd", args)
     }
 
     fn with_lightwalletd_config(self, zebra_rpc_listener: SocketAddr) -> Result<Self> {

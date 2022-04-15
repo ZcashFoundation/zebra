@@ -109,10 +109,7 @@ where
 
         args.merge_with(extra_args);
 
-        let args: Vec<_> = args.into_arguments().collect();
-        let args: Vec<_> = args.iter().map(|string| string.as_ref()).collect();
-
-        self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), &args)
+        self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), args)
     }
 
     fn with_config(self, config: &mut ZebradConfig) -> Result<Self> {
