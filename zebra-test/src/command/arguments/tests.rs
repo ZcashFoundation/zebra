@@ -51,6 +51,43 @@ proptest! {
 
         assert_eq!(argument_strings, expected_strings);
     }
+
+    /// Test that arguments in an [`Arguments`] instance can be merged.
+    ///
+    /// Generate a list of arguments to add and a list of overrides for those arguments. Also
+    /// generate a list of extra arguments.
+    ///
+    /// The first list is added to a first [`Arguments`] instance, while the second and third lists
+    /// are added to a second [`Arguments`] instance. The second instance is then merged into the
+    /// first instance. The generated list of strings from the [`Arguments::into_arguments`] method
+    /// of that first instance is compared to a list of `expected_strings`, which is built exactly
+    /// like in the [`arguments_can_be_overriden`] test.
+    #[test]
+    fn arguments_can_be_merged(
+        (argument_list, override_list) in Argument::list_and_overrides_strategy(),
+        extra_arguments in Argument::list_strategy(),
+    ) {
+        let all_arguments: Vec<_> = argument_list
+            .clone()
+            .into_iter()
+            .chain(override_list.clone())
+            .chain(extra_arguments.clone())
+            .collect();
+
+        let arguments_for_second_instance = override_list.into_iter().chain(extra_arguments).collect();
+
+        let mut first_arguments = collect_arguments(argument_list);
+        let second_arguments = collect_arguments(arguments_for_second_instance);
+
+        first_arguments.merge_with(second_arguments);
+
+        let argument_strings: Vec<_> = first_arguments.into_arguments().collect();
+
+        let overriden_list = handle_overrides(all_arguments);
+        let expected_strings = expand_arguments(overriden_list);
+
+        assert_eq!(argument_strings, expected_strings);
+    }
 }
 
 /// Collects a list of [`Argument`] items into an [`Arguments`] instance.
