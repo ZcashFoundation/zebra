@@ -1,5 +1,8 @@
 use indexmap::IndexMap;
 
+#[cfg(test)]
+mod tests;
+
 /// Helper type to keep track of arguments for spawning a process.
 ///
 /// Stores the arguments in order, but is aware of key-value pairs to make overriding parameters
