@@ -5884,6 +5884,7 @@ dependencies = [
  "color-eyre 0.5.11",
  "futures",
  "hex",
+ "indexmap",
  "insta",
  "lazy_static",
  "once_cell",

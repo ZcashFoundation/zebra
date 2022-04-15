@@ -19,8 +19,10 @@ use color_eyre::{
 use regex::RegexSet;
 use tracing::instrument;
 
+mod arguments;
 pub mod to_regex;
 
+pub use self::arguments::Arguments;
 use self::to_regex::{CollectRegexSet, ToRegex, ToRegexSet};
 
 /// A super-trait for [`Iterator`] + [`Debug`].

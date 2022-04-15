@@ -9,6 +9,7 @@ edition = "2021"
 
 [dependencies]
 hex = "0.4.3"
+indexmap = "1.8.1"
 lazy_static = "1.4.0"
 insta = "1.14.0"
 proptest = "0.10.1"
