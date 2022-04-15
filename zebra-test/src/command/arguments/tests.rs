@@ -12,26 +12,44 @@ proptest! {
     /// order as if each argument was individually added to a list.
     #[test]
     fn argument_order_is_preserved(argument_list in Argument::list_strategy()) {
-        let mut arguments = Arguments::new();
-        let mut expected_strings = Vec::new();
-
-        for argument in argument_list {
-            match argument {
-                Argument::LoneArgument(argument) => {
-                    arguments.set_argument(&argument);
-                    expected_strings.push(argument);
-                }
-                Argument::KeyValuePair(key, value) => {
-                    arguments.set_parameter(&key, &value);
-                    expected_strings.extend([key, value]);
-                }
-            }
-        }
-
+        let arguments = collect_arguments(argument_list.clone());
         let argument_strings: Vec<_> = arguments.into_arguments().collect();
+
+        let expected_strings = expand_arguments(argument_list);
 
         assert_eq!(argument_strings, expected_strings);
     }
+}
+
+/// Collects a list of [`Argument`] items into an [`Arguments`] instance.
+fn collect_arguments(argument_list: Vec<Argument>) -> Arguments {
+    let mut arguments = Arguments::new();
+
+    for argument in argument_list {
+        match argument {
+            Argument::LoneArgument(argument) => arguments.set_argument(argument),
+            Argument::KeyValuePair(key, value) => arguments.set_parameter(key, value),
+        }
+    }
+
+    arguments
+}
+
+/// Expands a list of [`Argument`] items into a list of [`String`]s.
+///
+/// This list is the list of expected strings that is expected to be generated from an [`Arguments`]
+/// instance built from the same list of [`Argument`] items.
+fn expand_arguments(argument_list: Vec<Argument>) -> Vec<String> {
+    let mut expected_strings = Vec::new();
+
+    for argument in argument_list {
+        match argument {
+            Argument::LoneArgument(argument) => expected_strings.push(argument),
+            Argument::KeyValuePair(key, value) => expected_strings.extend([key, value]),
+        }
+    }
+
+    expected_strings
 }
 
 /// A helper type to generate argument items.
