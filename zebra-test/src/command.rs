@@ -19,6 +19,7 @@ use color_eyre::{
 use regex::RegexSet;
 use tracing::instrument;
 
+#[macro_use]
 mod arguments;
 pub mod to_regex;
 
