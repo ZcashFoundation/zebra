@@ -19,6 +19,60 @@ proptest! {
 
         assert_eq!(argument_strings, expected_strings);
     }
+
+    /// Test that arguments in an [`Arguments`] instance can be overriden.
+    ///
+    /// Generate a list of arguments to add and a list of overrides for those arguments. Also
+    /// generate a list of extra arguments.
+    ///
+    /// All arguments from the three lists are added to an [`Arguments`] instance. The generated
+    /// list of strings from the [`Arguments::into_arguments`] method is compared to a list of
+    /// `expected_strings`.
+    ///
+    /// To build the list of `expected_strings`, a new `overriden_list` is compiled from the three
+    /// original lists. The list is compiled by manually handling overrides in a compatible way that
+    /// keeps the argument order when overriding and adding new arguments to the end of the list.
+    #[test]
+    fn arguments_can_be_overriden(
+        (argument_list, override_list) in Argument::list_and_overrides_strategy(),
+        extra_arguments in Argument::list_strategy(),
+    ) {
+        let arguments_to_add: Vec<_> = argument_list
+            .into_iter()
+            .chain(override_list)
+            .chain(extra_arguments)
+            .collect();
+
+        let arguments = collect_arguments(arguments_to_add.clone());
+        let argument_strings: Vec<_> = arguments.into_arguments().collect();
+
+        let mut overriden_list = Vec::new();
+
+        for override_argument in arguments_to_add {
+            let search_term = match &override_argument {
+                Argument::LoneArgument(argument) => argument,
+                Argument::KeyValuePair(key, _value) => key,
+            };
+
+            let argument_to_override =
+                overriden_list
+                    .iter_mut()
+                    .find(|existing_argument| match existing_argument {
+                        Argument::LoneArgument(argument) => argument == search_term,
+                        Argument::KeyValuePair(key, _value) => key == search_term,
+                    });
+
+            if let Some(argument_to_override) = argument_to_override {
+                *argument_to_override = override_argument;
+            } else {
+                overriden_list.push(override_argument);
+            }
+        }
+
+        let expected_strings = expand_arguments(overriden_list);
+
+        assert_eq!(argument_strings, expected_strings);
+    }
 }
 
 /// Collects a list of [`Argument`] items into an [`Arguments`] instance.
@@ -102,6 +156,50 @@ impl Argument {
                         }
                     })
                     .collect()
+            })
+    }
+
+    /// Generates a list of unique arbitrary [`Argument`] instances and a list of [`Argument`]
+    /// instances that override arguments from the first list.
+    pub fn list_and_overrides_strategy() -> impl Strategy<Value = (Vec<Argument>, Vec<Argument>)> {
+        // Generate a list of unique arbitrary arguments.
+        Self::list_strategy()
+            // Generate a list of arguments to override (referenced by indices) with new arbitrary
+            // random strings.
+            .prop_flat_map(|argument_list| {
+                let argument_list_count = argument_list.len();
+
+                let max_overrides = argument_list_count * 3;
+                let min_overrides = 1.min(max_overrides);
+
+                let override_strategy = (0..argument_list_count, "\\PC*");
+
+                (
+                    Just(argument_list),
+                    hash_set(override_strategy, min_overrides..=max_overrides),
+                )
+            })
+            // Transform the override references and random strings into [`Argument`] instances,
+            // with empty strings leading to the creation of lone arguments.
+            .prop_map(|(argument_list, override_seeds)| {
+                let override_list = override_seeds
+                    .into_iter()
+                    .map(|(index, new_value)| {
+                        let key = match &argument_list[index] {
+                            Argument::LoneArgument(argument) => argument,
+                            Argument::KeyValuePair(key, _value) => key,
+                        }
+                        .clone();
+
+                        if new_value.is_empty() {
+                            Argument::LoneArgument(key)
+                        } else {
+                            Argument::KeyValuePair(key, new_value)
+                        }
+                    })
+                    .collect();
+
+                (argument_list, override_list)
             })
     }
 }
