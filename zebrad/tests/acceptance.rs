@@ -1156,7 +1156,7 @@ fn lightwalletd_integration() -> Result<()> {
     let ldir = ldir.with_lightwalletd_config(config.rpc.listen_addr.unwrap())?;
 
     // Launch the lightwalletd process
-    let result = ldir.spawn_lightwalletd_child(&[]);
+    let result = ldir.spawn_lightwalletd_child(args![]);
     let (lightwalletd, zebrad) = zebrad.kill_on_error(result)?;
     let mut lightwalletd = lightwalletd
         .with_timeout(LIGHTWALLETD_DELAY)
