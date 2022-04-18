@@ -38,9 +38,9 @@ orchard = "=0.1.0-beta.3"
 
 # TODO: replace with upstream librustzcash when these changes are merged (#3037)
 # Currently pointing to `download-sprout-params-new` branch which contains the
-# changes from `download-sprout-params-5761bb4b` rebased on top of 5761bb4b as
+# changes from `download-sprout-params-d14e7a70` rebased on top of d14e7a70 as
 # required by `zcash/Cargo.toml`.
-zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "b9df3515255b7270cb9c9aec474a1ce6d3786e23", features = ["local-prover", "multicore", "download-params"] }
+zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "c3ff94134b472ba90af665e5454983dc12de1338", features = ["local-prover", "multicore", "download-params"] }
 
 tower-fallback = { path = "../tower-fallback/" }
 tower-batch = { path = "../tower-batch/" }
