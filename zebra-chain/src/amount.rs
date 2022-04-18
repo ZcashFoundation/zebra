@@ -15,6 +15,7 @@ use std::{
 
 use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+use serde::Serializer;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
@@ -81,6 +82,16 @@ impl<C> Amount<C> {
         C: Constraint,
     {
         0.try_into().expect("an amount of 0 is always valid")
+    }
+
+    /// Serialize this [`Amount`] as a string instead of an integer.
+    ///
+    /// The string contains the amount of Zatoshis in the amount.
+    pub fn serialize_as_string<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0.to_string())
     }
 }
 
