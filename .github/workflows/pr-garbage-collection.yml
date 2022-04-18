@@ -1,4 +1,4 @@
-name: Merge cleanup
+name: Clean up Google Cloud instances
 
 on:
   workflow_dispatch:
