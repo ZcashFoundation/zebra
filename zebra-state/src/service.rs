@@ -1014,6 +1014,27 @@ impl Service<ReadRequest> for ReadStateService {
                 }
                 .boxed()
             }
+
+            // For the get_address_balance RPC.
+            ReadRequest::AddressBalance(addresses) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "balance",
+                );
+
+                let state = self.clone();
+
+                async move {
+                    let balance = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::transparent_balance(best_chain, &state.db, addresses)
+                    })?;
+
+                    Ok(ReadResponse::AddressBalance(balance))
+                }
+                .boxed()
+            }
         }
     }
 }
