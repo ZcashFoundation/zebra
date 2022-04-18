@@ -74,7 +74,8 @@ skip-tree = [
     { name = "tracing-subscriber", version = "=0.1.6" },
 
     # upgrade abscissa and arti
-    { name = "darling", version = "=0.10.2" },
+    { name = "darling", version = "=0.12.4" },
+    { name = "darling", version = "=0.13.4" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
