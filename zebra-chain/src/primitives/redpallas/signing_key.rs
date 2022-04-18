@@ -1,7 +1,7 @@
 use std::convert::{TryFrom, TryInto};
 use std::marker::PhantomData;
 
-use group::GroupEncoding;
+use group::{ff::PrimeField, GroupEncoding};
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 use rand_core::{CryptoRng, RngCore};
 
@@ -26,7 +26,7 @@ impl<'a, T: SigType> From<&'a SigningKey<T>> for VerificationKey<T> {
 
 impl<T: SigType> From<SigningKey<T>> for [u8; 32] {
     fn from(sk: SigningKey<T>) -> [u8; 32] {
-        sk.sk.to_bytes()
+        sk.sk.to_repr()
     }
 }
 
@@ -34,7 +34,7 @@ impl<T: SigType> TryFrom<[u8; 32]> for SigningKey<T> {
     type Error = Error;
 
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        let maybe_sk = pallas::Scalar::from_bytes(&bytes);
+        let maybe_sk = pallas::Scalar::from_repr(bytes);
 
         if maybe_sk.is_some().into() {
             let sk = maybe_sk.unwrap();
@@ -114,7 +114,7 @@ impl<T: SigType> SigningKey<T> {
             .update(msg)
             .finalize();
 
-        let s_bytes = (nonce + (c * self.sk)).to_bytes();
+        let s_bytes = (nonce + (c * self.sk)).to_repr();
 
         Signature {
             r_bytes,

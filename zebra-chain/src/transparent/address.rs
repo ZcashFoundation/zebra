@@ -2,8 +2,9 @@
 
 use std::{fmt, io};
 
-use ripemd160::{Digest, Ripemd160};
+use ripemd::{Digest, Ripemd160};
 use secp256k1::PublicKey;
+use sha2::Digest as Sha256Digest;
 use sha2::Sha256;
 
 use crate::{
