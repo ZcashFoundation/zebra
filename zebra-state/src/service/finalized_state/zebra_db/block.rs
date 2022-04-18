@@ -9,13 +9,16 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::Arc,
+};
 
 use itertools::Itertools;
 
 use zebra_chain::{
     amount::NonNegative,
-    block::{self, Block},
+    block::{self, Block, Height},
     history_tree::HistoryTree,
     orchard,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
@@ -29,7 +32,10 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::{transparent::AddressBalanceLocation, FromDisk, TransactionLocation},
+        disk_format::{
+            block::TransactionLocation,
+            transparent::{AddressBalanceLocation, OutputLocation},
+        },
         zebra_db::{metrics::block_precommit_metrics, shielded::NoteCommitmentTrees, ZebraDb},
         FinalizedBlock,
     },
@@ -55,14 +61,7 @@ impl ZebraDb {
     // TODO: move this method to the tip section
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
-        self.db
-            .zs_last_key_value(&hash_by_height)
-            .map(|(height_bytes, hash_bytes)| {
-                let height = block::Height::from_bytes(height_bytes);
-                let hash = block::Hash::from_bytes(hash_bytes);
-
-                (height, hash)
-            })
+        self.db.zs_last_key_value(&hash_by_height)
     }
 
     /// Returns the finalized hash for a given `block::Height` if it is present.
@@ -93,7 +92,7 @@ impl ZebraDb {
         // Transactions
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
 
-        // Fetch the entire block's transactions
+        // Manually fetch the entire block's transactions
         let mut transactions = Vec::new();
 
         // TODO: is this loop more efficient if we store the number of transactions?
@@ -180,14 +179,11 @@ impl ZebraDb {
         self.db.zs_get(&hash_by_tx_loc, &location)
     }
 
-    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`block::Height`],
+    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
     /// if a transaction with that hash exists in the finalized chain.
     //
     // TODO: move this method to the start of the section
-    pub fn transaction(
-        &self,
-        hash: transaction::Hash,
-    ) -> Option<(Arc<Transaction>, block::Height)> {
+    pub fn transaction(&self, hash: transaction::Hash) -> Option<(Arc<Transaction>, Height)> {
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
 
         let transaction_location = self.transaction_location(hash)?;
@@ -219,32 +215,77 @@ impl ZebraDb {
     ) -> Result<block::Hash, BoxError> {
         let finalized_hash = finalized.hash;
 
-        // Get a list of the spent UTXOs, before we delete any from the database
-        let all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo> = finalized
-            .block
-            .transactions
+        let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
+            .transaction_hashes
             .iter()
-            .flat_map(|tx| tx.inputs().iter())
-            .flat_map(|input| input.outpoint())
-            .map(|outpoint| {
+            .enumerate()
+            .map(|(index, hash)| (*hash, index))
+            .collect();
+
+        // Get a list of the new UTXOs in the format we need for database updates.
+        //
+        // TODO: index new_outputs by TransactionLocation,
+        //       simplify the spent_utxos location lookup code,
+        //       and remove the extra new_outputs_by_out_loc argument
+        let new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo> = finalized
+            .new_outputs
+            .iter()
+            .map(|(outpoint, utxo)| {
                 (
-                    outpoint,
-                    // Some utxos are spent in the same block, so they will be in `new_outputs`
-                    self.utxo(&outpoint)
-                        .or_else(|| finalized.new_outputs.get(&outpoint).cloned())
-                        .expect("already checked UTXO was in state or block"),
+                    lookup_out_loc(finalized.height, outpoint, &tx_hash_indexes),
+                    utxo.clone(),
                 )
             })
             .collect();
 
-        // Get the current address balances, before the transactions in this block
-        let address_balances = all_utxos_spent_by_block
+        // Get a list of the spent UTXOs, before we delete any from the database
+        let spent_utxos: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)> =
+            finalized
+                .block
+                .transactions
+                .iter()
+                .flat_map(|tx| tx.inputs().iter())
+                .flat_map(|input| input.outpoint())
+                .map(|outpoint| {
+                    (
+                        outpoint,
+                        // Some utxos are spent in the same block, so they will be in
+                        // `tx_hash_indexes` and `new_outputs`
+                        self.output_location(&outpoint).unwrap_or_else(|| {
+                            lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
+                        }),
+                        self.utxo(&outpoint)
+                            .map(|ordered_utxo| ordered_utxo.utxo)
+                            .or_else(|| finalized.new_outputs.get(&outpoint).cloned())
+                            .expect("already checked UTXO was in state or block"),
+                    )
+                })
+                .collect();
+
+        let spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo> =
+            spent_utxos
+                .iter()
+                .map(|(outpoint, _output_loc, utxo)| (*outpoint, utxo.clone()))
+                .collect();
+        let spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo> = spent_utxos
+            .into_iter()
+            .map(|(_outpoint, out_loc, utxo)| (out_loc, utxo))
+            .collect();
+
+        // Get the transparent addresses with changed balances/UTXOs
+        let changed_addresses: HashSet<transparent::Address> = spent_utxos_by_out_loc
             .values()
             .chain(finalized.new_outputs.values())
             .filter_map(|utxo| utxo.output.address(network))
             .unique()
-            .filter_map(|address| Some((address, self.address_balance_location(&address)?)))
             .collect();
+
+        // Get the current address balances, before the transactions in this block
+        let address_balances: HashMap<transparent::Address, AddressBalanceLocation> =
+            changed_addresses
+                .into_iter()
+                .filter_map(|address| Some((address, self.address_balance_location(&address)?)))
+                .collect();
 
         let mut batch = DiskWriteBatch::new(network);
 
@@ -252,7 +293,9 @@ impl ZebraDb {
         batch.prepare_block_batch(
             &self.db,
             finalized,
-            all_utxos_spent_by_block,
+            new_outputs_by_out_loc,
+            spent_utxos_by_outpoint,
+            spent_utxos_by_out_loc,
             address_balances,
             self.note_commitment_trees(),
             history_tree,
@@ -267,6 +310,23 @@ impl ZebraDb {
     }
 }
 
+/// Lookup the output location for an outpoint.
+///
+/// `tx_hash_indexes` must contain `outpoint.hash` and that transaction's index in its block.
+fn lookup_out_loc(
+    height: Height,
+    outpoint: &transparent::OutPoint,
+    tx_hash_indexes: &HashMap<transaction::Hash, usize>,
+) -> OutputLocation {
+    let tx_index = tx_hash_indexes
+        .get(&outpoint.hash)
+        .expect("already checked UTXO was in state or block");
+
+    let tx_loc = TransactionLocation::from_usize(height, *tx_index);
+
+    OutputLocation::from_outpoint(tx_loc, outpoint)
+}
+
 impl DiskWriteBatch {
     // Write block methods
 
@@ -279,12 +339,16 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating history tree, note commitment trees, or value pools
+    //
+    // TODO: move db, finalized, and maybe other arguments into DiskWriteBatch
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
         &mut self,
         db: &DiskDb,
         finalized: FinalizedBlock,
-        all_utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
+        new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
+        spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
+        spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         mut note_commitment_trees: NoteCommitmentTrees,
         history_tree: HistoryTree,
@@ -318,7 +382,8 @@ impl DiskWriteBatch {
         self.prepare_transaction_index_batch(
             db,
             &finalized,
-            &all_utxos_spent_by_block,
+            new_outputs_by_out_loc,
+            spent_utxos_by_out_loc,
             address_balances,
             &mut note_commitment_trees,
         )?;
@@ -326,7 +391,7 @@ impl DiskWriteBatch {
         self.prepare_note_commitment_batch(db, &finalized, note_commitment_trees, history_tree)?;
 
         // Commit UTXOs and value pools
-        self.prepare_chain_value_pools_batch(db, &finalized, all_utxos_spent_by_block, value_pool)?;
+        self.prepare_chain_value_pools_batch(db, &finalized, spent_utxos_by_outpoint, value_pool)?;
 
         // The block has passed contextual validation, so update the metrics
         block_precommit_metrics(block, *hash, *height);
@@ -422,11 +487,14 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating note commitment trees
+    //
+    // TODO: move db, finalized, and maybe other arguments into DiskWriteBatch
     pub fn prepare_transaction_index_batch(
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
-        all_utxos_spent_by_block: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
+        utxos_spent_by_block: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         note_commitment_trees: &mut NoteCommitmentTrees,
     ) -> Result<(), BoxError> {
@@ -441,8 +509,8 @@ impl DiskWriteBatch {
 
         self.prepare_transparent_outputs_batch(
             db,
-            finalized,
-            all_utxos_spent_by_block,
+            new_outputs_by_out_loc,
+            utxos_spent_by_block,
             address_balances,
         )
     }

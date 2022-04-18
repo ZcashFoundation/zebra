@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3.0.0
+      - uses: actions/checkout@v3.0.1
         with:
           persist-credentials: false
 
@@ -70,8 +70,8 @@ jobs:
         # Coverage tests are much slower than other tests, particularly in hot loops.
         shell: bash
         run: |
-             echo "PROPTEST_CASES=1" >> $GITHUB_ENV
-             echo "PROPTEST_MAX_SHRINK_ITERS=0" >> $GITHUB_ENV
+          echo "PROPTEST_CASES=1" >> $GITHUB_ENV
+          echo "PROPTEST_MAX_SHRINK_ITERS=0" >> $GITHUB_ENV
 
       # Modified from:
       # https://github.com/zcash/librustzcash/blob/c48bb4def2e122289843ddb3cb2984c325c03ca0/.github/workflows/ci.yml#L20-L33

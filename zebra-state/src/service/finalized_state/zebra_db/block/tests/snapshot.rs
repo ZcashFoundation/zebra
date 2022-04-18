@@ -196,7 +196,7 @@ fn test_block_and_transaction_data_with_network(network: Network) {
         settings.set_snapshot_suffix(format!("{}_{}", net_suffix, height));
 
         settings.bind(|| snapshot_block_and_transaction_data(&state));
-        settings.bind(|| snapshot_transparent_address_data(&state));
+        settings.bind(|| snapshot_transparent_address_data(&state, height));
     }
 }
 
@@ -355,34 +355,43 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                     let output = &stored_block.transactions[tx_index].outputs()[output_index];
                     let outpoint =
                         transparent::OutPoint::from_usize(transaction_hash, output_index);
-
                     let output_location =
-                        OutputLocation::from_usize(transaction_hash, output_index);
+                        OutputLocation::from_usize(query_height, tx_index, output_index);
 
-                    let stored_utxo = state.utxo(&outpoint);
+                    let stored_output_location = state
+                        .output_location(&outpoint)
+                        .expect("all outpoints are indexed");
+
+                    let stored_utxo_by_outpoint = state.utxo(&outpoint);
+                    let stored_utxo_by_out_loc = state.utxo_by_location(output_location);
+
+                    assert_eq!(stored_output_location, output_location);
+                    assert_eq!(stored_utxo_by_out_loc, stored_utxo_by_outpoint);
 
                     // # Consensus
                     //
                     // The genesis transaction's UTXO is not indexed.
                     // This check also ignores spent UTXOs.
-                    if let Some(stored_utxo) = &stored_utxo {
-                        assert_eq!(&stored_utxo.output, output);
-                        assert_eq!(stored_utxo.height, query_height);
+                    if let Some(stored_utxo) = &stored_utxo_by_out_loc {
+                        assert_eq!(&stored_utxo.utxo.output, output);
+                        assert_eq!(stored_utxo.utxo.height, query_height);
 
                         assert_eq!(
-                            stored_utxo.from_coinbase,
+                            stored_utxo.utxo.from_coinbase,
                             transaction_location.index == TransactionIndex::from_usize(0),
                             "coinbase transactions must be the first transaction in a block:\n\
                              from_coinbase was: {from_coinbase},\n\
                              but transaction index was: {tx_index},\n\
                              at: {transaction_location:?},\n\
                              {output_location:?}",
-                            from_coinbase = stored_utxo.from_coinbase,
+                            from_coinbase = stored_utxo.utxo.from_coinbase,
                         );
                     }
 
-                    // TODO: use output_location in #3151
-                    stored_utxos.push((outpoint, stored_utxo));
+                    stored_utxos.push((
+                        output_location,
+                        stored_utxo_by_out_loc.map(|ordered_utxo| ordered_utxo.utxo),
+                    ));
                 }
             }
         }
@@ -422,44 +431,113 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 }
 
 /// Snapshot transparent address data, using `cargo insta` and RON serialization.
-fn snapshot_transparent_address_data(state: &FinalizedState) {
+fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
     let balance_by_transparent_addr = state.cf_handle("balance_by_transparent_addr").unwrap();
+    let utxo_loc_by_transparent_addr_loc =
+        state.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
+    let tx_loc_by_transparent_addr_loc = state.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
 
     let mut stored_address_balances = Vec::new();
-
-    // TODO: UTXOs for each address (#3953)
-    //       transactions for each address (#3951)
+    let mut stored_address_utxo_locations = Vec::new();
+    let mut stored_address_utxos = Vec::new();
+    let mut stored_address_transaction_locations = Vec::new();
 
     // Correctness: Multi-key iteration causes hangs in concurrent code, but seems ok in tests.
     let addresses =
         state.full_iterator_cf(&balance_by_transparent_addr, rocksdb::IteratorMode::Start);
+    let utxo_address_location_count = state
+        .full_iterator_cf(
+            &utxo_loc_by_transparent_addr_loc,
+            rocksdb::IteratorMode::Start,
+        )
+        .count();
+    let transaction_address_location_count = state
+        .full_iterator_cf(
+            &tx_loc_by_transparent_addr_loc,
+            rocksdb::IteratorMode::Start,
+        )
+        .count();
 
-    // The default raw data serialization is very verbose, so we hex-encode the bytes.
     let addresses: Vec<transparent::Address> = addresses
         .map(|(key, _value)| transparent::Address::from_bytes(key))
         .collect();
 
+    // # Consensus
+    //
+    // The genesis transaction's UTXO is not indexed.
+    // This check also ignores spent UTXOs.
+    if height == 0 {
+        assert_eq!(addresses.len(), 0);
+        assert_eq!(utxo_address_location_count, 0);
+        assert_eq!(transaction_address_location_count, 0);
+        return;
+    }
+
     for address in addresses {
-        let stored_address_balance = state
+        let stored_address_balance_location = state
             .address_balance_location(&address)
             .expect("address indexes are consistent");
 
-        stored_address_balances.push((address.to_string(), stored_address_balance));
-    }
+        let stored_address_location = stored_address_balance_location.address_location();
 
-    // TODO: check that the UTXO and transaction lists are in chain order.
-    /*
-       assert!(
-           is_sorted(&stored_address_utxos),
-           "unsorted: {:?}",
-           stored_address_utxos,
-       );
-    */
+        let mut stored_utxo_locations = Vec::new();
+        for address_utxo_loc in state.address_utxo_locations(stored_address_location) {
+            assert_eq!(address_utxo_loc.address_location(), stored_address_location);
+
+            stored_utxo_locations.push(address_utxo_loc.unspent_output_location());
+        }
+
+        let mut stored_utxos = Vec::new();
+        for (utxo_loc, utxo) in state.address_utxos(&address) {
+            assert!(stored_utxo_locations.contains(&utxo_loc));
+
+            stored_utxos.push(utxo);
+        }
+
+        let mut stored_transaction_locations = Vec::new();
+        for transaction_location in state.address_transaction_locations(stored_address_location) {
+            assert_eq!(
+                transaction_location.address_location(),
+                stored_address_location
+            );
+
+            stored_transaction_locations.push(transaction_location.transaction_location());
+        }
+
+        // Check that the lists are in chain order
+        assert!(
+            is_sorted(&stored_utxo_locations),
+            "unsorted: {:?}\n\
+             for address: {:?}",
+            stored_utxo_locations,
+            address,
+        );
+        assert!(
+            is_sorted(&stored_transaction_locations),
+            "unsorted: {:?}\n\
+             for address: {:?}",
+            stored_transaction_locations,
+            address,
+        );
+
+        // The default raw data serialization is very verbose, so we hex-encode the bytes.
+        stored_address_balances.push((address.to_string(), stored_address_balance_location));
+        stored_address_utxo_locations.push((stored_address_location, stored_utxo_locations));
+        stored_address_utxos.push((address, stored_utxos));
+        stored_address_transaction_locations.push((address, stored_transaction_locations));
+    }
 
     // We want to snapshot the order in the database,
     // because sometimes it is significant for performance or correctness.
     // So we don't sort the vectors before snapshotting.
     insta::assert_ron_snapshot!("address_balances", stored_address_balances);
+    // TODO: change these names to address_utxo_locations and address_utxos
+    insta::assert_ron_snapshot!("address_utxos", stored_address_utxo_locations);
+    insta::assert_ron_snapshot!("address_utxo_data", stored_address_utxos);
+    insta::assert_ron_snapshot!(
+        "address_transaction_locations",
+        stored_address_transaction_locations
+    );
 }
 
 /// Return true if `list` is sorted in ascending order.

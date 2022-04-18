@@ -189,6 +189,7 @@ impl Block {
     ///
     /// `utxos` must contain the [`Utxo`]s of every input in this block,
     /// including UTXOs created by earlier transactions in this block.
+    /// (It can also contain unrelated UTXOs, which are ignored.)
     ///
     /// Note: the chain value pool has the opposite sign to the transaction
     /// value pool.

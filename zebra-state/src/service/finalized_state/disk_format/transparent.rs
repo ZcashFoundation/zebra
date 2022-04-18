@@ -7,44 +7,63 @@
 
 use std::fmt::Debug;
 
-use serde::{Deserialize, Serialize};
-
 use zebra_chain::{
-    amount::{Amount, NonNegative},
+    amount::{self, Amount, NonNegative},
     block::Height,
     parameters::Network::*,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transaction,
     transparent::{self, Address::*},
 };
 
-use crate::service::finalized_state::disk_format::{block::HEIGHT_DISK_BYTES, FromDisk, IntoDisk};
+use crate::service::finalized_state::disk_format::{
+    block::{TransactionIndex, TransactionLocation, TRANSACTION_LOCATION_DISK_BYTES},
+    expand_zero_be_bytes, truncate_zero_be_bytes, FromDisk, IntoDisk,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+#[cfg(any(test, feature = "proptest-impl"))]
+use serde::{Deserialize, Serialize};
+
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
 
 /// Transparent balances are stored as an 8 byte integer on disk.
 pub const BALANCE_DISK_BYTES: usize = 8;
 
-/// Output transaction locations are stored as a 32 byte transaction hash on disk.
+/// [`OutputIndex`]es are stored as 3 bytes on disk.
 ///
-/// TODO: change to TransactionLocation to reduce database size and increases lookup performance (#3953)
-pub const OUTPUT_TX_HASH_DISK_BYTES: usize = 32;
+/// This reduces database size and increases lookup performance.
+pub const OUTPUT_INDEX_DISK_BYTES: usize = 3;
 
-/// [`OutputIndex`]es are stored as 4 bytes on disk.
+/// [`OutputLocation`]s are stored as a 3 byte height, 2 byte transaction index,
+/// and 3 byte output index on disk.
 ///
-/// TODO: change to 3 bytes to reduce database size and increases lookup performance (#3953)
-pub const OUTPUT_INDEX_DISK_BYTES: usize = 4;
+/// This reduces database size and increases lookup performance.
+pub const OUTPUT_LOCATION_DISK_BYTES: usize =
+    TRANSACTION_LOCATION_DISK_BYTES + OUTPUT_INDEX_DISK_BYTES;
 
 // Transparent types
 
-/// A transaction's index in its block.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+/// A transparent output's index in its transaction.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize, Deserialize))]
 pub struct OutputIndex(u32);
 
 impl OutputIndex {
-    /// Create a transparent output index from the native index integer type.
+    /// Create a transparent output index from the Zcash consensus integer type.
+    ///
+    /// `u32` is also the inner type.
+    pub fn from_index(output_index: u32) -> OutputIndex {
+        OutputIndex(output_index)
+    }
+
+    /// Returns this index as the inner type.
+    pub fn index(&self) -> u32 {
+        self.0
+    }
+
+    /// Create a transparent output index from `usize`.
     #[allow(dead_code)]
     pub fn from_usize(output_index: usize) -> OutputIndex {
         OutputIndex(
@@ -54,7 +73,7 @@ impl OutputIndex {
         )
     }
 
-    /// Return this index as the native index integer type.
+    /// Return this index as `usize`.
     #[allow(dead_code)]
     pub fn as_usize(&self) -> usize {
         self.0
@@ -62,50 +81,104 @@ impl OutputIndex {
             .expect("the maximum valid index fits in usize")
     }
 
-    /// Create a transparent output index from the Zcash consensus integer type.
-    pub fn from_zcash(output_index: u32) -> OutputIndex {
-        OutputIndex(output_index)
+    /// Create a transparent output index from `u64`.
+    #[allow(dead_code)]
+    pub fn from_u64(output_index: u64) -> OutputIndex {
+        OutputIndex(
+            output_index
+                .try_into()
+                .expect("the maximum u64 index fits in the inner type"),
+        )
     }
 
-    /// Return this index as the Zcash consensus integer type.
+    /// Return this index as `u64`.
     #[allow(dead_code)]
-    pub fn as_zcash(&self) -> u32 {
-        self.0
+    pub fn as_u64(&self) -> u64 {
+        self.0.into()
     }
 }
 
 /// A transparent output's location in the chain, by block height and transaction index.
 ///
-/// TODO: provide a chain-order list of transactions (#3150)
-///       derive Ord, PartialOrd (#3150)
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+/// [`OutputLocation`]s are sorted in increasing chain order, by height, transaction index,
+/// and output index.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
 pub struct OutputLocation {
-    /// The transaction hash.
-    #[serde(with = "hex")]
-    pub hash: transaction::Hash,
+    /// The location of the transparent input's transaction.
+    transaction_location: TransactionLocation,
 
     /// The index of the transparent output in its transaction.
-    pub index: OutputIndex,
+    output_index: OutputIndex,
 }
 
 impl OutputLocation {
-    /// Create a transparent output location from a transaction hash and index
-    /// (as the native index integer type).
+    /// Creates an output location from a block height, and `usize` transaction and output indexes.
     #[allow(dead_code)]
-    pub fn from_usize(hash: transaction::Hash, output_index: usize) -> OutputLocation {
+    pub fn from_usize(
+        height: Height,
+        transaction_index: usize,
+        output_index: usize,
+    ) -> OutputLocation {
         OutputLocation {
-            hash,
-            index: OutputIndex::from_usize(output_index),
+            transaction_location: TransactionLocation::from_usize(height, transaction_index),
+            output_index: OutputIndex::from_usize(output_index),
         }
     }
 
-    /// Create a transparent output location from a [`transparent::OutPoint`].
-    pub fn from_outpoint(outpoint: &transparent::OutPoint) -> OutputLocation {
+    /// Creates an output location from an [`Outpoint`],
+    /// and the [`TransactionLocation`] of its transaction.
+    ///
+    /// The [`TransactionLocation`] is provided separately,
+    /// because the lookup is a database operation.
+    pub fn from_outpoint(
+        transaction_location: TransactionLocation,
+        outpoint: &transparent::OutPoint,
+    ) -> OutputLocation {
+        OutputLocation::from_output_index(transaction_location, outpoint.index)
+    }
+
+    /// Creates an output location from a [`TransactionLocation`] and a `u32` output index.
+    ///
+    /// Output indexes are serialized to `u32` in the Zcash consensus-critical transaction format.
+    pub fn from_output_index(
+        transaction_location: TransactionLocation,
+        output_index: u32,
+    ) -> OutputLocation {
         OutputLocation {
-            hash: outpoint.hash,
-            index: OutputIndex::from_zcash(outpoint.index),
+            transaction_location,
+            output_index: OutputIndex::from_index(output_index),
         }
+    }
+
+    /// Returns the height of this [`transparent::Output`].
+    pub fn height(&self) -> Height {
+        self.transaction_location.height
+    }
+
+    /// Returns the transaction index of this [`transparent::Output`].
+    pub fn transaction_index(&self) -> TransactionIndex {
+        self.transaction_location.index
+    }
+
+    /// Returns the output index of this [`transparent::Output`].
+    pub fn output_index(&self) -> OutputIndex {
+        self.output_index
+    }
+
+    /// Returns the location of the transaction for this [`transparent::Output`].
+    pub fn transaction_location(&self) -> TransactionLocation {
+        self.transaction_location
+    }
+
+    /// Allows tests to set the height of this output location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn height_mut(&mut self) -> &mut Height {
+        &mut self.transaction_location.height
     }
 }
 
@@ -125,13 +198,16 @@ pub type AddressLocation = OutputLocation;
 ///
 /// Currently, Zebra tracks this data 1:1 for each address:
 /// - the balance [`Amount`] for a transparent address, and
-/// - the [`OutputLocation`] for the first [`transparent::Output`] sent to that address
+/// - the [`AddressLocation`] for the first [`transparent::Output`] sent to that address
 ///   (regardless of whether that output is spent or unspent).
 ///
 /// All other address data is tracked multiple times for each address
 /// (UTXOs and transactions).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
 pub struct AddressBalanceLocation {
     /// The total balance of all UTXOs sent to an address.
     balance: Amount<NonNegative>,
@@ -162,9 +238,216 @@ impl AddressBalanceLocation {
         &mut self.balance
     }
 
+    /// Updates the current balance by adding the supplied output's value.
+    pub fn receive_output(
+        &mut self,
+        unspent_output: &transparent::Output,
+    ) -> Result<(), amount::Error> {
+        self.balance = (self.balance + unspent_output.value())?;
+
+        Ok(())
+    }
+
+    /// Updates the current balance by subtracting the supplied output's value.
+    pub fn spend_output(
+        &mut self,
+        spent_output: &transparent::Output,
+    ) -> Result<(), amount::Error> {
+        self.balance = (self.balance - spent_output.value())?;
+
+        Ok(())
+    }
+
     /// Returns the location of the first [`transparent::Output`] sent to an address.
-    pub fn location(&self) -> AddressLocation {
+    pub fn address_location(&self) -> AddressLocation {
         self.location
+    }
+
+    /// Allows tests to set the height of the address location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn height_mut(&mut self) -> &mut Height {
+        &mut self.location.transaction_location.height
+    }
+}
+
+/// A single unspent output for a [`transparent::Address`].
+///
+/// We store both the address location key and unspend output location value
+/// in the RocksDB column family key. This improves insert and delete performance.
+///
+/// This requires 8 extra bytes for each unspent output,
+/// because we repeat the key for each value.
+/// But RocksDB compression reduces the duplicate data size on disk.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
+pub struct AddressUnspentOutput {
+    /// The location of the first [`transparent::Output`] sent to the address in `output`.
+    address_location: AddressLocation,
+
+    /// The location of this unspent output.
+    unspent_output_location: OutputLocation,
+}
+
+impl AddressUnspentOutput {
+    /// Create a new [`AddressUnspentOutput`] from an address location,
+    /// and an unspent output location.
+    pub fn new(
+        address_location: AddressLocation,
+        unspent_output_location: OutputLocation,
+    ) -> AddressUnspentOutput {
+        AddressUnspentOutput {
+            address_location,
+            unspent_output_location,
+        }
+    }
+
+    /// Create an [`AddressUnspentOutput`] which starts iteration for the supplied address.
+    /// Used to look up the first output with [`ReadDisk::zs_next_key_value_from`].
+    ///
+    /// The unspent output location is before all unspent output locations in the index.
+    /// It is always invalid, due to the genesis consensus rules. But this is not an issue
+    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
+    pub fn address_iterator_start(address_location: AddressLocation) -> AddressUnspentOutput {
+        // Iterating from the lowest possible output location gets us the first output.
+        let zero_output_location = OutputLocation::from_usize(Height(0), 0, 0);
+
+        AddressUnspentOutput {
+            address_location,
+            unspent_output_location: zero_output_location,
+        }
+    }
+
+    /// Update the unspent output location to the next possible output for the supplied address.
+    /// Used to look up the next output with [`ReadDisk::zs_next_key_value_from`].
+    ///
+    /// The updated unspent output location may be invalid, which is not an issue
+    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
+    pub fn address_iterator_next(&mut self) {
+        // Iterating from the next possible output location gets us the next output,
+        // even if it is in a later block or transaction.
+        //
+        // Consensus: the block size limit is 2MB, which is much lower than the index range.
+        self.unspent_output_location.output_index.0 += 1;
+    }
+
+    /// The location of the first [`transparent::Output`] sent to the address of this output.
+    ///
+    /// This can be used to look up the address.
+    pub fn address_location(&self) -> AddressLocation {
+        self.address_location
+    }
+
+    /// The location of this unspent output.
+    pub fn unspent_output_location(&self) -> OutputLocation {
+        self.unspent_output_location
+    }
+
+    /// Allows tests to modify the address location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn address_location_mut(&mut self) -> &mut AddressLocation {
+        &mut self.address_location
+    }
+
+    /// Allows tests to modify the unspent output location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn unspent_output_location_mut(&mut self) -> &mut OutputLocation {
+        &mut self.unspent_output_location
+    }
+}
+
+/// A single transaction sent to a [`transparent::Address`].
+///
+/// We store both the address location key and transaction location value
+/// in the RocksDB column family key. This improves insert and delete performance.
+///
+/// This requires 8 extra bytes for each transaction location,
+/// because we repeat the key for each value.
+/// But RocksDB compression reduces the duplicate data size on disk.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
+pub struct AddressTransaction {
+    /// The location of the first [`transparent::Output`] sent to the address in `output`.
+    address_location: AddressLocation,
+
+    /// The location of the transaction sent to the address.
+    transaction_location: TransactionLocation,
+}
+
+impl AddressTransaction {
+    /// Create a new [`AddressTransaction`] from an address location,
+    /// and a transaction location.
+    pub fn new(
+        address_location: AddressLocation,
+        transaction_location: TransactionLocation,
+    ) -> AddressTransaction {
+        AddressTransaction {
+            address_location,
+            transaction_location,
+        }
+    }
+
+    /// Create an [`AddressTransaction`] which starts iteration for the supplied address.
+    /// Used to look up the first transaction with [`ReadDisk::zs_next_key_value_from`].
+    ///
+    /// The transaction location is before all unspent output locations in the index.
+    /// It is always invalid, due to the genesis consensus rules. But this is not an issue
+    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
+    pub fn address_iterator_start(address_location: AddressLocation) -> AddressTransaction {
+        // Iterating from the lowest possible transaction location gets us the first transaction.
+        let zero_transaction_location = TransactionLocation::from_usize(Height(0), 0);
+
+        AddressTransaction {
+            address_location,
+            transaction_location: zero_transaction_location,
+        }
+    }
+
+    /// Update the transaction location to the next possible transaction for the supplied address.
+    /// Used to look up the next output with [`ReadDisk::zs_next_key_value_from`].
+    ///
+    /// The updated transaction location may be invalid, which is not an issue
+    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
+    pub fn address_iterator_next(&mut self) {
+        // Iterating from the next possible output location gets us the next output,
+        // even if it is in a later block or transaction.
+        //
+        // Consensus: the block size limit is 2MB, which is much lower than the index range.
+        self.transaction_location.index.0 += 1;
+    }
+
+    /// The location of the first [`transparent::Output`] sent to the address of this output.
+    ///
+    /// This can be used to look up the address.
+    pub fn address_location(&self) -> AddressLocation {
+        self.address_location
+    }
+
+    /// The location of this transaction.
+    pub fn transaction_location(&self) -> TransactionLocation {
+        self.transaction_location
+    }
+
+    /// Allows tests to modify the address location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn address_location_mut(&mut self) -> &mut AddressLocation {
+        &mut self.address_location
+    }
+
+    /// Allows tests to modify the unspent output location.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(dead_code)]
+    pub fn transaction_location_mut(&mut self) -> &mut TransactionLocation {
+        &mut self.transaction_location
     }
 }
 
@@ -237,60 +520,81 @@ impl IntoDisk for OutputIndex {
     type Bytes = [u8; OUTPUT_INDEX_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.0.to_le_bytes()
+        let mem_bytes = self.index().to_be_bytes();
+
+        let disk_bytes = truncate_zero_be_bytes(&mem_bytes, OUTPUT_INDEX_DISK_BYTES);
+
+        disk_bytes.try_into().unwrap()
     }
 }
 
 impl FromDisk for OutputIndex {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        OutputIndex(u32::from_le_bytes(disk_bytes.as_ref().try_into().unwrap()))
+        let mem_len = u32::BITS / 8;
+        let mem_len = mem_len.try_into().unwrap();
+
+        let mem_bytes = expand_zero_be_bytes(disk_bytes.as_ref(), mem_len);
+        let mem_bytes = mem_bytes.try_into().unwrap();
+        OutputIndex::from_index(u32::from_be_bytes(mem_bytes))
     }
 }
 
 impl IntoDisk for OutputLocation {
-    type Bytes = [u8; OUTPUT_TX_HASH_DISK_BYTES + OUTPUT_INDEX_DISK_BYTES];
+    type Bytes = [u8; OUTPUT_LOCATION_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
-        let hash_bytes = self.hash.as_bytes().to_vec();
-        let index_bytes = self.index.as_bytes().to_vec();
+        let transaction_location_bytes = self.transaction_location().as_bytes().to_vec();
+        let output_index_bytes = self.output_index().as_bytes().to_vec();
 
-        [hash_bytes, index_bytes].concat().try_into().unwrap()
+        [transaction_location_bytes, output_index_bytes]
+            .concat()
+            .try_into()
+            .unwrap()
     }
 }
 
 impl FromDisk for OutputLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let (hash_bytes, index_bytes) = disk_bytes.as_ref().split_at(OUTPUT_TX_HASH_DISK_BYTES);
+        let (transaction_location_bytes, output_index_bytes) = disk_bytes
+            .as_ref()
+            .split_at(TRANSACTION_LOCATION_DISK_BYTES);
 
-        let hash = transaction::Hash::from_bytes(hash_bytes);
-        let index = OutputIndex::from_bytes(index_bytes);
+        let transaction_location = TransactionLocation::from_bytes(transaction_location_bytes);
+        let output_index = OutputIndex::from_bytes(output_index_bytes);
 
-        OutputLocation { hash, index }
+        OutputLocation {
+            transaction_location,
+            output_index,
+        }
     }
 }
 
 impl IntoDisk for AddressBalanceLocation {
-    type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_TX_HASH_DISK_BYTES + OUTPUT_INDEX_DISK_BYTES];
+    type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
         let balance_bytes = self.balance().as_bytes().to_vec();
-        let location_bytes = self.location().as_bytes().to_vec();
+        let address_location_bytes = self.address_location().as_bytes().to_vec();
 
-        [balance_bytes, location_bytes].concat().try_into().unwrap()
+        [balance_bytes, address_location_bytes]
+            .concat()
+            .try_into()
+            .unwrap()
     }
 }
 
 impl FromDisk for AddressBalanceLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let (balance_bytes, location_bytes) = disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
+        let (balance_bytes, address_location_bytes) =
+            disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
 
         let balance = Amount::from_bytes(balance_bytes.try_into().unwrap()).unwrap();
-        let location = AddressLocation::from_bytes(location_bytes);
+        let address_location = AddressLocation::from_bytes(address_location_bytes);
 
-        let mut balance_location = AddressBalanceLocation::new(location);
-        *balance_location.balance_mut() = balance;
+        let mut address_balance_location = AddressBalanceLocation::new(address_location);
+        *address_balance_location.balance_mut() = balance;
 
-        balance_location
+        address_balance_location
     }
 }
 
@@ -308,37 +612,59 @@ impl FromDisk for transparent::Output {
     }
 }
 
-// TODO: delete UTXO serialization (#3953)
-impl IntoDisk for transparent::Utxo {
-    type Bytes = Vec<u8>;
+impl IntoDisk for AddressUnspentOutput {
+    type Bytes = [u8; OUTPUT_LOCATION_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
-        let height_bytes = self.height.as_bytes().to_vec();
-        let coinbase_flag_bytes = [self.from_coinbase as u8].to_vec();
-        let output_bytes = self
-            .output
-            .zcash_serialize_to_vec()
-            .expect("serialization to vec doesn't fail");
+        let address_location_bytes = self.address_location().as_bytes();
+        let unspent_output_location_bytes = self.unspent_output_location().as_bytes();
 
-        [height_bytes, coinbase_flag_bytes, output_bytes].concat()
+        [address_location_bytes, unspent_output_location_bytes]
+            .concat()
+            .try_into()
+            .unwrap()
     }
 }
 
-impl FromDisk for transparent::Utxo {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let (height_bytes, rest_bytes) = bytes.as_ref().split_at(HEIGHT_DISK_BYTES);
-        let (coinbase_flag_bytes, output_bytes) = rest_bytes.split_at(1);
+impl FromDisk for AddressUnspentOutput {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        let (address_location_bytes, unspent_output_location_bytes) =
+            disk_bytes.as_ref().split_at(OUTPUT_LOCATION_DISK_BYTES);
 
-        let height = Height::from_bytes(height_bytes);
-        let from_coinbase = coinbase_flag_bytes[0] == 1u8;
-        let output = output_bytes
-            .zcash_deserialize_into()
-            .expect("db has valid serialized data");
+        let address_location = AddressLocation::from_bytes(address_location_bytes);
+        let unspent_output_location = AddressLocation::from_bytes(unspent_output_location_bytes);
 
-        Self {
-            output,
-            height,
-            from_coinbase,
-        }
+        AddressUnspentOutput::new(address_location, unspent_output_location)
+    }
+}
+
+impl IntoDisk for AddressTransaction {
+    type Bytes = [u8; OUTPUT_LOCATION_DISK_BYTES + TRANSACTION_LOCATION_DISK_BYTES];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let address_location_bytes: [u8; OUTPUT_LOCATION_DISK_BYTES] =
+            self.address_location().as_bytes();
+        let transaction_location_bytes: [u8; TRANSACTION_LOCATION_DISK_BYTES] =
+            self.transaction_location().as_bytes();
+
+        address_location_bytes
+            .iter()
+            .copied()
+            .chain(transaction_location_bytes.iter().copied())
+            .collect::<Vec<u8>>()
+            .try_into()
+            .expect("concatenation of fixed-sized arrays should have the correct size")
+    }
+}
+
+impl FromDisk for AddressTransaction {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        let (address_location_bytes, transaction_location_bytes) =
+            disk_bytes.as_ref().split_at(OUTPUT_LOCATION_DISK_BYTES);
+
+        let address_location = AddressLocation::from_bytes(address_location_bytes);
+        let transaction_location = TransactionLocation::from_bytes(transaction_location_bytes);
+
+        AddressTransaction::new(address_location, transaction_location)
     }
 }

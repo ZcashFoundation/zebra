@@ -1,0 +1,16 @@
+---
+source: zebra-state/src/service/finalized_state/zebra_db/block/tests/snapshot.rs
+expression: stored_address_transaction_locations
+---
+[
+  ("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd", [
+    TransactionLocation(
+      height: Height(1),
+      index: TransactionIndex(0),
+    ),
+    TransactionLocation(
+      height: Height(2),
+      index: TransactionIndex(0),
+    ),
+  ]),
+]

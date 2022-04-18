@@ -5,7 +5,7 @@ use std::sync::Arc;
 use zebra_chain::{
     block::{self, Block},
     orchard, sapling,
-    transaction::Transaction,
+    transaction::{Hash, Transaction},
     transparent,
 };
 
@@ -68,4 +68,8 @@ pub enum ReadResponse {
     /// [`ReadRequest::OrchardTree`](crate::ReadRequest::OrchardTree) with the
     /// specified Orchard note commitment tree.
     OrchardTree(Option<Arc<orchard::tree::NoteCommitmentTree>>),
+
+    /// Response to [`ReadRequest::TransactionsByAddresses`] with the obtained transaction ids,
+    /// in the order they appear in blocks.
+    TransactionIds(Vec<Hash>),
 }
