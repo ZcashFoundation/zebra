@@ -19,6 +19,7 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
@@ -655,6 +656,13 @@ pub struct GetBlockChainInfo {
     estimated_height: u32,
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
     consensus: TipConsensusBranch,
+}
+
+/// The transparent balance of a set of addresses.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
+pub struct AddressBalance {
+    #[serde(serialize_with = "Amount::serialize_as_string")]
+    balance: Amount<NonNegative>,
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.
