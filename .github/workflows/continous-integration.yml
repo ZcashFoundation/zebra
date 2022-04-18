@@ -74,7 +74,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.0.0
+      - uses: actions/checkout@v3.0.1
         with:
           persist-credentials: false
 
@@ -238,7 +238,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.0.0
+      - uses: actions/checkout@v3.0.1
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -322,6 +322,9 @@ jobs:
       # This TODO relates to the following issues:
       # https://github.com/actions/runner/issues/241
       # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
+      #
+      # Deploying a zebra container might take more than 30 seconds to completely start, so we're adding a timer at the end
+      # of this step before starting the following ones
       - name: Get container name from logs
         id: get-container-name
         if: ${{ steps.create-instance.outcome == 'success' }}
@@ -338,6 +341,7 @@ jobs:
 
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
+          sleep 90
 
       - name: Regenerate stateful disks
         id: sync-to-checkpoint
@@ -484,6 +488,9 @@ jobs:
       # This TODO relates to the following issues:
       # https://github.com/actions/runner/issues/241
       # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
+      #
+      # Deploying a zebra container might take more than 30 seconds to completely start, so we're adding a timer at the end
+      # of this step before starting the following ones
       - name: Get container name from logs
         id: get-container-name
         if: ${{ steps.create-instance.outcome == 'success' }}
@@ -500,6 +507,7 @@ jobs:
 
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
+          sleep 90
 
       - name: Sync past mandatory checkpoint
         id: sync-past-checkpoint
