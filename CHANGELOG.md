@@ -4,6 +4,73 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-beta.8](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.8) - 2022-04-19
+
+Zebra's latest beta completes our work on the NU5 consensus rules. It continues our work on `lightwalletd` RPC methods, and contains some internal CI improvements.
+
+### Added
+
+#### RPCs
+
+- Implement a retry queue for transactions sent via RPCs (#4015)
+- Partially implement the `getaddresstxids` RPC method (#4062)
+
+#### State
+
+- Add a transparent address balance index (#3963)
+- Add a transparent address UTXO index (#3999)
+- Add a transparent address transaction index (#4038)
+- Add transparent address indexes to the non-finalized state (#4022)
+- Add a query function for transparent address balances (#4097)
+
+### CI
+
+- Create cached state disk image after a successful full sync test (#3986)
+
+### Changed
+
+#### State
+
+- Store transactions in a separate database index, to improve query speed (#3934)
+- Store UTXOs by transaction location rather than transaction hash (#3978)
+- Stop storing redundant transparent output fields in the database (#3992)
+- Use LZ4 compression for RocksDB (#4027)
+- Use Ribbon filters for database index lookups (#4040)
+- Tune state database file compaction configuration (#4045)
+
+#### CI
+
+- Put the state version in cached state disk names (#4073)
+- Improve mergify merge throughput (#4094, #4120)
+- Run cached state rebuilds in main branch (#4107)
+- Use GitHub Branch Protection checks instead of Mergify (#4103, #4105)
+- Lint and standardize the actions structure (#3940)
+
+#### Rust Dependencies
+
+- Disable unused rocksdb compression features (#4082)
+- Bump rlimit from 0.7.0 to 0.8.3 (#4051)
+
+#### CI Dependencies
+
+- Bump docker/metadata-action from 3.6.2 to 3.7.0 (#4049)
+- Bump google-github-actions/auth from 0.6.0 to 0.7.0 (#4050)
+- Bump tj-actions/changed-files from 18.6 to 18.7 (#4065)
+- Bump reviewdog/action-actionlint from 1.21.0 to 1.23.0 (#4099, #4125)
+- Bump actions/checkout from 3.0.0 to 3.0.1 (#4126)
+
+### Fixed
+
+#### CI
+
+- Validate tests exit code after reading the container logs (#3968, #4069)
+- Give enough time to zebra before reading logs (#4123)
+
+#### Rust Clippy
+
+- Ignore clippy drop warnings in tests (#4081)
+
+
 ## [Zebra 1.0.0-beta.7](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.7) - 2022-04-05
 
 Zebra's latest beta fixes a `cargo install` build failure in the previous beta release. It also fixes a `lightwalletd` RPC bug, and improves test coverage.
