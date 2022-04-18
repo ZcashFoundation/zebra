@@ -1,13 +1,13 @@
 [package]
 name = "zebra-consensus"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.7"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [features]
 default = []
-proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
+proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
 
 [dependencies]
 blake2b_simd = "1.0.0"

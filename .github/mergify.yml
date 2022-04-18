@@ -1,88 +1,66 @@
 queue_rules:
-  - name: urgent
+  - name: hotfix
     allow_inplace_checks: False
     allow_checks_interruption: False
-    speculative_checks: 2
-    batch_size: 2
+    speculative_checks: 1
+    batch_size: 5
+    # Wait a short time to embark hotfixes together in a merge train
+    batch_max_wait_time: "2 minutes"
     conditions:
-      - check-success=Test all
-      - check-success=Test with fake activation heights
-      - check-success=Test full validation sync from cached state
-      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
-      - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macOS-latest
-      # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
-      # - check-success=Test stable on windows-latest
-      - check-success=Clippy
-      - check-success=Rustfmt
+      # Mergify automatically applies status check, approval, and conversation rules,
+      # which are the same as the GitHub main branch protection rules
+      # https://docs.mergify.com/conditions/#about-branch-protection
+      - base=main
 
-  - name: medium
+  - name: high
     allow_inplace_checks: False
-    allow_checks_interruption: False
-    speculative_checks: 2
-    batch_size: 3
+    allow_checks_interruption: True
+    speculative_checks: 1
+    batch_size: 5
+    # Wait for a few minutes to embark high priority tickets together in a merge train
+    batch_max_wait_time: "5 minutes"
     conditions:
-      - check-success=Test all
-      - check-success=Test with fake activation heights
-      - check-success=Test full validation sync from cached state
-      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
-      - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macOS-latest
-      # - check-success=Test stable on windows-latest
-      - check-success=Clippy
-      - check-success=Rustfmt
+      - base=main
 
   - name: low
     allow_inplace_checks: False
-    allow_checks_interruption: False
-    speculative_checks: 2
-    batch_size: 4
+    allow_checks_interruption: True
+    speculative_checks: 1
+    batch_size: 5
+    # Wait a bit longer to embark low priority tickets together in a merge train
+    batch_max_wait_time: "10 minutes"
     conditions:
-      - check-success=Test all
-      - check-success=Test with fake activation heights
-      - check-success=Test full validation sync from cached state
-      - check-success=Test stable zebra-state with fake activation heights on ubuntu-latest
-      - check-success=Test stable on ubuntu-latest
-      - check-success=Test stable on macOS-latest
-      # - check-success=Test stable on windows-latest
-      - check-success=Clippy
-      - check-success=Rustfmt
+      - base=main
 
 pull_request_rules:
-  - name: move to urgent queue when CI passes with 1 review and not WIP targeting main
+  - name: move to hotfix queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - "#approved-reviews-by>=1"
-      - "#review-threads-unresolved=0"
-      - -draft
       - base=main
-      - or:
-          - "label~=^P-Critical"
-          - "label~=^P-High"
+      - -draft
       - label!=do-not-merge
+      - 'label~=^P-Critical'
     actions:
       queue:
-        name: urgent
+        name: hotfix
         method: squash
 
-  - name: move to medium queue when CI passes with 1 review and not WIP targeting main
+  - name: move to high queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - "#approved-reviews-by>=1"
-      - "#review-threads-unresolved=0"
-      - -draft
       - base=main
-      - "label~=^P-Medium"
+      - -draft
       - label!=do-not-merge
+      - or:
+          - 'label~=^P-High'
+          - 'label~=^P-Medium'
     actions:
       queue:
-        name: medium
+        name: high
         method: squash
 
   - name: move to low queue when CI passes with 1 review and not WIP targeting main
     conditions:
-      - "#approved-reviews-by>=1"
-      - "#review-threads-unresolved=0"
-      - -draft
       - base=main
+      - -draft
       - label!=do-not-merge
       # This queue handles Low, Optional, and PRs with no priority label,
       # including automated dependabot PRs.

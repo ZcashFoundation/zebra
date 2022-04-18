@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
-        os: [ubuntu-latest, macOS-latest]
+        os: [ubuntu-latest, macos-latest]
         rust: [stable]
 
     steps:
@@ -47,6 +47,14 @@ jobs:
     strategy:
       matrix:
         rust: [stable, beta]
+
+    steps:
+      - run: 'echo "No build required"'
+
+  install-from-lockfile-no-cache:
+    name: Install zebrad from lockfile without cache on ubuntu-latest
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
 
     steps:
       - run: 'echo "No build required"'

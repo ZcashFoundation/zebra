@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use jsonrpc_core::ErrorCode;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
@@ -25,7 +26,7 @@ async fn rpc_getinfo() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
-    let rpc = RpcImpl::new(
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
@@ -45,6 +46,10 @@ async fn rpc_getinfo() {
 
     mempool.expect_no_requests().await;
     state.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
 #[tokio::test]
@@ -63,7 +68,7 @@ async fn rpc_getblock() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     // Init RPC
-    let rpc = RpcImpl::new(
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -82,17 +87,21 @@ async fn rpc_getblock() {
     }
 
     mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
 #[tokio::test]
-async fn rpc_getblock_error() {
+async fn rpc_getblock_parse_error() {
     zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     // Init RPC
-    let rpc = RpcImpl::new(
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
@@ -108,6 +117,62 @@ async fn rpc_getblock_error() {
 
     mempool.expect_no_requests().await;
     state.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
+}
+
+#[tokio::test]
+async fn rpc_getblock_missing_error() {
+    zebra_test::init();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    // Init RPC
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        NoChainTip,
+        Mainnet,
+    );
+
+    // Make sure Zebra returns the correct error code `-8` for missing blocks
+    // https://github.com/adityapk00/lightwalletd/blob/c1bab818a683e4de69cd952317000f9bb2932274/common/common.go#L251-L254
+    let block_future = tokio::spawn(rpc.get_block("0".to_string(), 0u8));
+
+    // Make the mock service respond with no block
+    let response_handler = state
+        .expect_request(zebra_state::ReadRequest::Block(Height(0).into()))
+        .await;
+    response_handler.respond(zebra_state::ReadResponse::Block(None));
+
+    let block_response = block_future.await;
+    let block_response = block_response
+        .expect("unexpected panic in spawned request future")
+        .expect_err("unexpected success from missing block state response");
+    assert_eq!(block_response.code, ErrorCode::ServerError(-8),);
+
+    // Now check the error string the way `lightwalletd` checks it
+    assert_eq!(
+        serde_json::to_string(&block_response)
+            .expect("unexpected error serializing JSON error")
+            .split(':')
+            .nth(1)
+            .expect("unexpectedly low number of error fields")
+            .split(',')
+            .next(),
+        Some("-8")
+    );
+
+    mempool.expect_no_requests().await;
+    state.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
 #[tokio::test]
@@ -132,7 +197,7 @@ async fn rpc_getbestblockhash() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     // Init RPC
-    let rpc = RpcImpl::new(
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -150,6 +215,10 @@ async fn rpc_getbestblockhash() {
     assert_eq!(response_hash, tip_block_hash);
 
     mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
 #[tokio::test]
@@ -168,7 +237,7 @@ async fn rpc_getrawtransaction() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     // Init RPC
-    let rpc = RpcImpl::new(
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -231,4 +300,142 @@ async fn rpc_getrawtransaction() {
             }
         }
     }
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
+}
+
+#[tokio::test]
+async fn rpc_getaddresstxids_invalid_arguments() {
+    zebra_test::init();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        latest_chain_tip,
+        Mainnet,
+    );
+
+    // call the method with an invalid address string
+    let address = "11111111".to_string();
+    let addresses = vec![address.clone()];
+    let start: u32 = 1;
+    let end: u32 = 2;
+    let error = rpc
+        .get_address_tx_ids(addresses, start, end)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        format!("Provided address is not valid: {}", address)
+    );
+
+    // create a valid address
+    let address = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string();
+    let addresses = vec![address.clone()];
+
+    // call the method with start greater than end
+    let start: u32 = 2;
+    let end: u32 = 1;
+    let error = rpc
+        .get_address_tx_ids(addresses.clone(), start, end)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "End value is expected to be greater than or equal to start".to_string()
+    );
+
+    // call the method with start equal zero
+    let start: u32 = 0;
+    let end: u32 = 1;
+    let error = rpc
+        .get_address_tx_ids(addresses.clone(), start, end)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "Start and end are expected to be greater than zero".to_string()
+    );
+
+    // call the method outside the chain tip height
+    let start: u32 = 1;
+    let end: u32 = 11;
+    let error = rpc
+        .get_address_tx_ids(addresses, start, end)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "Start or end is outside chain range".to_string()
+    );
+
+    mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
+}
+
+#[tokio::test]
+async fn rpc_getaddresstxids_response() {
+    zebra_test::init();
+
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // get the first transaction of the first block
+    let first_block_first_transaction = &blocks[1].transactions[0];
+    // get the address, this is always `t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd`
+    let address = &first_block_first_transaction.outputs()[1]
+        .address(Mainnet)
+        .unwrap();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        latest_chain_tip,
+        Mainnet,
+    );
+
+    // call the method with valid arguments
+    let addresses = vec![address.to_string()];
+    let start: u32 = 1;
+    let end: u32 = 1;
+    let response = rpc
+        .get_address_tx_ids(addresses, start, end)
+        .await
+        .expect("arguments are valid so no error can happen here");
+
+    // TODO: The lenght of the response should be 1
+    // Fix in the context of #3147
+    assert_eq!(response.len(), 0);
+
+    mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
 }

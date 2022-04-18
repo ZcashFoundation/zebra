@@ -12,6 +12,7 @@
 //! - [`ChainTipChange`]: a read-only channel that can asynchronously await chain tip changes.
 
 use std::{
+    convert,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -64,6 +65,8 @@ pub mod arbitrary;
 
 #[cfg(test)]
 mod tests;
+
+pub use finalized_state::{OutputLocation, TransactionLocation};
 
 pub type QueuedBlock = (
     PreparedBlock,
@@ -496,12 +499,22 @@ impl StateService {
             .or_else(|| self.disk.db().height(hash))
     }
 
-    /// Return the [`Utxo`] pointed to by `outpoint` if it exists in any chain.
+    /// Return the [`Utxo`] pointed to by `outpoint`, if it exists in any chain,
+    /// or in any pending block.
+    ///
+    /// Some of the returned UTXOs may be invalid, because:
+    /// - they are not in the best chain, or
+    /// - their block fails contextual validation.
     pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         self.mem
             .any_utxo(outpoint)
             .or_else(|| self.queued_blocks.utxo(outpoint))
-            .or_else(|| self.disk.db().utxo(outpoint))
+            .or_else(|| {
+                self.disk
+                    .db()
+                    .utxo(outpoint)
+                    .map(|ordered_utxo| ordered_utxo.utxo)
+            })
     }
 
     /// Return an iterator over the relevant chain of the block identified by
@@ -753,7 +766,12 @@ impl Service<Request> for StateService {
                 async move {
                     rsp_rx
                         .await
-                        .expect("sender is not dropped")
+                        .map_err(|_recv_error| {
+                            BoxError::from("block was dropped from the state CommitBlock queue")
+                        })
+                        // TODO: replace with Result::flatten once it stabilises
+                        // https://github.com/rust-lang/rust/issues/70142
+                        .and_then(convert::identity)
                         .map(Response::Committed)
                         .map_err(Into::into)
                 }
@@ -773,7 +791,14 @@ impl Service<Request> for StateService {
                 async move {
                     rsp_rx
                         .await
-                        .expect("sender is not dropped")
+                        .map_err(|_recv_error| {
+                            BoxError::from(
+                                "block was dropped from the state CommitFinalizedBlock queue",
+                            )
+                        })
+                        // TODO: replace with Result::flatten once it stabilises
+                        // https://github.com/rust-lang/rust/issues/70142
+                        .and_then(convert::identity)
                         .map(Response::Committed)
                         .map_err(Into::into)
                 }
@@ -945,7 +970,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
-            // For the get_raw_transaction RPC, to be implemented in #3145.
+            // For the get_raw_transaction RPC.
             ReadRequest::Transaction(hash) => {
                 metrics::counter!(
                     "state.requests",
@@ -963,6 +988,29 @@ impl Service<ReadRequest> for ReadStateService {
                         });
 
                     Ok(ReadResponse::Transaction(transaction_and_height))
+                }
+                .boxed()
+            }
+
+            // For the get_address_tx_ids RPC.
+            ReadRequest::TransactionsByAddresses(_addresses, _start, _end) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "transactions_by_addresses",
+                );
+
+                let _state = self.clone();
+
+                async move {
+                    // TODO: Respond with found transactions
+                    // At least the following pull requests should be merged:
+                    // - #4022
+                    // - #4038
+                    // Do the corresponding update in the context of #3147
+                    let transaction_ids = vec![];
+                    Ok(ReadResponse::TransactionIds(transaction_ids))
                 }
                 .boxed()
             }

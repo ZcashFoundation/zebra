@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.7"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -10,7 +10,7 @@ edition = "2021"
 [features]
 default = []
 proptest-impl = ["proptest", "proptest-derive", "zebra-test", "rand", "rand_chacha", "tokio",
-"hex/serde"]
+"hex/serde", "serde_with"]
 bench = ["zebra-test"]
 
 [dependencies]
@@ -37,10 +37,12 @@ jubjub = "0.8.0"
 lazy_static = "1.4.0"
 rand_core = "0.6.3"
 ripemd = "0.1.1"
+
 serde = { version = "1.0.136", features = ["serde_derive", "rc"] }
+serde_with = { version = "1.12.0", optional = true }
+serde-big-array = "0.4.1"
 # Matches version used by hdwallet
 secp256k1 = { version = "0.21.3", features = ["serde"] }
-serde-big-array = "0.3.2"
 sha2 = { version = "0.9.9", features=["compress"] }
 static_assertions = "1.1.0"
 subtle = "2.4.1"
@@ -77,6 +79,7 @@ spandoc = "0.2.1"
 tracing = "0.1.31"
 
 hex = { version = "0.4.3", features = ["serde"] }
+serde_with = "1.12.0"
 
 proptest = "0.10.1"
 proptest-derive = "0.3.0"

@@ -1,13 +1,13 @@
 ---
 source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
-assertion_line: 41
 expression: cf_names
-
 ---
 [
+  "balance_by_transparent_addr",
   "block_by_height",
   "default",
   "hash_by_height",
+  "hash_by_tx_loc",
   "height_by_hash",
   "history_tree",
   "orchard_anchors",
@@ -21,5 +21,8 @@ expression: cf_names
   "sprout_nullifiers",
   "tip_chain_value_pool",
   "tx_by_hash",
+  "tx_by_loc",
+  "tx_loc_by_transparent_addr_loc",
   "utxo_by_outpoint",
+  "utxo_loc_by_transparent_addr_loc",
 ]

@@ -1,10 +1,9 @@
 name: Lint Rust files
 
 on:
-  push:
+  pull_request:
     branches:
-      - "**"
-      - "!main"
+      - 'main'
     paths:
       # code and tests
       - '**/*.rs'
@@ -14,7 +13,8 @@ on:
       # workflow definitions
       - 'clippy.toml'
       - '.cargo/config.toml'
-      - '.github/workflows/lint.yml'
+      # TODO: we might want to run this in a separate workflow in the future for the `actionlint` job
+      - '.github/workflows/*.yml'
 
 env:
   CARGO_INCREMENTAL: 0
@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3.0.1
         with:
           persist-credentials: false
 
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3.0.1
         with:
           persist-credentials: false
 
@@ -82,3 +82,9 @@ jobs:
         with:
           command: fmt
           args: --all -- --check
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3.0.1
+      - uses: reviewdog/action-actionlint@v1.23.0
