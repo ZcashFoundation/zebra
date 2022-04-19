@@ -11,7 +11,7 @@ mod tests;
 /// # Notes
 ///
 /// Repeated arguments are not supported.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Arguments(IndexMap<String, Option<String>>);
 
 impl Arguments {
