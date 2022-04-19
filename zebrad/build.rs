@@ -59,6 +59,9 @@ fn main() {
     tonic_build::configure()
         .build_client(true)
         .build_server(false)
-        .compile(&["proto/service.proto"], &["proto"])
+        .compile(
+            &["tests/common/lightwalletd/proto/service.proto"],
+            &["tests/common/lightwalletd/proto"],
+        )
         .expect("Failed to generate lightwalletd gRPC files");
 }
