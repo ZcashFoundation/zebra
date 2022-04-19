@@ -3,7 +3,7 @@
 
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     ops::Deref,
     sync::Arc,
 };
@@ -27,7 +27,8 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::check, ContextuallyValidBlock, HashOrHeight, TransactionLocation, ValidateContextError,
+    service::check, ContextuallyValidBlock, HashOrHeight, OutputLocation, TransactionLocation,
+    ValidateContextError,
 };
 
 use self::index::TransparentTransfers;
@@ -562,6 +563,70 @@ impl Chain {
             "unexpected amount overflow: value balances are valid, so partial sum should be valid",
         )
     }
+
+    /// Returns the transparent UTXO changes for `addresses` in this non-finalized chain.
+    ///
+    /// If the UTXOs don't change for any of the addresses, returns empty lists.
+    ///
+    /// # Correctness
+    ///
+    /// Callers should apply these non-finalized UTXO changes to the finalized state UTXOs.
+    ///
+    /// The UTXOs will only be correct if the non-finalized chain matches or overlaps with
+    /// the finalized state.
+    ///
+    /// Specifically, a block in the partial chain must be a child block of the finalized tip.
+    /// (But the child block does not have to be the partial chain root.)
+    pub fn partial_transparent_utxo_changes(
+        &self,
+        addresses: &HashSet<transparent::Address>,
+    ) -> (
+        BTreeMap<OutputLocation, transparent::Output>,
+        BTreeSet<OutputLocation>,
+    ) {
+        let created_utxos = self
+            .partial_transparent_indexes(addresses)
+            .flat_map(|transfers| transfers.created_utxos())
+            .map(|(out_loc, output)| (*out_loc, output.clone()))
+            .collect();
+
+        let spent_utxos = self
+            .partial_transparent_indexes(addresses)
+            .flat_map(|transfers| transfers.spent_utxos())
+            .cloned()
+            .collect();
+
+        (created_utxos, spent_utxos)
+    }
+
+    /// Returns the [`transaction::Hash`]es used by `addresses` to receive or spend funds.
+    ///
+    /// If none of the addresses receive or spend funds in this partial chain, returns an empty list.
+    ///
+    /// # Correctness
+    ///
+    /// Callers should combine these non-finalized transactions with the finalized state transactions.
+    ///
+    /// The transaction IDs will only be correct if the non-finalized chain matches or overlaps with
+    /// the finalized state.
+    ///
+    /// Specifically, a block in the partial chain must be a child block of the finalized tip.
+    /// (But the child block does not have to be the partial chain root.)
+    ///
+    /// This condition does not apply if there is only one address.
+    /// Since address transactions are only appended by blocks,
+    /// and the finalized state query reads them in order,
+    /// it is impossible to get inconsistent transactions for a single address.
+    pub fn partial_transparent_tx_ids(
+        &self,
+        addresses: &HashSet<transparent::Address>,
+    ) -> BTreeMap<TransactionLocation, transaction::Hash> {
+        self.partial_transparent_indexes(addresses)
+            .flat_map(|transfers| transfers.tx_ids(&self.tx_by_hash))
+            .collect()
+    }
+
+    // Cloning
 
     /// Clone the Chain but not the history and note commitment trees, using
     /// the specified trees instead.

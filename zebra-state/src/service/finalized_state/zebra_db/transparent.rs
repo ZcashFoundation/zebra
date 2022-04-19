@@ -103,7 +103,6 @@ impl ZebraDb {
 
     /// Returns the unspent transparent outputs for a [`transparent::Address`],
     /// if they are in the finalized state.
-    #[allow(dead_code)]
     pub fn address_utxos(
         &self,
         address: &transparent::Address,
@@ -269,6 +268,29 @@ impl ZebraDb {
         balance.expect(
             "unexpected amount overflow: value balances are valid, so partial sum should be valid",
         )
+    }
+
+    /// Returns the UTXOs for `addresses` in the finalized chain.
+    ///
+    /// If none of the addresses has finalized UTXOs, returns an empty list.
+    ///
+    /// # Correctness
+    ///
+    /// Callers should apply the non-finalized UTXO changes for `addresses` to the returned UTXOs.
+    ///
+    /// The UTXOs will only be correct if the non-finalized chain matches or overlaps with
+    /// the finalized state.
+    ///
+    /// Specifically, a block in the partial chain must be a child block of the finalized tip.
+    /// (But the child block does not have to be the partial chain root.)
+    pub fn partial_finalized_transparent_utxos(
+        &self,
+        addresses: &HashSet<transparent::Address>,
+    ) -> BTreeMap<OutputLocation, transparent::Output> {
+        addresses
+            .iter()
+            .flat_map(|address| self.address_utxos(address))
+            .collect()
     }
 }
 

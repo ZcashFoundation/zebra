@@ -68,7 +68,7 @@ pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(653_600), Blossom),
     (block::Height(903_000), Heartwood),
     (block::Height(1_046_400), Canopy),
-    // TODO: Add Nu5 mainnet activation height
+    // TODO: Add Nu5 mainnet activation height (#4115)
 ];
 
 /// Fake mainnet network upgrade activation heights, used in tests.
