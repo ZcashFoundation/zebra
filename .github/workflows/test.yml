@@ -457,10 +457,25 @@ jobs:
             gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
           fi
 
-      - name: Get disk state name from gcloud
-        id: get-disk-name
+      # If a triggering file for a rebuild was changed on a PR or we manually triggered a rebuild,
+      # use the latest available disk state as the regenerate-stateful-disks job was executed
+      - name: Get latest state disk name from gcloud
+        id: get-latest-disk-name
+        if: ${{ (needs.build.outputs.any_changed == 'true' && github.event_name == 'pull_request') || github.event.inputs.regenerate-disks == 'true' }}
         run: |
           GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "Disk: $GCP_STATE_DISK"
+          echo "Description: $(gcloud compute images describe $GCP_STATE_DISK --format='value(DESCRIPTION)')"
+
+          echo "CACHED_DISK_NAME=$GCP_STATE_DISK" >> $GITHUB_ENV
+
+      # If the conditions in the get-latest-disk-name step were not applied means this was triggered by a push event,
+      # and we need to use the cached state from the main branch. 
+      - name: Get main state disk name from gcloud
+        id: get-main-disk-name
+        if: ${{ steps.get-latest-disk-name.outcome == 'skipped' }}
+        run: |
+          GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache-main AND name~-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "Disk: $GCP_STATE_DISK"
           echo "Description: $(gcloud compute images describe $GCP_STATE_DISK --format='value(DESCRIPTION)')"
 
