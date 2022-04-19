@@ -260,9 +260,6 @@ jobs:
     name: Regenerate stateful disks
     runs-on: ubuntu-latest
     needs: build
-    outputs:
-      # Only run this job if the database format version has (likely) changed.
-      any_changed: ${{ steps.changed-files-specific.outputs.any_changed }}
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -294,6 +291,7 @@ jobs:
       # Check if our destination compute instance exists and delete it
       - name: Delete existing instance with same SHA
         id: delete-old-instance
+        if: ${{ needs.build.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true' }}
         run: |
           INSTANCE=$(gcloud compute instances list --filter=regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
           if [ -z "${INSTANCE}" ]; then
@@ -304,6 +302,7 @@ jobs:
 
       - name: Create GCP compute instance
         id: create-instance
+        if: ${{ needs.build.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true' }}
         run: |
           gcloud compute instances create-with-container "regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
