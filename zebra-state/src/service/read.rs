@@ -103,7 +103,7 @@ pub(crate) fn transparent_balance(
 ) -> Result<Amount<NonNegative>, BoxError> {
     let mut balance_result = finalized_transparent_balance(db, &addresses);
 
-    // Retry the finalized balance query if it was interruped by a finalizing block
+    // Retry the finalized balance query if it was interrupted by a finalizing block
     for _ in 0..FINALIZED_ADDRESS_INDEX_RETRIES {
         if balance_result.is_ok() {
             break;
