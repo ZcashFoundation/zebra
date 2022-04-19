@@ -635,7 +635,7 @@ proptest! {
                 .await?
                 .respond(response);
 
-            // no more requets are done
+            // no more requests are done
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
@@ -680,7 +680,7 @@ proptest! {
                 let tx_unmined = UnminedTx::from(tx.clone());
                 let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
 
-                // inser to hs we will use later
+                // insert to hs we will use later
                 transactions_hash_set.insert(tx_unmined.id);
 
                 // fail the mempool insertion
@@ -700,7 +700,7 @@ proptest! {
             let spacing = chrono::Duration::seconds(150);
             tokio::time::advance(spacing.to_std().unwrap()).await;
 
-            // the runner will made a new call to TransactionsById quering with both transactions
+            // the runner will made a new call to TransactionsById querying with both transactions
             let expected_request = mempool::Request::TransactionsById(transactions_hash_set);
             let response = mempool::Response::Transactions(vec![]);
 
@@ -731,7 +731,7 @@ proptest! {
                     .respond(response);
             }
 
-            // no more requets are done
+            // no more requests are done
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
