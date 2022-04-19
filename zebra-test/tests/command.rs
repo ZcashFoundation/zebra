@@ -5,6 +5,7 @@ use regex::RegexSet;
 use tempfile::tempdir;
 
 use zebra_test::{
+    args,
     command::{TestDirExt, NO_MATCHES_REGEX_ITER},
     prelude::Stdio,
 };
@@ -59,7 +60,7 @@ fn kill_on_timeout_output_continuous_lines() -> Result<()> {
     // Without '-v', hexdump hides duplicate lines. But we want duplicate lines
     // in this test.
     let mut child = tempdir()?
-        .spawn_child_with_command(TEST_CMD, &["-v", "/dev/zero"])?
+        .spawn_child_with_command(TEST_CMD, args!["-v", "/dev/zero"])?
         .with_timeout(Duration::from_secs(2));
 
     // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
@@ -86,7 +87,7 @@ fn finish_before_timeout_output_single_line() -> Result<()> {
     }
 
     let mut child = tempdir()?
-        .spawn_child_with_command(TEST_CMD, &["zebra_test_output"])?
+        .spawn_child_with_command(TEST_CMD, args!["zebra_test_output"])?
         .with_timeout(Duration::from_secs(2));
 
     // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
@@ -115,7 +116,7 @@ fn kill_on_timeout_continuous_output_no_newlines() -> Result<()> {
     }
 
     let mut child = tempdir()?
-        .spawn_child_with_command(TEST_CMD, &["/dev/zero"])?
+        .spawn_child_with_command(TEST_CMD, args!["/dev/zero"])?
         .with_timeout(Duration::from_secs(2));
 
     // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
@@ -143,7 +144,7 @@ fn finish_before_timeout_short_output_no_newlines() -> Result<()> {
     }
 
     let mut child = tempdir()?
-        .spawn_child_with_command(TEST_CMD, &["zebra_test_output"])?
+        .spawn_child_with_command(TEST_CMD, args!["zebra_test_output"])?
         .with_timeout(Duration::from_secs(2));
 
     // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
@@ -171,7 +172,7 @@ fn kill_on_timeout_no_output() -> Result<()> {
     }
 
     let mut child = tempdir()?
-        .spawn_child_with_command(TEST_CMD, &["120"])?
+        .spawn_child_with_command(TEST_CMD, args!["120"])?
         .with_timeout(Duration::from_secs(2));
 
     // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
@@ -201,7 +202,7 @@ fn failure_regex_matches_stdout_failure_message() {
 
     let mut child = tempdir()
         .unwrap()
-        .spawn_child_with_command(TEST_CMD, &["failure_message"])
+        .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(2))
         .with_failure_regex_set("fail", RegexSet::empty());
@@ -237,7 +238,7 @@ fn failure_regex_matches_stderr_failure_message() {
 
     let mut child = tempdir()
         .unwrap()
-        .spawn_child_with_command(TEST_CMD, &["-c", "read -t 1 -p failure_message"])
+        .spawn_child_with_command(TEST_CMD, args![ "-c": "read -t 1 -p failure_message" ])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
         .with_failure_regex_set("fail", RegexSet::empty());
@@ -267,7 +268,7 @@ fn failure_regex_matches_stdout_failure_message_drop() {
 
     let _child = tempdir()
         .unwrap()
-        .spawn_child_with_command(TEST_CMD, &["failure_message"])
+        .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
         .with_failure_regex_set("fail", RegexSet::empty());
@@ -296,7 +297,7 @@ fn failure_regex_matches_stdout_failure_message_kill() {
 
     let mut child = tempdir()
         .unwrap()
-        .spawn_child_with_command(TEST_CMD, &["failure_message"])
+        .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
         .with_failure_regex_set("fail", RegexSet::empty());
@@ -327,7 +328,7 @@ fn failure_regex_matches_stdout_failure_message_kill_on_error() {
 
     let child = tempdir()
         .unwrap()
-        .spawn_child_with_command(TEST_CMD, &["failure_message"])
+        .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
         .with_failure_regex_set("fail", RegexSet::empty());
@@ -359,7 +360,7 @@ fn failure_regex_matches_stdout_failure_message_no_kill_on_error() {
 
     let child = tempdir()
         .unwrap()
-        .spawn_child_with_command(TEST_CMD, &["failure_message"])
+        .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
         .with_failure_regex_set("fail", RegexSet::empty());
@@ -398,7 +399,7 @@ fn failure_regex_timeout_continuous_output() {
     // in this test.
     let mut child = tempdir()
         .unwrap()
-        .spawn_child_with_command(TEST_CMD, &["-v", "/dev/zero"])
+        .spawn_child_with_command(TEST_CMD, args!["-v", "/dev/zero"])
         .unwrap()
         .with_timeout(Duration::from_secs(2))
         .with_failure_regex_set("0", RegexSet::empty());
@@ -430,7 +431,7 @@ fn failure_regex_matches_stdout_failure_message_wait_for_output() {
 
     let child = tempdir()
         .unwrap()
-        .spawn_child_with_command(TEST_CMD, &["failure_message"])
+        .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
         .with_failure_regex_set("fail", RegexSet::empty());
@@ -461,7 +462,7 @@ fn failure_regex_iter_matches_stdout_failure_message() {
 
     let mut child = tempdir()
         .unwrap()
-        .spawn_child_with_command(TEST_CMD, &["failure_message"])
+        .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(2))
         .with_failure_regex_iter(
@@ -489,7 +490,7 @@ fn ignore_regex_ignores_stdout_failure_message() {
 
     let mut child = tempdir()
         .unwrap()
-        .spawn_child_with_command(TEST_CMD, &["failure_message ignore_message"])
+        .spawn_child_with_command(TEST_CMD, args!["failure_message ignore_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(2))
         .with_failure_regex_set("fail", "ignore");
@@ -511,7 +512,7 @@ fn ignore_regex_iter_ignores_stdout_failure_message() {
 
     let mut child = tempdir()
         .unwrap()
-        .spawn_child_with_command(TEST_CMD, &["failure_message ignore_message"])
+        .spawn_child_with_command(TEST_CMD, args!["failure_message ignore_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(2))
         .with_failure_regex_iter(["fail"].iter().cloned(), ["ignore"].iter().cloned());
