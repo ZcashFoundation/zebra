@@ -16,7 +16,7 @@ bls12_381 = "0.6.0"
 jubjub = "0.8.0"
 rand = { version = "0.8.5", package = "rand" }
 
-halo2 = "=0.1.0-beta.1"
+halo2 = { package = "halo2_proofs", version = "=0.1.0-beta.4" }
 
 chrono = "0.4.19"
 dirs = "4.0.0"
@@ -34,11 +34,13 @@ tower = { version = "0.4.12", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.31"
 tracing-futures = "0.2.5"
 
-# TODO: replace with upstream orchard (#3056)
-orchard = { git = "https://github.com/ZcashFoundation/orchard.git", rev = "568e24cd5f129158375d7ac7d98c89ebff4f982f" }
+orchard = "=0.1.0-beta.3"
 
 # TODO: replace with upstream librustzcash when these changes are merged (#3037)
-zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", tag = "0.5.1-zebra-v1.0.0-beta.4", features = ["local-prover", "multicore", "download-params"] }
+# Currently pointing to `download-sprout-params-new` branch which contains the
+# changes from `download-sprout-params-d14e7a70` rebased on top of d14e7a70 as
+# required by `zcash/Cargo.toml`.
+zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "c3ff94134b472ba90af665e5454983dc12de1338", features = ["local-prover", "multicore", "download-params"] }
 
 tower-fallback = { path = "../tower-fallback/" }
 tower-batch = { path = "../tower-batch/" }

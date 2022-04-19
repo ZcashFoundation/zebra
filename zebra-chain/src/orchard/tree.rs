@@ -21,7 +21,7 @@ use std::{
 };
 
 use bitvec::prelude::*;
-use halo2::{arithmetic::FieldExt, pasta::pallas};
+use halo2::pasta::{group::ff::PrimeField, pallas};
 use incrementalmerkletree::{bridgetree, Frontier};
 use lazy_static::lazy_static;
 use thiserror::Error;
@@ -54,8 +54,8 @@ fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pal
     // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
     let l = MERKLE_DEPTH - 1 - layer as usize;
     s.extend_from_bitslice(&BitArray::<Lsb0, _>::from([l, 0])[0..10]);
-    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(left.to_bytes())[0..255]);
-    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(right.to_bytes())[0..255]);
+    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(left.to_repr())[0..255]);
+    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(right.to_repr())[0..255]);
 
     match sinsemilla_hash(b"z.cash:Orchard-MerkleCRH", &s) {
         Some(h) => h,
@@ -99,7 +99,7 @@ pub struct Root(#[serde(with = "serde_helpers::Base")] pub(crate) pallas::Base);
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Root")
-            .field(&hex::encode(&self.0.to_bytes()))
+            .field(&hex::encode(&self.0.to_repr()))
             .finish()
     }
 }
@@ -118,7 +118,7 @@ impl From<&Root> for [u8; 32] {
 
 impl Hash for Root {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.to_bytes().hash(state)
+        self.0.to_repr().hash(state)
     }
 }
 
@@ -126,7 +126,7 @@ impl TryFrom<[u8; 32]> for Root {
     type Error = SerializationError;
 
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        let possible_point = pallas::Base::from_bytes(&bytes);
+        let possible_point = pallas::Base::from_repr(bytes);
 
         if possible_point.is_some().into() {
             Ok(Self(possible_point.unwrap()))
@@ -187,7 +187,7 @@ impl serde::Serialize for Node {
     where
         S: serde::Serializer,
     {
-        self.0.to_bytes().serialize(serializer)
+        self.0.to_repr().serialize(serializer)
     }
 }
 
@@ -197,7 +197,7 @@ impl<'de> serde::Deserialize<'de> for Node {
         D: serde::Deserializer<'de>,
     {
         let bytes = <[u8; 32]>::deserialize(deserializer)?;
-        Option::<pallas::Base>::from(pallas::Base::from_bytes(&bytes))
+        Option::<pallas::Base>::from(pallas::Base::from_repr(bytes))
             .map(Node)
             .ok_or_else(|| serde::de::Error::custom("invalid Pallas field element"))
     }

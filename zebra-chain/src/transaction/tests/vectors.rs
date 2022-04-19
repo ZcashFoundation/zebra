@@ -896,36 +896,36 @@ fn zip244_sighash() -> Result<()> {
 
     for (i, test) in zip0244::TEST_VECTORS.iter().enumerate() {
         let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
-        let (input_index, output) = match test.amount {
-            Some(amount) => (
-                Some(
-                    test.transparent_input
-                        .expect("test vector must have transparent_input when it has amount")
-                        as usize,
-                ),
-                Some(transparent::Output {
-                    value: amount.try_into()?,
-                    lock_script: transparent::Script::new(
-                        test.script_code
-                            .as_ref()
-                            .expect("test vector must have script_code when it has amount"),
-                    ),
-                }),
-            ),
-            None => (None, None),
-        };
-        let all_previous_outputs: Vec<_> = match output {
-            Some(output) => mock_pre_v5_output_list(output, input_index.unwrap()),
-            None => vec![],
-        };
+
+        let all_previous_outputs: Vec<_> = test
+            .amounts
+            .iter()
+            .zip(test.script_pubkeys.iter())
+            .map(|(amount, script_pubkey)| transparent::Output {
+                value: (*amount).try_into().unwrap(),
+                lock_script: transparent::Script::new(script_pubkey.as_ref()),
+            })
+            .collect();
+
         let result = hex::encode(transaction.sighash(
             NetworkUpgrade::Nu5,
             HashType::ALL,
             &all_previous_outputs,
-            input_index,
+            None,
         ));
-        let expected = hex::encode(test.sighash_all);
+        let expected = hex::encode(test.sighash_shielded);
         assert_eq!(expected, result, "test #{}: sighash does not match", i);
+
+        if let Some(sighash_all) = test.sighash_all {
+            let result = hex::encode(transaction.sighash(
+                NetworkUpgrade::Nu5,
+                HashType::ALL,
+                &all_previous_outputs,
+                test.transparent_input.map(|idx| idx as _),
+            ));
+            let expected = hex::encode(sighash_all);
+            assert_eq!(expected, result, "test #{}: sighash does not match", i);
+        }
     }
 
     Ok(())
