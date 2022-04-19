@@ -459,6 +459,17 @@ jobs:
 
       # If a triggering file for a rebuild was changed on a PR or we manually triggered a rebuild,
       # use the latest available disk state as the regenerate-stateful-disks job was executed
+      #
+      # In the regenerate-stateful-disks job we don't validate the github.event_name because we
+      # want to ensure the disk are regenerated on PR syncs and push events (to main), and when
+      # manually triggered.
+      # 
+      # In this scenario we also valida that if a file like constants.rs was changed then a disk
+      # rebuild was triggered and we if this happened on a PR we want to use the cached disk from
+      # the PR and not the cached disk from main. Otherwise we move to the next step, which is
+      # get-main-disk-name as this was most likely triggered by a push in main, or constanst.rs
+      # was not changed, which allows us to use the disk from main, as a disk rebuild did not happened,
+      # and if the rebuilt happened then it was triggered on main and we want to use main's reference.
       - name: Get latest state disk name from gcloud
         id: get-latest-disk-name
         if: ${{ (needs.build.outputs.any_changed == 'true' && github.event_name == 'pull_request') || github.event.inputs.regenerate-disks == 'true' }}
