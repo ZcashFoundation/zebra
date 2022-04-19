@@ -463,7 +463,7 @@ jobs:
         id: get-latest-disk-name
         if: ${{ (needs.build.outputs.any_changed == 'true' && github.event_name == 'pull_request') || github.event.inputs.regenerate-disks == 'true' }}
         run: |
-          GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache-${{ env.GITHUB_REF_SLUG_URL }} AND name~-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "Disk: $GCP_STATE_DISK"
           echo "Description: $(gcloud compute images describe $GCP_STATE_DISK --format='value(DESCRIPTION)')"
 
