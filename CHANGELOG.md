@@ -29,6 +29,13 @@ Zebra's latest beta completes our work on the NU5 consensus rules. It continues 
 
 ### Changed
 
+#### NU5
+
+- Update to new zcash_script V5 API (#3799)
+- Update network protocol versions for the second NU5 activation on testnet (#3799)
+- Update the consensus branch ID and the second NU5 testnet activation height (#3799)
+- Bump database version to trigger testnet rollback (#3799)
+
 #### State
 
 - Store transactions in a separate database index, to improve query speed (#3934)
@@ -48,6 +55,7 @@ Zebra's latest beta completes our work on the NU5 consensus rules. It continues 
 
 #### Rust Dependencies
 
+- Update shared Zcash dependencies for the second NU5 activation on testnet (#3799)
 - Disable unused rocksdb compression features (#4082)
 - Bump rlimit from 0.7.0 to 0.8.3 (#4051)
 
