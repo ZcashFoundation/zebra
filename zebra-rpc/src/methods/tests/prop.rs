@@ -2,14 +2,15 @@
 
 use std::collections::HashSet;
 
-use futures::FutureExt;
+use futures::{join, FutureExt, TryFutureExt};
 use hex::ToHex;
 use jsonrpc_core::{Error, ErrorCode};
-use proptest::prelude::*;
+use proptest::{collection::vec, prelude::*};
 use thiserror::Error;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::{Block, Height},
     chain_tip::{mock::MockChainTip, NoChainTip},
     parameters::{
@@ -18,13 +19,14 @@ use zebra_chain::{
     },
     serialization::{ZcashDeserialize, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, UnminedTxId},
+    transparent,
 };
 use zebra_node_services::mempool;
 use zebra_state::BoxError;
 
 use zebra_test::mock_service::MockService;
 
-use super::super::{NetworkUpgradeStatus, Rpc, RpcImpl, SentTransactionHash};
+use super::super::{AddressBalance, NetworkUpgradeStatus, Rpc, RpcImpl, SentTransactionHash};
 
 proptest! {
     /// Test that when sending a raw transaction, it is received by the mempool service.
@@ -567,6 +569,68 @@ proptest! {
 
         // check no requests were made during this test
         runtime.block_on(async move {
+            mempool.expect_no_requests().await?;
+            state.expect_no_requests().await?;
+
+            Ok::<_, TestCaseError>(())
+        })?;
+    }
+
+    /// Test the `get_address_balance` RPC using an arbitrary set of addresses.
+    #[test]
+    fn queries_balance_for_valid_addresses(
+        network in any::<Network>(),
+        addresses in any::<HashSet<transparent::Address>>(),
+        balance in any::<Amount<NonNegative>>(),
+    ) {
+        let runtime = zebra_test::init_async();
+        let _guard = runtime.enter();
+
+        let mut mempool = MockService::build().for_prop_tests();
+        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+
+        // Create a mocked `ChainTip`
+        let (chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+
+        // Prepare the list of addresses.
+        let address_list = addresses
+            .iter()
+            .map(|address| address.to_string())
+            .collect();
+
+        tokio::time::pause();
+
+        // Start RPC with the mocked `ChainTip`
+        runtime.block_on(async move {
+            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+                chain_tip,
+                network,
+            );
+
+            // Build the future to call the RPC
+            let call = rpc.get_address_balance(address_list);
+
+            // The RPC should perform a state query
+            let state_query = state
+                .expect_request(zebra_state::ReadRequest::AddressBalance(addresses))
+                .map_ok(|responder| {
+                    responder.respond(zebra_state::ReadResponse::AddressBalance(balance))
+                });
+
+            // Await the RPC call and the state query
+            let (response, state_query_result) = join!(call, state_query);
+
+            state_query_result?;
+
+            // Check that response contains the expected balance
+            let received_balance = response?;
+
+            prop_assert_eq!(received_balance, AddressBalance { balance });
+
+            // Check no further requests were made during this test
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
