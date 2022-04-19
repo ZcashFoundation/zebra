@@ -7,6 +7,8 @@ use std::{
     ops::Deref,
 };
 
+use zcash_primitives::transaction as zp_tx;
+
 use crate::{
     amount::{Amount, NonNegative},
     parameters::{Network, NetworkUpgrade},
@@ -15,7 +17,131 @@ use crate::{
     transparent::{self, Script},
 };
 
-impl TryFrom<&Transaction> for zcash_primitives::transaction::Transaction {
+// Used by boilerplate code below.
+
+#[derive(Clone, Debug)]
+struct TransparentAuth<'a> {
+    all_prev_outputs: &'a [transparent::Output],
+}
+
+impl zp_tx::components::transparent::Authorization for TransparentAuth<'_> {
+    type ScriptSig = zcash_primitives::legacy::Script;
+}
+
+// In this block we convert our Output to a librustzcash to TxOut.
+// (We could do the serialize/deserialize route but it's simple enough to convert manually)
+impl zp_tx::sighash::TransparentAuthorizingContext for TransparentAuth<'_> {
+    fn input_amounts(&self) -> Vec<zp_tx::components::amount::Amount> {
+        self.all_prev_outputs
+            .iter()
+            .map(|prevout| {
+                zp_tx::components::amount::Amount::from_nonnegative_i64_le_bytes(
+                    prevout.value.to_bytes(),
+                )
+                .expect("will not fail since it was previously validated")
+            })
+            .collect()
+    }
+
+    fn input_scriptpubkeys(&self) -> Vec<zcash_primitives::legacy::Script> {
+        self.all_prev_outputs
+            .iter()
+            .map(|prevout| {
+                zcash_primitives::legacy::Script(prevout.lock_script.as_raw_bytes().into())
+            })
+            .collect()
+    }
+}
+
+// Boilerplate mostly copied from `zcash/src/rust/src/transaction_ffi.rs` which is required
+// to compute sighash.
+// TODO: remove/change if they improve the API to not require this.
+
+struct MapTransparent<'a> {
+    auth: TransparentAuth<'a>,
+}
+
+impl<'a>
+    zp_tx::components::transparent::MapAuth<
+        zp_tx::components::transparent::Authorized,
+        TransparentAuth<'a>,
+    > for MapTransparent<'a>
+{
+    fn map_script_sig(
+        &self,
+        s: <zp_tx::components::transparent::Authorized as zp_tx::components::transparent::Authorization>::ScriptSig,
+    ) -> <TransparentAuth as zp_tx::components::transparent::Authorization>::ScriptSig {
+        s
+    }
+
+    fn map_authorization(
+        &self,
+        _: zp_tx::components::transparent::Authorized,
+    ) -> TransparentAuth<'a> {
+        // TODO: This map should consume self, so we can move self.auth
+        self.auth.clone()
+    }
+}
+
+struct IdentityMap;
+
+impl
+    zp_tx::components::sapling::MapAuth<
+        zp_tx::components::sapling::Authorized,
+        zp_tx::components::sapling::Authorized,
+    > for IdentityMap
+{
+    fn map_proof(
+        &self,
+        p: <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::Proof,
+    ) -> <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::Proof
+    {
+        p
+    }
+
+    fn map_auth_sig(
+        &self,
+        s: <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::AuthSig,
+    ) -> <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::AuthSig{
+        s
+    }
+
+    fn map_authorization(
+        &self,
+        a: zp_tx::components::sapling::Authorized,
+    ) -> zp_tx::components::sapling::Authorized {
+        a
+    }
+}
+
+impl zp_tx::components::orchard::MapAuth<orchard::bundle::Authorized, orchard::bundle::Authorized>
+    for IdentityMap
+{
+    fn map_spend_auth(
+        &self,
+        s: <orchard::bundle::Authorized as orchard::bundle::Authorization>::SpendAuth,
+    ) -> <orchard::bundle::Authorized as orchard::bundle::Authorization>::SpendAuth {
+        s
+    }
+
+    fn map_authorization(&self, a: orchard::bundle::Authorized) -> orchard::bundle::Authorized {
+        a
+    }
+}
+
+struct PrecomputedAuth<'a> {
+    _phantom: std::marker::PhantomData<&'a ()>,
+}
+
+impl<'a> zp_tx::Authorization for PrecomputedAuth<'a> {
+    type TransparentAuth = TransparentAuth<'a>;
+    type SaplingAuth = zp_tx::components::sapling::Authorized;
+    type OrchardAuth = orchard::bundle::Authorized;
+}
+
+// End of (mostly) copied code
+
+impl TryFrom<&Transaction> for zp_tx::Transaction {
     type Error = io::Error;
 
     /// Convert a Zebra transaction into a librustzcash one.
@@ -42,7 +168,7 @@ impl TryFrom<&Transaction> for zcash_primitives::transaction::Transaction {
 pub(crate) fn convert_tx_to_librustzcash(
     trans: &Transaction,
     network_upgrade: NetworkUpgrade,
-) -> Result<zcash_primitives::transaction::Transaction, io::Error> {
+) -> Result<zp_tx::Transaction, io::Error> {
     let serialized_tx = trans.zcash_serialize_to_vec()?;
     let branch_id: u32 = network_upgrade
         .branch_id()
@@ -52,16 +178,16 @@ pub(crate) fn convert_tx_to_librustzcash(
     let branch_id: zcash_primitives::consensus::BranchId = branch_id
         .try_into()
         .expect("zcash_primitives and Zebra have the same branch ids");
-    let alt_tx = zcash_primitives::transaction::Transaction::read(&serialized_tx[..], branch_id)?;
+    let alt_tx = zp_tx::Transaction::read(&serialized_tx[..], branch_id)?;
     Ok(alt_tx)
 }
 
 /// Convert a Zebra Amount into a librustzcash one.
-impl TryFrom<Amount<NonNegative>> for zcash_primitives::transaction::components::Amount {
+impl TryFrom<Amount<NonNegative>> for zp_tx::components::Amount {
     type Error = ();
 
     fn try_from(amount: Amount<NonNegative>) -> Result<Self, Self::Error> {
-        zcash_primitives::transaction::components::Amount::from_u64(amount.into())
+        zp_tx::components::Amount::from_u64(amount.into())
     }
 }
 
@@ -98,33 +224,32 @@ pub(crate) fn sighash(
         Some(input_index) => {
             let output = all_previous_outputs[input_index].clone();
             script = (&output.lock_script).into();
-            zcash_primitives::transaction::sighash::SignableInput::Transparent(
-                zcash_primitives::transaction::sighash::TransparentInput::new(
-                    input_index,
-                    &script,
-                    output
-                        .value
-                        .try_into()
-                        .expect("amount was previously validated"),
-                ),
-            )
+            zp_tx::sighash::SignableInput::Transparent {
+                hash_type: hash_type.bits() as _,
+                index: input_index,
+                script_code: &script,
+                script_pubkey: &script,
+                value: output
+                    .value
+                    .try_into()
+                    .expect("amount was previously validated"),
+            }
         }
-        None => zcash_primitives::transaction::sighash::SignableInput::Shielded,
+        None => zp_tx::sighash::SignableInput::Shielded,
     };
 
-    let txid_parts = alt_tx
-        .deref()
-        .digest(zcash_primitives::transaction::txid::TxIdDigester);
+    let txid_parts = alt_tx.deref().digest(zp_tx::txid::TxIdDigester);
+    let f_transparent = MapTransparent {
+        auth: TransparentAuth {
+            all_prev_outputs: all_previous_outputs,
+        },
+    };
+    let txdata: zp_tx::TransactionData<PrecomputedAuth> =
+        alt_tx
+            .into_data()
+            .map_authorization(f_transparent, IdentityMap, IdentityMap);
 
-    SigHash(
-        *zcash_primitives::transaction::sighash::signature_hash(
-            alt_tx.deref(),
-            hash_type.bits(),
-            &signable_input,
-            &txid_parts,
-        )
-        .as_ref(),
-    )
+    SigHash(*zp_tx::sighash::signature_hash(&txdata, &signable_input, &txid_parts).as_ref())
 }
 
 /// Compute the authorizing data commitment of this transaction as specified
@@ -136,7 +261,7 @@ pub(crate) fn sighash(
 ///
 /// [ZIP-244]: https://zips.z.cash/zip-0244.
 pub(crate) fn auth_digest(trans: &Transaction) -> AuthDigest {
-    let alt_tx: zcash_primitives::transaction::Transaction = trans
+    let alt_tx: zp_tx::Transaction = trans
         .try_into()
         .expect("zcash_primitives and Zebra transaction formats must be compatible");
 
