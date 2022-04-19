@@ -3,7 +3,7 @@
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
-use group::GroupEncoding;
+use group::{ff::PrimeField, GroupEncoding};
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 use rand_core::{CryptoRng, RngCore};
 
@@ -48,7 +48,7 @@ pub struct Rho(pub(crate) pallas::Base);
 
 impl From<Rho> for [u8; 32] {
     fn from(rho: Rho) -> Self {
-        rho.0.to_bytes()
+        rho.0.to_repr()
     }
 }
 
@@ -78,7 +78,7 @@ pub struct Psi(pub(crate) pallas::Base);
 
 impl From<Psi> for [u8; 32] {
     fn from(psi: Psi) -> Self {
-        psi.0.to_bytes()
+        psi.0.to_repr()
     }
 }
 

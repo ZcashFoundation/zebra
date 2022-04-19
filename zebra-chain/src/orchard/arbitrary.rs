@@ -1,4 +1,4 @@
-use group::prime::PrimeCurveAffine;
+use group::{ff::PrimeField, prime::PrimeCurveAffine};
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 
@@ -46,7 +46,7 @@ impl Arbitrary for note::Nullifier {
         (vec(any::<u8>(), 64))
             .prop_map(|bytes| {
                 let bytes = bytes.try_into().expect("vec is the correct length");
-                Self::try_from(pallas::Scalar::from_bytes_wide(&bytes).to_bytes())
+                Self::try_from(pallas::Scalar::from_bytes_wide(&bytes).to_repr())
                     .expect("a valid generated nullifier")
             })
             .boxed()
@@ -120,7 +120,7 @@ impl Arbitrary for tree::Root {
         (vec(any::<u8>(), 64))
             .prop_map(|bytes| {
                 let bytes = bytes.try_into().expect("vec is the correct length");
-                Self::try_from(pallas::Base::from_bytes_wide(&bytes).to_bytes())
+                Self::try_from(pallas::Base::from_bytes_wide(&bytes).to_repr())
                     .expect("a valid generated Orchard note commitment tree root")
             })
             .boxed()

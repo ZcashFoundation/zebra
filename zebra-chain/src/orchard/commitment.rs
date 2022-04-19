@@ -3,7 +3,7 @@
 use std::{convert::TryFrom, fmt, io};
 
 use bitvec::prelude::*;
-use group::{prime::PrimeCurveAffine, GroupEncoding};
+use group::{ff::PrimeField, prime::PrimeCurveAffine, GroupEncoding};
 use halo2::{
     arithmetic::{Coordinates, CurveAffine, FieldExt},
     pasta::pallas,
@@ -65,12 +65,12 @@ impl fmt::Debug for NoteCommitment {
 
         match option {
             Some(coordinates) => d
-                .field("x", &hex::encode(coordinates.x().to_bytes()))
-                .field("y", &hex::encode(coordinates.y().to_bytes()))
+                .field("x", &hex::encode(coordinates.x().to_repr()))
+                .field("y", &hex::encode(coordinates.y().to_repr()))
                 .finish(),
             None => d
-                .field("x", &hex::encode(pallas::Base::zero().to_bytes()))
-                .field("y", &hex::encode(pallas::Base::zero().to_bytes()))
+                .field("x", &hex::encode(pallas::Base::zero().to_repr()))
+                .field("y", &hex::encode(pallas::Base::zero().to_repr()))
                 .finish(),
         }
     }
@@ -192,12 +192,12 @@ impl fmt::Debug for ValueCommitment {
 
         match option {
             Some(coordinates) => d
-                .field("x", &hex::encode(coordinates.x().to_bytes()))
-                .field("y", &hex::encode(coordinates.y().to_bytes()))
+                .field("x", &hex::encode(coordinates.x().to_repr()))
+                .field("y", &hex::encode(coordinates.y().to_repr()))
                 .finish(),
             None => d
-                .field("x", &hex::encode(pallas::Base::zero().to_bytes()))
-                .field("y", &hex::encode(pallas::Base::zero().to_bytes()))
+                .field("x", &hex::encode(pallas::Base::zero().to_repr()))
+                .field("y", &hex::encode(pallas::Base::zero().to_repr()))
                 .finish(),
         }
     }
