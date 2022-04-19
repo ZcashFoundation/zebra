@@ -19,11 +19,11 @@ use super::subsidy;
 /// and if that coinbase transaction is the first transaction in the block.
 /// Returns the coinbase transaction is successful.
 ///
-/// "The first (and only the first) transaction in a block is a coinbase
-/// transaction, which collects and spends any miner subsidy and transaction
-/// fees paid by transactions included in this block." [§3.10][3.10]
+/// > A transaction that has a single transparent input with a null prevout field,
+/// > is called a coinbase transaction. Every block has a single coinbase
+/// > transaction as the first transaction in the block.
 ///
-/// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
+/// <https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions>
 pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>, BlockError> {
     // # Consensus
     //
