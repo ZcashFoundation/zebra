@@ -110,7 +110,7 @@ jobs:
       - name: Validate constants.rs version vs cached state version
         id: validate-state-version
         run: |
-          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
           echo "LOCAL_STATE_VERSION: $LOCAL_STATE_VERSION"
 
           GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache-main AND name~-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
