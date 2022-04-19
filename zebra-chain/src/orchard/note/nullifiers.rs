@@ -6,7 +6,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use halo2::{arithmetic::FieldExt, pasta::pallas};
+use halo2::pasta::{group::ff::PrimeField, pallas};
 
 use crate::serialization::{serde_helpers, SerializationError};
 
@@ -48,7 +48,7 @@ pub struct Nullifier(#[serde(with = "serde_helpers::Base")] pub(crate) pallas::B
 
 impl Hash for Nullifier {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.to_bytes().hash(state);
+        self.0.to_repr().hash(state);
     }
 }
 
@@ -56,7 +56,7 @@ impl TryFrom<[u8; 32]> for Nullifier {
     type Error = SerializationError;
 
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        let possible_point = pallas::Base::from_bytes(&bytes);
+        let possible_point = pallas::Base::from_repr(bytes);
 
         if possible_point.is_some().into() {
             Ok(Self(possible_point.unwrap()))
@@ -94,7 +94,7 @@ impl From<(NullifierDerivingKey, Note, NoteCommitment)> for Nullifier {
         //
         // [︀ (PRF^nfOrchard_nk(ρ) + ψ) mod q_P ]︀ K^Orchard + cm
         let scalar =
-            pallas::Scalar::from_bytes(&(prf_nf(nk.0, note.rho.0) + psi.0).to_bytes()).unwrap();
+            pallas::Scalar::from_repr((prf_nf(nk.0, note.rho.0) + psi.0).to_repr()).unwrap();
 
         // Basically a new-gen Pedersen hash?
         Nullifier(extract_p((K * scalar) + cm.0))

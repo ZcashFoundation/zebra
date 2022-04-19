@@ -4,7 +4,7 @@
 use std::{borrow::Borrow, convert::TryInto, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use halo2::{arithmetic::FieldExt, pasta::pallas};
+use halo2::pasta::{group::ff::PrimeField, pallas};
 
 use crate::{
     amount,
@@ -41,7 +41,7 @@ impl ZcashDeserialize for jubjub::Fq {
 
 impl ZcashDeserialize for pallas::Scalar {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let possible_scalar = pallas::Scalar::from_bytes(&reader.read_32_bytes()?);
+        let possible_scalar = pallas::Scalar::from_repr(reader.read_32_bytes()?);
 
         if possible_scalar.is_some().into() {
             Ok(possible_scalar.unwrap())
@@ -55,7 +55,7 @@ impl ZcashDeserialize for pallas::Scalar {
 
 impl ZcashDeserialize for pallas::Base {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let possible_field_element = pallas::Base::from_bytes(&reader.read_32_bytes()?);
+        let possible_field_element = pallas::Base::from_repr(reader.read_32_bytes()?);
 
         if possible_field_element.is_some().into() {
             Ok(possible_field_element.unwrap())

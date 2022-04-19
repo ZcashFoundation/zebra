@@ -1,6 +1,6 @@
 [package]
 name = "zebra-test"
-version = "1.0.0-beta.7"
+version = "1.0.0-beta.8"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -9,6 +9,7 @@ edition = "2021"
 
 [dependencies]
 hex = "0.4.3"
+indexmap = "1.8.1"
 lazy_static = "1.4.0"
 insta = "1.14.0"
 proptest = "0.10.1"

@@ -8,7 +8,7 @@
 use std::{env, net::SocketAddr, path::Path};
 
 use zebra_test::{
-    command::{TestChild, TestDirExt},
+    command::{Arguments, TestChild, TestDirExt},
     net::random_known_port,
     prelude::*,
 };
@@ -78,7 +78,7 @@ where
     /// # Panics
     ///
     /// If there is no lightwalletd config in the test directory.
-    fn spawn_lightwalletd_child(self, args: &[&str]) -> Result<TestChild<Self>>;
+    fn spawn_lightwalletd_child(self, extra_args: Arguments) -> Result<TestChild<Self>>;
 
     /// Create a config file and use it for all subsequently spawned `lightwalletd` processes.
     /// Returns an error if the config already exists.
@@ -92,7 +92,7 @@ impl<T> LightWalletdTestDirExt for T
 where
     Self: TestDirExt + AsRef<Path> + Sized,
 {
-    fn spawn_lightwalletd_child(self, extra_args: &[&str]) -> Result<TestChild<Self>> {
+    fn spawn_lightwalletd_child(self, extra_args: Arguments) -> Result<TestChild<Self>> {
         let dir = self.as_ref().to_owned();
         let default_config_path = dir.join("lightwalletd-zcash.conf");
 
@@ -103,35 +103,37 @@ where
 
         // By default, launch a working test instance with logging,
         // and avoid port conflicts.
-        let mut args: Vec<_> = vec![
-            // the fake zcashd conf we just wrote
-            "--zcash-conf-path",
-            default_config_path
-                .as_path()
-                .to_str()
-                .expect("Path is valid Unicode"),
-            // the lightwalletd cache directory
-            //
-            // TODO: create a sub-directory for lightwalletd
-            "--data-dir",
-            dir.to_str().expect("Path is valid Unicode"),
-            // log to standard output
-            //
-            // TODO: if lightwalletd needs to run on Windows,
-            //       work out how to log to the terminal on all platforms
-            "--log-file",
-            "/dev/stdout",
-            // let the OS choose a random available wallet client port
-            "--grpc-bind-addr",
-            "127.0.0.1:0",
-            "--http-bind-addr",
-            "127.0.0.1:0",
-            // don't require a TLS certificate for the HTTP server
-            "--no-tls-very-insecure",
-        ];
-        args.extend_from_slice(extra_args);
+        let mut args = Arguments::new();
 
-        self.spawn_child_with_command("lightwalletd", &args)
+        // the fake zcashd conf we just wrote
+        let zcash_conf_path = default_config_path
+            .as_path()
+            .to_str()
+            .expect("Path is valid Unicode");
+        args.set_parameter("--zcash-conf-path", zcash_conf_path);
+
+        // the lightwalletd cache directory
+        //
+        // TODO: create a sub-directory for lightwalletd
+        args.set_parameter("--data-dir", dir.to_str().expect("Path is valid Unicode"));
+
+        // log to standard output
+        //
+        // TODO: if lightwalletd needs to run on Windows,
+        //       work out how to log to the terminal on all platforms
+        args.set_parameter("--log-file", "/dev/stdout");
+
+        // let the OS choose a random available wallet client port
+        args.set_parameter("--grpc-bind-addr", "127.0.0.1:0");
+        args.set_parameter("--http-bind-addr", "127.0.0.1:0");
+
+        // don't require a TLS certificate for the HTTP server
+        args.set_argument("--no-tls-very-insecure");
+
+        // apply user provided arguments
+        args.merge_with(extra_args);
+
+        self.spawn_child_with_command("lightwalletd", args)
     }
 
     fn with_lightwalletd_config(self, zebra_rpc_listener: SocketAddr) -> Result<Self> {

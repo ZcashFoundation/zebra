@@ -16,7 +16,7 @@ use aes::Aes256;
 use bech32::{self, ToBase32, Variant};
 use bitvec::prelude::*;
 use fpe::ff1::{BinaryNumeralString, FF1};
-use group::{prime::PrimeCurveAffine, Group, GroupEncoding};
+use group::{ff::PrimeField, prime::PrimeCurveAffine, Group, GroupEncoding};
 use halo2::{
     arithmetic::{Coordinates, CurveAffine, FieldExt},
     pasta::pallas,
@@ -231,7 +231,7 @@ impl ConstantTimeEq for SpendAuthorizingKey {
     /// Check whether two `SpendAuthorizingKey`s are equal, runtime independent
     /// of the value of the secret.
     fn ct_eq(&self, other: &Self) -> Choice {
-        self.0.to_bytes().ct_eq(&other.0.to_bytes())
+        self.0.to_repr().ct_eq(&other.0.to_repr())
     }
 }
 
@@ -245,7 +245,7 @@ impl fmt::Debug for SpendAuthorizingKey {
 
 impl From<SpendAuthorizingKey> for [u8; 32] {
     fn from(sk: SpendAuthorizingKey) -> Self {
-        sk.0.to_bytes()
+        sk.0.to_repr()
     }
 }
 
@@ -281,7 +281,7 @@ impl PartialEq for SpendAuthorizingKey {
 
 impl PartialEq<[u8; 32]> for SpendAuthorizingKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
-        self.0.to_bytes().ct_eq(other).unwrap_u8() == 1u8
+        self.0.to_repr().ct_eq(other).unwrap_u8() == 1u8
     }
 }
 
@@ -341,14 +341,14 @@ impl ConstantTimeEq for NullifierDerivingKey {
     /// Check whether two `NullifierDerivingKey`s are equal, runtime independent
     /// of the value of the secret.
     fn ct_eq(&self, other: &Self) -> Choice {
-        self.0.to_bytes().ct_eq(&other.0.to_bytes())
+        self.0.to_repr().ct_eq(&other.0.to_repr())
     }
 }
 
 impl fmt::Debug for NullifierDerivingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("NullifierDerivingKey")
-            .field(&hex::encode(self.0.to_bytes()))
+            .field(&hex::encode(self.0.to_repr()))
             .finish()
     }
 }
@@ -357,13 +357,13 @@ impl Eq for NullifierDerivingKey {}
 
 impl From<NullifierDerivingKey> for [u8; 32] {
     fn from(nk: NullifierDerivingKey) -> [u8; 32] {
-        nk.0.to_bytes()
+        nk.0.to_repr()
     }
 }
 
 impl From<&NullifierDerivingKey> for [u8; 32] {
     fn from(nk: &NullifierDerivingKey) -> [u8; 32] {
-        nk.0.to_bytes()
+        nk.0.to_repr()
     }
 }
 
@@ -375,7 +375,7 @@ impl From<NullifierDerivingKey> for pallas::Base {
 
 impl From<[u8; 32]> for NullifierDerivingKey {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(pallas::Base::from_bytes(&bytes).unwrap())
+        Self(pallas::Base::from_repr(bytes).unwrap())
     }
 }
 
@@ -399,7 +399,7 @@ impl PartialEq for NullifierDerivingKey {
 
 impl PartialEq<[u8; 32]> for NullifierDerivingKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
-        self.0.to_bytes().ct_eq(other).unwrap_u8() == 1u8
+        self.0.to_repr().ct_eq(other).unwrap_u8() == 1u8
     }
 }
 
@@ -414,14 +414,14 @@ impl ConstantTimeEq for IvkCommitRandomness {
     /// Check whether two `IvkCommitRandomness`s are equal, runtime independent
     /// of the value of the secret.
     fn ct_eq(&self, other: &Self) -> Choice {
-        self.0.to_bytes().ct_eq(&other.0.to_bytes())
+        self.0.to_repr().ct_eq(&other.0.to_repr())
     }
 }
 
 impl fmt::Debug for IvkCommitRandomness {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("IvkCommitRandomness")
-            .field(&hex::encode(self.0.to_bytes()))
+            .field(&hex::encode(self.0.to_repr()))
             .finish()
     }
 }
@@ -459,7 +459,7 @@ impl PartialEq for IvkCommitRandomness {
 
 impl PartialEq<[u8; 32]> for IvkCommitRandomness {
     fn eq(&self, other: &[u8; 32]) -> bool {
-        self.0.to_bytes().ct_eq(other).unwrap_u8() == 1u8
+        self.0.to_repr().ct_eq(other).unwrap_u8() == 1u8
     }
 }
 
@@ -467,7 +467,7 @@ impl TryFrom<[u8; 32]> for IvkCommitRandomness {
     type Error = &'static str;
 
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        let possible_scalar = pallas::Scalar::from_bytes(&bytes);
+        let possible_scalar = pallas::Scalar::from_repr(bytes);
 
         if possible_scalar.is_some().into() {
             Ok(Self(possible_scalar.unwrap()))
@@ -658,7 +658,7 @@ impl From<FullViewingKey> for IncomingViewingKey {
         // I2LEBSP_l^Orchard_base(ak)︁
         let ak_bytes =
             extract_p(pallas::Point::from_bytes(&fvk.spend_validating_key.into()).unwrap())
-                .to_bytes();
+                .to_repr();
         M.extend_from_bitslice(&BitArray::<Lsb0, _>::from(ak_bytes)[0..255]);
 
         // I2LEBSP_l^Orchard_base(nk)︁
@@ -677,7 +677,7 @@ impl From<FullViewingKey> for IncomingViewingKey {
         Self {
             dk: fvk.into(),
             // mod r_P
-            ivk: pallas::Scalar::from_bytes(&commit_x.into()).unwrap(),
+            ivk: pallas::Scalar::from_repr(commit_x.into()).unwrap(),
         }
     }
 }
@@ -931,12 +931,12 @@ impl fmt::Debug for TransmissionKey {
 
         match option {
             Some(coordinates) => d
-                .field("x", &hex::encode(coordinates.x().to_bytes()))
-                .field("y", &hex::encode(coordinates.y().to_bytes()))
+                .field("x", &hex::encode(coordinates.x().to_repr()))
+                .field("y", &hex::encode(coordinates.y().to_repr()))
                 .finish(),
             None => d
-                .field("x", &hex::encode(pallas::Base::zero().to_bytes()))
-                .field("y", &hex::encode(pallas::Base::zero().to_bytes()))
+                .field("x", &hex::encode(pallas::Base::zero().to_repr()))
+                .field("y", &hex::encode(pallas::Base::zero().to_repr()))
                 .finish(),
         }
     }
@@ -1013,7 +1013,7 @@ impl ConstantTimeEq for EphemeralPrivateKey {
     /// Check whether two `EphemeralPrivateKey`s are equal, runtime independent
     /// of the value of the secret.
     fn ct_eq(&self, other: &Self) -> Choice {
-        self.0.to_bytes().ct_eq(&other.0.to_bytes())
+        self.0.to_repr().ct_eq(&other.0.to_repr())
     }
 }
 
@@ -1021,7 +1021,7 @@ impl Eq for EphemeralPrivateKey {}
 
 impl From<EphemeralPrivateKey> for [u8; 32] {
     fn from(esk: EphemeralPrivateKey) -> Self {
-        esk.0.to_bytes()
+        esk.0.to_repr()
     }
 }
 
@@ -1033,7 +1033,7 @@ impl PartialEq for EphemeralPrivateKey {
 
 impl PartialEq<[u8; 32]> for EphemeralPrivateKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
-        self.0.to_bytes().ct_eq(other).unwrap_u8() == 1u8
+        self.0.to_repr().ct_eq(other).unwrap_u8() == 1u8
     }
 }
 /// An ephemeral public key for Orchard key agreement.
@@ -1051,12 +1051,12 @@ impl fmt::Debug for EphemeralPublicKey {
 
         match option {
             Some(coordinates) => d
-                .field("x", &hex::encode(coordinates.x().to_bytes()))
-                .field("y", &hex::encode(coordinates.y().to_bytes()))
+                .field("x", &hex::encode(coordinates.x().to_repr()))
+                .field("y", &hex::encode(coordinates.y().to_repr()))
                 .finish(),
             None => d
-                .field("x", &hex::encode(pallas::Base::zero().to_bytes()))
-                .field("y", &hex::encode(pallas::Base::zero().to_bytes()))
+                .field("x", &hex::encode(pallas::Base::zero().to_repr()))
+                .field("y", &hex::encode(pallas::Base::zero().to_repr()))
                 .finish(),
         }
     }
