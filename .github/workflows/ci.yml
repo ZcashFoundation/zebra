@@ -2,6 +2,23 @@ name: CI
 
 on:
   workflow_dispatch:
+  # we build Rust and Zcash parameter caches on main,
+  # so they can be shared by all branches:
+  # https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows#restrictions-for-accessing-a-cache
+  push:
+    branches:
+      - main
+    paths:
+      # production code and test code
+      - '**/*.rs'
+      # hard-coded checkpoints
+      # TODO: skip proptest regressions
+      - '**/*.txt'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
+      - '.github/workflows/ci.yml'
   pull_request:
     paths:
       # code and tests
