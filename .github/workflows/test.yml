@@ -302,7 +302,7 @@ jobs:
 
       - name: Create GCP compute instance
         id: create-instance
-        if: ${{ needs.build.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true' }}
+        if: ${{ steps.delete-old-instance.outcome == 'skipped' }}
         run: |
           gcloud compute instances create-with-container "regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
