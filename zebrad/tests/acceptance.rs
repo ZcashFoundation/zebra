@@ -1691,7 +1691,7 @@ async fn perform_full_sync_starting_from(
 /// Loads transactions from a block that's after the specified `height`.
 ///
 /// Starts at the block after the block at the specified `height`, and stops when it finds a block
-/// from where it can load at least one transaction.
+/// from where it can load at least one non-coinbase transaction.
 ///
 /// # Panics
 ///
@@ -1720,6 +1720,8 @@ async fn load_transactions_from_block_after(
     while transactions.is_empty() {
         transactions =
             load_transactions_from_block(block::Height(target_height), &mut state).await?;
+
+        transactions.retain(|transaction| !transaction.is_coinbase());
 
         target_height += 1;
     }
