@@ -1021,7 +1021,7 @@ impl Service<ReadRequest> for ReadStateService {
                     "state.requests",
                     1,
                     "service" => "read_state",
-                    "type" => "balance",
+                    "type" => "address_balance",
                 );
 
                 let state = self.clone();
