@@ -19,11 +19,12 @@ use color_eyre::{
 use regex::RegexSet;
 use tracing::instrument;
 
+#[macro_use]
+mod arguments;
 pub mod to_regex;
 
-use to_regex::{CollectRegexSet, ToRegex};
-
-use self::to_regex::ToRegexSet;
+pub use self::arguments::Arguments;
+use self::to_regex::{CollectRegexSet, ToRegex, ToRegexSet};
 
 /// A super-trait for [`Iterator`] + [`Debug`].
 pub trait IteratorDebug: Iterator + Debug {}
@@ -123,18 +124,18 @@ where
     /// Spawn `cmd` with `args` as a child process in this test directory,
     /// potentially taking ownership of the tempdir for the duration of the
     /// child process.
-    fn spawn_child_with_command(self, cmd: &str, args: &[&str]) -> Result<TestChild<Self>>;
+    fn spawn_child_with_command(self, cmd: &str, args: Arguments) -> Result<TestChild<Self>>;
 }
 
 impl<T> TestDirExt for T
 where
     Self: AsRef<Path> + Sized,
 {
-    fn spawn_child_with_command(self, cmd: &str, args: &[&str]) -> Result<TestChild<Self>> {
+    fn spawn_child_with_command(self, cmd: &str, args: Arguments) -> Result<TestChild<Self>> {
         let mut cmd = test_cmd(cmd, self.as_ref())?;
 
         Ok(cmd
-            .args(args)
+            .args(args.into_arguments())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn2(self)

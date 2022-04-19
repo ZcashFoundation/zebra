@@ -81,7 +81,10 @@ and Zebra implements all the features required to reach Zcash network consensus.
 The goals of the beta release series are for Zebra to act as a fully validating Zcash node,
 for all active consensus rules as of NU5 activation.
 
-Currently, Zebra validates all of the documented Zcash consensus rules, but it may not validate any:
+Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
+(As of the second NU5 activation on testnet.)
+
+But it may not validate any:
 - Undocumented rules derived from Bitcoin
 - Undocumented network protocol requirements
 
@@ -100,7 +103,7 @@ for your platform:
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.7 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.8 zebrad`
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind

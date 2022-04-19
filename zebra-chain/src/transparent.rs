@@ -314,7 +314,10 @@ impl Input {
 /// that spends my UTXO and sends 1 ZEC to you and 1 ZEC back to me
 /// (just like receiving change).
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Serialize))]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, Serialize, Deserialize)
+)]
 pub struct Output {
     /// Transaction value.
     // At https://en.bitcoin.it/wiki/Protocol_documentation#tx, this is an i64.

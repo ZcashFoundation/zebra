@@ -5,7 +5,29 @@ on:
     inputs:
       network:
         default: 'Mainnet'
+        description: 'Network to deploy: Mainnet or Testnet'
+        required: true
+      checkpoint_sync:
+        default: 'true'
+        description: 'Configures `zebrad` to use as many checkpoints as possible'
+        required: true
   pull_request:
+    branches:
+      - main
+    paths:
+      # code and tests (including full sync acceptance test changes)
+      # TODO: ignore changes in test code that isn't used in the full sync test
+      - '**/*.rs'
+      # hard-coded checkpoints
+      # TODO: ignore changes to proptest seed .txt files
+      - '**/*.txt'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
+      - 'docker/**'
+      - '.github/workflows/test-full-sync.yml'
+  push:
     branches:
       - main
     paths:
@@ -24,7 +46,7 @@ on:
 
 env:
   CARGO_INCREMENTAL: '1'
-  ZEBRA_SKIP_IPV6_TESTS: "1"
+  ZEBRA_SKIP_IPV6_TESTS: '1'
   RUST_BACKTRACE: full
   RUST_LIB_BACKTRACE: full
   COLORBT_SHOW_HIDDEN: '1'
@@ -39,9 +61,10 @@ env:
 
 jobs:
   build:
+    # TODO add `startsWith(github.head_ref, 'mergify/merge-queue/')` to the condition to
     # only run on Mergify head branches, and on manual dispatch:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if:  startsWith(github.head_ref, 'mergify/merge-queue/') || github.event_name == 'workflow_dispatch'
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     name: Build images
     timeout-minutes: 210
     runs-on: ubuntu-latest
@@ -49,7 +72,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.0.0
+      - uses: actions/checkout@v3.0.1
         with:
           persist-credentials: false
 
@@ -132,11 +155,15 @@ jobs:
   test-full-sync:
     name: Test full Mainnet sync
     runs-on: ubuntu-latest
-    needs: [ build ]
+    needs: [build]
     permissions:
       contents: 'read'
       id-token: 'write'
     steps:
+      - uses: actions/checkout@v3.0.1
+        with:
+          persist-credentials: false
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -144,7 +171,9 @@ jobs:
 
       - name: Downcase network name for disks
         run: |
-          echo LOWER_NET_NAME="${{ github.event.inputs.network || env.NETWORK }}" | awk '{print tolower($0)}' >> $GITHUB_ENV
+          NETWORK_CAPS=${{ github.event.inputs.network || env.NETWORK }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -185,6 +214,9 @@ jobs:
       # This TODO relates to the following issues:
       # https://github.com/actions/runner/issues/241
       # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
+      #
+      # Deploying a zebra container might take more than 30 seconds to completely start, so we're adding a timer at the end
+      # of this step before starting the following ones
       - name: Get container name from logs
         run: |
           INSTANCE_ID=$(gcloud compute instances describe full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
@@ -197,19 +229,9 @@ jobs:
               sleep 10
           done
 
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
-
-      - name: Get state version from logs
-        run: |
-          STATE_VERSION=""
-
-          while [[ ${STATE_VERSION} == "" ]]; do
-              STATE_VERSION=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+Opened Zebra state cache.+v[0-9]+.+")' | grep -oE "v[0-9]+" || [[ $? == 1 ]] )
-              echo "STATE_VERSION: $STATE_VERSION"
-              sleep 10
-          done
-
-          echo "STATE_VERSION=$STATE_VERSION" >> $GITHUB_ENV
+          sleep 90
 
       - name: Full sync
         id: full-sync
@@ -220,6 +242,25 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command="docker logs --follow ${{ env.CONTAINER_NAME }}"
+
+          EXIT_CODE=$(\
+          gcloud compute ssh \
+          full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command="docker wait ${{ env.CONTAINER_NAME }}")
+
+          exit ${EXIT_CODE}
+
+      - name: Get state version from constants.rs
+        run: |
+          STATE_VERSION=""
+
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
+          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
+
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
 
       - name: Get sync height from logs
         run: |
@@ -237,12 +278,12 @@ jobs:
       # Force the image creation as the disk is still attached, even though is not being used by the container
       - name: Create image from state disk
         run: |
-          gcloud compute images create zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ env.SYNC_HEIGHT }} \
+          gcloud compute images create zebrad-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-tip \
           --force \
           --source-disk=full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --source-disk-zone=${{ env.ZONE }} \
           --storage-location=us \
-          --description="Created from head branch ${{ env.GITHUB_HEAD_REF_SLUG_URL }} targeting ${{ env.GITHUB_BASE_REF_SLUG }} from PR ${{ env.GITHUB_REF_SLUG_URL }} with commit ${{ env.GITHUB_EVENT_PULL_REQUEST_HEAD_SHA }}"
+          --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
 
       - name: Delete test instance
         # Do not delete the instance if the sync timeouts in GitHub

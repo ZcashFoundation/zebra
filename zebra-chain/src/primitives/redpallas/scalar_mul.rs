@@ -15,8 +15,8 @@
 
 use std::{borrow::Borrow, fmt::Debug};
 
-use group::Group;
-use halo2::{arithmetic::FieldExt, pasta::pallas};
+use group::{ff::PrimeField, Group};
+use halo2::pasta::pallas;
 
 /// A trait to support getting the Non-Adjacent form of a scalar.
 pub trait NonAdjacentForm {
@@ -81,7 +81,7 @@ impl NonAdjacentForm for pallas::Scalar {
         let mut naf = [0i8; 256];
 
         let mut x_u64 = [0u64; 5];
-        LittleEndian::read_u64_into(&self.to_bytes(), &mut x_u64[0..4]);
+        LittleEndian::read_u64_into(&self.to_repr(), &mut x_u64[0..4]);
 
         let width = 1 << w;
         let window_mask = width - 1;

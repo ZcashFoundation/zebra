@@ -14,17 +14,22 @@ use hex::{FromHex, ToHex};
 use indexmap::IndexMap;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
+use tokio::{sync::broadcast::Sender, task::JoinHandle};
 use tower::{buffer::Buffer, Service, ServiceExt};
+use tracing::Instrument;
 
 use zebra_chain::{
     block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::{SerializationError, ZcashDeserialize},
-    transaction::{self, SerializedTransaction, Transaction},
+    transaction::{self, SerializedTransaction, Transaction, UnminedTx},
+    transparent::Address,
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
+
+use crate::queue::Queue;
 
 #[cfg(test)]
 mod tests;
@@ -140,6 +145,28 @@ pub trait Rpc {
         txid_hex: String,
         verbose: u8,
     ) -> BoxFuture<Result<GetRawTransaction>>;
+
+    /// Returns the transaction ids made by the provided transparent addresses.
+    ///
+    /// zcashd reference: [`getaddresstxids`](https://zcash.github.io/rpc/getaddresstxids.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `addresses`: (json array of string, required) The addresses to get transactions from.
+    /// - `start`: (numeric, required) The lower height to start looking for transactions (inclusive).
+    /// - `end`: (numeric, required) The top height to stop looking for transactions (inclusive).
+    ///
+    /// # Notes
+    ///
+    /// Only the multi-argument format is used by lightwalletd and this is what we currently support:
+    /// https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102
+    #[rpc(name = "getaddresstxids")]
+    fn get_address_tx_ids(
+        &self,
+        addresses: Vec<String>,
+        start: u32,
+        end: u32,
+    ) -> BoxFuture<Result<Vec<String>>>;
 }
 
 /// RPC method implementations.
@@ -168,17 +195,23 @@ where
     /// The configured network for this RPC service.
     #[allow(dead_code)]
     network: Network,
+
+    /// A sender component of a channel used to send transactions to the queue.
+    queue_sender: Sender<Option<UnminedTx>>,
 }
 
 impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
 where
-    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError> + 'static,
     State: Service<
-        zebra_state::ReadRequest,
-        Response = zebra_state::ReadResponse,
-        Error = zebra_state::BoxError,
-    >,
-    Tip: ChainTip + Send + Sync,
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the RPC handler.
     pub fn new<Version>(
@@ -187,17 +220,31 @@ where
         state: State,
         latest_chain_tip: Tip,
         network: Network,
-    ) -> Self
+    ) -> (Self, JoinHandle<()>)
     where
         Version: ToString,
+        <Mempool as Service<mempool::Request>>::Future: Send,
+        <State as Service<zebra_state::ReadRequest>>::Future: Send,
     {
-        RpcImpl {
+        let runner = Queue::start();
+
+        let rpc_impl = RpcImpl {
             app_version: app_version.to_string(),
-            mempool,
-            state,
-            latest_chain_tip,
+            mempool: mempool.clone(),
+            state: state.clone(),
+            latest_chain_tip: latest_chain_tip.clone(),
             network,
-        }
+            queue_sender: runner.sender(),
+        };
+
+        // run the process queue
+        let rpc_tx_queue_task_handle = tokio::spawn(
+            runner
+                .run(mempool, state, latest_chain_tip, network)
+                .in_current_span(),
+        );
+
+        (rpc_impl, rpc_tx_queue_task_handle)
     }
 }
 
@@ -327,6 +374,7 @@ where
         raw_transaction_hex: String,
     ) -> BoxFuture<Result<SentTransactionHash>> {
         let mempool = self.mempool.clone();
+        let queue_sender = self.queue_sender.clone();
 
         async move {
             let raw_transaction_bytes = Vec::from_hex(raw_transaction_hex).map_err(|_| {
@@ -336,6 +384,10 @@ where
                 .map_err(|_| Error::invalid_params("raw transaction is structurally invalid"))?;
 
             let transaction_hash = raw_transaction.hash();
+
+            // send transaction to the rpc queue, ignore any error.
+            let unmined_transaction = UnminedTx::from(raw_transaction.clone());
+            let _ = queue_sender.send(Some(unmined_transaction));
 
             let transaction_parameter = mempool::Gossip::Tx(raw_transaction.into());
             let request = mempool::Request::Queue(vec![transaction_parameter]);
@@ -526,6 +578,59 @@ where
         }
         .boxed()
     }
+
+    fn get_address_tx_ids(
+        &self,
+        addresses: Vec<String>,
+        start: u32,
+        end: u32,
+    ) -> BoxFuture<Result<Vec<String>>> {
+        let mut state = self.state.clone();
+        let mut response_transactions = vec![];
+        let start = Height(start);
+        let end = Height(end);
+
+        let chain_height = self.latest_chain_tip.best_tip_height().ok_or(Error {
+            code: ErrorCode::ServerError(0),
+            message: "No blocks in state".to_string(),
+            data: None,
+        });
+
+        async move {
+            // height range checks
+            check_height_range(start, end, chain_height?)?;
+
+            let valid_addresses: Result<Vec<Address>> = addresses
+                .iter()
+                .map(|address| {
+                    address.parse().map_err(|_| {
+                        Error::invalid_params(format!("Provided address is not valid: {}", address))
+                    })
+                })
+                .collect();
+
+            let request =
+                zebra_state::ReadRequest::TransactionsByAddresses(valid_addresses?, start, end);
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                zebra_state::ReadResponse::TransactionIds(hashes) => response_transactions
+                    .append(&mut hashes.iter().map(|h| h.to_string()).collect()),
+                _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
+            }
+
+            Ok(response_transactions)
+        }
+        .boxed()
+    }
 }
 
 /// Response to a `getinfo` RPC request.
@@ -649,4 +754,23 @@ impl GetRawTransaction {
             Ok(GetRawTransaction::Raw(tx.into()))
         }
     }
+}
+
+/// Check if provided height range is valid
+fn check_height_range(start: Height, end: Height, chain_height: Height) -> Result<()> {
+    if start == Height(0) || end == Height(0) {
+        return Err(Error::invalid_params(
+            "Start and end are expected to be greater than zero",
+        ));
+    }
+    if end < start {
+        return Err(Error::invalid_params(
+            "End value is expected to be greater than or equal to start",
+        ));
+    }
+    if start > chain_height || end > chain_height {
+        return Err(Error::invalid_params("Start or end is outside chain range"));
+    }
+
+    Ok(())
 }

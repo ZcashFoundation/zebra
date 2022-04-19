@@ -1,10 +1,9 @@
 ---
 source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
-assertion_line: 140
 expression: empty_column_families
-
 ---
 [
+  "balance_by_transparent_addr: no entries",
   "history_tree: no entries",
   "orchard_anchors: no entries",
   "orchard_nullifiers: no entries",
@@ -13,6 +12,7 @@ expression: empty_column_families
   "sprout_anchors: no entries",
   "sprout_nullifiers: no entries",
   "tip_chain_value_pool: no entries",
-  "tx_by_hash: no entries",
+  "tx_loc_by_transparent_addr_loc: no entries",
   "utxo_by_outpoint: no entries",
+  "utxo_loc_by_transparent_addr_loc: no entries",
 ]
