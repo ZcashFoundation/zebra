@@ -638,6 +638,62 @@ proptest! {
         })?;
     }
 
+    /// Test the `get_address_balance` RPC using an invalid list of addresses.
+    ///
+    /// An error should be returned.
+    #[test]
+    fn does_not_query_balance_for_invalid_addresses(
+        network in any::<Network>(),
+        at_least_one_invalid_address in vec(".*", 1..10),
+    ) {
+        let runtime = zebra_test::init_async();
+        let _guard = runtime.enter();
+
+        prop_assume!(at_least_one_invalid_address
+            .iter()
+            .any(|string| string.parse::<transparent::Address>().is_err()));
+
+        let mut mempool = MockService::build().for_prop_tests();
+        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+
+        // Create a mocked `ChainTip`
+        let (chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+
+        tokio::time::pause();
+
+        // Start RPC with the mocked `ChainTip`
+        runtime.block_on(async move {
+            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
+                "RPC test",
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+                chain_tip,
+                network,
+            );
+
+            // Build the future to call the RPC
+            let result = rpc.get_address_balance(at_least_one_invalid_address).await;
+
+            // Check that the invalid addresses lead to an error
+            prop_assert!(
+                matches!(
+                    result,
+                    Err(Error {
+                        code: ErrorCode::InvalidParams,
+                        ..
+                    })
+                ),
+                "Result is not a server error: {result:?}"
+            );
+
+            // Check no requests were made during this test
+            mempool.expect_no_requests().await?;
+            state.expect_no_requests().await?;
+
+            Ok::<_, TestCaseError>(())
+        })?;
+    }
+
     /// Test the queue functionality using `send_raw_transaction`
     #[test]
     fn rpc_queue_main_loop(tx in any::<Transaction>()) {
