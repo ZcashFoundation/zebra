@@ -117,7 +117,7 @@ proptest! {
             // have a block interval value equal to the one at Height(1)
             let spacing = Duration::seconds(150);
 
-            // apply expiration inmediatly, transaction will not be removed from queue
+            // apply expiration immediately, transaction will not be removed from queue
             runner.remove_expired(spacing);
             prop_assert_eq!(runner.queue.transactions().len(), 1);
 
@@ -229,7 +229,7 @@ proptest! {
             runner.remove_committed(result);
             prop_assert_eq!(runner.queue.transactions().len(), 0);
 
-            // no more requets expected
+            // no more requests expected
             mempool.expect_no_requests().await?;
 
             Ok::<_, TestCaseError>(())
