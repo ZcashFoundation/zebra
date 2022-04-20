@@ -1798,6 +1798,7 @@ fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
     config.network.initial_mainnet_peers = HashSet::new();
     config.network.initial_testnet_peers = HashSet::new();
     config.network.network = network;
+    config.mempool.debug_enable_at_height = Some(0);
 
     let mut zebrad = zebra_directory
         .with_config(&mut config)?
@@ -1807,8 +1808,8 @@ fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
 
     let rpc_address = config.rpc.listen_addr.unwrap();
 
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
     zebrad.expect_stdout_line_matches("activating mempool")?;
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
 
     Ok((zebrad, rpc_address))
 }
