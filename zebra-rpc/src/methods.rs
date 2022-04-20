@@ -710,6 +710,14 @@ pub struct GetBlockChainInfo {
     consensus: TipConsensusBranch,
 }
 
+/// A wrapper type with a list of strings of addresses.
+///
+/// This is used for the input parameter of [`Rpc::get_account_balance`].
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+pub struct AddressStrings {
+    addresses: Vec<String>,
+}
+
 /// The transparent balance of a set of addresses.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
 pub struct AddressBalance {
