@@ -439,16 +439,17 @@ where
         .collect()
 }
 
-/// Returns the transaction IDs that sent or received funds,
-/// from the supplied [`transparent::Address`]es, in chain order.
+/// Returns the transaction IDs that sent or received funds from the supplied [`transparent::Address`]es,
+/// within `height_range`, in chain order.
 ///
 /// If the addresses do not exist in the non-finalized `chain` or finalized `db`,
+/// or the `height_range` is totally outside both the `chain` and `db` range,
 /// returns an empty list.
-#[allow(dead_code)]
 pub(crate) fn transparent_tx_ids<C>(
     chain: Option<C>,
     db: &ZebraDb,
     addresses: HashSet<transparent::Address>,
+    height_range: RangeInclusive<block::Height>,
 ) -> Result<BTreeMap<TransactionLocation, transaction::Hash>, BoxError>
 where
     C: AsRef<Chain>,
@@ -467,7 +468,9 @@ where
         // If the tx IDs are valid, return them, otherwise, retry or return an error.
         match chain_tx_id_changes {
             Ok(chain_tx_id_changes) => {
-                let tx_ids = apply_tx_id_changes(finalized_tx_ids, chain_tx_id_changes);
+                // TODO: do the height_range filter in the queries, to improve performance
+                let tx_ids =
+                    apply_tx_id_changes(finalized_tx_ids, chain_tx_id_changes, height_range);
 
                 return Ok(tx_ids);
             }
@@ -603,15 +606,18 @@ where
     Ok(chain.partial_transparent_tx_ids(addresses))
 }
 
-/// Returns the combined the supplied finalized and non-finalized transaction IDs.
+/// Returns the combined the supplied finalized and non-finalized transaction IDs,
+/// filtered by `height_range`.
 fn apply_tx_id_changes(
     finalized_tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
     chain_tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
+    height_range: RangeInclusive<block::Height>,
 ) -> BTreeMap<TransactionLocation, transaction::Hash> {
     // Correctness: compensate for inconsistent tx IDs finalized blocks across multiple addresses,
     // by combining them with overalapping non-finalized block tx IDs.
     finalized_tx_ids
         .into_iter()
         .chain(chain_tx_ids.into_iter())
+        .filter(|(tx_loc, _tx_hash)| height_range.contains(&tx_loc.height))
         .collect()
 }

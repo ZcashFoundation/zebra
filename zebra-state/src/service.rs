@@ -995,8 +995,7 @@ impl Service<ReadRequest> for ReadStateService {
             // For the get_address_tx_ids RPC.
             ReadRequest::TransactionIdsByAddresses {
                 addresses,
-                // TODO: filter by height range
-                height_range: _,
+                height_range,
             } => {
                 metrics::counter!(
                     "state.requests",
@@ -1009,7 +1008,7 @@ impl Service<ReadRequest> for ReadStateService {
 
                 async move {
                     let tx_ids = state.best_chain_receiver.with_watch_data(|best_chain| {
-                        read::transparent_tx_ids(best_chain, &state.db, addresses)
+                        read::transparent_tx_ids(best_chain, &state.db, addresses, height_range)
                     });
 
                     tx_ids.map(ReadResponse::AddressesTransactionIds)
