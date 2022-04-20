@@ -1865,7 +1865,16 @@ fn spawn_lightwalletd_with_rpc_server(
 
     let mut lightwalletd = lightwalletd_dir
         .spawn_lightwalletd_child(arguments)?
-        .with_timeout(LIGHTWALLETD_TEST_TIMEOUT);
+        .with_timeout(LIGHTWALLETD_TEST_TIMEOUT)
+        .with_failure_regex_iter(
+            // TODO: replace with a function that returns the full list and correct return type
+            LIGHTWALLETD_FAILURE_MESSAGES
+                .iter()
+                .chain(PROCESS_FAILURE_MESSAGES)
+                .cloned(),
+            // TODO: some exceptions do not apply to the cached state tests (#3511)
+            LIGHTWALLETD_IGNORE_MESSAGES.iter().cloned(),
+        );
 
     lightwalletd.expect_stdout_line_matches("Starting gRPC server")?;
     lightwalletd.expect_stdout_line_matches("Waiting for block")?;
