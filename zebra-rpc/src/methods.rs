@@ -167,6 +167,21 @@ pub trait Rpc {
         start: u32,
         end: u32,
     ) -> BoxFuture<Result<Vec<String>>>;
+
+    /// Returns all unspent outputs for a list of addresses.
+    ///
+    /// zcashd reference: [`getaddressutxos`](https://zcash.github.io/rpc/getaddressutxos.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `addresses`: (json array of string, required) The addresses to get outputs from.
+    ///
+    /// # Notes
+    ///
+    /// lightwalletd always uses the multi-address request, without chaininfo:
+    /// https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L402
+    #[rpc(name = "getaddressutxos")]
+    fn get_address_utxos(&self, addresses: Vec<String>) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
 }
 
 /// RPC method implementations.
@@ -631,6 +646,61 @@ where
         }
         .boxed()
     }
+
+    fn get_address_utxos(&self, addresses: Vec<String>) -> BoxFuture<Result<Vec<GetAddressUtxos>>> {
+        let mut state = self.state.clone();
+        let mut response_utxos = vec![];
+
+        async move {
+            // TODO: make this a function after #4119 is merged
+            let valid_addresses: Result<HashSet<Address>> = addresses
+                .iter()
+                .map(|address| {
+                    address.parse().map_err(|_| {
+                        Error::invalid_params(format!("Provided address is not valid: {}", address))
+                    })
+                })
+                .collect();
+
+            // get utxos data for addresses
+            let request = zebra_state::ReadRequest::UtxosByAddresses(valid_addresses?);
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+            let utxos = match response {
+                zebra_state::ReadResponse::Utxos(utxos) => utxos,
+                _ => unreachable!("unmatched response to a UtxosByAddresses request"),
+            };
+
+            for utxo_data in utxos.utxos() {
+                let address = utxo_data.0.to_string();
+                let txid = utxo_data.1.to_string();
+                let height = utxo_data.2.height().0;
+                let output_index = utxo_data.2.output_index().as_usize();
+                let script = utxo_data.3.lock_script.to_string();
+                let satoshis = i64::from(utxo_data.3.value);
+
+                let entry = GetAddressUtxos {
+                    address,
+                    txid,
+                    height,
+                    output_index,
+                    script,
+                    satoshis,
+                };
+                response_utxos.push(entry);
+            }
+
+            Ok(response_utxos)
+        }
+        .boxed()
+    }
 }
 
 /// Response to a `getinfo` RPC request.
@@ -731,6 +801,20 @@ pub enum GetRawTransaction {
         /// not applicable.
         height: i32,
     },
+}
+
+/// Response to a `getaddressutxos` RPC request.
+///
+/// See the notes for the [`Rpc::get_address_utxos` method].
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GetAddressUtxos {
+    address: String,
+    txid: String,
+    height: u32,
+    #[serde(rename = "outputIndex")]
+    output_index: usize,
+    script: String,
+    satoshis: i64,
 }
 
 impl GetRawTransaction {

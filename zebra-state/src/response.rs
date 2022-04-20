@@ -11,7 +11,7 @@ use zebra_chain::{
 // Allow *only* this unused import, so that rustdoc link resolution
 // will work with inline links.
 #[allow(unused_imports)]
-use crate::Request;
+use crate::{service::read::AddressUtxos, Request};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`] [`Request`].
@@ -57,4 +57,7 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::TransactionsByAddresses`] with the obtained transaction ids,
     /// in the order they appear in blocks.
     TransactionIds(Vec<Hash>),
+
+    /// Response to [`ReadRequest::UtxosByAddresses`] with found utxos and transaction data.
+    Utxos(AddressUtxos),
 }

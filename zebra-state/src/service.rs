@@ -58,7 +58,7 @@ pub(crate) mod check;
 mod finalized_state;
 mod non_finalized_state;
 mod pending_utxos;
-mod read;
+pub(crate) mod read;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
@@ -1011,6 +1011,27 @@ impl Service<ReadRequest> for ReadStateService {
                     // Do the corresponding update in the context of #3147
                     let transaction_ids = vec![];
                     Ok(ReadResponse::TransactionIds(transaction_ids))
+                }
+                .boxed()
+            }
+
+            // For the get_address_utxos RPC.
+            ReadRequest::UtxosByAddresses(addresses) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "utxos_by_addresses",
+                );
+
+                let state = self.clone();
+
+                async move {
+                    let utxos = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::transparent_utxos(state.network, best_chain, &state.db, addresses)
+                    });
+
+                    utxos.map(ReadResponse::Utxos)
                 }
                 .boxed()
             }

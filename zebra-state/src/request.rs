@@ -1,6 +1,9 @@
 //! State [`tower::Service`] request types.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use zebra_chain::{
     amount::NegativeAllowed,
@@ -445,4 +448,11 @@ pub enum ReadRequest {
     /// Returned txids are in the order they appear in blocks, which ensures that they are topologically sorted
     /// (i.e. parent txids will appear before child txids).
     TransactionsByAddresses(Vec<transparent::Address>, block::Height, block::Height),
+
+    /// Looks up utxos for the provided addresses.
+    ///
+    /// Returns
+    ///
+    /// * A type with found utxos and transaction information.
+    UtxosByAddresses(HashSet<transparent::Address>),
 }
