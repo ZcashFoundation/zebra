@@ -146,7 +146,7 @@ impl ZebraDb {
         let mut unspent_output = AddressUnspentOutput::address_iterator_start(address_location);
 
         loop {
-            // A valid key representing an entry for this address or the next
+            // Seek to a valid entry for this address, or the first entry for the next address
             unspent_output = match self
                 .db
                 .zs_next_key_value_from(&utxo_loc_by_transparent_addr_loc, &unspent_output)
@@ -216,16 +216,16 @@ impl ZebraDb {
         // Manually fetch the entire addresses' transaction locations
         let mut addr_transactions = BTreeSet::new();
 
-        // An invalid key representing the minimum possible transaction
+        // A valid key representing the first UTXO send to the address
         let mut transaction_location = AddressTransaction::address_iterator_start(address_location);
 
         loop {
-            // A valid key representing an entry for this address or the next
+            // Seek to a valid entry for this address, or the first entry for the next address
             transaction_location = match self
                 .db
                 .zs_next_key_value_from(&tx_loc_by_transparent_addr_loc, &transaction_location)
             {
-                Some((unspent_output, ())) => unspent_output,
+                Some((transaction_location, ())) => transaction_location,
                 // We're finished with the final address in the column family
                 None => break,
             };

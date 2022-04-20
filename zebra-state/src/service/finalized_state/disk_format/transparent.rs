@@ -403,11 +403,14 @@ impl AddressTransaction {
     /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
     pub fn address_iterator_start(address_location: AddressLocation) -> AddressTransaction {
         // Iterating from the lowest possible transaction location gets us the first transaction.
-        let zero_transaction_location = TransactionLocation::from_usize(Height(0), 0);
+        //
+        // The address location is the output location of the first UTXO sent to the address,
+        // and addresses can not spend funds until they receive their first UTXO.
+        let first_utxo_location = address_location.transaction_location();
 
         AddressTransaction {
             address_location,
-            transaction_location: zero_transaction_location,
+            transaction_location: first_utxo_location,
         }
     }
 
