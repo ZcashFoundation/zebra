@@ -26,7 +26,9 @@ use zebra_state::BoxError;
 
 use zebra_test::mock_service::MockService;
 
-use super::super::{AddressBalance, NetworkUpgradeStatus, Rpc, RpcImpl, SentTransactionHash};
+use super::super::{
+    AddressBalance, AddressStrings, NetworkUpgradeStatus, Rpc, RpcImpl, SentTransactionHash,
+};
 
 proptest! {
     /// Test that when sending a raw transaction, it is received by the mempool service.
@@ -593,10 +595,12 @@ proptest! {
         let (chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
 
         // Prepare the list of addresses.
-        let address_list = addresses
-            .iter()
-            .map(|address| address.to_string())
-            .collect();
+        let address_strings = AddressStrings {
+            addresses: addresses
+                .iter()
+                .map(|address| address.to_string())
+                .collect(),
+        };
 
         tokio::time::pause();
 
@@ -611,7 +615,7 @@ proptest! {
             );
 
             // Build the future to call the RPC
-            let call = rpc.get_address_balance(address_list);
+            let call = rpc.get_address_balance(address_strings);
 
             // The RPC should perform a state query
             let state_query = state
@@ -671,8 +675,12 @@ proptest! {
                 network,
             );
 
+            let address_strings = AddressStrings {
+                addresses: at_least_one_invalid_address,
+            };
+
             // Build the future to call the RPC
-            let result = rpc.get_address_balance(at_least_one_invalid_address).await;
+            let result = rpc.get_address_balance(address_strings).await;
 
             // Check that the invalid addresses lead to an error
             prop_assert!(
