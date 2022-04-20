@@ -1,7 +1,7 @@
 //! Consensus check functions
 
 use chrono::{DateTime, Utc};
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use zebra_chain::{
     amount::{Amount, Error as AmountError, NonNegative},
@@ -15,28 +15,46 @@ use crate::{error::*, parameters::SLOW_START_INTERVAL};
 
 use super::subsidy;
 
-/// Returns `Ok(())` if there is exactly one coinbase transaction in `Block`,
-/// and that coinbase transaction is the first transaction in the block.
+/// Checks if there is exactly one coinbase transaction in `Block`,
+/// and if that coinbase transaction is the first transaction in the block.
+/// Returns the coinbase transaction is successful.
 ///
-/// "The first (and only the first) transaction in a block is a coinbase
-/// transaction, which collects and spends any miner subsidy and transaction
-/// fees paid by transactions included in this block." [§3.10][3.10]
+/// > A transaction that has a single transparent input with a null prevout field,
+/// > is called a coinbase transaction. Every block has a single coinbase
+/// > transaction as the first transaction in the block.
 ///
-/// [3.10]: https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
-pub fn coinbase_is_first(block: &Block) -> Result<(), BlockError> {
+/// <https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions>
+pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>, BlockError> {
+    // # Consensus
+    //
+    // > A block MUST have at least one transaction
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
     let first = block
         .transactions
         .get(0)
         .ok_or(BlockError::NoTransactions)?;
+    // > The first transaction in a block MUST be a coinbase transaction,
+    // > and subsequent transactions MUST NOT be coinbase transactions.
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    //
+    // > A transaction that has a single transparent input with a null prevout
+    // > field, is called a coinbase transaction.
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions>
     let mut rest = block.transactions.iter().skip(1);
-    if !first.has_valid_coinbase_transaction_inputs() {
+    if !first.is_coinbase() {
         return Err(TransactionError::CoinbasePosition)?;
     }
-    if rest.any(|tx| tx.has_any_coinbase_inputs()) {
+    // > A transparent input in a non-coinbase transaction MUST NOT have a null prevout
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    if !rest.all(|tx| tx.is_valid_non_coinbase()) {
         return Err(TransactionError::CoinbaseAfterFirst)?;
     }
 
-    Ok(())
+    Ok(first.clone())
 }
 
 /// Returns `Ok(())` if `hash` passes:
