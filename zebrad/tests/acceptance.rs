@@ -1509,8 +1509,11 @@ async fn fully_synced_rpc_test() -> Result<()> {
 
     let network = Network::Mainnet;
 
-    let (_zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc_without_initial_peers(network, cached_state_path)?;
+    let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
+        network,
+        cached_state_path,
+        LIGHTWALLETD_TEST_TIMEOUT,
+    )?;
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
@@ -1563,6 +1566,9 @@ const LIGHTWALLETD_DATA_DIR_VAR: &str = "LIGHTWALLETD_DATA_DIR";
 /// cause the test to fail.
 const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
+/// The maximum time that a `lightwalletd` integration test is expected to run.
+const LIGHTWALLETD_TEST_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
 /// Test sending transactions using a lightwalletd instance connected to a zebrad instance.
 ///
 /// This test requires a cached chain state that is partially synchronized, i.e., it should be a
@@ -1597,8 +1603,11 @@ async fn sending_transactions_using_lightwalletd() -> Result<()> {
     let (transactions, partial_sync_path) =
         load_transactions_from_a_future_block(network, cached_state_path).await?;
 
-    let (_zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc_without_initial_peers(Network::Mainnet, partial_sync_path)?;
+    let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
+        Network::Mainnet,
+        partial_sync_path,
+        LIGHTWALLETD_TEST_TIMEOUT,
+    )?;
 
     let (_lightwalletd, lightwalletd_rpc_port) =
         spawn_lightwalletd_with_rpc_server(zebra_rpc_address)?;
@@ -1804,6 +1813,7 @@ async fn start_state_service(
 fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
     network: Network,
     zebra_directory: P,
+    timeout: Duration,
 ) -> Result<(TestChild<P>, SocketAddr)> {
     let mut config = random_known_rpc_port_config()
         .expect("Failed to create a config file with a known RPC listener port");
@@ -1818,7 +1828,7 @@ fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
         .with_config(&mut config)?
         .spawn_child(args!["start"])?
         .bypass_test_capture(true)
-        .with_timeout(Duration::from_secs(60 * 60))
+        .with_timeout(timeout)
         .with_failure_regex_iter(
             // TODO: replace with a function that returns the full list and correct return type
             ZEBRA_FAILURE_MESSAGES
@@ -1853,7 +1863,9 @@ fn spawn_lightwalletd_with_rpc_server(
         arguments.set_parameter("--data-dir", data_dir);
     }
 
-    let mut lightwalletd = lightwalletd_dir.spawn_lightwalletd_child(arguments)?;
+    let mut lightwalletd = lightwalletd_dir
+        .spawn_lightwalletd_child(arguments)?
+        .with_timeout(LIGHTWALLETD_TEST_TIMEOUT);
 
     lightwalletd.expect_stdout_line_matches("Starting gRPC server")?;
     lightwalletd.expect_stdout_line_matches("Waiting for block")?;
