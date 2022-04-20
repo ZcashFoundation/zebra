@@ -24,7 +24,7 @@
 use std::{
     collections::HashSet,
     convert::TryInto,
-    env, io,
+    env,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
@@ -1780,8 +1780,6 @@ async fn start_state_service(
         ..zebra_state::Config::default()
     };
 
-    remove_file_if_it_exists(config.db_path(network).join("LOCK")).await?;
-
     Ok(zebra_state::init(config, network))
 }
 
@@ -1913,16 +1911,4 @@ async fn copy_directory(
     }
 
     Ok(sub_directories)
-}
-
-/// Removes a file if it exists.
-///
-/// Attempts to remove a file, and ignores an error that says that the file doesn't exist. Any
-/// other error is wrapped and returned back to the caller.
-async fn remove_file_if_it_exists(path: impl AsRef<Path>) -> Result<()> {
-    match fs::remove_file(path).await {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
 }
