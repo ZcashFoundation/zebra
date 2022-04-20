@@ -1549,6 +1549,12 @@ type LightwalletdRpcClient = lightwalletd::rpc::compact_tx_streamer_client::Comp
     tonic::transport::Channel,
 >;
 
+/// Optional environment variable with the cached state for lightwalletd.
+///
+/// Can be used to speed up the [`sending_transactions_using_lightwalletd`] test, by allowing the
+/// test to reuse the cached lightwalletd synchronization data.
+const LIGHTWALLETD_DATA_DIR_VAR: &str = "LIGHTWALLETD_DATA_DIR";
+
 /// Test sending transactions using a lightwalletd instance connected to a zebrad instance.
 ///
 /// This test requires a cached chain state that is partially synchronized, i.e., it should be a
@@ -1827,7 +1833,7 @@ fn spawn_lightwalletd_with_rpc_server(
 
     let mut arguments = args!["--grpc-bind-addr": lightwalletd_rpc_address];
 
-    if let Ok(data_dir) = env::var("LIGHTWALLETD_DATA_DIR") {
+    if let Ok(data_dir) = env::var(LIGHTWALLETD_DATA_DIR_VAR) {
         arguments.set_parameter("--data-dir", data_dir);
     }
 
