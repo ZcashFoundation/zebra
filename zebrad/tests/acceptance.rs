@@ -1809,8 +1809,16 @@ fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
     let mut zebrad = zebra_directory
         .with_config(&mut config)?
         .spawn_child(args!["start"])?
+        .bypass_test_capture(true)
         .with_timeout(Duration::from_secs(60 * 60))
-        .bypass_test_capture(true);
+        .with_failure_regex_iter(
+            // TODO: replace with a function that returns the full list and correct return type
+            ZEBRA_FAILURE_MESSAGES
+                .iter()
+                .chain(PROCESS_FAILURE_MESSAGES)
+                .cloned(),
+            NO_MATCHES_REGEX_ITER.iter().cloned(),
+        );
 
     let rpc_address = config.rpc.listen_addr.unwrap();
 
