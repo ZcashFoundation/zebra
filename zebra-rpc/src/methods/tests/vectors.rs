@@ -465,7 +465,20 @@ async fn rpc_getaddresstxids_response_with(
 
     mempool.expect_no_requests().await;
 
-    // The queue task should continue without errors or panics
+    // Shut down the queue task, to close the state's file descriptors.
+    // (If we don't, opening ~100 simultaneous states causes process file descriptor limit errors.)
+    //
+    // TODO: abort all the join handles in all the tests, except one?
+    rpc_tx_queue_task_handle.abort();
+
+    // The queue task should not have panicked or exited by itself.
+    // It can still be running, or it can have exited due to the abort.
     let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-    assert!(matches!(rpc_tx_queue_task_result, None));
+    assert!(
+        rpc_tx_queue_task_result.is_none()
+            || rpc_tx_queue_task_result
+                .unwrap()
+                .unwrap_err()
+                .is_cancelled()
+    );
 }
