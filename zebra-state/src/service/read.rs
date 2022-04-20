@@ -37,6 +37,12 @@ pub use utxo::AddressUtxos;
 /// If any more arrive, the client should wait until we're synchronised with our peers.
 const FINALIZED_ADDRESS_INDEX_RETRIES: usize = 3;
 
+/// The full range of address heights.
+///
+/// The genesis coinbase transactions are ignored by a consensus rule,
+/// so they are not included in any address indexes.
+pub const ADDRESS_HEIGHTS_FULL_RANGE: RangeInclusive<Height> = Height(1)..=Height::MAX;
+
 /// Returns the [`Block`] with [`block::Hash`](zebra_chain::block::Hash) or
 /// [`Height`](zebra_chain::block::Height),
 /// if it exists in the non-finalized `chain` or finalized `db`.
@@ -421,7 +427,11 @@ where
 
     let chain_tx_ids = chain
         .as_ref()
-        .map(|chain| chain.as_ref().partial_transparent_tx_ids(addresses))
+        .map(|chain| {
+            chain
+                .as_ref()
+                .partial_transparent_tx_ids(addresses, ADDRESS_HEIGHTS_FULL_RANGE)
+        })
         .unwrap_or_default();
 
     // First try the in-memory chain, then the disk database
@@ -522,8 +532,8 @@ fn finalized_transparent_tx_ids(
     (finalized_tx_ids, finalized_tip_range)
 }
 
-/// Returns the extra transaction IDs for `addresses` in the non-finalized chain,
-/// matching or overlapping the transaction IDs for the `finalized_tip_range`.
+/// Returns the extra transaction IDs for `addresses` in the non-finalized chain `query_height_range`,
+/// matching or overlapping the transaction IDs for the `finalized_tip_range`,
 ///
 /// If the addresses do not exist in the non-finalized `chain`, returns an empty list.
 //
@@ -532,7 +542,7 @@ fn chain_transparent_tx_id_changes<C>(
     chain: Option<C>,
     addresses: &HashSet<transparent::Address>,
     finalized_tip_range: Option<RangeInclusive<Height>>,
-    _query_height_range: RangeInclusive<Height>,
+    query_height_range: RangeInclusive<Height>,
 ) -> Result<BTreeMap<TransactionLocation, transaction::Hash>, BoxError>
 where
     C: AsRef<Chain>,
@@ -608,7 +618,7 @@ where
         "tx ID query inconsistency: chain must contain required overlap blocks if there are multiple addresses",
     );
 
-    Ok(chain.partial_transparent_tx_ids(addresses))
+    Ok(chain.partial_transparent_tx_ids(addresses, query_height_range))
 }
 
 /// Returns the combined finalized and non-finalized transaction IDs.
