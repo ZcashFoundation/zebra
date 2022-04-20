@@ -440,16 +440,16 @@ where
 }
 
 /// Returns the transaction IDs that sent or received funds from the supplied [`transparent::Address`]es,
-/// within `height_range`, in chain order.
+/// within `query_height_range`, in chain order.
 ///
 /// If the addresses do not exist in the non-finalized `chain` or finalized `db`,
-/// or the `height_range` is totally outside both the `chain` and `db` range,
+/// or the `query_height_range` is totally outside both the `chain` and `db` range,
 /// returns an empty list.
 pub(crate) fn transparent_tx_ids<C>(
     chain: Option<C>,
     db: &ZebraDb,
     addresses: HashSet<transparent::Address>,
-    height_range: RangeInclusive<block::Height>,
+    query_height_range: RangeInclusive<Height>,
 ) -> Result<BTreeMap<TransactionLocation, transaction::Hash>, BoxError>
 where
     C: AsRef<Chain>,
@@ -459,18 +459,21 @@ where
     // Retry the finalized tx ID query if it was interruped by a finalizing block,
     // and the non-finalized chain doesn't overlap the changed heights.
     for _ in 0..=FINALIZED_ADDRESS_INDEX_RETRIES {
-        let (finalized_tx_ids, finalized_tip_range) = finalized_transparent_tx_ids(db, &addresses);
+        let (finalized_tx_ids, finalized_tip_range) =
+            finalized_transparent_tx_ids(db, &addresses, query_height_range.clone());
 
         // Apply the non-finalized tx ID changes.
-        let chain_tx_id_changes =
-            chain_transparent_tx_id_changes(chain.as_ref(), &addresses, finalized_tip_range);
+        let chain_tx_id_changes = chain_transparent_tx_id_changes(
+            chain.as_ref(),
+            &addresses,
+            finalized_tip_range,
+            query_height_range.clone(),
+        );
 
         // If the tx IDs are valid, return them, otherwise, retry or return an error.
         match chain_tx_id_changes {
             Ok(chain_tx_id_changes) => {
-                // TODO: do the height_range filter in the queries, to improve performance
-                let tx_ids =
-                    apply_tx_id_changes(finalized_tx_ids, chain_tx_id_changes, height_range);
+                let tx_ids = apply_tx_id_changes(finalized_tx_ids, chain_tx_id_changes);
 
                 return Ok(tx_ids);
             }
@@ -482,7 +485,7 @@ where
     tx_id_error.expect("unexpected missing error: attempts should set error or return")
 }
 
-/// Returns the [`transaction::Hash`]es for `addresses` in the finalized chain,
+/// Returns the [`transaction::Hash`]es for `addresses` in the finalized chain `query_height_range`,
 /// and the finalized tip heights the transaction IDs were queried at.
 ///
 /// If the addresses do not exist in the finalized `db`, returns an empty list.
@@ -491,6 +494,7 @@ where
 fn finalized_transparent_tx_ids(
     db: &ZebraDb,
     addresses: &HashSet<transparent::Address>,
+    query_height_range: RangeInclusive<Height>,
 ) -> (
     BTreeMap<TransactionLocation, transaction::Hash>,
     Option<RangeInclusive<Height>>,
@@ -502,7 +506,7 @@ fn finalized_transparent_tx_ids(
     // Check if the finalized state changed while we were querying it
     let start_finalized_tip = db.finalized_tip_height();
 
-    let finalized_tx_ids = db.partial_finalized_transparent_tx_ids(addresses);
+    let finalized_tx_ids = db.partial_finalized_transparent_tx_ids(addresses, query_height_range);
 
     let end_finalized_tip = db.finalized_tip_height();
 
@@ -528,6 +532,7 @@ fn chain_transparent_tx_id_changes<C>(
     chain: Option<C>,
     addresses: &HashSet<transparent::Address>,
     finalized_tip_range: Option<RangeInclusive<Height>>,
+    _query_height_range: RangeInclusive<Height>,
 ) -> Result<BTreeMap<TransactionLocation, transaction::Hash>, BoxError>
 where
     C: AsRef<Chain>,
@@ -606,18 +611,15 @@ where
     Ok(chain.partial_transparent_tx_ids(addresses))
 }
 
-/// Returns the combined the supplied finalized and non-finalized transaction IDs,
-/// filtered by `height_range`.
+/// Returns the combined finalized and non-finalized transaction IDs.
 fn apply_tx_id_changes(
     finalized_tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
     chain_tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
-    height_range: RangeInclusive<block::Height>,
 ) -> BTreeMap<TransactionLocation, transaction::Hash> {
     // Correctness: compensate for inconsistent tx IDs finalized blocks across multiple addresses,
     // by combining them with overalapping non-finalized block tx IDs.
     finalized_tx_ids
         .into_iter()
         .chain(chain_tx_ids.into_iter())
-        .filter(|(tx_loc, _tx_hash)| height_range.contains(&tx_loc.height))
         .collect()
 }
