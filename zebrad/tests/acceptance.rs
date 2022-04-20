@@ -21,7 +21,9 @@
 //! or you have poor network connectivity,
 //! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
 
-use std::{collections::HashSet, convert::TryInto, env, path::PathBuf, time::Duration};
+use std::{
+    collections::HashSet, convert::TryInto, env, net::SocketAddr, path::PathBuf, time::Duration,
+};
 
 use color_eyre::{
     eyre::{Result, WrapErr},
@@ -1472,4 +1474,60 @@ where
         .context_from(&output1)?;
 
     Ok(())
+}
+
+#[test]
+fn fully_synced_rpc_test() -> Result<()> {
+    zebra_test::init();
+
+    const CACHED_STATE_PATH_VAR: &str = "ZEBRA_CACHED_STATE_PATH";
+
+    let cached_state_path = match env::var_os(CACHED_STATE_PATH_VAR) {
+        Some(argument) => PathBuf::from(argument),
+        None => {
+            tracing::info!(
+                "skipped send transactions using lightwalletd test, \
+                 set the {CACHED_STATE_PATH_VAR:?} environment variable to run the test",
+            );
+            return Ok(());
+        }
+    };
+
+    let network = Network::Mainnet;
+
+    let (_zebrad, _zebra_rpc_address) =
+        spawn_zebrad_for_rpc_without_initial_peers(network, cached_state_path)?;
+
+    // TODO: make a RPC query that works only with a near-tip state
+
+    Ok(())
+}
+
+/// Spawns a zebrad instance to interact with lightwalletd, but without an internet connection.
+///
+/// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
+/// providing an initial state to the zebrad instance.
+fn spawn_zebrad_for_rpc_without_initial_peers(
+    network: Network,
+    zebra_directory: PathBuf,
+) -> Result<(TestChild<PathBuf>, SocketAddr)> {
+    let mut config = random_known_rpc_port_config()
+        .expect("Failed to create a config file with a known RPC listener port");
+
+    config.state.ephemeral = false;
+    config.network.initial_mainnet_peers = HashSet::new();
+    config.network.initial_testnet_peers = HashSet::new();
+    config.network.network = network;
+
+    let mut zebrad = zebra_directory
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(Duration::from_secs(60 * 60))
+        .bypass_test_capture(true);
+
+    let rpc_address = config.rpc.listen_addr.unwrap();
+
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
+
+    Ok((zebrad, rpc_address))
 }
