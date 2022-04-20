@@ -38,9 +38,9 @@ jobs:
   coverage:
     name: Coverage nightly
     # The large timeout is to accommodate:
-    # - nightly builds (75 minutes, typically 30-50 minutes)
-    # - parameter downloads (40 minutes, but only when the cache expires)
-    timeout-minutes: 115
+    # - nightly builds (75 minutes, typically 30-50 minutes), and
+    # - parameter downloads (an extra 90 minutes, but only when the cache expires)
+    timeout-minutes: 165
     runs-on: ubuntu-latest
 
     steps:
