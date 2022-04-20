@@ -1,6 +1,6 @@
 //! Fixed test vectors for RPC methods.
 
-use std::sync::Arc;
+use std::{ops::RangeInclusive, sync::Arc};
 
 use jsonrpc_core::ErrorCode;
 use tower::buffer::Buffer;
@@ -395,43 +395,50 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 async fn rpc_getaddresstxids_response() {
     zebra_test::init();
 
-    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
-        .collect();
+    for network in [Mainnet, Testnet] {
+        rpc_getaddresstxids_response_with(network, 1..=10).await;
+    }
+}
+
+async fn rpc_getaddresstxids_response_with(network: Network, range: RangeInclusive<u32>) {
+    let blocks: Vec<Arc<Block>> = match network {
+        Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
+        Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
+    }
+    .iter()
+    .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+    .collect();
 
     // get the first transaction of the first block
     let first_block_first_transaction = &blocks[1].transactions[0];
-    // get the address, this is always `t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd`
+    // get the address
     let address = &first_block_first_transaction.outputs()[1]
-        .address(Mainnet)
+        .address(network)
         .unwrap();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), network).await;
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip,
-        Mainnet,
+        network,
     );
 
     // call the method with valid arguments
     let addresses = vec![address.to_string()];
-    let start: u32 = 1;
-    let end: u32 = 1;
     let response = rpc
-        .get_address_tx_ids(addresses, start, end)
+        .get_address_tx_ids(addresses, *range.start(), *range.end())
         .await
         .expect("arguments are valid so no error can happen here");
 
-    // TODO: The length of the response should be 1
-    // Fix in the context of #3147
-    assert_eq!(response.len(), 10);
+    // The first few blocks after genesis send funds to the same founders reward address,
+    // in one output per coinbase transaction.
+    assert_eq!(response.len(), range.count());
 
     mempool.expect_no_requests().await;
 
