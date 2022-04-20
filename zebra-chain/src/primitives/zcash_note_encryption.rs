@@ -21,7 +21,7 @@ pub fn decrypts_successfully(transaction: &Transaction, network: Network, height
         .expect("zcash_primitives and Zebra transaction formats must be compatible");
 
     let alt_height = height.0.into();
-    let null_sapling_ovk = zcash_primitives::sapling::keys::OutgoingViewingKey([0u8; 32]);
+    let null_sapling_ovk = zcash_primitives::keys::OutgoingViewingKey([0u8; 32]);
 
     if let Some(bundle) = alt_tx.sapling_bundle() {
         for output in bundle.shielded_outputs.iter() {

@@ -206,7 +206,7 @@ impl TransparentTransfers {
     }
 
     /// Returns the [`transaction::Hash`]es of the transactions that
-    /// sent or received transparent tranfers to this address,
+    /// sent or received transparent transfers to this address,
     /// in this partial chain, in chain order.
     ///
     /// `chain_tx_by_hash` should be the `tx_by_hash` field from the [`Chain`] containing this index.

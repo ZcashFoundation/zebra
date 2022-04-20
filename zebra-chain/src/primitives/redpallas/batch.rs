@@ -19,8 +19,7 @@
 
 use std::convert::TryFrom;
 
-use group::{Group, GroupEncoding};
-use halo2::arithmetic::FieldExt;
+use group::{ff::PrimeField, Group, GroupEncoding};
 use rand_core::{CryptoRng, RngCore};
 
 use super::{private::Sealed, scalar_mul::VartimeMultiscalarMul, *};
@@ -231,7 +230,7 @@ impl Verifier {
 
             let s = {
                 // XXX-pallas: should not use CtOption here
-                let maybe_scalar = pallas::Scalar::from_bytes(&s_bytes);
+                let maybe_scalar = pallas::Scalar::from_repr(s_bytes);
                 if maybe_scalar.is_some().into() {
                     maybe_scalar.unwrap()
                 } else {

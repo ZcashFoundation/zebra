@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-beta.7"
+version = "1.0.0-beta.8"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -20,7 +20,7 @@ bigint = "4.4.3"
 bitvec = "0.22"
 bitflags = "1.3.2"
 blake2b_simd = "1.0.0"
-blake2s_simd = "0.5.11"
+blake2s_simd = "1.0.0"
 bls12_381 = "0.6.0"
 bs58 = { version = "0.4.0", features = ["check"] }
 byteorder = "1.4.3"
@@ -29,34 +29,32 @@ displaydoc = "0.2.3"
 fpe = "0.5.1"
 futures = "0.3.21"
 group = "0.11.0"
-halo2 = "=0.1.0-beta.1"
+halo2 = { package = "halo2_proofs", version = "=0.1.0-beta.4" }
 hex = "0.4.3"
-incrementalmerkletree = "0.2.0"
+incrementalmerkletree = "0.3.0-beta.2"
 itertools = "0.10.3"
 jubjub = "0.8.0"
 lazy_static = "1.4.0"
 rand_core = "0.6.3"
-ripemd160 = "0.9"
+ripemd = "0.1.1"
 
 serde = { version = "1.0.136", features = ["serde_derive", "rc"] }
 serde_with = { version = "1.12.0", optional = true }
 serde-big-array = "0.4.1"
-
+# Matches version used by hdwallet
 secp256k1 = { version = "0.21.3", features = ["serde"] }
 sha2 = { version = "0.9.9", features=["compress"] }
 static_assertions = "1.1.0"
 subtle = "2.4.1"
 thiserror = "1.0.30"
-uint = "0.9.3"
+uint = "0.9.1"
 x25519-dalek = { version = "1.2.0", features = ["serde"] }
 
-# TODO: replace with upstream orchard (#3056)
-orchard = { git = "https://github.com/ZcashFoundation/orchard.git", rev = "568e24cd5f129158375d7ac7d98c89ebff4f982f" }
+orchard = "=0.1.0-beta.3"
 
-# TODO: replace with upstream librustzcash when these changes are merged (#3037)
-equihash = { git = "https://github.com/ZcashFoundation/librustzcash.git", tag = "0.5.1-zebra-v1.0.0-beta.4" }
-zcash_note_encryption = { git = "https://github.com/ZcashFoundation/librustzcash.git", tag = "0.5.1-zebra-v1.0.0-beta.4" }
-zcash_primitives = { git = "https://github.com/ZcashFoundation/librustzcash.git", tag = "0.5.1-zebra-v1.0.0-beta.4" }
+equihash = "0.1.0"
+zcash_note_encryption = "0.1"
+zcash_primitives = { version = "0.5", features = ["transparent-inputs"] }
 zcash_history = { git = "https://github.com/ZcashFoundation/librustzcash.git", tag = "0.5.1-zebra-v1.0.0-beta.4" }
 
 proptest = { version = "0.10.1", optional = true }
