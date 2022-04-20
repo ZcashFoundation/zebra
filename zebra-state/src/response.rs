@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::{self, Block},
     transaction::{Hash, Transaction},
     transparent,
@@ -57,4 +58,7 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::TransactionsByAddresses`] with the obtained transaction ids,
     /// in the order they appear in blocks.
     TransactionIds(Vec<Hash>),
+
+    /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses.
+    AddressBalance(Amount<NonNegative>),
 }
