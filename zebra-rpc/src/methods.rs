@@ -83,6 +83,10 @@ pub trait Rpc {
     ///
     /// zcashd also returns the total amount of Zatoshis received by the addresses, but Zebra
     /// doesn't because lightwalletd doesn't use that information.
+    ///
+    /// The RPC documentation says that the returned object has a string `balance` field, but
+    /// zcashd actually [returns an
+    /// integer](https://github.com/zcash/lightwalletd/blob/bdaac63f3ee0dbef62bde04f6817a9f90d483b00/common/common.go#L128-L130).
     #[rpc(name = "getaddressbalance")]
     fn get_address_balance(&self, addresses: Vec<String>) -> BoxFuture<Result<AddressBalance>>;
 
@@ -707,7 +711,6 @@ pub struct GetBlockChainInfo {
 /// The transparent balance of a set of addresses.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
 pub struct AddressBalance {
-    #[serde(serialize_with = "Amount::serialize_as_string")]
     balance: Amount<NonNegative>,
 }
 
