@@ -76,7 +76,8 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
-    /// - `addresses`: (array of strings) A list of base-58 encoded addresses.
+    /// - `address_strings`: (map) A JSON map with a single entry
+    ///   - `addresses`: (array of strings) A list of base-58 encoded addresses.
     ///
     /// # Notes
     ///
@@ -90,7 +91,10 @@ pub trait Rpc {
     /// zcashd actually [returns an
     /// integer](https://github.com/zcash/lightwalletd/blob/bdaac63f3ee0dbef62bde04f6817a9f90d483b00/common/common.go#L128-L130).
     #[rpc(name = "getaddressbalance")]
-    fn get_address_balance(&self, addresses: Vec<String>) -> BoxFuture<Result<AddressBalance>>;
+    fn get_address_balance(
+        &self,
+        address_strings: AddressStrings,
+    ) -> BoxFuture<Result<AddressBalance>>;
 
     /// Sends the raw bytes of a signed transaction to the local node's mempool, if the transaction is valid.
     /// Returns the [`SentTransactionHash`] for the transaction, as a JSON string.
@@ -392,11 +396,15 @@ where
         Ok(response)
     }
 
-    fn get_address_balance(&self, addresses: Vec<String>) -> BoxFuture<Result<AddressBalance>> {
+    fn get_address_balance(
+        &self,
+        address_strings: AddressStrings,
+    ) -> BoxFuture<Result<AddressBalance>> {
         let state = self.state.clone();
 
         async move {
-            let addresses: HashSet<Address> = addresses
+            let addresses: HashSet<Address> = address_strings
+                .addresses
                 .into_iter()
                 .map(|address| {
                     address.parse().map_err(|error| {
