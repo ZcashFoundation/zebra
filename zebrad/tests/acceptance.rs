@@ -1555,6 +1555,14 @@ type LightwalletdRpcClient = lightwalletd::rpc::compact_tx_streamer_client::Comp
 /// test to reuse the cached lightwalletd synchronization data.
 const LIGHTWALLETD_DATA_DIR_VAR: &str = "LIGHTWALLETD_DATA_DIR";
 
+/// The maximum time to wait for Zebrad to synchronize up to the chain tip starting from a
+/// partially synchronized state.
+///
+/// The partially synchronized state is expected to be close to the tip, so this timeout can be
+/// lower than what's expected for a full synchronization. However, a value that's too short may
+/// cause the test to fail.
+const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
 /// Test sending transactions using a lightwalletd instance connected to a zebrad instance.
 ///
 /// This test requires a cached chain state that is partially synchronized, i.e., it should be a
@@ -1686,7 +1694,7 @@ async fn perform_full_sync_starting_from(
         block::Height::MAX,
         network,
         SYNC_FINISHED_REGEX,
-        Duration::from_secs(60 * 60),
+        FINISH_PARTIAL_SYNC_TIMEOUT,
         fully_synced_path,
         MempoolBehavior::ShouldAutomaticallyActivate,
         true,
