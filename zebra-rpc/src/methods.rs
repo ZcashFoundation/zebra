@@ -72,6 +72,8 @@ pub trait Rpc {
 
     /// Returns the total balance of a provided `addresses` in an [`AddressBalance`] instance.
     ///
+    /// zcashd reference: [`getaddressbalance`](https://zcash.github.io/rpc/getaddressbalance.html)
+    ///
     /// # Parameters
     ///
     /// - `addresses`: (array of strings) A list of base-58 encoded addresses.
