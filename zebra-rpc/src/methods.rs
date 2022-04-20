@@ -19,6 +19,7 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
+    amount::{Amount, NonNegative},
     block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
@@ -68,6 +69,32 @@ pub trait Rpc {
     /// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L72-L89)
     #[rpc(name = "getblockchaininfo")]
     fn get_blockchain_info(&self) -> Result<GetBlockChainInfo>;
+
+    /// Returns the total balance of a provided `addresses` in an [`AddressBalance`] instance.
+    ///
+    /// zcashd reference: [`getaddressbalance`](https://zcash.github.io/rpc/getaddressbalance.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `address_strings`: (map) A JSON map with a single entry
+    ///   - `addresses`: (array of strings) A list of base-58 encoded addresses.
+    ///
+    /// # Notes
+    ///
+    /// zcashd also accepts a single string parameter instead of an array of strings, but Zebra
+    /// doesn't because lightwalletd always calls this RPC with an array of addresses.
+    ///
+    /// zcashd also returns the total amount of Zatoshis received by the addresses, but Zebra
+    /// doesn't because lightwalletd doesn't use that information.
+    ///
+    /// The RPC documentation says that the returned object has a string `balance` field, but
+    /// zcashd actually [returns an
+    /// integer](https://github.com/zcash/lightwalletd/blob/bdaac63f3ee0dbef62bde04f6817a9f90d483b00/common/common.go#L128-L130).
+    #[rpc(name = "getaddressbalance")]
+    fn get_address_balance(
+        &self,
+        address_strings: AddressStrings,
+    ) -> BoxFuture<Result<AddressBalance>>;
 
     /// Sends the raw bytes of a signed transaction to the local node's mempool, if the transaction is valid.
     /// Returns the [`SentTransactionHash`] for the transaction, as a JSON string.
@@ -382,6 +409,40 @@ where
         };
 
         Ok(response)
+    }
+
+    fn get_address_balance(
+        &self,
+        address_strings: AddressStrings,
+    ) -> BoxFuture<Result<AddressBalance>> {
+        let state = self.state.clone();
+
+        async move {
+            let addresses: HashSet<Address> = address_strings
+                .addresses
+                .into_iter()
+                .map(|address| {
+                    address.parse().map_err(|error| {
+                        Error::invalid_params(&format!("invalid address {address:?}: {error}"))
+                    })
+                })
+                .collect::<Result<_>>()?;
+
+            let request = zebra_state::ReadRequest::AddressBalance(addresses);
+            let response = state.oneshot(request).await.map_err(|error| Error {
+                code: ErrorCode::ServerError(0),
+                message: error.to_string(),
+                data: None,
+            })?;
+
+            match response {
+                zebra_state::ReadResponse::AddressBalance(balance) => {
+                    Ok(AddressBalance { balance })
+                }
+                _ => unreachable!("Unexpected response from state service: {response:?}"),
+            }
+        }
+        .boxed()
     }
 
     fn send_raw_transaction(
@@ -725,6 +786,20 @@ pub struct GetBlockChainInfo {
     estimated_height: u32,
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
     consensus: TipConsensusBranch,
+}
+
+/// A wrapper type with a list of strings of addresses.
+///
+/// This is used for the input parameter of [`Rpc::get_account_balance`].
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+pub struct AddressStrings {
+    addresses: Vec<String>,
+}
+
+/// The transparent balance of a set of addresses.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
+pub struct AddressBalance {
+    balance: Amount<NonNegative>,
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.

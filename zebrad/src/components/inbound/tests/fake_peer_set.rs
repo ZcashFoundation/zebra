@@ -217,7 +217,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     let test_transaction = block
         .transactions
         .into_iter()
-        .find(|tx| !tx.has_any_coinbase_inputs())
+        .find(|tx| !tx.is_coinbase())
         .expect("at least one non-coinbase transaction");
     let test_transaction_id = test_transaction.unmined_id();
     let txs = HashSet::from_iter([test_transaction_id]);

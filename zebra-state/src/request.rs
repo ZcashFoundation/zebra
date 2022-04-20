@@ -449,6 +449,11 @@ pub enum ReadRequest {
     /// (i.e. parent txids will appear before child txids).
     TransactionsByAddresses(Vec<transparent::Address>, block::Height, block::Height),
 
+    /// Looks up the balance of a set of transparent addresses.
+    ///
+    /// Returns an [`Amount`] with the total balance of the set of addresses.
+    AddressBalance(HashSet<transparent::Address>),
+
     /// Looks up utxos for the provided addresses.
     ///
     /// Returns
