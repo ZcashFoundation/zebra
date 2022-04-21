@@ -20,7 +20,7 @@ proptest! {
         assert_eq!(argument_strings, expected_strings);
     }
 
-    /// Test that arguments in an [`Arguments`] instance can be overriden.
+    /// Test that arguments in an [`Arguments`] instance can be overridden.
     ///
     /// Generate a list of arguments to add and a list of overrides for those arguments. Also
     /// generate a list of extra arguments.
@@ -29,11 +29,11 @@ proptest! {
     /// list of strings from the [`Arguments::into_arguments`] method is compared to a list of
     /// `expected_strings`.
     ///
-    /// To build the list of `expected_strings`, a new `overriden_list` is compiled from the three
+    /// To build the list of `expected_strings`, a new `overridden_list` is compiled from the three
     /// original lists. The list is compiled by manually handling overrides in a compatible way that
     /// keeps the argument order when overriding and adding new arguments to the end of the list.
     #[test]
-    fn arguments_can_be_overriden(
+    fn arguments_can_be_overridden(
         (argument_list, override_list) in Argument::list_and_overrides_strategy(),
         extra_arguments in Argument::list_strategy(),
     ) {
@@ -46,8 +46,8 @@ proptest! {
         let arguments = collect_arguments(arguments_to_add.clone());
         let argument_strings: Vec<_> = arguments.into_arguments().collect();
 
-        let overriden_list = handle_overrides(arguments_to_add);
-        let expected_strings = expand_arguments(overriden_list);
+        let overridden_list = handle_overrides(arguments_to_add);
+        let expected_strings = expand_arguments(overridden_list);
 
         assert_eq!(argument_strings, expected_strings);
     }
@@ -61,7 +61,7 @@ proptest! {
     /// are added to a second [`Arguments`] instance. The second instance is then merged into the
     /// first instance. The generated list of strings from the [`Arguments::into_arguments`] method
     /// of that first instance is compared to a list of `expected_strings`, which is built exactly
-    /// like in the [`arguments_can_be_overriden`] test.
+    /// like in the [`arguments_can_be_overridden`] test.
     #[test]
     fn arguments_can_be_merged(
         (argument_list, override_list) in Argument::list_and_overrides_strategy(),
@@ -83,8 +83,8 @@ proptest! {
 
         let argument_strings: Vec<_> = first_arguments.into_arguments().collect();
 
-        let overriden_list = handle_overrides(all_arguments);
-        let expected_strings = expand_arguments(overriden_list);
+        let overridden_list = handle_overrides(all_arguments);
+        let expected_strings = expand_arguments(overridden_list);
 
         assert_eq!(argument_strings, expected_strings);
     }
@@ -127,7 +127,7 @@ fn expand_arguments(argument_list: Vec<Argument>) -> Vec<String> {
 /// This follows the behavior of [`Arguments`] when handling overrides, so that the returned list
 /// is equivalent to an [`Arguments`] instance built from the same input list.
 fn handle_overrides(argument_list: Vec<Argument>) -> Vec<Argument> {
-    let mut overriden_list = Vec::new();
+    let mut overridden_list = Vec::new();
 
     for override_argument in argument_list {
         let search_term = match &override_argument {
@@ -136,7 +136,7 @@ fn handle_overrides(argument_list: Vec<Argument>) -> Vec<Argument> {
         };
 
         let argument_to_override =
-            overriden_list
+            overridden_list
                 .iter_mut()
                 .find(|existing_argument| match existing_argument {
                     Argument::LoneArgument(argument) => argument == search_term,
@@ -146,11 +146,11 @@ fn handle_overrides(argument_list: Vec<Argument>) -> Vec<Argument> {
         if let Some(argument_to_override) = argument_to_override {
             *argument_to_override = override_argument;
         } else {
-            overriden_list.push(override_argument);
+            overridden_list.push(override_argument);
         }
     }
 
-    overriden_list
+    overridden_list
 }
 
 /// A helper type to generate argument items.
