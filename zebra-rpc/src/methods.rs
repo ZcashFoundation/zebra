@@ -662,7 +662,6 @@ where
         end: u32,
     ) -> BoxFuture<Result<Vec<String>>> {
         let mut state = self.state.clone();
-        let mut response_transactions = vec![];
         let start = Height(start);
         let end = Height(end);
 
@@ -676,7 +675,7 @@ where
             // height range checks
             check_height_range(start, end, chain_height?)?;
 
-            let valid_addresses: Result<Vec<Address>> = addresses
+            let valid_addresses: Result<HashSet<Address>> = addresses
                 .iter()
                 .map(|address| {
                     address.parse().map_err(|_| {
@@ -685,8 +684,10 @@ where
                 })
                 .collect();
 
-            let request =
-                zebra_state::ReadRequest::TransactionsByAddresses(valid_addresses?, start, end);
+            let request = zebra_state::ReadRequest::TransactionIdsByAddresses {
+                addresses: valid_addresses?,
+                height_range: start..=end,
+            };
             let response = state
                 .ready()
                 .and_then(|service| service.call(request))
@@ -697,13 +698,14 @@ where
                     data: None,
                 })?;
 
-            match response {
-                zebra_state::ReadResponse::TransactionIds(hashes) => response_transactions
-                    .append(&mut hashes.iter().map(|h| h.to_string()).collect()),
+            let hashes = match response {
+                zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
+                    hashes.values().map(|tx_id| tx_id.to_string()).collect()
+                }
                 _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
-            }
+            };
 
-            Ok(response_transactions)
+            Ok(hashes)
         }
         .boxed()
     }
