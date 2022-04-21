@@ -458,6 +458,7 @@ pub enum ReadRequest {
     TransactionIdsByAddresses {
         /// The requested addresses.
         addresses: HashSet<transparent::Address>,
+
         /// The blocks to be queried for transactions.
         height_range: RangeInclusive<block::Height>,
     },
