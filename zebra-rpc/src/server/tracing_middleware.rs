@@ -66,7 +66,7 @@ impl TracingMiddleware {
             ..
         })) = output
         {
-            tracing::error!("Received unrecognized RPC request: {call_description}");
+            tracing::warn!("Received unrecognized RPC request: {call_description}");
         }
 
         output
