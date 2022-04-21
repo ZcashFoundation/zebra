@@ -191,6 +191,10 @@ impl ChainTipSender {
     /// An update is only sent if the current best tip is different from the last best tip
     /// that was sent.
     fn update(&mut self, new_tip: Option<ChainTipBlock>) {
+        // Correctness: the `self.sender.borrow()` must not be placed in a `let` binding to prevent
+        // a read-lock being created and living beyond the `self.sender.send(..)` call. If that
+        // happens, the `send` method will attempt to obtain a write-lock and will dead-lock.
+        // Without the binding, the guard is dropped at the end of the expression.
         let needs_update = match (new_tip.as_ref(), self.sender.borrow().as_ref()) {
             // since the blocks have been contextually validated,
             // we know their hashes cover all the block data
