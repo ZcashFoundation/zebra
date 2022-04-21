@@ -26,11 +26,9 @@ impl<M: Metadata> Middleware<M> for TracingMiddleware {
         Next: Fn(Call, M) -> NextFuture + Send + Sync,
         NextFuture: Future<Output = Option<Output>> + Send + 'static,
     {
-        let call_description = self.call_description(&call);
-
         Either::Left(
-            next(call, meta)
-                .then(move |output| Self::log_error_if_method_not_found(output, call_description))
+            next(call.clone(), meta)
+                .then(move |output| Self::log_error_if_method_not_found(output, call))
                 .boxed(),
         )
     }
@@ -40,7 +38,7 @@ impl TracingMiddleware {
     /// Obtain a description string for a received request.
     ///
     /// Prints out only the method name and the received parameters.
-    fn call_description(&self, call: &Call) -> String {
+    fn call_description(call: &Call) -> String {
         match call {
             Call::MethodCall(MethodCall { method, params, .. }) => {
                 format!(r#"method = {method:?}, params = {params:?}"#)
@@ -53,10 +51,9 @@ impl TracingMiddleware {
     }
 
     /// Check an RPC output and log an error if it indicates the method was not found.
-    async fn log_error_if_method_not_found(
-        output: Option<Output>,
-        call_description: String,
-    ) -> Option<Output> {
+    async fn log_error_if_method_not_found(output: Option<Output>, call: Call) -> Option<Output> {
+        let call_description = Self::call_description(&call);
+
         if let Some(Output::Failure(Failure {
             error:
                 Error {
