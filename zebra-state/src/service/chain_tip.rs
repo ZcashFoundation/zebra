@@ -151,9 +151,6 @@ impl ChainTipSender {
     /// Update the latest finalized tip.
     ///
     /// May trigger an update to the best tip.
-    //
-    // TODO: when we replace active_value with  `watch::Sender::borrow`,
-    //       refactor instrument to avoid multiple borrows, to prevent deadlocks
     #[instrument(
         skip(self, new_tip),
         fields(old_use_non_finalized_tip, old_height, old_hash, new_height, new_hash)
@@ -170,9 +167,6 @@ impl ChainTipSender {
     /// Update the latest non-finalized tip.
     ///
     /// May trigger an update to the best tip.
-    //
-    // TODO: when we replace active_value with  `watch::Sender::borrow`,
-    //       refactor instrument to avoid multiple borrows, to prevent deadlocks
     #[instrument(
         skip(self, new_tip),
         fields(old_use_non_finalized_tip, old_height, old_hash, new_height, new_hash)
