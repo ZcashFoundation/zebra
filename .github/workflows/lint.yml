@@ -1,6 +1,23 @@
 name: Lint Rust files
 
 on:
+  # we build Rust caches on main, so they can be shared by all branches:
+  # https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows#restrictions-for-accessing-a-cache
+  push:
+    branches:
+      - main
+    paths:
+      # production code and test code
+      - '**/*.rs'
+      # hard-coded checkpoints
+      # TODO: skip proptest regressions
+      - '**/*.txt'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions that change the clippy cache
+      - '.cargo/config.toml'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches:
       - 'main'
@@ -41,6 +58,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: Swatinem/rust-cache@v1
+
       - name: Run clippy action to produce annotations
         uses: actions-rs/clippy-check@v1.0.7
         if: ${{ steps.check_permissions.outputs.has-permission }}
@@ -76,7 +95,7 @@ jobs:
           components: rustfmt
           override: true
 
-      - uses: Swatinem/rust-cache@v1 # TODO: No cache is being found
+      - uses: Swatinem/rust-cache@v1
 
       - uses: actions-rs/cargo@v1.0.3
         with:
