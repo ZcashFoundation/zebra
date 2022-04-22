@@ -676,14 +676,10 @@ where
                 .expect("verified blocks have a valid height");
             let time = block.header.time;
 
-            // The Sapling & Orchard treestates are optional fields in the RPC
-            // response, so we don't throw an error if the state didn't return
-            // the requested treestate. Instead, we return a [`None`] which is
-            // then serialized into an empty string (empty JSON object).
-
             let sapling_tree = match sapling_response {
-                zebra_state::ReadResponse::SaplingTree(Some(tree)) => Some((*tree).clone()),
-                zebra_state::ReadResponse::SaplingTree(None) => None,
+                zebra_state::ReadResponse::SaplingTree(maybe_tree) => {
+                    sapling::tree::SerializedTree::from(maybe_tree)
+                }
                 _ => unreachable!("unmatched response to a sapling tree request"),
             };
 
@@ -841,15 +837,17 @@ pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
 
 /// Response to a `z_gettreestate` RPC request.
 ///
-/// Contains the hex-encoded Sapling & Orchard note commitment trees.
-// TODO: adjust the description above so that it reflects the new fields once
-// they are added.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+/// Contains the hex-encoded Sapling & Orchard note commitment trees, and their
+/// corresponding [`block::Hash`], [`block::Height`] and block time.
+#[derive(serde::Serialize)]
 pub struct GetTreestate {
+    #[serde(with = "hex")]
     hash: block::Hash,
     height: block::Height,
     time: DateTime<Utc>,
-    sapling_tree: Option<sapling::tree::NoteCommitmentTree>,
+    #[serde(with = "hex")]
+    sapling_tree: sapling::tree::SerializedTree,
+    // TODO: change this member to `SerializedTree`, and add `hex`.
     orchard_tree: Option<orchard::tree::NoteCommitmentTree>,
 }
 
