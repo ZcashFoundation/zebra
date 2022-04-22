@@ -1114,7 +1114,46 @@ const LIGHTWALLETD_IGNORE_MESSAGES: &[&str] = &[
     r#"No Chain tip available yet","level":"warning","msg":"error with getblockchaininfo rpc, retrying"#,
 ];
 
-/// Launch `zebrad` with an RPC port, and make sure `lightwalletd` works with Zebra.
+/// The type of lightwalletd integration test that we're running.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum LightwalletdTestType {
+    /// Launch with an empty Zebra and lightwalletd state.
+    LaunchWithEmptyState,
+
+    /// Do a full sync from an empty lightwalletd state.
+    ///
+    /// This test is much faster if it has a cached Zebra state.
+    FullSyncFromGenesis,
+
+    /// Sync to tip from a lightwalletd cached state.
+    ///
+    /// This test is much faster if it has a cached Zebra state.
+    UpdateCachedState,
+}
+
+use LightwalletdTestType::*;
+
+impl LightwalletdTestType {
+    /// Does this test need a Zebra cached state?
+    fn needs_zebra_cached_state(&self) -> bool {
+        match self {
+            LaunchWithEmptyState => false,
+            FullSyncFromGenesis => true,
+            UpdateCachedState => true,
+        }
+    }
+
+    /// Does this test need a lightwalletd cached state?
+    fn needs_lightwalletd_cached_state(&self) -> bool {
+        match self {
+            LaunchWithEmptyState => false,
+            FullSyncFromGenesis => false,
+            UpdateCachedState => true,
+        }
+    }
+}
+
+/// Make sure `lightwalletd` works with Zebra, when both their states are empty.
 ///
 /// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` env var is set.
 ///
@@ -1122,6 +1161,16 @@ const LIGHTWALLETD_IGNORE_MESSAGES: &[&str] = &[
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_integration() -> Result<()> {
+    lightwalletd_integration_test(LaunchWithEmptyState)
+}
+
+/// Launch `zebrad` with an RPC port, and make sure `lightwalletd` works with Zebra.
+///
+/// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` env var is set.
+///
+/// This test doesn't work on Windows, so it is always skipped on that platform.
+#[cfg(not(target_os = "windows"))]
+fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> {
     zebra_test::init();
 
     // Skip the test unless the user specifically asked for it
