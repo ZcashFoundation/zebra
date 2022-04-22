@@ -106,4 +106,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3.0.2
-      - uses: reviewdog/action-actionlint@v1.23.0
+      - uses: reviewdog/action-actionlint@v1.24.0
