@@ -46,14 +46,14 @@ mod common;
 
 use common::{
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
-    config::{default_test_config, persistent_test_config, testdir},
+    config::{default_test_config, persistent_test_config, testdir, CACHED_STATE_PATH_VAR},
     launch::{
         spawn_zebrad_for_rpc_without_initial_peers, ZebradTestDirExt, BETWEEN_NODES_DELAY,
         LAUNCH_DELAY, LIGHTWALLETD_DELAY,
     },
     lightwalletd::{
         random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
-        LIGHTWALLETD_TEST_TIMEOUT,
+        LIGHTWALLETD_DATA_DIR_VAR, LIGHTWALLETD_TEST_TIMEOUT,
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
@@ -1164,11 +1164,56 @@ fn lightwalletd_integration() -> Result<()> {
     lightwalletd_integration_test(LaunchWithEmptyState)
 }
 
-/// Launch `zebrad` with an RPC port, and make sure `lightwalletd` works with Zebra.
+/// Make sure `lightwalletd` can sync from Zebra, in update sync mode.
 ///
-/// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` env var is set.
+/// If  is set, runs a quick sync, then a full sync.
+/// If `LIGHTWALLETD_DATA_DIR` is not set, just runs a full sync.
+///
+/// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD`,
+/// `CACHED_STATE_PATH`, and `LIGHTWALLETD_DATA_DIR` env vars are set.
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn lightwalletd_update_sync() -> Result<()> {
+    lightwalletd_integration_test(UpdateCachedState)
+}
+
+/// Make sure `lightwalletd` can fully sync from genesis using Zebra.
+///
+/// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` and
+/// `CACHED_STATE_PATH` env vars are set.
+///
+/// This test doesn't work on Windows, so it is always skipped on that platform.
+#[test]
+#[ignore]
+#[cfg(not(target_os = "windows"))]
+fn lightwalletd_full_sync() -> Result<()> {
+    lightwalletd_integration_test(FullSyncFromGenesis)
+}
+
+/// Make sure `lightwalletd` can sync from Zebra, in both update and full sync modes.
+///
+/// If `LIGHTWALLETD_DATA_DIR` is set, runs a quick sync, then a full sync.
+/// If `LIGHTWALLETD_DATA_DIR` is not set, just runs a full sync.
+///
+/// These tests only run when the `ZEBRA_TEST_LIGHTWALLETD` and
+/// `CACHED_STATE_PATH` env vars are set.
+///
+/// These tests don't work on Windows, so they are always skipped on that platform.
+#[test]
+#[ignore]
+#[cfg(not(target_os = "windows"))]
+fn lightwalletd_update_then_full_sync() -> Result<()> {
+    // Only runs when LIGHTWALLETD_DATA_DIR is set
+    lightwalletd_integration_test(UpdateCachedState)?;
+
+    lightwalletd_integration_test(FullSyncFromGenesis)?;
+
+    Ok(())
+}
+
+/// Run a lightwalletd integration test with a configuration for `test_type`.
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> {
     zebra_test::init();
@@ -1182,7 +1227,29 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = random_known_rpc_port_config()?;
+    let mut config = if test_type.needs_zebra_cached_state() {
+        // TODO: turn this into a config helper function
+        let zebra_state_path = match env::var_os(CACHED_STATE_PATH_VAR) {
+            Some(path) => path,
+            None => {
+                tracing::info!(
+                    "skipped {test_type:?} lightwalletd test, \
+                     set the {CACHED_STATE_PATH_VAR:?} environment variable to run the test",
+                );
+                return Ok(());
+            }
+        };
+
+        let mut config = random_known_rpc_port_config()?;
+        config.sync.lookahead_limit = zebrad::components::sync::DEFAULT_LOOKAHEAD_LIMIT;
+
+        config.state.ephemeral = false;
+        config.state.cache_dir = zebra_state_path.into();
+
+        config
+    } else {
+        random_known_rpc_port_config()?
+    };
 
     let zdir = testdir()?.with_config(&mut config)?;
     let mut zebrad = zdir
@@ -1209,8 +1276,24 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     let ldir = ldir.with_lightwalletd_config(config.rpc.listen_addr.unwrap())?;
 
     // Launch the lightwalletd process
-    let result = ldir.spawn_lightwalletd_child(args![]);
-    let (lightwalletd, zebrad) = zebrad.kill_on_error(result)?;
+    let lightwalletd = if test_type.needs_lightwalletd_cached_state() {
+        // TODO: turn this into a config helper function?
+        let lightwalletd_state_path: PathBuf = match env::var_os(LIGHTWALLETD_DATA_DIR_VAR) {
+            Some(path) => path.into(),
+            None => {
+                tracing::info!(
+                    "skipped {test_type:?} lightwalletd test, \
+                     set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
+                );
+                return Ok(());
+            }
+        };
+
+        ldir.spawn_lightwalletd_child(lightwalletd_state_path, args![])?
+    } else {
+        ldir.spawn_lightwalletd_child(None, args![])?
+    };
+
     let mut lightwalletd = lightwalletd
         .with_timeout(LIGHTWALLETD_DELAY)
         .with_failure_regex_iter(

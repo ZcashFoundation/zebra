@@ -5,7 +5,12 @@
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
 
-use std::{env, net::SocketAddr, path::Path, time::Duration};
+use std::{
+    env,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use zebra_test::{
     command::{Arguments, TestChild, TestDirExt},
@@ -28,7 +33,16 @@ pub mod wallet_grpc;
 ///
 /// This environmental variable is used to enable the lightwalletd tests.
 /// But the network tests are *disabled* by their environmental variables.
-const ZEBRA_TEST_LIGHTWALLETD: &str = "ZEBRA_TEST_LIGHTWALLETD";
+pub const ZEBRA_TEST_LIGHTWALLETD: &str = "ZEBRA_TEST_LIGHTWALLETD";
+
+/// Optional environment variable with the cached state for lightwalletd.
+///
+/// Required for [`LightwalletdTestType::UpdateCachedState`],
+/// so we can test lightwalletd RPC integration with a populated state.
+///
+/// Can also be used to speed up the [`sending_transactions_using_lightwalletd`] test,
+/// by skipping the lightwalletd initial sync.
+pub const LIGHTWALLETD_DATA_DIR_VAR: &str = "LIGHTWALLETD_DATA_DIR";
 
 /// The maximum time that a `lightwalletd` integration test is expected to run.
 pub const LIGHTWALLETD_TEST_TIMEOUT: Duration = Duration::from_secs(60 * 60);
@@ -75,16 +89,20 @@ pub trait LightWalletdTestDirExt: ZebradTestDirExt
 where
     Self: AsRef<Path> + Sized,
 {
-    /// Spawn `lightwalletd` with `args` as a child process in this test directory,
-    /// potentially taking ownership of the tempdir for the duration of the
-    /// child process.
+    /// Spawn `lightwalletd` with `lightwalletd_state_path`, and `extra_args`,
+    /// as a child process in this test directory,
+    /// potentially taking ownership of the tempdir for the duration of the child process.
     ///
     /// By default, launch a working test instance with logging, and avoid port conflicts.
     ///
     /// # Panics
     ///
     /// If there is no lightwalletd config in the test directory.
-    fn spawn_lightwalletd_child(self, extra_args: Arguments) -> Result<TestChild<Self>>;
+    fn spawn_lightwalletd_child(
+        self,
+        lightwalletd_state_path: impl Into<Option<PathBuf>>,
+        extra_args: Arguments,
+    ) -> Result<TestChild<Self>>;
 
     /// Create a config file and use it for all subsequently spawned `lightwalletd` processes.
     /// Returns an error if the config already exists.
@@ -98,9 +116,13 @@ impl<T> LightWalletdTestDirExt for T
 where
     Self: TestDirExt + AsRef<Path> + Sized,
 {
-    fn spawn_lightwalletd_child(self, extra_args: Arguments) -> Result<TestChild<Self>> {
-        let dir = self.as_ref().to_owned();
-        let default_config_path = dir.join("lightwalletd-zcash.conf");
+    fn spawn_lightwalletd_child(
+        self,
+        lightwalletd_state_path: impl Into<Option<PathBuf>>,
+        extra_args: Arguments,
+    ) -> Result<TestChild<Self>> {
+        let test_dir = self.as_ref().to_owned();
+        let default_config_path = test_dir.join("lightwalletd-zcash.conf");
 
         assert!(
             default_config_path.exists(),
@@ -119,9 +141,24 @@ where
         args.set_parameter("--zcash-conf-path", zcash_conf_path);
 
         // the lightwalletd cache directory
-        //
-        // TODO: create a sub-directory for lightwalletd
-        args.set_parameter("--data-dir", dir.to_str().expect("Path is valid Unicode"));
+        if let Some(lightwalletd_state_path) = lightwalletd_state_path.into() {
+            args.set_parameter(
+                "--data-dir",
+                lightwalletd_state_path
+                    .to_str()
+                    .expect("path is valid Unicode"),
+            );
+        } else {
+            let empty_state_path = test_dir.join("lightwalletd_state");
+
+            std::fs::create_dir(&empty_state_path)
+                .expect("unexpected failure creating lightwalletd state sub-directory");
+
+            args.set_parameter(
+                "--data-dir",
+                empty_state_path.to_str().expect("path is valid Unicode"),
+            );
+        }
 
         // log to standard output
         //

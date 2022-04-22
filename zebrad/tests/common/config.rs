@@ -15,6 +15,11 @@ use zebrad::{
     config::{SyncSection, TracingSection, ZebradConfig},
 };
 
+/// The environmental variable that contains the cached state path.
+///
+/// TODO: use this in the checkpoint cached state tests as well.
+pub const CACHED_STATE_PATH_VAR: &str = "ZEBRA_CACHED_STATE_PATH";
+
 /// Returns a config with:
 /// - a Zcash listener on an unused port on IPv4 localhost, and
 /// - an ephemeral state,
