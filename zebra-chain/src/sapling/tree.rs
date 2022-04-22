@@ -248,7 +248,7 @@ pub enum NoteCommitmentTreeError {
 /// Sapling Incremental Note Commitment Tree.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NoteCommitmentTree {
-    /// The tree represented as a Frontier.
+    /// The tree represented as a [`Frontier`](bridgetree::Frontier).
     ///
     /// A Frontier is a subset of the tree that allows to fully specify it.
     /// It consists of nodes along the rightmost (newer) branch of the tree that
@@ -257,8 +257,9 @@ pub struct NoteCommitmentTree {
     ///
     /// # Consensus
     ///
-    /// > [Sapling onward] A block MUST NOT add Sapling note commitments that would result in the Sapling note
-    /// > commitment tree exceeding its capacity of 2^(MerkleDepth^Sapling) leaf nodes.
+    /// > [Sapling onward] A block MUST NOT add Sapling note commitments that
+    /// > would result in the Sapling note commitment tree exceeding its capacity
+    /// > of 2^(MerkleDepth^Sapling) leaf nodes.
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
     ///
@@ -267,18 +268,19 @@ pub struct NoteCommitmentTree {
 
     /// A cached root of the tree.
     ///
-    /// Every time the root is computed by [`Self::root`] it is cached here,
-    /// and the cached value will be returned by [`Self::root`] until the tree is
-    /// changed by [`Self::append`]. This greatly increases performance
-    /// because it avoids recomputing the root when the tree does not change
-    /// between blocks. In the finalized state, the tree is read from
-    /// disk for every block processed, which would also require recomputing
-    /// the root even if it has not changed (note that the cached root is
-    /// serialized with the tree). This is particularly important since we decided
-    /// to instantiate the trees from the genesis block, for simplicity.
+    /// Every time the root is computed by [`Self::root`] it is cached here, and
+    /// the cached value will be returned by [`Self::root`] until the tree is
+    /// changed by [`Self::append`]. This greatly increases performance because
+    /// it avoids recomputing the root when the tree does not change between
+    /// blocks. In the finalized state, the tree is read from disk for every
+    /// block processed, which would also require recomputing the root even if
+    /// it has not changed (note that the cached root is serialized with the
+    /// tree). This is particularly important since we decided to instantiate
+    /// the trees from the genesis block, for simplicity.
     ///
-    /// We use a [`RwLock`] for this cache, because it is only written once per tree update.
-    /// Each tree has its own cached root, a new lock is created for each clone.
+    /// We use a [`RwLock`] for this cache, because it is only written once per
+    /// tree update. Each tree has its own cached root, a new lock is created
+    /// for each clone.
     cached_root: std::sync::RwLock<Option<Root>>,
 }
 
@@ -336,7 +338,7 @@ impl NoteCommitmentTree {
         }
     }
 
-    /// Get the Jubjub-based Pedersen hash of root node of this merkle tree of
+    /// Gets the Jubjub-based Pedersen hash of root node of this merkle tree of
     /// note commitments.
     pub fn hash(&self) -> [u8; 32] {
         self.root().into()
@@ -351,7 +353,7 @@ impl NoteCommitmentTree {
         jubjub::Fq::one().to_bytes()
     }
 
-    /// Count of note commitments added to the tree.
+    /// Counts of note commitments added to the tree.
     ///
     /// For Sapling, the tree is capped at 2^32.
     pub fn count(&self) -> u64 {
@@ -392,7 +394,7 @@ impl PartialEq for NoteCommitmentTree {
 }
 
 impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
-    /// Compute the tree from a whole bunch of note commitments at once.
+    /// Computes the tree from a whole bunch of note commitments at once.
     fn from(values: Vec<jubjub::Fq>) -> Self {
         let mut tree = Self::default();
 

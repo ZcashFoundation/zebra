@@ -667,8 +667,8 @@ where
                     data: None,
                 })?;
 
-            // We've got all the data we need for the RPC request, so we
-            // assemble the request.
+            // We've got all the data we need for the RPC response, so we
+            // assemble the response.
 
             let hash = block.hash();
             let height = block
