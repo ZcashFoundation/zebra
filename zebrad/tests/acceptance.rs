@@ -1191,13 +1191,13 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = if let Some(config) = test_type.zebrad_config() {
+    let config = if let Some(config) = test_type.zebrad_config() {
         config?
     } else {
         return Ok(());
     };
 
-    let zdir = testdir()?.with_config(&mut config)?;
+    let zdir = testdir()?.with_exact_config(&config)?;
     let mut zebrad = zdir
         .spawn_child(args!["start"])?
         .with_timeout(LAUNCH_DELAY)
