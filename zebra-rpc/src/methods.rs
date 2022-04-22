@@ -190,7 +190,7 @@ pub trait Rpc {
     #[rpc(name = "getaddresstxids")]
     fn get_address_tx_ids(
         &self,
-        addresses: Vec<String>,
+        address_strings: AddressStrings,
         start: u32,
         end: u32,
     ) -> BoxFuture<Result<Vec<String>>>;
@@ -208,7 +208,10 @@ pub trait Rpc {
     /// lightwalletd always uses the multi-address request, without chaininfo:
     /// https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L402
     #[rpc(name = "getaddressutxos")]
-    fn get_address_utxos(&self, addresses: Vec<String>) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
+    fn get_address_utxos(
+        &self,
+        address_strings: AddressStrings,
+    ) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
 }
 
 /// RPC method implementations.
@@ -418,7 +421,7 @@ where
         let state = self.state.clone();
 
         async move {
-            let addresses: HashSet<Address> = address_strings
+            let valid_addresses: HashSet<Address> = address_strings
                 .addresses
                 .into_iter()
                 .map(|address| {
@@ -428,7 +431,7 @@ where
                 })
                 .collect::<Result<_>>()?;
 
-            let request = zebra_state::ReadRequest::AddressBalance(addresses);
+            let request = zebra_state::ReadRequest::AddressBalance(valid_addresses);
             let response = state.oneshot(request).await.map_err(|error| Error {
                 code: ErrorCode::ServerError(0),
                 message: error.to_string(),
@@ -657,7 +660,7 @@ where
 
     fn get_address_tx_ids(
         &self,
-        addresses: Vec<String>,
+        address_strings: AddressStrings,
         start: u32,
         end: u32,
     ) -> BoxFuture<Result<Vec<String>>> {
@@ -675,17 +678,18 @@ where
             // height range checks
             check_height_range(start, end, chain_height?)?;
 
-            let valid_addresses: Result<HashSet<Address>> = addresses
-                .iter()
+            let valid_addresses: HashSet<Address> = address_strings
+                .addresses
+                .into_iter()
                 .map(|address| {
-                    address.parse().map_err(|_| {
-                        Error::invalid_params(format!("Provided address is not valid: {}", address))
+                    address.parse().map_err(|error| {
+                        Error::invalid_params(&format!("invalid address {address:?}: {error}"))
                     })
                 })
-                .collect();
+                .collect::<Result<_>>()?;
 
             let request = zebra_state::ReadRequest::TransactionIdsByAddresses {
-                addresses: valid_addresses?,
+                addresses: valid_addresses,
                 height_range: start..=end,
             };
             let response = state
@@ -710,23 +714,26 @@ where
         .boxed()
     }
 
-    fn get_address_utxos(&self, addresses: Vec<String>) -> BoxFuture<Result<Vec<GetAddressUtxos>>> {
+    fn get_address_utxos(
+        &self,
+        address_strings: AddressStrings,
+    ) -> BoxFuture<Result<Vec<GetAddressUtxos>>> {
         let mut state = self.state.clone();
         let mut response_utxos = vec![];
 
         async move {
-            // TODO: make this a function after #4119 is merged
-            let valid_addresses: Result<HashSet<Address>> = addresses
-                .iter()
+            let valid_addresses: HashSet<Address> = address_strings
+                .addresses
+                .into_iter()
                 .map(|address| {
-                    address.parse().map_err(|_| {
-                        Error::invalid_params(format!("Provided address is not valid: {}", address))
+                    address.parse().map_err(|error| {
+                        Error::invalid_params(&format!("invalid address {address:?}: {error}"))
                     })
                 })
-                .collect();
+                .collect::<Result<_>>()?;
 
             // get utxos data for addresses
-            let request = zebra_state::ReadRequest::UtxosByAddresses(valid_addresses?);
+            let request = zebra_state::ReadRequest::UtxosByAddresses(valid_addresses);
             let response = state
                 .ready()
                 .and_then(|service| service.call(request))
@@ -792,7 +799,8 @@ pub struct GetBlockChainInfo {
 
 /// A wrapper type with a list of strings of addresses.
 ///
-/// This is used for the input parameter of [`Rpc::get_account_balance`].
+/// This is used for the input parameter of [`Rpc::get_address_balance`],
+/// [`Rpc::get_address_tx_ids`] and [`Rpc::get_address_utxos`].
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
 pub struct AddressStrings {
     addresses: Vec<String>,
