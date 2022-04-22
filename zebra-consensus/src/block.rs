@@ -180,17 +180,13 @@ where
             let now = Utc::now();
             check::time_is_valid_at(&block.header, now, &height, &hash)
                 .map_err(VerifyBlockError::Time)?;
-            check::coinbase_is_first(&block)?;
-            let coinbase_tx = block
-                .transactions
-                .get(0)
-                .expect("must have coinbase transaction");
+            let coinbase_tx = check::coinbase_is_first(&block)?;
             check::subsidy_is_valid(&block, network)?;
 
             // Now do the slower checks
 
             // Check compatibility with ZIP-212 shielded Sapling and Orchard coinbase output decryption
-            tx::check::coinbase_outputs_are_decryptable(coinbase_tx, network, height)?;
+            tx::check::coinbase_outputs_are_decryptable(&coinbase_tx, network, height)?;
 
             // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();

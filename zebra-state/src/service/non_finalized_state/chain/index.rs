@@ -1,11 +1,15 @@
 //! Transparent address indexes for non-finalized chains.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    ops::RangeInclusive,
+};
 
 use mset::MultiSet;
 
 use zebra_chain::{
     amount::{Amount, NegativeAllowed},
+    block::Height,
     transaction, transparent,
 };
 
@@ -205,29 +209,33 @@ impl TransparentTransfers {
         self.balance
     }
 
-    /// Returns the [`transaction::Hash`]es of the transactions that
-    /// sent or received transparent tranfers to this address,
-    /// in this partial chain, in chain order.
+    /// Returns the [`transaction::Hash`]es of the transactions that sent or received
+    /// transparent transfers to this address, in this partial chain, filtered by `query_height_range`.
+    ///
+    /// The transactions are returned in chain order.
     ///
     /// `chain_tx_by_hash` should be the `tx_by_hash` field from the [`Chain`] containing this index.
     ///
     /// # Panics
     ///
     /// If `chain_tx_by_hash` is missing some transaction hashes from this index.
-    #[allow(dead_code)]
     pub fn tx_ids(
         &self,
         chain_tx_by_hash: &HashMap<transaction::Hash, TransactionLocation>,
+        query_height_range: RangeInclusive<Height>,
     ) -> BTreeMap<TransactionLocation, transaction::Hash> {
         self.tx_ids
             .distinct_elements()
-            .map(|tx_hash| {
-                (
-                    *chain_tx_by_hash
-                        .get(tx_hash)
-                        .expect("all hashes are indexed"),
-                    *tx_hash,
-                )
+            .filter_map(|tx_hash| {
+                let tx_loc = *chain_tx_by_hash
+                    .get(tx_hash)
+                    .expect("all hashes are indexed");
+
+                if query_height_range.contains(&tx_loc.height) {
+                    Some((tx_loc, *tx_hash))
+                } else {
+                    None
+                }
             })
             .collect()
     }

@@ -111,8 +111,9 @@ pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError
 ///
 /// # Consensus
 ///
-/// > A coinbase transaction MUST NOT have any transparent inputs with non-null prevout fields,
-/// > JoinSplit descriptions, or Spend descriptions.
+/// > A coinbase transaction MUST NOT have any JoinSplit descriptions.
+///
+/// > A coinbase transaction MUST NOT have any Spend descriptions.
 ///
 /// > [NU5 onward] In a version 5 coinbase transaction, the enableSpendsOrchard flag MUST be 0.
 ///
@@ -124,10 +125,8 @@ pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), TransactionError> {
-    if tx.has_valid_coinbase_transaction_inputs() {
-        if tx.contains_prevout_input() {
-            return Err(TransactionError::CoinbaseHasPrevOutInput);
-        } else if tx.joinsplit_count() > 0 {
+    if tx.is_coinbase() {
+        if tx.joinsplit_count() > 0 {
             return Err(TransactionError::CoinbaseHasJoinSplit);
         } else if tx.sapling_spends_per_anchor().count() > 0 {
             return Err(TransactionError::CoinbaseHasSpend);

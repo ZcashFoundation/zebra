@@ -1,6 +1,10 @@
 //! State [`tower::Service`] request types.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::RangeInclusive,
+    sync::Arc,
+};
 
 use zebra_chain::{
     amount::NegativeAllowed,
@@ -458,6 +462,11 @@ pub enum ReadRequest {
     /// * [`ReadResponse::SaplingTree(None)`](crate::ReadResponse::SaplingTree) otherwise.
     SaplingTree(HashOrHeight),
 
+    /// Looks up the balance of a set of transparent addresses.
+    ///
+    /// Returns an [`Amount`] with the total balance of the set of addresses.
+    AddressBalance(HashSet<transparent::Address>),
+
     /// Looks up an Orchard note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -467,16 +476,22 @@ pub enum ReadRequest {
     /// * [`ReadResponse::OrchardTree(None)`](crate::ReadResponse::OrchardTree) otherwise.
     OrchardTree(HashOrHeight),
 
-    /// Looks up transactions hashes that were made by provided addresses in a
-    /// blockchain height range.
+    /// Looks up transaction hashes that were sent or received from addresses,
+    /// in an inclusive blockchain height range.
     ///
     /// Returns
     ///
-    /// * A vector of transaction hashes.
+    /// * A set of transaction hashes.
     /// * An empty vector if no transactions were found for the given arguments.
     ///
-    /// Returned txids are in the order they appear in blocks, which ensures
-    /// that they are topologically sorted (i.e. parent txids will appear before
-    /// child txids).
-    TransactionsByAddresses(Vec<transparent::Address>, block::Height, block::Height),
+    /// Returned txids are in the order they appear in blocks,
+    /// which ensures that they are topologically sorted
+    /// (i.e. parent txids will appear before child txids).
+    TransactionIdsByAddresses {
+        /// The requested addresses.
+        addresses: HashSet<transparent::Address>,
+
+        /// The blocks to be queried for transactions.
+        height_range: RangeInclusive<block::Height>,
+    },
 }

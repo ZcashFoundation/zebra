@@ -4,7 +4,7 @@
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    ops::Deref,
+    ops::{Deref, RangeInclusive},
     sync::Arc,
 };
 
@@ -13,7 +13,7 @@ use tracing::instrument;
 
 use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
-    block,
+    block::{self, Height},
     history_tree::HistoryTree,
     orchard,
     parameters::Network,
@@ -599,7 +599,8 @@ impl Chain {
         (created_utxos, spent_utxos)
     }
 
-    /// Returns the [`transaction::Hash`]es used by `addresses` to receive or spend funds.
+    /// Returns the [`transaction::Hash`]es used by `addresses` to receive or spend funds,
+    /// in the non-finalized chain, filtered using the `query_height_range`.
     ///
     /// If none of the addresses receive or spend funds in this partial chain, returns an empty list.
     ///
@@ -620,9 +621,10 @@ impl Chain {
     pub fn partial_transparent_tx_ids(
         &self,
         addresses: &HashSet<transparent::Address>,
+        query_height_range: RangeInclusive<Height>,
     ) -> BTreeMap<TransactionLocation, transaction::Hash> {
         self.partial_transparent_indexes(addresses)
-            .flat_map(|transfers| transfers.tx_ids(&self.tx_by_hash))
+            .flat_map(|transfers| transfers.tx_ids(&self.tx_by_hash, query_height_range.clone()))
             .collect()
     }
 

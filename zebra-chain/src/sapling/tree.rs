@@ -24,8 +24,7 @@ use bitvec::prelude::*;
 use incrementalmerkletree::{bridgetree, Frontier};
 use lazy_static::lazy_static;
 use thiserror::Error;
-use zcash_primitives::merkle_tree;
-use zcash_primitives::merkle_tree::CommitmentTree;
+use zcash_primitives::merkle_tree::{self, CommitmentTree};
 
 use super::commitment::pedersen_hashes::pedersen_hash;
 

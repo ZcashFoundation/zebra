@@ -5,7 +5,7 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::fmt::Debug;
+use std::{cmp::max, fmt::Debug};
 
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
@@ -396,18 +396,29 @@ impl AddressTransaction {
     }
 
     /// Create an [`AddressTransaction`] which starts iteration for the supplied address.
+    /// Starts at the first UTXO, or at the `query_start` height, whichever is greater.
+    ///
     /// Used to look up the first transaction with [`ReadDisk::zs_next_key_value_from`].
     ///
-    /// The transaction location is before all unspent output locations in the index.
-    /// It is always invalid, due to the genesis consensus rules. But this is not an issue
-    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
-    pub fn address_iterator_start(address_location: AddressLocation) -> AddressTransaction {
+    /// The transaction location might be invalid, if it is based on the `query_start` height.
+    /// But this is not an issue, since [`ReadDisk::zs_next_key_value_from`]
+    /// will fetch the next existing (valid) value.
+    pub fn address_iterator_start(
+        address_location: AddressLocation,
+        query_start: Height,
+    ) -> AddressTransaction {
         // Iterating from the lowest possible transaction location gets us the first transaction.
-        let zero_transaction_location = TransactionLocation::from_usize(Height(0), 0);
+        //
+        // The address location is the output location of the first UTXO sent to the address,
+        // and addresses can not spend funds until they receive their first UTXO.
+        let first_utxo_location = address_location.transaction_location();
+
+        // Iterating from the start height filters out transactions that aren't needed.
+        let query_start_location = TransactionLocation::from_usize(query_start, 0);
 
         AddressTransaction {
             address_location,
-            transaction_location: zero_transaction_location,
+            transaction_location: max(first_utxo_location, query_start_location),
         }
     }
 

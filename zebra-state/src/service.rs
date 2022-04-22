@@ -1031,24 +1031,46 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // For the get_address_tx_ids RPC.
-            ReadRequest::TransactionsByAddresses(_addresses, _start, _end) => {
+            ReadRequest::TransactionIdsByAddresses {
+                addresses,
+                height_range,
+            } => {
                 metrics::counter!(
                     "state.requests",
                     1,
                     "service" => "read_state",
-                    "type" => "transactions_by_addresses",
+                    "type" => "transaction_ids_by_addresses",
                 );
 
-                let _state = self.clone();
+                let state = self.clone();
 
                 async move {
-                    // TODO: Respond with found transactions
-                    // At least the following pull requests should be merged:
-                    // - #4022
-                    // - #4038
-                    // Do the corresponding update in the context of #3147
-                    let transaction_ids = vec![];
-                    Ok(ReadResponse::TransactionIds(transaction_ids))
+                    let tx_ids = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::transparent_tx_ids(best_chain, &state.db, addresses, height_range)
+                    });
+
+                    tx_ids.map(ReadResponse::AddressesTransactionIds)
+                }
+                .boxed()
+            }
+
+            // For the get_address_balance RPC.
+            ReadRequest::AddressBalance(addresses) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "address_balance",
+                );
+
+                let state = self.clone();
+
+                async move {
+                    let balance = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::transparent_balance(best_chain, &state.db, addresses)
+                    })?;
+
+                    Ok(ReadResponse::AddressBalance(balance))
                 }
                 .boxed()
             }
