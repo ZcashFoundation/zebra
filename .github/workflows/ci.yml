@@ -56,7 +56,7 @@ jobs:
         rust: [stable]
 
     steps:
-      - uses: actions/checkout@v3.0.1
+      - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
 
@@ -151,7 +151,7 @@ jobs:
         rust: [stable]
 
     steps:
-      - uses: actions/checkout@v3.0.1
+      - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
 
@@ -192,7 +192,7 @@ jobs:
         rust: [stable, beta]
 
     steps:
-      - uses: actions/checkout@v3.0.1
+      - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
 
@@ -219,7 +219,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3.0.1
+      - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
 
@@ -241,7 +241,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3.0.1
+      - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
 
@@ -284,7 +284,7 @@ jobs:
     continue-on-error: ${{ matrix.checks == 'advisories' }}
 
     steps:
-      - uses: actions/checkout@v3.0.1
+      - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
 
