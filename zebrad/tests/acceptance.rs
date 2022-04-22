@@ -1307,8 +1307,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         );
 
     // Wait until `lightwalletd` has launched
-    let result = lightwalletd.expect_stdout_line_matches("Starting gRPC server");
-    let (_, zebrad) = zebrad.kill_on_error(result)?;
+    lightwalletd.expect_stdout_line_matches("Starting gRPC server")?;
 
     // Check that `lightwalletd` is calling the expected Zebra RPCs
 
@@ -1316,13 +1315,10 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     //
     // TODO: update branchID when we're using cached state (#3511)
     //       add "Waiting for zcashd height to reach Sapling activation height"
-    let result = lightwalletd.expect_stdout_line_matches(
+    lightwalletd.expect_stdout_line_matches(
         "Got sapling height 419200 block height [0-9]+ chain main branchID 00000000",
-    );
-    let (_, zebrad) = zebrad.kill_on_error(result)?;
-
-    let result = lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache");
-    let (_, zebrad) = zebrad.kill_on_error(result)?;
+    )?;
+    lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache")?;
 
     // getblock with the first Sapling block in Zebra's state
     //
@@ -1347,18 +1343,12 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     //
     // TODO: expect Ingestor log when we're using cached state (#3511)
     //       "Ingestor adding block to cache"
-    let result = lightwalletd.expect_stdout_line_matches(regex::escape(
+    lightwalletd.expect_stdout_line_matches(regex::escape(
         "Waiting for zcashd height to reach Sapling activation height (419200)",
-    ));
-    let (_, zebrad) = zebrad.kill_on_error(result)?;
-
-    // (next RPC)
-    //
-    // TODO: add extra checks when we add new Zebra RPCs
+    ))?;
 
     // Cleanup both processes
-    let result = lightwalletd.kill();
-    let (_, mut zebrad) = zebrad.kill_on_error(result)?;
+    lightwalletd.kill()?;
     zebrad.kill()?;
 
     let lightwalletd_output = lightwalletd.wait_with_output()?.assert_failure()?;
