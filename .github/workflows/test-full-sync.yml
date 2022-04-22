@@ -72,12 +72,12 @@ jobs:
       image_label_gar: us-docker.pkg.dev/zealous-zebra/zebra
       image_label_gcr: gcr.io/zealous-zebra/zcashfoundation-zebra
       cache_label: us-docker.pkg.dev/zealous-zebra/zebra
-      network: ${{ github.event.inputs.network || env.NETWORK }}
+      network: ${{ github.event.inputs.network || Mainnet }}
       checkpoint_sync: ${{ github.event.inputs.checkpoint_sync || true }}
-      rust_backtrace: ${{ env.RUST_BACKTRACE }}
-      rust_lib_backtrace: ${{ env.RUST_LIB_BACKTRACE }}
-      colorbt_show_hidden: ${{ env.COLORBT_SHOW_HIDDEN }}
-      zebra_skip_network_tests: "1"
+      rust_backtrace: full
+      rust_lib_backtrace: full
+      colorbt_show_hidden: '1'
+      zebra_skip_network_tests: '1'
       rust_log: debug
 
   # Test that Zebra can run a full mainnet sync after a PR is approved
