@@ -34,6 +34,7 @@ use zebra_chain::{
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::LOCK_FILE_ERROR;
+use zebrad::config::ZebradConfig;
 
 use zebra_test::{
     args,
@@ -1151,6 +1152,60 @@ impl LightwalletdTestType {
             UpdateCachedState => true,
         }
     }
+
+    /// Returns the Zebra state path for this test, if set.
+    fn zebrad_state_path(&self) -> Option<PathBuf> {
+        match env::var_os(CACHED_STATE_PATH_VAR) {
+            Some(path) => Some(path.into()),
+            None => {
+                tracing::info!(
+                    "skipped {self:?} lightwalletd test, \
+                     set the {CACHED_STATE_PATH_VAR:?} environment variable to run the test",
+                );
+
+                None
+            }
+        }
+    }
+
+    /// Returns a Zebra config for this test.
+    ///
+    /// Returns `None` if the test should be skipped,
+    /// and `Some(Err(_))` if the config could not be created.
+    fn zebrad_config(&self) -> Option<Result<ZebradConfig>> {
+        if !self.needs_zebra_cached_state() {
+            return Some(random_known_rpc_port_config());
+        }
+
+        let zebra_state_path = self.zebrad_state_path()?;
+
+        let mut config = match random_known_rpc_port_config() {
+            Ok(config) => config,
+            Err(error) => return Some(Err(error)),
+        };
+
+        config.sync.lookahead_limit = zebrad::components::sync::DEFAULT_LOOKAHEAD_LIMIT;
+
+        config.state.ephemeral = false;
+        config.state.cache_dir = zebra_state_path;
+
+        Some(Ok(config))
+    }
+
+    /// Returns the lightwalletd state path for this test, if set.
+    fn lightwalletd_state_path(&self) -> Option<PathBuf> {
+        match env::var_os(LIGHTWALLETD_DATA_DIR_VAR) {
+            Some(path) => Some(path.into()),
+            None => {
+                tracing::info!(
+                    "skipped {self:?} lightwalletd test, \
+                     set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
+                );
+
+                None
+            }
+        }
+    }
 }
 
 /// Make sure `lightwalletd` works with Zebra, when both their states are empty.
@@ -1227,28 +1282,10 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = if test_type.needs_zebra_cached_state() {
-        // TODO: turn this into a config helper function
-        let zebra_state_path = match env::var_os(CACHED_STATE_PATH_VAR) {
-            Some(path) => path,
-            None => {
-                tracing::info!(
-                    "skipped {test_type:?} lightwalletd test, \
-                     set the {CACHED_STATE_PATH_VAR:?} environment variable to run the test",
-                );
-                return Ok(());
-            }
-        };
-
-        let mut config = random_known_rpc_port_config()?;
-        config.sync.lookahead_limit = zebrad::components::sync::DEFAULT_LOOKAHEAD_LIMIT;
-
-        config.state.ephemeral = false;
-        config.state.cache_dir = zebra_state_path.into();
-
-        config
+    let mut config = if let Some(config) = test_type.zebrad_config() {
+        config?
     } else {
-        random_known_rpc_port_config()?
+        return Ok(());
     };
 
     let zdir = testdir()?.with_config(&mut config)?;
@@ -1277,17 +1314,11 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
 
     // Launch the lightwalletd process
     let lightwalletd = if test_type.needs_lightwalletd_cached_state() {
-        // TODO: turn this into a config helper function?
-        let lightwalletd_state_path: PathBuf = match env::var_os(LIGHTWALLETD_DATA_DIR_VAR) {
-            Some(path) => path.into(),
-            None => {
-                tracing::info!(
-                    "skipped {test_type:?} lightwalletd test, \
-                     set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
-                );
-                return Ok(());
-            }
-        };
+        let lightwalletd_state_path = test_type.lightwalletd_state_path();
+
+        if lightwalletd_state_path.is_none() {
+            return Ok(());
+        }
 
         ldir.spawn_lightwalletd_child(lightwalletd_state_path, args![])?
     } else {
