@@ -19,7 +19,12 @@ use zebra_test::{
 };
 use zebrad::config::ZebradConfig;
 
-use super::{config::default_test_config, launch::ZebradTestDirExt};
+use super::{
+    config::{default_test_config, CACHED_STATE_PATH_VAR},
+    launch::ZebradTestDirExt,
+};
+
+use LightwalletdTestType::*;
 
 pub mod send_transaction_test;
 pub mod wallet_grpc;
@@ -198,5 +203,96 @@ where
         fs::write(config_file, lightwalletd_config.as_bytes())?;
 
         Ok(self)
+    }
+}
+
+/// The type of lightwalletd integration test that we're running.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum LightwalletdTestType {
+    /// Launch with an empty Zebra and lightwalletd state.
+    LaunchWithEmptyState,
+
+    /// Do a full sync from an empty lightwalletd state.
+    ///
+    /// This test is much faster if it has a cached Zebra state.
+    FullSyncFromGenesis,
+
+    /// Sync to tip from a lightwalletd cached state.
+    ///
+    /// This test is much faster if it has a cached Zebra state.
+    UpdateCachedState,
+}
+
+impl LightwalletdTestType {
+    /// Does this test need a Zebra cached state?
+    pub fn needs_zebra_cached_state(&self) -> bool {
+        match self {
+            LaunchWithEmptyState => false,
+            FullSyncFromGenesis => true,
+            UpdateCachedState => true,
+        }
+    }
+
+    /// Does this test need a lightwalletd cached state?
+    pub fn needs_lightwalletd_cached_state(&self) -> bool {
+        match self {
+            LaunchWithEmptyState => false,
+            FullSyncFromGenesis => false,
+            UpdateCachedState => true,
+        }
+    }
+
+    /// Returns the Zebra state path for this test, if set.
+    pub fn zebrad_state_path(&self) -> Option<PathBuf> {
+        match env::var_os(CACHED_STATE_PATH_VAR) {
+            Some(path) => Some(path.into()),
+            None => {
+                tracing::info!(
+                    "skipped {self:?} lightwalletd test, \
+                     set the {CACHED_STATE_PATH_VAR:?} environment variable to run the test",
+                );
+
+                None
+            }
+        }
+    }
+
+    /// Returns a Zebra config for this test.
+    ///
+    /// Returns `None` if the test should be skipped,
+    /// and `Some(Err(_))` if the config could not be created.
+    pub fn zebrad_config(&self) -> Option<Result<ZebradConfig>> {
+        if !self.needs_zebra_cached_state() {
+            return Some(random_known_rpc_port_config());
+        }
+
+        let zebra_state_path = self.zebrad_state_path()?;
+
+        let mut config = match random_known_rpc_port_config() {
+            Ok(config) => config,
+            Err(error) => return Some(Err(error)),
+        };
+
+        config.sync.lookahead_limit = zebrad::components::sync::DEFAULT_LOOKAHEAD_LIMIT;
+
+        config.state.ephemeral = false;
+        config.state.cache_dir = zebra_state_path;
+
+        Some(Ok(config))
+    }
+
+    /// Returns the lightwalletd state path for this test, if set.
+    pub fn lightwalletd_state_path(&self) -> Option<PathBuf> {
+        match env::var_os(LIGHTWALLETD_DATA_DIR_VAR) {
+            Some(path) => Some(path.into()),
+            None => {
+                tracing::info!(
+                    "skipped {self:?} lightwalletd test, \
+                     set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
+                );
+
+                None
+            }
+        }
     }
 }

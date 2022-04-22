@@ -1,6 +1,6 @@
 //! Lightwalletd gRPC interface and utility functions.
 
-use std::{env, net::SocketAddr};
+use std::{env, net::SocketAddr, path::PathBuf};
 
 use tempfile::TempDir;
 
@@ -37,14 +37,11 @@ pub fn spawn_lightwalletd_with_rpc_server(
     let lightwalletd_rpc_port = random_known_port();
     let lightwalletd_rpc_address = format!("127.0.0.1:{lightwalletd_rpc_port}");
 
-    let mut arguments = args!["--grpc-bind-addr": lightwalletd_rpc_address];
-
-    if let Ok(data_dir) = env::var(LIGHTWALLETD_DATA_DIR_VAR) {
-        arguments.set_parameter("--data-dir", data_dir);
-    }
+    let lightwalletd_state_path = env::var(LIGHTWALLETD_DATA_DIR_VAR).ok().map(PathBuf::from);
+    let arguments = args!["--grpc-bind-addr": lightwalletd_rpc_address];
 
     let mut lightwalletd = lightwalletd_dir
-        .spawn_lightwalletd_child(arguments)?
+        .spawn_lightwalletd_child(lightwalletd_state_path, arguments)?
         .with_timeout(LIGHTWALLETD_TEST_TIMEOUT)
         .with_failure_regex_iter(
             // TODO: replace with a function that returns the full list and correct return type

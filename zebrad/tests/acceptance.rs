@@ -34,7 +34,6 @@ use zebra_chain::{
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::LOCK_FILE_ERROR;
-use zebrad::config::ZebradConfig;
 
 use zebra_test::{
     args,
@@ -47,14 +46,15 @@ mod common;
 
 use common::{
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
-    config::{default_test_config, persistent_test_config, testdir, CACHED_STATE_PATH_VAR},
+    config::{default_test_config, persistent_test_config, testdir},
     launch::{
         spawn_zebrad_for_rpc_without_initial_peers, ZebradTestDirExt, BETWEEN_NODES_DELAY,
         LAUNCH_DELAY, LIGHTWALLETD_DELAY,
     },
     lightwalletd::{
         random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
-        LIGHTWALLETD_DATA_DIR_VAR, LIGHTWALLETD_TEST_TIMEOUT,
+        LightwalletdTestType::{self, *},
+        LIGHTWALLETD_TEST_TIMEOUT,
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
@@ -1114,99 +1114,6 @@ const LIGHTWALLETD_IGNORE_MESSAGES: &[&str] = &[
     // TODO: this exception should not be used for the cached state tests (#3511)
     r#"No Chain tip available yet","level":"warning","msg":"error with getblockchaininfo rpc, retrying"#,
 ];
-
-/// The type of lightwalletd integration test that we're running.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum LightwalletdTestType {
-    /// Launch with an empty Zebra and lightwalletd state.
-    LaunchWithEmptyState,
-
-    /// Do a full sync from an empty lightwalletd state.
-    ///
-    /// This test is much faster if it has a cached Zebra state.
-    FullSyncFromGenesis,
-
-    /// Sync to tip from a lightwalletd cached state.
-    ///
-    /// This test is much faster if it has a cached Zebra state.
-    UpdateCachedState,
-}
-
-use LightwalletdTestType::*;
-
-impl LightwalletdTestType {
-    /// Does this test need a Zebra cached state?
-    fn needs_zebra_cached_state(&self) -> bool {
-        match self {
-            LaunchWithEmptyState => false,
-            FullSyncFromGenesis => true,
-            UpdateCachedState => true,
-        }
-    }
-
-    /// Does this test need a lightwalletd cached state?
-    fn needs_lightwalletd_cached_state(&self) -> bool {
-        match self {
-            LaunchWithEmptyState => false,
-            FullSyncFromGenesis => false,
-            UpdateCachedState => true,
-        }
-    }
-
-    /// Returns the Zebra state path for this test, if set.
-    fn zebrad_state_path(&self) -> Option<PathBuf> {
-        match env::var_os(CACHED_STATE_PATH_VAR) {
-            Some(path) => Some(path.into()),
-            None => {
-                tracing::info!(
-                    "skipped {self:?} lightwalletd test, \
-                     set the {CACHED_STATE_PATH_VAR:?} environment variable to run the test",
-                );
-
-                None
-            }
-        }
-    }
-
-    /// Returns a Zebra config for this test.
-    ///
-    /// Returns `None` if the test should be skipped,
-    /// and `Some(Err(_))` if the config could not be created.
-    fn zebrad_config(&self) -> Option<Result<ZebradConfig>> {
-        if !self.needs_zebra_cached_state() {
-            return Some(random_known_rpc_port_config());
-        }
-
-        let zebra_state_path = self.zebrad_state_path()?;
-
-        let mut config = match random_known_rpc_port_config() {
-            Ok(config) => config,
-            Err(error) => return Some(Err(error)),
-        };
-
-        config.sync.lookahead_limit = zebrad::components::sync::DEFAULT_LOOKAHEAD_LIMIT;
-
-        config.state.ephemeral = false;
-        config.state.cache_dir = zebra_state_path;
-
-        Some(Ok(config))
-    }
-
-    /// Returns the lightwalletd state path for this test, if set.
-    fn lightwalletd_state_path(&self) -> Option<PathBuf> {
-        match env::var_os(LIGHTWALLETD_DATA_DIR_VAR) {
-            Some(path) => Some(path.into()),
-            None => {
-                tracing::info!(
-                    "skipped {self:?} lightwalletd test, \
-                     set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
-                );
-
-                None
-            }
-        }
-    }
-}
 
 /// Make sure `lightwalletd` works with Zebra, when both their states are empty.
 ///
