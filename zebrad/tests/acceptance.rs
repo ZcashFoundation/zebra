@@ -1132,7 +1132,7 @@ fn lightwalletd_integration() -> Result<()> {
 /// If `LIGHTWALLETD_DATA_DIR` is not set, just runs a full sync.
 ///
 /// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD`,
-/// `CACHED_STATE_PATH`, and `LIGHTWALLETD_DATA_DIR` env vars are set.
+/// `ZEBRA_CACHED_STATE_PATH`, and `LIGHTWALLETD_DATA_DIR` env vars are set.
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
@@ -1144,7 +1144,7 @@ fn lightwalletd_update_sync() -> Result<()> {
 /// Make sure `lightwalletd` can fully sync from genesis using Zebra.
 ///
 /// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` and
-/// `CACHED_STATE_PATH` env vars are set.
+/// `ZEBRA_CACHED_STATE_PATH` env vars are set.
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
@@ -1154,22 +1154,24 @@ fn lightwalletd_full_sync() -> Result<()> {
     lightwalletd_integration_test(FullSyncFromGenesis)
 }
 
-/// Make sure `lightwalletd` can sync from Zebra, in both update and full sync modes.
+/// Make sure `lightwalletd` can sync from Zebra, in all available modes.
 ///
-/// If `LIGHTWALLETD_DATA_DIR` is set, runs a quick sync, then a full sync.
-/// If `LIGHTWALLETD_DATA_DIR` is not set, just runs a full sync.
-///
-/// These tests only run when the `ZEBRA_TEST_LIGHTWALLETD` and
-/// `CACHED_STATE_PATH` env vars are set.
+/// Runs the tests in this order:
+/// - launch lightwalletd with empty states,
+/// - if `ZEBRA_CACHED_STATE_PATH` and `LIGHTWALLETD_DATA_DIR` are set: run a quick update sync,
+/// - if `ZEBRA_CACHED_STATE_PATH` is set: run a full sync.
 ///
 /// These tests don't work on Windows, so they are always skipped on that platform.
 #[test]
 #[ignore]
 #[cfg(not(target_os = "windows"))]
-fn lightwalletd_update_then_full_sync() -> Result<()> {
-    // Only runs when LIGHTWALLETD_DATA_DIR is set
+fn lightwalletd_test_suite() -> Result<()> {
+    lightwalletd_integration_test(LaunchWithEmptyState)?;
+
+    // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_PATH are set
     lightwalletd_integration_test(UpdateCachedState)?;
 
+    // Only runs when ZEBRA_CACHED_STATE_PATH is set
     lightwalletd_integration_test(FullSyncFromGenesis)?;
 
     Ok(())
