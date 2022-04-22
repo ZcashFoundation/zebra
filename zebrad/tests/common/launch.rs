@@ -5,7 +5,11 @@
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
 
-use std::{env, path::Path, time::Duration};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use color_eyre::eyre::Result;
 
@@ -142,7 +146,7 @@ where
     fn cache_config_update_helper(self, config: &mut ZebradConfig) -> Result<Self> {
         if !config.state.ephemeral {
             let dir = self.as_ref();
-            let cache_dir = dir.join("state");
+            let cache_dir = PathBuf::from(dir);
             config.state.cache_dir = cache_dir;
         }
 
