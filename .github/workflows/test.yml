@@ -75,7 +75,7 @@ jobs:
       image_label_gcr: gcr.io/zealous-zebra/zcashfoundation-zebra
       cache_label: us-docker.pkg.dev/zealous-zebra/zebra
       network: Mainnet
-      checkpoint_sync: 'true'
+      checkpoint_sync: true
       rust_backtrace: full
       rust_lib_backtrace: full
       colorbt_show_hidden: '1'
