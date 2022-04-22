@@ -337,7 +337,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 1;
     let end: u32 = 2;
     let error = rpc
-        .get_address_tx_ids(AddressStrings { addresses }, start, end)
+        .get_address_tx_ids(AddressStrings::new(addresses), start, end)
         .await
         .unwrap_err();
     assert_eq!(
@@ -356,13 +356,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 2;
     let end: u32 = 1;
     let error = rpc
-        .get_address_tx_ids(
-            AddressStrings {
-                addresses: addresses.clone(),
-            },
-            start,
-            end,
-        )
+        .get_address_tx_ids(AddressStrings::new(addresses.clone()), start, end)
         .await
         .unwrap_err();
     assert_eq!(
@@ -374,13 +368,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 0;
     let end: u32 = 1;
     let error = rpc
-        .get_address_tx_ids(
-            AddressStrings {
-                addresses: addresses.clone(),
-            },
-            start,
-            end,
-        )
+        .get_address_tx_ids(AddressStrings::new(addresses.clone()), start, end)
         .await
         .unwrap_err();
     assert_eq!(
@@ -392,7 +380,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 1;
     let end: u32 = 11;
     let error = rpc
-        .get_address_tx_ids(AddressStrings { addresses }, start, end)
+        .get_address_tx_ids(AddressStrings::new(addresses), start, end)
         .await
         .unwrap_err();
     assert_eq!(
@@ -471,7 +459,7 @@ async fn rpc_getaddresstxids_response_with(
     // call the method with valid arguments
     let addresses = vec![address.to_string()];
     let response = rpc
-        .get_address_tx_ids(AddressStrings { addresses }, *range.start(), *range.end())
+        .get_address_tx_ids(AddressStrings::new(addresses), *range.start(), *range.end())
         .await
         .expect("arguments are valid so no error can happen here");
 
@@ -518,7 +506,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
     let addresses = vec![address.clone()];
     let error = rpc
         .0
-        .get_address_utxos(AddressStrings { addresses })
+        .get_address_utxos(AddressStrings::new(addresses))
         .await
         .unwrap_err();
     assert_eq!(
@@ -566,7 +554,7 @@ async fn rpc_getaddressutxos_response() {
     let addresses = vec![address.to_string()];
     let response = rpc
         .0
-        .get_address_utxos(AddressStrings { addresses })
+        .get_address_utxos(AddressStrings::new(addresses))
         .await
         .expect("address is valid so no error can happen here");
 

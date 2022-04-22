@@ -421,15 +421,7 @@ where
         let state = self.state.clone();
 
         async move {
-            let valid_addresses: HashSet<Address> = address_strings
-                .addresses
-                .into_iter()
-                .map(|address| {
-                    address.parse().map_err(|error| {
-                        Error::invalid_params(&format!("invalid address {address:?}: {error}"))
-                    })
-                })
-                .collect::<Result<_>>()?;
+            let valid_addresses = address_strings.valid_addresses()?;
 
             let request = zebra_state::ReadRequest::AddressBalance(valid_addresses);
             let response = state.oneshot(request).await.map_err(|error| Error {
@@ -678,15 +670,7 @@ where
             // height range checks
             check_height_range(start, end, chain_height?)?;
 
-            let valid_addresses: HashSet<Address> = address_strings
-                .addresses
-                .into_iter()
-                .map(|address| {
-                    address.parse().map_err(|error| {
-                        Error::invalid_params(&format!("invalid address {address:?}: {error}"))
-                    })
-                })
-                .collect::<Result<_>>()?;
+            let valid_addresses = address_strings.valid_addresses()?;
 
             let request = zebra_state::ReadRequest::TransactionIdsByAddresses {
                 addresses: valid_addresses,
@@ -722,15 +706,7 @@ where
         let mut response_utxos = vec![];
 
         async move {
-            let valid_addresses: HashSet<Address> = address_strings
-                .addresses
-                .into_iter()
-                .map(|address| {
-                    address.parse().map_err(|error| {
-                        Error::invalid_params(&format!("invalid address {address:?}: {error}"))
-                    })
-                })
-                .collect::<Result<_>>()?;
+            let valid_addresses = address_strings.valid_addresses()?;
 
             // get utxos data for addresses
             let request = zebra_state::ReadRequest::UtxosByAddresses(valid_addresses);
@@ -804,6 +780,29 @@ pub struct GetBlockChainInfo {
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
 pub struct AddressStrings {
     addresses: Vec<String>,
+}
+
+impl AddressStrings {
+    // Creates a new `AddressStrings` given a vector.
+    #[cfg(test)]
+    pub fn new(addresses: Vec<String>) -> AddressStrings {
+        AddressStrings { addresses }
+    }
+    /// Given a list of addresses as strings check if they are valid transparent addresses
+    /// and return them as a set of transparent addresses if so.
+    pub fn valid_addresses(self) -> Result<HashSet<Address>> {
+        let valid_addresses: HashSet<Address> = self
+            .addresses
+            .into_iter()
+            .map(|address| {
+                address.parse().map_err(|error| {
+                    Error::invalid_params(&format!("invalid address {address:?}: {error}"))
+                })
+            })
+            .collect::<Result<_>>()?;
+
+        Ok(valid_addresses)
+    }
 }
 
 /// The transparent balance of a set of addresses.
