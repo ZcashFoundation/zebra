@@ -70,10 +70,10 @@ jobs:
     # TODO: before merging change uses to ZcashFoundation/zebra/.github/workflows/docker-zebra-build.yml@main
     uses: ./.github/workflows/docker-zebra-build.yml
     with:
-      image_label_gar: ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}
-      image_label_gcr: ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.IMAGE_NAME }}
-      cache_label: ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache
-      short_sha: ${{ env.GITHUB_SHA_SHORT }}
+      image_name: zebrad-test
+      image_label_gar: us-docker.pkg.dev/zealous-zebra/zebra
+      image_label_gcr: gcr.io/zealous-zebra/zcashfoundation-zebra
+      cache_label: us-docker.pkg.dev/zealous-zebra/zebra
       network: ${{ github.event.inputs.network || env.NETWORK }}
       checkpoint_sync: ${{ github.event.inputs.checkpoint_sync || true }}
       rust_backtrace: ${{ env.RUST_BACKTRACE }}

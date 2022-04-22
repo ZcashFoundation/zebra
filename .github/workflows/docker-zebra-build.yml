@@ -9,6 +9,9 @@ on:
       checkpoint_sync:
         required: true
         type: boolean
+      image_name:
+        required: true
+        type: string
       image_label_gar:
         required: true
         type: string
@@ -19,7 +22,7 @@ on:
         required: true
         type: string
       short_sha:
-        required: true
+        required: false
         type: string
       rust_backtrace:
         required: true
@@ -62,8 +65,8 @@ jobs:
         with:
           # list of Docker images to use as base name for tags
           images: |
-            ${{ inputs.image_label_gar }}
-            ${{ inputs.image_label_gcr }}
+            ${{ inputs.image_label_gar }}/${{ inputs.image_name }}
+            ${{ inputs.image_label_gcr }}/${{ inputs.image_name }}
           # generate Docker tags based on the following events/attributes
           tags: |
             type=schedule
@@ -113,7 +116,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             NETWORK=${{ inputs.network }}
-            SHORT_SHA=${{ inputs.short_sha }}
+            SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
             RUST_BACKTRACE=${{ inputs.rust_backtrace }}
             RUST_LIB_BACKTRACE=${{ inputs.rust_lib_backtrace }}
             COLORBT_SHOW_HIDDEN=${{ inputs.colorbt_show_hidden }}
@@ -121,5 +124,5 @@ jobs:
             CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
           push: true
-          cache-from: type=registry,ref=${{ inputs.cache_label }}
-          cache-to: type=registry,ref=${{ inputs.cache_label }},mode=max
+          cache-from: type=registry,ref=${{ inputs.cache_label }}/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache
+          cache-to: type=registry,ref=${{ inputs.cache_label }}/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache,mode=max
