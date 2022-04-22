@@ -788,8 +788,9 @@ impl AddressStrings {
     pub fn new(addresses: Vec<String>) -> AddressStrings {
         AddressStrings { addresses }
     }
-    /// Given a list of addresses as strings check if they are valid transparent addresses
-    /// and return them as a set of transparent addresses if so.
+    /// Given a list of addresses as strings:
+    /// - check if provided list have all valid transparent addresses.
+    /// - return valid addresses as a set of `Address`.
     pub fn valid_addresses(self) -> Result<HashSet<Address>> {
         let valid_addresses: HashSet<Address> = self
             .addresses
