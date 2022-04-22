@@ -236,7 +236,7 @@ where
 {
     let mut utxo_error = None;
 
-    // Retry the finalized UTXO query if it was interruped by a finalizing block,
+    // Retry the finalized UTXO query if it was interrupted by a finalizing block,
     // and the non-finalized chain doesn't overlap the changed heights.
     for _ in 0..=FINALIZED_ADDRESS_INDEX_RETRIES {
         let (finalized_utxos, finalized_tip_range) = finalized_transparent_utxos(db, &addresses);
