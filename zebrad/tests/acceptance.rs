@@ -1234,14 +1234,27 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         ldir.spawn_lightwalletd_child(None, args![])?
     };
 
+    let mut lightwalletd_failure_messages: Vec<String> = LIGHTWALLETD_FAILURE_MESSAGES
+        .iter()
+        .chain(PROCESS_FAILURE_MESSAGES)
+        .map(ToString::to_string)
+        .collect();
+
+    if test_type.needs_zebra_cached_state() {
+        lightwalletd_failure_messages.push("No Chain tip available yet".to_string());
+    }
+
+    let lightwalletd_timeout = if test_type == FullSyncFromGenesis {
+        Duration::from_secs(60 * 60)
+    } else {
+        LIGHTWALLETD_DELAY
+    };
+
     let mut lightwalletd = lightwalletd
-        .with_timeout(LIGHTWALLETD_DELAY)
+        .with_timeout(lightwalletd_timeout)
         .with_failure_regex_iter(
             // TODO: replace with a function that returns the full list and correct return type
-            LIGHTWALLETD_FAILURE_MESSAGES
-                .iter()
-                .chain(PROCESS_FAILURE_MESSAGES)
-                .cloned(),
+            lightwalletd_failure_messages,
             // TODO: some exceptions do not apply to the cached state tests (#3511)
             LIGHTWALLETD_IGNORE_MESSAGES.iter().cloned(),
         );
@@ -1252,13 +1265,23 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     // Check that `lightwalletd` is calling the expected Zebra RPCs
 
     // getblockchaininfo
-    //
-    // TODO: update branchID when we're using cached state (#3511)
-    //       add "Waiting for zcashd height to reach Sapling activation height"
-    lightwalletd.expect_stdout_line_matches(
-        "Got sapling height 419200 block height [0-9]+ chain main branchID 00000000",
-    )?;
-    lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache")?;
+    if test_type.needs_zebra_cached_state() {
+        lightwalletd.expect_stdout_line_matches(
+            "Got sapling height 419200 block height [0-9]{7} chain main branchID e9ff75a6",
+        )?;
+    } else {
+        // Timeout the test if we're somehow accidentally using a cached state in our temp dir
+        lightwalletd.expect_stdout_line_matches(
+            "Got sapling height 419200 block height [0-9]{1,6} chain main branchID 00000000",
+        )?;
+    }
+
+    if test_type.needs_lightwalletd_cached_state() {
+        lightwalletd.expect_stdout_line_matches("Found [0-9]{7} blocks in cache")?;
+    } else {
+        // Timeout the test if we're somehow accidentally using a cached state in our temp dir
+        lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache")?;
+    }
 
     // getblock with the first Sapling block in Zebra's state
     //
@@ -1267,25 +1290,40 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     //
     // The log also depends on what is in Zebra's state:
     //
+    // # Cached Zebra State
+    //
+    // lightwalletd ingests blocks into its cache.
+    //
     // # Empty Zebra State
     //
     // lightwalletd tries to download the Sapling activation block, but it's not in the state.
     //
-    // Until the Sapling activation block has been downloaded, lightwalletd will log Zebra's RPC error:
-    // "error requesting block: 0: Block not found"
-    // We also get a similar log when lightwalletd reaches the end of Zebra's cache.
-    //
-    // # Cached Zebra State
-    //
-    // After the first successful getblock call, lightwalletd will log:
-    // "Block hash changed, clearing mempool clients"
-    // But we can't check for that, because it can come before or after the Ingestor log.
-    //
-    // TODO: expect Ingestor log when we're using cached state (#3511)
-    //       "Ingestor adding block to cache"
-    lightwalletd.expect_stdout_line_matches(regex::escape(
-        "Waiting for zcashd height to reach Sapling activation height (419200)",
-    ))?;
+    // Until the Sapling activation block has been downloaded,
+    // lightwalletd will keep retrying getblock.
+    if test_type.needs_zebra_cached_state() {
+        lightwalletd.expect_stdout_line_matches(regex::escape("Ingestor adding block to cache"))?;
+    } else {
+        lightwalletd.expect_stdout_line_matches(regex::escape(
+            "Waiting for zcashd height to reach Sapling activation height (419200)",
+        ))?;
+    }
+
+    if test_type == UpdateCachedState || test_type == FullSyncFromGenesis {
+        // Wait for Zebra to sync its cached state to the chain tip
+        zebrad.expect_stdout_line_matches(regex::escape("sync_percent=100"))?;
+
+        // Wait for lightwalletd to sync to Zebra's tip
+        lightwalletd.expect_stdout_line_matches(regex::escape("Ingestor adding block to cache"))?;
+
+        // lightwalletd doesn't log anything when we've reached the tip.
+        // But when it gets near the tip, it starts using the mempool.
+        //
+        // TODO: check that lightwalletd has ingested Zebra's tip block (or higher)
+        lightwalletd.expect_stdout_line_matches(regex::escape(
+            "Block hash changed, clearing mempool clients",
+        ))?;
+        lightwalletd.expect_stdout_line_matches(regex::escape("Adding new mempool txid"))?;
+    }
 
     // Cleanup both processes
     lightwalletd.kill()?;
