@@ -1190,6 +1190,11 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     }
 
     // Launch zebrad
+    //
+    // Handle the state directory based on the test type:
+    // - LaunchWithEmptyState: ignore the state directory
+    // - FullSyncFromGenesis & UpdateCachedState:
+    //   skip the test if it is not available, timeout if it is not populated
 
     // Write a configuration that has RPC listen_addr set.
     // If the state path env var is set, use it in the config.
@@ -1212,6 +1217,13 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
             NO_MATCHES_REGEX_ITER.iter().cloned(),
         );
 
+    if test_type.needs_zebra_cached_state() {
+        zebrad.expect_stdout_line_matches(r"loaded Zebra state cache tip=.*Height\([0-9]{7}\)")?;
+    } else {
+        // Timeout the test if we're somehow accidentally using a cached state
+        zebrad.expect_stdout_line_matches("loaded Zebra state cache tip=None")?;
+    }
+
     // Wait until `zebrad` has opened the RPC endpoint
     zebrad.expect_stdout_line_matches(
         format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
@@ -1224,23 +1236,27 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     let ldir = ldir.with_lightwalletd_config(config.rpc.listen_addr.unwrap())?;
 
     // Launch the lightwalletd process
+    //
+    // Handle the state directory based on the test type:
+    // - LaunchWithEmptyState: ignore the state directory
+    // - FullSyncFromGenesis: use it if available, timeout if it is already populated
+    // - UpdateCachedState: skip the test if it is not available, timeout if it is not populated
     let lightwalletd_state_path = test_type.lightwalletd_state_path();
+
     if test_type.needs_lightwalletd_cached_state() && lightwalletd_state_path.is_none() {
         tracing::info!(
-            r#"skipped {test_type:?} lightwalletd test, \
-             set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test"#,
+            "skipped {test_type:?} lightwalletd test, \
+             set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
         );
 
         return Ok(());
     }
 
-    // Use the lightwalletd state path if the env var is set:
-    // - UpdateCachedState tests expect the state to be already populated,
-    // - FullSyncFromGenesis tests expect an empty state.
-    //
-    // Otherwise, use a random empty state directory:
-    // - LaunchWithEmptyState and FullSyncFromGenesis tests expect an empty state.
-    let lightwalletd = ldir.spawn_lightwalletd_child(lightwalletd_state_path, args![])?;
+    let lightwalletd = if test_type == LaunchWithEmptyState {
+        ldir.spawn_lightwalletd_child(None, args![])?
+    } else {
+        ldir.spawn_lightwalletd_child(lightwalletd_state_path, args![])?
+    };
 
     let mut lightwalletd_failure_messages: Vec<String> = LIGHTWALLETD_FAILURE_MESSAGES
         .iter()
