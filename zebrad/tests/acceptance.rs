@@ -1204,10 +1204,18 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         return Ok(());
     };
 
+    let zebrad_timeout = if test_type == FullSyncFromGenesis || test_type == UpdateCachedState {
+        // Allow Zebra enough time to sync to the tip, from a cache that is a few days old
+        Duration::from_secs(10 * 60)
+    } else {
+        // Zebra is starting from an empty state, and only needs to load the genesis block
+        LAUNCH_DELAY
+    };
+
     let zdir = testdir()?.with_exact_config(&config)?;
     let mut zebrad = zdir
         .spawn_child(args!["start"])?
-        .with_timeout(LAUNCH_DELAY)
+        .with_timeout(zebrad_timeout)
         .with_failure_regex_iter(
             // TODO: replace with a function that returns the full list and correct return type
             ZEBRA_FAILURE_MESSAGES
@@ -1225,9 +1233,9 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     }
 
     // Wait until `zebrad` has opened the RPC endpoint
-    zebrad.expect_stdout_line_matches(
+    zebrad.expect_stdout_line_matches(regex::escape(
         format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
-    )?;
+    ))?;
 
     // Launch lightwalletd
 
@@ -1269,8 +1277,13 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     }
 
     let lightwalletd_timeout = if test_type == FullSyncFromGenesis {
+        // Allow lightwalletd enough time to sync to the tip, from an empty state
         Duration::from_secs(60 * 60)
+    } else if test_type == UpdateCachedState {
+        // Allow Zebra and lightwalletd enough time to sync to the tip, from caches that are a few days old
+        Duration::from_secs(10 * 60)
     } else {
+        // Allow lightwalletd enough time to sync to the tip, from a cache that is a few days old
         LIGHTWALLETD_DELAY
     };
 
@@ -1284,7 +1297,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         );
 
     // Wait until `lightwalletd` has launched
-    lightwalletd.expect_stdout_line_matches("Starting gRPC server")?;
+    lightwalletd.expect_stdout_line_matches(regex::escape("Starting gRPC server"))?;
 
     // Check that `lightwalletd` is calling the expected Zebra RPCs
 
