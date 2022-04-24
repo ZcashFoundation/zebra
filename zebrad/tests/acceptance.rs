@@ -1225,26 +1225,6 @@ fn lightwalletd_integration_test(
 
     tracing::info!(?test_type, "running lightwalletd & zebrad integration test");
 
-    // Get the process log checking timeouts
-    let zebrad_timeout = if test_type == FullSyncFromGenesis || test_type == UpdateCachedState {
-        // Allow Zebra enough time to sync to the tip, from a cache that is a few days old
-        Duration::from_secs(10 * 60)
-    } else {
-        // Zebra is starting from an empty state, and only needs to load the genesis block
-        LAUNCH_DELAY
-    };
-
-    let lightwalletd_timeout = if test_type == FullSyncFromGenesis {
-        // Allow lightwalletd enough time to sync to the tip, from an empty state
-        Duration::from_secs(60 * 60)
-    } else if test_type == UpdateCachedState {
-        // Allow Zebra and lightwalletd enough time to sync to the tip, from caches that are a few days old
-        Duration::from_secs(10 * 60)
-    } else {
-        // Allow lightwalletd enough time to sync to the tip, from a cache that is a few days old
-        LIGHTWALLETD_DELAY
-    };
-
     // Get the process failure log checks
     let mut zebrad_failure_messages: Vec<String> = ZEBRA_FAILURE_MESSAGES
         .iter()
@@ -1295,7 +1275,7 @@ fn lightwalletd_integration_test(
     let zdir = testdir()?.with_exact_config(&config)?;
     let mut zebrad = zdir
         .spawn_child(args!["start"])?
-        .with_timeout(zebrad_timeout)
+        .with_timeout(test_type.zebrad_timeout())
         .with_failure_regex_iter(
             // TODO: replace with a function that returns the full list and correct return type
             zebrad_failure_messages,
@@ -1328,7 +1308,7 @@ fn lightwalletd_integration_test(
     };
 
     let mut lightwalletd = lightwalletd
-        .with_timeout(lightwalletd_timeout)
+        .with_timeout(test_type.lightwalletd_timeout())
         .with_failure_regex_iter(
             // TODO: replace with a function that returns the full list and correct return type
             lightwalletd_failure_messages,
