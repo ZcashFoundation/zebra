@@ -1390,8 +1390,8 @@ fn lightwalletd_integration_test(
         zebrad.expect_stdout_line_matches(regex::escape("sync_percent=100"))?;
 
         // Wait for lightwalletd to sync to Zebra's tip
-        lightwalletd.expect_stdout_line_matches(regex::escape("Ingestor adding block to cache"))?;
         lightwalletd.expect_stdout_line_matches(regex::escape("Ingestor waiting for block"))?;
+
         // Check Zebra is still at the tip (also clears and prints Zebra's logs)
         zebrad.expect_stdout_line_matches(regex::escape("sync_percent=100"))?;
 
