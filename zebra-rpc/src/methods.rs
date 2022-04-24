@@ -745,8 +745,9 @@ where
             };
 
             let orchard_tree = match orchard_response {
-                zebra_state::ReadResponse::OrchardTree(Some(tree)) => Some((*tree).clone()),
-                zebra_state::ReadResponse::OrchardTree(None) => None,
+                zebra_state::ReadResponse::OrchardTree(maybe_tree) => {
+                    orchard::tree::SerializedTree::from(maybe_tree)
+                }
                 _ => unreachable!("unmatched response to an orchard tree request"),
             };
 
@@ -924,8 +925,8 @@ pub struct GetTreestate {
     time: DateTime<Utc>,
     #[serde(with = "hex")]
     sapling_tree: sapling::tree::SerializedTree,
-    // TODO: change this member to `SerializedTree`, and add `hex`.
-    orchard_tree: Option<orchard::tree::NoteCommitmentTree>,
+    #[serde(with = "hex")]
+    orchard_tree: orchard::tree::SerializedTree,
 }
 
 /// Response to a `getrawtransaction` RPC request.
