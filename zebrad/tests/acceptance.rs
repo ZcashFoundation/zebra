@@ -1379,7 +1379,6 @@ fn zebra_state_conflict() -> Result<()> {
         let mut dir_conflict_full = PathBuf::new();
         dir_conflict_full.push(dir_conflict.path());
         dir_conflict_full.push("state");
-        dir_conflict_full.push("state");
         dir_conflict_full.push(format!(
             "v{}",
             zebra_state::constants::DATABASE_FORMAT_VERSION
