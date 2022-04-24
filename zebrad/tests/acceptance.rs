@@ -1121,7 +1121,7 @@ const LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES: &[&str] = &[
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_integration() -> Result<()> {
-    lightwalletd_integration_test(LaunchWithEmptyState)
+    lightwalletd_integration_test(LaunchWithEmptyState, false)
 }
 
 /// Make sure `lightwalletd` can sync from Zebra, in update sync mode.
@@ -1136,7 +1136,7 @@ fn lightwalletd_integration() -> Result<()> {
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_update_sync() -> Result<()> {
-    lightwalletd_integration_test(UpdateCachedState)
+    lightwalletd_integration_test(UpdateCachedState, false)
 }
 
 /// Make sure `lightwalletd` can fully sync from genesis using Zebra.
@@ -1149,7 +1149,7 @@ fn lightwalletd_update_sync() -> Result<()> {
 #[ignore]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_full_sync() -> Result<()> {
-    lightwalletd_integration_test(FullSyncFromGenesis)
+    lightwalletd_integration_test(FullSyncFromGenesis, false)
 }
 
 /// Make sure `lightwalletd` can sync from Zebra, in all available modes.
@@ -1164,22 +1164,28 @@ fn lightwalletd_full_sync() -> Result<()> {
 #[ignore]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_test_suite() -> Result<()> {
-    lightwalletd_integration_test(LaunchWithEmptyState)?;
+    lightwalletd_integration_test(LaunchWithEmptyState, false)?;
+
+    // Only runs when ZEBRA_CACHED_STATE_PATH is set.
+    // When manually running the test suite, allow cached state in the full sync test.
+    lightwalletd_integration_test(FullSyncFromGenesis, true)?;
 
     // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_PATH are set
-    lightwalletd_integration_test(UpdateCachedState)?;
-
-    // Only runs when ZEBRA_CACHED_STATE_PATH is set
-    lightwalletd_integration_test(FullSyncFromGenesis)?;
+    lightwalletd_integration_test(UpdateCachedState, false)?;
 
     Ok(())
 }
 
 /// Run a lightwalletd integration test with a configuration for `test_type`.
 ///
+/// Set `allow_cached_state_for_full_sync` to speed up manual full sync tests.
+///
 /// The random ports in this test can cause [rare port conflicts.](#Note on port conflict)
 #[cfg(not(target_os = "windows"))]
-fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> {
+fn lightwalletd_integration_test(
+    test_type: LightwalletdTestType,
+    allow_cached_state_for_full_sync: bool,
+) -> Result<()> {
     zebra_test::init();
 
     // Skip the test unless the user specifically asked for it
@@ -1217,7 +1223,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         return Ok(());
     }
 
-    info!(?test_type, "running lightwalletd & zebrad integration test");
+    tracing::info!(?test_type, "running lightwalletd & zebrad integration test");
 
     // Get the process log checking timeouts
     let zebrad_timeout = if test_type == FullSyncFromGenesis || test_type == UpdateCachedState {
@@ -1349,7 +1355,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     if test_type.needs_lightwalletd_cached_state() {
         // TODO: expect `[0-9]{7}` when we're using the tip cached state (#4155)
         lightwalletd.expect_stdout_line_matches("Found [0-9]{6,7} blocks in cache")?;
-    } else {
+    } else if !allow_cached_state_for_full_sync {
         // Timeout the test if we're somehow accidentally using a cached state in our temp dir
         lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache")?;
     }
