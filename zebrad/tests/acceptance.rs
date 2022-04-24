@@ -1187,9 +1187,9 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         return Ok(());
     }
 
-    // Launch zebrad
-    //
-    // Handle the state directory based on the test type:
+    // Get the zebrad and lightwalletd configs
+
+    // Handle the Zebra state directory based on the test type:
     // - LaunchWithEmptyState: ignore the state directory
     // - FullSyncFromGenesis & UpdateCachedState:
     //   skip the test if it is not available, timeout if it is not populated
@@ -1202,6 +1202,24 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         return Ok(());
     };
 
+    // Handle the lightwalletd state directory based on the test type:
+    // - LaunchWithEmptyState: ignore the state directory
+    // - FullSyncFromGenesis: use it if available, timeout if it is already populated
+    // - UpdateCachedState: skip the test if it is not available, timeout if it is not populated
+    let lightwalletd_state_path = test_type.lightwalletd_state_path();
+
+    if test_type.needs_lightwalletd_cached_state() && lightwalletd_state_path.is_none() {
+        tracing::info!(
+            "skipped {test_type:?} lightwalletd test, \
+             set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
+        );
+
+        return Ok(());
+    }
+
+    info!(?test_type, "running lightwalletd & zebrad integration test");
+
+    // Get the process log checking timeouts
     let zebrad_timeout = if test_type == FullSyncFromGenesis || test_type == UpdateCachedState {
         // Allow Zebra enough time to sync to the tip, from a cache that is a few days old
         Duration::from_secs(10 * 60)
@@ -1210,6 +1228,18 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         LAUNCH_DELAY
     };
 
+    let lightwalletd_timeout = if test_type == FullSyncFromGenesis {
+        // Allow lightwalletd enough time to sync to the tip, from an empty state
+        Duration::from_secs(60 * 60)
+    } else if test_type == UpdateCachedState {
+        // Allow Zebra and lightwalletd enough time to sync to the tip, from caches that are a few days old
+        Duration::from_secs(10 * 60)
+    } else {
+        // Allow lightwalletd enough time to sync to the tip, from a cache that is a few days old
+        LIGHTWALLETD_DELAY
+    };
+
+    // Get the process failure log checks
     let mut zebrad_failure_messages: Vec<String> = ZEBRA_FAILURE_MESSAGES
         .iter()
         .chain(PROCESS_FAILURE_MESSAGES)
@@ -1226,6 +1256,36 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
             .push(r"loaded Zebra state cache tip=.*Height\([1-9][0-9]*\)".to_string());
     }
 
+    let mut lightwalletd_failure_messages: Vec<String> = LIGHTWALLETD_FAILURE_MESSAGES
+        .iter()
+        .chain(PROCESS_FAILURE_MESSAGES)
+        .map(ToString::to_string)
+        .collect();
+
+    if test_type.needs_zebra_cached_state() {
+        // Fail if we need a cached Zebra state, but it's empty
+        lightwalletd_failure_messages.push("No Chain tip available yet".to_string());
+    }
+    if test_type.needs_lightwalletd_cached_state() {
+        // Fail if we need a cached lightwalletd state, but it isn't near the tip
+        lightwalletd_failure_messages
+            .push("Got sapling height 419200 block height [0-9]{1,6} chain main".to_string());
+    }
+    if test_type == FullSyncFromGenesis && !allow_cached_state_for_full_sync {
+        // Fail if we need an empty lightwalletd state, but it has blocks
+        lightwalletd_failure_messages
+            .push("Got sapling height 419200 block height [1-9][0-9]* chain main".to_string());
+    }
+
+    let lightwalletd_ignore_messages = if test_type == LaunchWithEmptyState {
+        LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES
+            .iter()
+            .cloned()
+    } else {
+        NO_MATCHES_REGEX_ITER.iter().cloned()
+    };
+
+    // Launch zebrad
     let zdir = testdir()?.with_exact_config(&config)?;
     let mut zebrad = zdir
         .spawn_child(args!["start"])?
@@ -1255,66 +1315,10 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     let ldir = ldir.with_lightwalletd_config(config.rpc.listen_addr.unwrap())?;
 
     // Launch the lightwalletd process
-    //
-    // Handle the state directory based on the test type:
-    // - LaunchWithEmptyState: ignore the state directory
-    // - FullSyncFromGenesis: use it if available, timeout if it is already populated
-    // - UpdateCachedState: skip the test if it is not available, timeout if it is not populated
-    let lightwalletd_state_path = test_type.lightwalletd_state_path();
-
-    if test_type.needs_lightwalletd_cached_state() && lightwalletd_state_path.is_none() {
-        tracing::info!(
-            "skipped {test_type:?} lightwalletd test, \
-             set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
-        );
-
-        return Ok(());
-    }
-
     let lightwalletd = if test_type == LaunchWithEmptyState {
         ldir.spawn_lightwalletd_child(None, args![])?
     } else {
         ldir.spawn_lightwalletd_child(lightwalletd_state_path, args![])?
-    };
-
-    let mut lightwalletd_failure_messages: Vec<String> = LIGHTWALLETD_FAILURE_MESSAGES
-        .iter()
-        .chain(PROCESS_FAILURE_MESSAGES)
-        .map(ToString::to_string)
-        .collect();
-
-    if test_type.needs_zebra_cached_state() {
-        // Fail if we need a cached Zebra state, but it's empty
-        lightwalletd_failure_messages.push("No Chain tip available yet".to_string());
-    }
-    if test_type.needs_lightwalletd_cached_state() {
-        // Fail if we need a cached lightwalletd state, but it isn't near the tip
-        lightwalletd_failure_messages
-            .push("Got sapling height 419200 block height [0-9]{1,6} chain main".to_string());
-    }
-    if test_type == FullSyncFromGenesis {
-        // Fail if we need an empty lightwalletd state, but it has blocks
-        lightwalletd_failure_messages
-            .push("Got sapling height 419200 block height [1-9][0-9]* chain main".to_string());
-    }
-
-    let lightwalletd_timeout = if test_type == FullSyncFromGenesis {
-        // Allow lightwalletd enough time to sync to the tip, from an empty state
-        Duration::from_secs(60 * 60)
-    } else if test_type == UpdateCachedState {
-        // Allow Zebra and lightwalletd enough time to sync to the tip, from caches that are a few days old
-        Duration::from_secs(10 * 60)
-    } else {
-        // Allow lightwalletd enough time to sync to the tip, from a cache that is a few days old
-        LIGHTWALLETD_DELAY
-    };
-
-    let lightwalletd_ignore_messages = if test_type == LaunchWithEmptyState {
-        LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES
-            .iter()
-            .cloned()
-    } else {
-        NO_MATCHES_REGEX_ITER.iter().cloned()
     };
 
     let mut lightwalletd = lightwalletd
