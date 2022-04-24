@@ -54,7 +54,7 @@ use common::{
     lightwalletd::{
         random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
         LightwalletdTestType::{self, *},
-        LIGHTWALLETD_TEST_TIMEOUT,
+        LIGHTWALLETD_DATA_DIR_VAR, LIGHTWALLETD_TEST_TIMEOUT,
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
@@ -1178,6 +1178,8 @@ fn lightwalletd_test_suite() -> Result<()> {
 }
 
 /// Run a lightwalletd integration test with a configuration for `test_type`.
+///
+/// The random ports in this test can cause [rare port conflicts.](#Note on port conflict)
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> {
     zebra_test::init();
@@ -1189,8 +1191,8 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
 
     // Launch zebrad
 
-    // Write a configuration that has RPC listen_addr set
-    // [Note on port conflict](#Note on port conflict)
+    // Write a configuration that has RPC listen_addr set.
+    // If the state path env var is set, use it in the config.
     let config = if let Some(config) = test_type.zebrad_config() {
         config?
     } else {
@@ -1222,17 +1224,23 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     let ldir = ldir.with_lightwalletd_config(config.rpc.listen_addr.unwrap())?;
 
     // Launch the lightwalletd process
-    let lightwalletd = if test_type.needs_lightwalletd_cached_state() {
-        let lightwalletd_state_path = test_type.lightwalletd_state_path();
+    let lightwalletd_state_path = test_type.lightwalletd_state_path();
+    if test_type.needs_lightwalletd_cached_state() && lightwalletd_state_path.is_none() {
+        tracing::info!(
+            r#"skipped {test_type:?} lightwalletd test, \
+             set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test"#,
+        );
 
-        if lightwalletd_state_path.is_none() {
-            return Ok(());
-        }
+        return Ok(());
+    }
 
-        ldir.spawn_lightwalletd_child(lightwalletd_state_path, args![])?
-    } else {
-        ldir.spawn_lightwalletd_child(None, args![])?
-    };
+    // Use the lightwalletd state path if the env var is set:
+    // - UpdateCachedState tests expect the state to be already populated,
+    // - FullSyncFromGenesis tests expect an empty state.
+    //
+    // Otherwise, use a random empty state directory:
+    // - LaunchWithEmptyState and FullSyncFromGenesis tests expect an empty state.
+    let lightwalletd = ldir.spawn_lightwalletd_child(lightwalletd_state_path, args![])?;
 
     let mut lightwalletd_failure_messages: Vec<String> = LIGHTWALLETD_FAILURE_MESSAGES
         .iter()

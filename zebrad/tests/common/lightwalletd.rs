@@ -283,16 +283,6 @@ impl LightwalletdTestType {
 
     /// Returns the lightwalletd state path for this test, if set.
     pub fn lightwalletd_state_path(&self) -> Option<PathBuf> {
-        match env::var_os(LIGHTWALLETD_DATA_DIR_VAR) {
-            Some(path) => Some(path.into()),
-            None => {
-                tracing::info!(
-                    "skipped {self:?} lightwalletd test, \
-                     set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
-                );
-
-                None
-            }
-        }
+        env::var_os(LIGHTWALLETD_DATA_DIR_VAR).map(Into::into)
     }
 }
