@@ -13,7 +13,8 @@ use zebra_chain::{
 // will work with inline links.
 #[allow(unused_imports)]
 use crate::Request;
-use crate::TransactionLocation;
+
+use crate::{service::read::AddressUtxos, TransactionLocation};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`] [`Request`].
@@ -62,4 +63,7 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::TransactionIdsByAddresses`] with the obtained transaction ids,
     /// in the order they appear in blocks.
     AddressesTransactionIds(BTreeMap<TransactionLocation, transaction::Hash>),
+
+    /// Response to [`ReadRequest::UtxosByAddresses`] with found utxos and transaction data.
+    Utxos(AddressUtxos),
 }

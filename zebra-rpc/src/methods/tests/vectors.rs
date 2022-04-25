@@ -337,12 +337,15 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 1;
     let end: u32 = 2;
     let error = rpc
-        .get_address_tx_ids(addresses, start, end)
+        .get_address_tx_ids(AddressStrings::new(addresses), start, end)
         .await
         .unwrap_err();
     assert_eq!(
         error.message,
-        format!("Provided address is not valid: {}", address)
+        format!(
+            "invalid address \"{}\": parse error: t-addr decoding error",
+            address
+        )
     );
 
     // create a valid address
@@ -353,7 +356,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 2;
     let end: u32 = 1;
     let error = rpc
-        .get_address_tx_ids(addresses.clone(), start, end)
+        .get_address_tx_ids(AddressStrings::new(addresses.clone()), start, end)
         .await
         .unwrap_err();
     assert_eq!(
@@ -365,7 +368,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 0;
     let end: u32 = 1;
     let error = rpc
-        .get_address_tx_ids(addresses.clone(), start, end)
+        .get_address_tx_ids(AddressStrings::new(addresses.clone()), start, end)
         .await
         .unwrap_err();
     assert_eq!(
@@ -377,7 +380,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 1;
     let end: u32 = 11;
     let error = rpc
-        .get_address_tx_ids(addresses, start, end)
+        .get_address_tx_ids(AddressStrings::new(addresses), start, end)
         .await
         .unwrap_err();
     assert_eq!(
@@ -456,7 +459,7 @@ async fn rpc_getaddresstxids_response_with(
     // call the method with valid arguments
     let addresses = vec![address.to_string()];
     let response = rpc
-        .get_address_tx_ids(addresses, *range.start(), *range.end())
+        .get_address_tx_ids(AddressStrings::new(addresses), *range.start(), *range.end())
         .await
         .expect("arguments are valid so no error can happen here");
 
@@ -481,4 +484,82 @@ async fn rpc_getaddresstxids_response_with(
                 .unwrap_err()
                 .is_cancelled()
     );
+}
+
+#[tokio::test]
+async fn rpc_getaddressutxos_invalid_arguments() {
+    zebra_test::init();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let rpc = RpcImpl::new(
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        NoChainTip,
+        Mainnet,
+    );
+
+    // call the method with an invalid address string
+    let address = "11111111".to_string();
+    let addresses = vec![address.clone()];
+    let error = rpc
+        .0
+        .get_address_utxos(AddressStrings::new(addresses))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        format!(
+            "invalid address \"{}\": parse error: t-addr decoding error",
+            address
+        )
+    );
+
+    mempool.expect_no_requests().await;
+    state.expect_no_requests().await;
+}
+
+#[tokio::test]
+async fn rpc_getaddressutxos_response() {
+    zebra_test::init();
+
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // get the first transaction of the first block
+    let first_block_first_transaction = &blocks[1].transactions[0];
+    // get the address, this is always `t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd`
+    let address = &first_block_first_transaction.outputs()[1]
+        .address(Mainnet)
+        .unwrap();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    let rpc = RpcImpl::new(
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        latest_chain_tip,
+        Mainnet,
+    );
+
+    // call the method with a valid address
+    let addresses = vec![address.to_string()];
+    let response = rpc
+        .0
+        .get_address_utxos(AddressStrings::new(addresses))
+        .await
+        .expect("address is valid so no error can happen here");
+
+    // there are 10 outputs for provided address
+    assert_eq!(response.len(), 10);
+
+    mempool.expect_no_requests().await;
 }
