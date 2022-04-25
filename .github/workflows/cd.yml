@@ -31,7 +31,7 @@ jobs:
       # TODO validate if CARGO_INCREMENTAL should be added at build time
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
-      image_name: zebrad-test
+      image_name: main
       image_label_gar: us-docker.pkg.dev/zealous-zebra/zebra
       image_label_gcr: gcr.io/zealous-zebra/zcashfoundation-zebra
       cache_label: us-docker.pkg.dev/zealous-zebra/zebra
