@@ -357,19 +357,22 @@ impl LightwalletdTestType {
             .map(ToString::to_string)
             .collect();
 
+        // Zebra state failures
         if self.needs_zebra_cached_state() {
             // Fail if we need a cached Zebra state, but it's empty
             lightwalletd_failure_messages.push("No Chain tip available yet".to_string());
         }
+
+        // lightwalletd state failures
         if self.needs_lightwalletd_cached_state() {
             // Fail if we need a cached lightwalletd state, but it isn't near the tip
-            lightwalletd_failure_messages
-                .push("Got sapling height 419200 block height [0-9]{1,6} chain main".to_string());
+            //
+            // TODO: fail on `[0-9]{1,6}` when we're using the tip cached state (#4155)
+            lightwalletd_failure_messages.push("Found [0-9]{1,5} blocks in cache".to_string());
         }
         if !self.allow_lightwalletd_cached_state() {
             // Fail if we need an empty lightwalletd state, but it has blocks
-            lightwalletd_failure_messages
-                .push("Got sapling height 419200 block height [1-9][0-9]* chain main".to_string());
+            lightwalletd_failure_messages.push("Found [1-9][0-9]* blocks in cache".to_string());
         }
 
         let lightwalletd_ignore_messages = if *self == LaunchWithEmptyState {
