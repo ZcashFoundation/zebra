@@ -19,20 +19,20 @@ To create checkpoints, you need a synchronized instance of `zcashd`, and the `zc
 `zebra-checkpoints` is a standalone rust binary, you can compile it using:
 
 ```sh
-cargo install --locked --git https://github.com/ZcashFoundation/zebra zebra-utils 
+cargo install --locked --git https://github.com/ZcashFoundation/zebra zebra-utils
 ```
 
 Then update the checkpoints using these commands:
 ```sh
-zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/main-checkpoints.txt | cut -d" " -f1) | tee /dev/stderr >> zebra-consensus/src/checkpoint/main-checkpoints.txt &
-zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/test-checkpoints.txt | cut -d" " -f1) -- -testnet | tee /dev/stderr >> zebra-consensus/src/checkpoint/test-checkpoints.txt &
+zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/main-checkpoints.txt | cut -d" " -f1) | tee --append zebra-consensus/src/checkpoint/main-checkpoints.txt &
+zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/test-checkpoints.txt | cut -d" " -f1) -- -testnet | tee --append zebra-consensus/src/checkpoint/test-checkpoints.txt &
 wait
 ```
 
 You can see all the `zebra-checkpoints` options using:
 
 ```sh
-./target/release/zebra-checkpoints --help
+target/release/zebra-checkpoints --help
 ```
 
 For more details, see the [`zebra-checkpoints` README.](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint/README.md)
