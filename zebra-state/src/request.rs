@@ -462,4 +462,9 @@ pub enum ReadRequest {
         /// The blocks to be queried for transactions.
         height_range: RangeInclusive<block::Height>,
     },
+
+    /// Looks up utxos for the provided addresses.
+    ///
+    /// Returns a type with found utxos and transaction information.
+    UtxosByAddresses(HashSet<transparent::Address>),
 }
