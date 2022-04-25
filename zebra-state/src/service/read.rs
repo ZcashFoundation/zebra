@@ -466,7 +466,7 @@ where
 {
     let mut tx_id_error = None;
 
-    // Retry the finalized tx ID query if it was interruped by a finalizing block,
+    // Retry the finalized tx ID query if it was interrupted by a finalizing block,
     // and the non-finalized chain doesn't overlap the changed heights.
     for _ in 0..=FINALIZED_ADDRESS_INDEX_RETRIES {
         let (finalized_tx_ids, finalized_tip_range) =
@@ -627,7 +627,7 @@ fn apply_tx_id_changes(
     chain_tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
 ) -> BTreeMap<TransactionLocation, transaction::Hash> {
     // Correctness: compensate for inconsistent tx IDs finalized blocks across multiple addresses,
-    // by combining them with overalapping non-finalized block tx IDs.
+    // by combining them with overlapping non-finalized block tx IDs.
     finalized_tx_ids
         .into_iter()
         .chain(chain_tx_ids.into_iter())
