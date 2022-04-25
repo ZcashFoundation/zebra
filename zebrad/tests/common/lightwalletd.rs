@@ -221,12 +221,17 @@ pub enum LightwalletdTestType {
 
     /// Do a full sync from an empty lightwalletd state.
     ///
-    /// This test is much faster if it has a cached Zebra state.
-    FullSyncFromGenesis,
+    /// This test requires a cached Zebra state.
+    FullSyncFromGenesis {
+        /// Should the test allow a cached lightwalletd state?
+        ///
+        /// If `false`, the test fails if the lightwalletd state is populated.
+        allow_lightwalletd_cached_state: bool,
+    },
 
     /// Sync to tip from a lightwalletd cached state.
     ///
-    /// This test is much faster if it has a cached Zebra state.
+    /// This test requires a cached Zebra and lightwalletd state.
     UpdateCachedState,
 }
 
@@ -235,14 +240,25 @@ impl LightwalletdTestType {
     pub fn needs_zebra_cached_state(&self) -> bool {
         match self {
             LaunchWithEmptyState => false,
-            FullSyncFromGenesis | UpdateCachedState => true,
+            FullSyncFromGenesis { .. } | UpdateCachedState => true,
         }
     }
 
     /// Does this test need a lightwalletd cached state?
     pub fn needs_lightwalletd_cached_state(&self) -> bool {
         match self {
-            LaunchWithEmptyState | FullSyncFromGenesis => false,
+            LaunchWithEmptyState | FullSyncFromGenesis { .. } => false,
+            UpdateCachedState => true,
+        }
+    }
+
+    /// Does this test allow a lightwalletd cached state, even if it is not required?
+    pub fn allow_lightwalletd_cached_state(&self) -> bool {
+        match self {
+            LaunchWithEmptyState => false,
+            FullSyncFromGenesis {
+                allow_lightwalletd_cached_state,
+            } => *allow_lightwalletd_cached_state,
             UpdateCachedState => true,
         }
     }
@@ -295,7 +311,7 @@ impl LightwalletdTestType {
     pub fn zebrad_timeout(&self) -> Duration {
         match self {
             LaunchWithEmptyState => LIGHTWALLETD_DELAY,
-            FullSyncFromGenesis | UpdateCachedState => LIGHTWALLETD_UPDATE_TIP_DELAY,
+            FullSyncFromGenesis { .. } | UpdateCachedState => LIGHTWALLETD_UPDATE_TIP_DELAY,
         }
     }
 
@@ -304,7 +320,7 @@ impl LightwalletdTestType {
         match self {
             LaunchWithEmptyState => LIGHTWALLETD_DELAY,
             UpdateCachedState => LIGHTWALLETD_UPDATE_TIP_DELAY,
-            FullSyncFromGenesis => LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
+            FullSyncFromGenesis { .. } => LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
         }
     }
 
@@ -334,10 +350,7 @@ impl LightwalletdTestType {
 
     /// Returns `lightwalletd` log regexes that indicate the tests have failed,
     /// and regexes of any failures that should be ignored.
-    pub fn lightwalletd_failure_messages(
-        &self,
-        allow_cached_state_for_full_sync: bool,
-    ) -> (Vec<String>, Vec<String>) {
+    pub fn lightwalletd_failure_messages(&self) -> (Vec<String>, Vec<String>) {
         let mut lightwalletd_failure_messages: Vec<String> = LIGHTWALLETD_FAILURE_MESSAGES
             .iter()
             .chain(PROCESS_FAILURE_MESSAGES)
@@ -353,7 +366,7 @@ impl LightwalletdTestType {
             lightwalletd_failure_messages
                 .push("Got sapling height 419200 block height [0-9]{1,6} chain main".to_string());
         }
-        if *self == FullSyncFromGenesis && !allow_cached_state_for_full_sync {
+        if !self.allow_lightwalletd_cached_state() {
             // Fail if we need an empty lightwalletd state, but it has blocks
             lightwalletd_failure_messages
                 .push("Got sapling height 419200 block height [1-9][0-9]* chain main".to_string());

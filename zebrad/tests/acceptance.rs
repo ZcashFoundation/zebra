@@ -1001,7 +1001,7 @@ async fn rpc_endpoint() -> Result<()> {
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_integration() -> Result<()> {
-    lightwalletd_integration_test(LaunchWithEmptyState, false)
+    lightwalletd_integration_test(LaunchWithEmptyState)
 }
 
 /// Make sure `lightwalletd` can sync from Zebra, in update sync mode.
@@ -1016,7 +1016,7 @@ fn lightwalletd_integration() -> Result<()> {
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_update_sync() -> Result<()> {
-    lightwalletd_integration_test(UpdateCachedState, false)
+    lightwalletd_integration_test(UpdateCachedState)
 }
 
 /// Make sure `lightwalletd` can fully sync from genesis using Zebra.
@@ -1029,7 +1029,9 @@ fn lightwalletd_update_sync() -> Result<()> {
 #[ignore]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_full_sync() -> Result<()> {
-    lightwalletd_integration_test(FullSyncFromGenesis, false)
+    lightwalletd_integration_test(FullSyncFromGenesis {
+        allow_lightwalletd_cached_state: false,
+    })
 }
 
 /// Make sure `lightwalletd` can sync from Zebra, in all available modes.
@@ -1044,14 +1046,16 @@ fn lightwalletd_full_sync() -> Result<()> {
 #[ignore]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_test_suite() -> Result<()> {
-    lightwalletd_integration_test(LaunchWithEmptyState, false)?;
+    lightwalletd_integration_test(LaunchWithEmptyState)?;
 
     // Only runs when ZEBRA_CACHED_STATE_PATH is set.
     // When manually running the test suite, allow cached state in the full sync test.
-    lightwalletd_integration_test(FullSyncFromGenesis, true)?;
+    lightwalletd_integration_test(FullSyncFromGenesis {
+        allow_lightwalletd_cached_state: true,
+    })?;
 
     // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_PATH are set
-    lightwalletd_integration_test(UpdateCachedState, false)?;
+    lightwalletd_integration_test(UpdateCachedState)?;
 
     Ok(())
 }
@@ -1062,10 +1066,7 @@ fn lightwalletd_test_suite() -> Result<()> {
 ///
 /// The random ports in this test can cause [rare port conflicts.](#Note on port conflict)
 #[cfg(not(target_os = "windows"))]
-fn lightwalletd_integration_test(
-    test_type: LightwalletdTestType,
-    allow_cached_state_for_full_sync: bool,
-) -> Result<()> {
+fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> {
     zebra_test::init();
 
     // Skip the test unless the user specifically asked for it
@@ -1109,7 +1110,7 @@ fn lightwalletd_integration_test(
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 
     let (lightwalletd_failure_messages, lightwalletd_ignore_messages) =
-        test_type.lightwalletd_failure_messages(allow_cached_state_for_full_sync);
+        test_type.lightwalletd_failure_messages();
 
     // Launch zebrad
     let zdir = testdir()?.with_exact_config(&config)?;
@@ -1167,7 +1168,7 @@ fn lightwalletd_integration_test(
     if test_type.needs_lightwalletd_cached_state() {
         // TODO: expect `[0-9]{7}` when we're using the tip cached state (#4155)
         lightwalletd.expect_stdout_line_matches("Found [0-9]{6,7} blocks in cache")?;
-    } else if !allow_cached_state_for_full_sync {
+    } else if !test_type.allow_lightwalletd_cached_state() {
         // Timeout the test if we're somehow accidentally using a cached state in our temp dir
         lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache")?;
     }
@@ -1197,7 +1198,7 @@ fn lightwalletd_integration_test(
         ))?;
     }
 
-    if test_type == UpdateCachedState || test_type == FullSyncFromGenesis {
+    if matches!(test_type, UpdateCachedState | FullSyncFromGenesis { .. }) {
         // Wait for Zebra to sync its cached state to the chain tip
         zebrad.expect_stdout_line_matches(regex::escape("sync_percent=100"))?;
 
