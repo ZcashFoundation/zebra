@@ -51,13 +51,17 @@ opt-level = 1
 [profile.release]
 panic = "abort"
 
-# Speed up release syncs and sync tests by optimizing all release build code.
+# Speed up release builds and sync tests using link-time optimization.
 # Some of Zebra's code is CPU-intensive, and needs extra optimizations for peak performance.
 #
-# The `cc` crate automatically applies this setting when compiling C/C++ code:
-# https://docs.rs/cc/latest/cc/struct.Build.html#method.opt_level
-# https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-build-scripts
-opt-level = 3
+# TODO:
+# - add "-Clinker-plugin-lto" in .cargo/config.toml to speed up release builds
+#     - add "-Clinker=clang -Clink-arg=-fuse-ld=lld" in .cargo/config.toml
+# - also use LTO on C/C++ code:
+#     - use clang to compile all C/C++ code
+#     - add "-flto=thin" to all C/C++ code builds
+#     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
+lto = "thin"
 
 [patch.crates-io]
 
