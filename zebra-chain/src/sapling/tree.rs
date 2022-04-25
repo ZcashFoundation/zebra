@@ -433,12 +433,12 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
 /// compatible with [`Frontier`](bridgetree::Frontier) instead.
 pub struct SerializedTree(Vec<u8>);
 
-impl<Tree: AsRef<NoteCommitmentTree>> From<Tree> for SerializedTree {
-    fn from(tree: Tree) -> Self {
+impl From<&NoteCommitmentTree> for SerializedTree {
+    fn from(tree: &NoteCommitmentTree) -> Self {
         // Convert the note commitment tree from
         // [`Frontier`](bridgetree::Frontier) to
         // [`CommitmentTree`](merkle_tree::CommitmentTree).
-        let tree = CommitmentTree::from_frontier(&tree.as_ref().inner);
+        let tree = CommitmentTree::from_frontier(&tree.inner);
         let mut serialized_tree = vec![];
         tree.write(&mut serialized_tree)
             .expect("note commitment tree should be serializable");
@@ -449,7 +449,7 @@ impl<Tree: AsRef<NoteCommitmentTree>> From<Tree> for SerializedTree {
 impl From<Option<Arc<NoteCommitmentTree>>> for SerializedTree {
     fn from(maybe_tree: Option<Arc<NoteCommitmentTree>>) -> Self {
         match maybe_tree {
-            Some(tree) => Self::from(&tree),
+            Some(tree) => tree.as_ref().into(),
             None => Self(Vec::new()),
         }
     }
