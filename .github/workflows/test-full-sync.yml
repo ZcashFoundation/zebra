@@ -45,19 +45,13 @@ on:
       - '.github/workflows/test-full-sync.yml'
 
 env:
-  CARGO_INCREMENTAL: '1'
-  ZEBRA_SKIP_IPV6_TESTS: '1'
-  RUST_BACKTRACE: full
-  RUST_LIB_BACKTRACE: full
-  COLORBT_SHOW_HIDDEN: '1'
   NETWORK: Mainnet
   PROJECT_ID: zealous-zebra
+  IMAGE_NAME: zebrad-test
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
-  GCR_BASE: gcr.io/zealous-zebra
   REGION: us-central1
   ZONE: us-central1-a
   MACHINE_TYPE: c2d-standard-16
-  IMAGE_NAME: zebrad-test
 
 jobs:
   build:
@@ -68,6 +62,9 @@ jobs:
     # TODO: before merging change uses to ZcashFoundation/zebra/.github/workflows/docker-zebra-build.yml@main
     uses: ./.github/workflows/docker-zebra-build.yml
     with:
+      # TODO validate if CARGO_INCREMENTAL should be added at build time
+      dockerfile_path: ./docker/Dockerfile
+      dockerfile_target: tester
       image_name: zebrad-test
       image_label_gar: us-docker.pkg.dev/zealous-zebra/zebra
       image_label_gcr: gcr.io/zealous-zebra/zcashfoundation-zebra
@@ -77,7 +74,7 @@ jobs:
       rust_backtrace: full
       rust_lib_backtrace: full
       colorbt_show_hidden: '1'
-      zebra_skip_network_tests: '1'
+      zebra_skip_ipv6_tests: '1'
       rust_log: debug
 
   # Test that Zebra can run a full mainnet sync after a PR is approved
@@ -132,7 +129,7 @@ jobs:
           --container-restart-policy=never \
           --container-stdin \
           --container-tty \
-          --container-env=ZEBRA_SKIP_IPV6_TESTS=1,TEST_FULL_SYNC=1,ZEBRA_FORCE_USE_COLOR=1,FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 \
+          --container-env=TEST_FULL_SYNC=1,ZEBRA_FORCE_USE_COLOR=1,FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \

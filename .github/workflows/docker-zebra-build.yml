@@ -4,12 +4,18 @@ on:
   workflow_call:
     inputs:
       network:
-        required: true
+        required: false
         type: string
       checkpoint_sync:
-        required: true
+        required: false
         type: boolean
       image_name:
+        required: true
+        type: string
+      dockerfile_path:
+        required: true
+        type: string
+      dockerfile_target:
         required: true
         type: string
       image_label_gar:
@@ -25,19 +31,19 @@ on:
         required: false
         type: string
       rust_backtrace:
-        required: true
+        required: false
         type: string
       rust_lib_backtrace:
-        required: true
+        required: false
         type: string
       colorbt_show_hidden:
-        required: true
+        required: false
         type: string
-      zebra_skip_network_tests:
-        required: true
+      zebra_skip_ipv6_tests:
+        required: false
         type: string
       rust_log:
-        required: true
+        required: false
         type: string
 
 jobs:
@@ -109,9 +115,9 @@ jobs:
         id: docker_build
         uses: docker/build-push-action@v2.10.0
         with:
-          target: tester
+          target: ${{ inputs.dockerfile_target }}
           context: .
-          file: ./docker/Dockerfile
+          file: ${{ inputs.dockerfile_path }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
@@ -120,7 +126,7 @@ jobs:
             RUST_BACKTRACE=${{ inputs.rust_backtrace }}
             RUST_LIB_BACKTRACE=${{ inputs.rust_lib_backtrace }}
             COLORBT_SHOW_HIDDEN=${{ inputs.colorbt_show_hidden }}
-            ZEBRA_SKIP_NETWORK_TESTS=${{ inputs.zebra_skip_network_tests }}
+            ZEBRA_SKIP_IPV6_TESTS=${{ inputs.zebra_skip_ipv6_tests }}
             CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
           push: true
