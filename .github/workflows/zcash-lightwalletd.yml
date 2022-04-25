@@ -21,9 +21,7 @@ on:
       - '.github/workflows/zcash-lightwalletd.yml'
 
 env:
-  PROJECT_ID: zealous-zebra
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
-  GCR_BASE: gcr.io/zealous-zebra
   IMAGE_NAME: lightwalletd
 
 jobs:
