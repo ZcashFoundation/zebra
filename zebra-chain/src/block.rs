@@ -4,9 +4,9 @@ mod commitment;
 mod error;
 mod hash;
 mod header;
-mod height;
 mod serialize;
 
+pub mod height;
 pub mod merkle;
 
 #[cfg(any(test, feature = "proptest-impl"))]

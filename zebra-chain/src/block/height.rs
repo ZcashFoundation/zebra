@@ -1,8 +1,8 @@
 //! Block height.
 
-use crate::serialization::{SerializationError, ZcashDeserialize};
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
-use byteorder::{LittleEndian, ReadBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use std::{
     convert::TryFrom,
@@ -141,6 +141,31 @@ impl ZcashDeserialize for Height {
         }
 
         Ok(Self(height))
+    }
+}
+
+impl ZcashSerialize for Height {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_u32::<LittleEndian>(self.0)
+    }
+}
+
+/// A serialized [`Height`].
+pub struct SerializedHeight(Vec<u8>);
+
+impl From<&Height> for SerializedHeight {
+    fn from(height: &Height) -> Self {
+        Self(
+            height
+                .zcash_serialize_to_vec()
+                .expect("The block height should always be serializable."),
+        )
+    }
+}
+
+impl AsRef<[u8]> for SerializedHeight {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
     }
 }
 

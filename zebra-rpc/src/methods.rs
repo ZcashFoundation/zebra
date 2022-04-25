@@ -6,7 +6,7 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-use std::{collections::HashSet, io, sync::Arc};
+use std::{borrow::Borrow, collections::HashSet, io, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use futures::{FutureExt, TryFutureExt};
@@ -20,7 +20,7 @@ use tracing::Instrument;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Height, SerializedBlock},
+    block::{self, height::SerializedHeight, Height, SerializedBlock},
     chain_tip::ChainTip,
     orchard,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
@@ -744,7 +744,10 @@ where
             let hash = block.hash();
             let height = block
                 .coinbase_height()
-                .expect("verified blocks have a valid height");
+                .expect("verified blocks have a valid height")
+                .borrow()
+                .into();
+
             let time = block.header.time;
 
             let sapling_tree = match sapling_response {
@@ -994,12 +997,13 @@ pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
 /// Response to a `z_gettreestate` RPC request.
 ///
 /// Contains the hex-encoded Sapling & Orchard note commitment trees, and their
-/// corresponding [`block::Hash`], [`block::Height`] and block time.
+/// corresponding [`block::Hash`], [`Height`] and block time.
 #[derive(serde::Serialize)]
 pub struct GetTreestate {
     #[serde(with = "hex")]
     hash: block::Hash,
-    height: block::Height,
+    #[serde(with = "hex")]
+    height: SerializedHeight,
     time: DateTime<Utc>,
     #[serde(with = "hex")]
     sapling_tree: sapling::tree::SerializedTree,
