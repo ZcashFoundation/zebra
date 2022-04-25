@@ -23,9 +23,9 @@ use zebra_test::{
 };
 use zebrad::config::ZebradConfig;
 
-use crate::{
-    common::lightwalletd::random_known_rpc_port_config, PROCESS_FAILURE_MESSAGES,
-    ZEBRA_FAILURE_MESSAGES,
+use crate::common::{
+    failure_messages::{PROCESS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES},
+    lightwalletd::random_known_rpc_port_config,
 };
 
 /// After we launch `zebrad`, wait this long for the command to start up,

@@ -13,7 +13,7 @@ use std::{
 };
 
 use zebra_test::{
-    command::{Arguments, TestChild, TestDirExt},
+    command::{Arguments, TestChild, TestDirExt, NO_MATCHES_REGEX_ITER},
     net::random_known_port,
     prelude::*,
 };
@@ -21,6 +21,10 @@ use zebrad::config::ZebradConfig;
 
 use super::{
     config::{default_test_config, CACHED_STATE_PATH_VAR},
+    failure_messages::{
+        LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES, LIGHTWALLETD_FAILURE_MESSAGES,
+        PROCESS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES,
+    },
     launch::{
         ZebradTestDirExt, LIGHTWALLETD_DELAY, LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
         LIGHTWALLETD_UPDATE_TIP_DELAY,
@@ -302,5 +306,67 @@ impl LightwalletdTestType {
             UpdateCachedState => LIGHTWALLETD_UPDATE_TIP_DELAY,
             FullSyncFromGenesis => LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
         }
+    }
+
+    /// Returns Zebra log regexes that indicate the tests have failed,
+    /// and regexes of any failures that should be ignored.
+    pub fn zebrad_failure_messages(&self) -> (Vec<String>, Vec<String>) {
+        let mut zebrad_failure_messages: Vec<String> = ZEBRA_FAILURE_MESSAGES
+            .iter()
+            .chain(PROCESS_FAILURE_MESSAGES)
+            .map(ToString::to_string)
+            .collect();
+
+        if self.needs_zebra_cached_state() {
+            // Fail if we need a cached Zebra state, but it's empty
+            zebrad_failure_messages.push("loaded Zebra state cache tip=None".to_string());
+        }
+        if *self == LaunchWithEmptyState {
+            // Fail if we need an empty Zebra state, but it has blocks
+            zebrad_failure_messages
+                .push(r"loaded Zebra state cache tip=.*Height\([1-9][0-9]*\)".to_string());
+        }
+
+        let zebrad_ignore_messages = Vec::new();
+
+        (zebrad_failure_messages, zebrad_ignore_messages)
+    }
+
+    /// Returns `lightwalletd` log regexes that indicate the tests have failed,
+    /// and regexes of any failures that should be ignored.
+    pub fn lightwalletd_failure_messages(
+        &self,
+        allow_cached_state_for_full_sync: bool,
+    ) -> (Vec<String>, Vec<String>) {
+        let mut lightwalletd_failure_messages: Vec<String> = LIGHTWALLETD_FAILURE_MESSAGES
+            .iter()
+            .chain(PROCESS_FAILURE_MESSAGES)
+            .map(ToString::to_string)
+            .collect();
+
+        if self.needs_zebra_cached_state() {
+            // Fail if we need a cached Zebra state, but it's empty
+            lightwalletd_failure_messages.push("No Chain tip available yet".to_string());
+        }
+        if self.needs_lightwalletd_cached_state() {
+            // Fail if we need a cached lightwalletd state, but it isn't near the tip
+            lightwalletd_failure_messages
+                .push("Got sapling height 419200 block height [0-9]{1,6} chain main".to_string());
+        }
+        if *self == FullSyncFromGenesis && !allow_cached_state_for_full_sync {
+            // Fail if we need an empty lightwalletd state, but it has blocks
+            lightwalletd_failure_messages
+                .push("Got sapling height 419200 block height [1-9][0-9]* chain main".to_string());
+        }
+
+        let lightwalletd_ignore_messages = if *self == LaunchWithEmptyState {
+            LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES.iter()
+        } else {
+            NO_MATCHES_REGEX_ITER.iter()
+        }
+        .map(ToString::to_string)
+        .collect();
+
+        (lightwalletd_failure_messages, lightwalletd_ignore_messages)
     }
 }
