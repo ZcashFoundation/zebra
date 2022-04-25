@@ -51,7 +51,6 @@ on:
       - '.github/workflows/test.yml'
 
 env:
-  CARGO_INCREMENTAL: '1'
   NETWORK: Mainnet
   PROJECT_ID: zealous-zebra
   IMAGE_NAME: zebrad-test
@@ -69,9 +68,6 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: tester
       image_name: zebrad-test
-      image_label_gar: us-docker.pkg.dev/zealous-zebra/zebra
-      image_label_gcr: gcr.io/zealous-zebra/zcashfoundation-zebra
-      cache_label: us-docker.pkg.dev/zealous-zebra/zebra
       network: Mainnet
       checkpoint_sync: true
       rust_backtrace: full

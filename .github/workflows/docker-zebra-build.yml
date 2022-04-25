@@ -18,15 +18,6 @@ on:
       dockerfile_target:
         required: true
         type: string
-      image_label_gar:
-        required: true
-        type: string
-      image_label_gcr:
-        required: true
-        type: string
-      cache_label:
-        required: true
-        type: string
       short_sha:
         required: false
         type: string
@@ -71,8 +62,8 @@ jobs:
         with:
           # list of Docker images to use as base name for tags
           images: |
-            ${{ inputs.image_label_gar }}/${{ inputs.image_name }}
-            ${{ inputs.image_label_gcr }}/${{ inputs.image_name }}
+            us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}
+            gcr.io/zealous-zebra/zcashfoundation-zebra/${{ inputs.image_name }}
           # generate Docker tags based on the following events/attributes
           tags: |
             type=schedule
@@ -130,5 +121,5 @@ jobs:
             CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
           push: true
-          cache-from: type=registry,ref=${{ inputs.cache_label }}/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache
-          cache-to: type=registry,ref=${{ inputs.cache_label }}/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache,mode=max
+          cache-from: type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache
+          cache-to: type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache,mode=max

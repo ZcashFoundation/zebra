@@ -14,13 +14,6 @@ on:
       - 'docker/zcash-params/Dockerfile'
       - '.github/workflows/zcash-params.yml'
 
-env:
-  CARGO_INCREMENTAL: '1'
-  PROJECT_ID: zealous-zebra
-  GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
-  GCR_BASE: gcr.io/zealous-zebra
-  IMAGE_NAME: zcash-params
-
 jobs:
   build:
     # TODO: before merging change uses to ZcashFoundation/zebra/.github/workflows/docker-zebra-build.yml@main
@@ -29,9 +22,6 @@ jobs:
       dockerfile_path: ./docker/zcash-params/Dockerfile
       dockerfile_target: builder
       image_name: zcash-params
-      image_label_gar: us-docker.pkg.dev/zealous-zebra/zebra
-      image_label_gcr: gcr.io/zealous-zebra/zcashfoundation-zebra
-      cache_label: us-docker.pkg.dev/zealous-zebra/zebra
       network: Mainnet
       checkpoint_sync: true
       rust_backtrace: full

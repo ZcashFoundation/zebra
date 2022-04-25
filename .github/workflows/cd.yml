@@ -17,7 +17,6 @@ on:
 
 env:
   NETWORK: Mainnet
-  PROJECT_ID: zealous-zebra
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
   REGION: us-central1
   ZONE: us-central1-a
@@ -32,9 +31,6 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: main
-      image_label_gar: us-docker.pkg.dev/zealous-zebra/zebra
-      image_label_gcr: gcr.io/zealous-zebra/zcashfoundation-zebra
-      cache_label: us-docker.pkg.dev/zealous-zebra/zebra
       network: Mainnet
       checkpoint_sync: true
       rust_backtrace: '1'
