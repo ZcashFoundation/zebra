@@ -236,12 +236,15 @@ jobs:
       - name: Full sync
         id: full-sync
         run: |
-          gcloud compute ssh \
-          full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker logs --follow ${{ env.CONTAINER_NAME }}"
+          for RETRY in 1 2 3 4; do
+              gcloud compute ssh \
+              full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+              --zone ${{ env.ZONE }} \
+              --quiet \
+              --ssh-flag="-o ServerAliveInterval=15" \
+              --command="docker logs --follow ${{ env.CONTAINER_NAME }}" \
+              || echo "ssh disconnected $RETRY times"
+          done
 
           EXIT_CODE=$(\
           gcloud compute ssh \

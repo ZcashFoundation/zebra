@@ -21,7 +21,9 @@
 //! or you have poor network connectivity,
 //! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
 
-use std::{collections::HashSet, convert::TryInto, env, path::PathBuf, time::Duration};
+use std::{
+    collections::HashSet, convert::TryInto, env, net::SocketAddr, path::PathBuf, time::Duration,
+};
 
 use color_eyre::{
     eyre::{Result, WrapErr},
@@ -1472,4 +1474,85 @@ where
         .context_from(&output1)?;
 
     Ok(())
+}
+
+#[tokio::test]
+#[ignore]
+async fn fully_synced_rpc_test() -> Result<()> {
+    zebra_test::init();
+
+    // TODO: reuse code from https://github.com/ZcashFoundation/zebra/pull/4177/
+    // to get the cached_state_path
+    const CACHED_STATE_PATH_VAR: &str = "ZEBRA_CACHED_STATE_PATH";
+    let cached_state_path = match env::var_os(CACHED_STATE_PATH_VAR) {
+        Some(argument) => PathBuf::from(argument),
+        None => {
+            tracing::info!(
+                "skipped send transactions using lightwalletd test, \
+                 set the {CACHED_STATE_PATH_VAR:?} environment variable to run the test",
+            );
+            return Ok(());
+        }
+    };
+
+    let network = Network::Mainnet;
+
+    let (_zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc_without_initial_peers(network, cached_state_path)?;
+
+    // Make a getblock test that works only on synced node (high block number).
+    // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
+    // if desired.
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("http://{}", &zebra_rpc_address.to_string()))
+        // Manually constructed request to avoid encoding it, for simplicity
+        .body(r#"{"jsonrpc": "2.0", "method": "getblock", "params": ["1180900", 0], "id":123 }"#)
+        .header("Content-Type", "application/json")
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    // Simple textual check to avoid fully parsing the response, for simplicity
+    let expected_bytes = zebra_test::vectors::MAINNET_BLOCKS
+        .get(&1_180_900)
+        .expect("test block must exist");
+    let expected_hex = hex::encode(expected_bytes);
+    assert!(
+        res.contains(&expected_hex),
+        "response did not contain the desired block: {}",
+        res
+    );
+
+    Ok(())
+}
+
+/// Spawns a zebrad instance to interact with lightwalletd, but without an internet connection.
+///
+/// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
+/// providing an initial state to the zebrad instance.
+fn spawn_zebrad_for_rpc_without_initial_peers(
+    network: Network,
+    zebra_directory: PathBuf,
+) -> Result<(TestChild<PathBuf>, SocketAddr)> {
+    let mut config = random_known_rpc_port_config()
+        .expect("Failed to create a config file with a known RPC listener port");
+
+    config.state.ephemeral = false;
+    config.network.initial_mainnet_peers = HashSet::new();
+    config.network.initial_testnet_peers = HashSet::new();
+    config.network.network = network;
+
+    let mut zebrad = zebra_directory
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(Duration::from_secs(60 * 60))
+        .bypass_test_capture(true);
+
+    let rpc_address = config.rpc.listen_addr.unwrap();
+
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
+
+    Ok((zebrad, rpc_address))
 }
