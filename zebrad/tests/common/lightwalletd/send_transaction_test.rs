@@ -42,7 +42,7 @@ use crate::{
         lightwalletd::{
             self, random_known_rpc_port_config,
             rpc::{connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server},
-            LIGHTWALLETD_TEST_TIMEOUT,
+            zebra_skip_lightwalletd_tests, LIGHTWALLETD_TEST_TIMEOUT,
         },
         sync::perform_full_sync_starting_from,
     },
@@ -52,6 +52,11 @@ use crate::{
 /// The test entry point.
 pub async fn run() -> Result<()> {
     zebra_test::init();
+
+    // Skip the test unless the user specifically asked for it
+    if zebra_skip_lightwalletd_tests() {
+        return Ok(());
+    }
 
     let cached_state_path = match env::var_os(ZEBRA_CACHED_STATE_DIR_VAR) {
         Some(argument) => PathBuf::from(argument),
