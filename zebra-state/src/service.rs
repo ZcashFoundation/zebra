@@ -940,13 +940,6 @@ impl Service<ReadRequest> for ReadStateService {
     #[instrument(name = "read_state", skip(self))]
     fn call(&mut self, req: ReadRequest) -> Self::Future {
         match req {
-            // TODO: implement these new ReadRequests for lightwalletd, as part of these tickets
-
-            // depends on transparent address indexes (#3150)
-            // get_address_tx_ids (#3147)
-            // get_address_balance (#3157)
-            // get_address_utxos (#3158)
-
             // Used by get_block RPC.
             ReadRequest::Block(hash_or_height) => {
                 metrics::counter!(
