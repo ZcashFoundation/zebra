@@ -548,7 +548,7 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     // Using the mainnet for now
     let network = Network::Mainnet;
 
-    let (mut mempool, _peer_set, mut state_service, mut tx_verifier, mut recent_syncs) =
+    let (mut mempool, _peer_set, _state_service, mut tx_verifier, mut recent_syncs) =
         setup(network, u64::MAX).await;
 
     // Get transactions to use in the test
@@ -559,20 +559,6 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
 
     // Enable the mempool
     mempool.enable(&mut recent_syncs).await;
-
-    // Push the genesis block to the state, since downloader needs a valid tip.
-    let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
-    state_service
-        .ready()
-        .await
-        .unwrap()
-        .call(zebra_state::Request::CommitFinalizedBlock(
-            genesis_block.clone().into(),
-        ))
-        .await
-        .unwrap();
 
     // Queue first transaction for verification
     // (queue the transaction itself to avoid a download).
@@ -633,7 +619,7 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     // Using the mainnet for now
     let network = Network::Mainnet;
 
-    let (mut mempool, mut peer_set, mut state_service, _tx_verifier, mut recent_syncs) =
+    let (mut mempool, mut peer_set, _state_service, _tx_verifier, mut recent_syncs) =
         setup(network, u64::MAX).await;
 
     // Get transactions to use in the test
@@ -644,20 +630,6 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
 
     // Enable the mempool
     mempool.enable(&mut recent_syncs).await;
-
-    // Push the genesis block to the state, since downloader needs a valid tip.
-    let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
-        .zcash_deserialize_into()
-        .unwrap();
-    state_service
-        .ready()
-        .await
-        .unwrap()
-        .call(zebra_state::Request::CommitFinalizedBlock(
-            genesis_block.clone().into(),
-        ))
-        .await
-        .unwrap();
 
     // Queue second transaction for download and verification.
     let request = mempool
