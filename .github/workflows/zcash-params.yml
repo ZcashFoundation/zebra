@@ -22,10 +22,7 @@ jobs:
       dockerfile_path: ./docker/zcash-params/Dockerfile
       dockerfile_target: builder
       image_name: zcash-params
-      network: Mainnet
-      checkpoint_sync: true
       rust_backtrace: full
       rust_lib_backtrace: full
       colorbt_show_hidden: '1'
-      zebra_skip_network_tests: '1'
       rust_log: debug
