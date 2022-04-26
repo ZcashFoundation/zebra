@@ -47,11 +47,13 @@ mod common;
 use common::{
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
     config::{default_test_config, persistent_test_config, testdir},
-    launch::{ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY, LIGHTWALLETD_DELAY},
+    launch::{
+        spawn_zebrad_for_rpc_without_initial_peers, ZebradTestDirExt, BETWEEN_NODES_DELAY,
+        LAUNCH_DELAY, LIGHTWALLETD_DELAY,
+    },
     lightwalletd::{
-        random_known_rpc_port_config,
-        send_transaction_test::spawn_zebrad_for_rpc_without_initial_peers,
-        zebra_skip_lightwalletd_tests, LightWalletdTestDirExt, LIGHTWALLETD_TEST_TIMEOUT,
+        random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
+        LIGHTWALLETD_TEST_TIMEOUT,
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
