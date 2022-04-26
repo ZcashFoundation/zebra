@@ -77,12 +77,9 @@ impl Version {
     /// - after Zebra restarts, and
     /// - after Zebra's local network is slow or shut down.
     fn initial_min_for_network(network: Network) -> Version {
-        Version::min_specified_for_upgrade(
-            network,
-            *constants::INITIAL_MIN_NETWORK_PROTOCOL_VERSION
-                .get(&network)
-                .expect("We always have a value for testnet or mainnet"),
-        )
+        *constants::INITIAL_MIN_NETWORK_PROTOCOL_VERSION
+            .get(&network)
+            .expect("We always have a value for testnet or mainnet")
     }
 
     /// Returns the minimum specified network protocol version for `network` and

@@ -13,7 +13,7 @@ use tempfile::TempDir;
 use zebra_chain::{block::Height, parameters::Network};
 use zebrad::{components::sync, config::ZebradConfig};
 
-use zebra_test::prelude::*;
+use zebra_test::{args, prelude::*};
 
 use super::{
     config::{persistent_test_config, testdir},
@@ -195,7 +195,7 @@ pub fn sync_until(
         testdir()?.with_config(&mut config)?
     };
 
-    let mut child = tempdir.spawn_child(&["start"])?.with_timeout(timeout);
+    let mut child = tempdir.spawn_child(args!["start"])?.with_timeout(timeout);
 
     let network = format!("network: {},", network);
 
@@ -327,7 +327,7 @@ pub fn create_cached_database_height(
     let dir = PathBuf::from("/zebrad-cache");
     let mut child = dir
         .with_exact_config(&config)?
-        .spawn_child(&["start"])?
+        .spawn_child(args!["start"])?
         .with_timeout(timeout)
         .bypass_test_capture(true);
 

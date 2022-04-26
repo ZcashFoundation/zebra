@@ -313,15 +313,17 @@ where
             check::has_inputs_and_outputs(&tx)?;
             check::has_enough_orchard_flags(&tx)?;
 
-            if req.is_mempool() && tx.has_any_coinbase_inputs() {
+            if req.is_mempool() && tx.is_coinbase() {
                 return Err(TransactionError::CoinbaseInMempool);
             }
-            if tx.has_valid_coinbase_transaction_inputs() {
+            if tx.is_coinbase() {
                 check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
+            } else if !tx.is_valid_non_coinbase() {
+                return Err(TransactionError::NonCoinbaseHasCoinbaseInput);
             }
 
             // Validate `nExpiryHeight` consensus rules
-            if tx.has_any_coinbase_inputs() {
+            if tx.is_coinbase() {
                 check::coinbase_expiry_height(&req.height(), &tx, network)?;
             } else {
                 check::non_coinbase_expiry_height(&req.height(), &tx)?;
@@ -396,7 +398,7 @@ where
 
             // Calculate the fee only for non-coinbase transactions.
             let mut miner_fee = None;
-            if !tx.has_valid_coinbase_transaction_inputs() {
+            if !tx.is_coinbase() {
                 // TODO: deduplicate this code with remaining_transaction_value (#TODO: open ticket)
                 miner_fee = match value_balance {
                     Ok(vb) => match vb.remaining_transaction_value() {
@@ -678,7 +680,7 @@ where
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
 
-        if transaction.has_valid_coinbase_transaction_inputs() {
+        if transaction.is_coinbase() {
             // The script verifier only verifies PrevOut inputs and their corresponding UTXOs.
             // Coinbase transactions don't have any PrevOut inputs.
             Ok(AsyncChecks::new())

@@ -7,7 +7,7 @@
 //! See the full list of
 //! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
-use jsonrpc_core;
+use jsonrpc_core::{Compatibility, MetaIoHandler};
 use jsonrpc_http_server::ServerBuilder;
 use tokio::task::JoinHandle;
 use tower::{buffer::Buffer, Service};
@@ -20,10 +20,11 @@ use zebra_node_services::{mempool, BoxError};
 use crate::{
     config::Config,
     methods::{Rpc, RpcImpl},
-    server::compatibility::FixHttpRequestMiddleware,
+    server::{compatibility::FixHttpRequestMiddleware, tracing_middleware::TracingMiddleware},
 };
 
 pub mod compatibility;
+mod tracing_middleware;
 
 /// Zebra RPC Server
 #[derive(Clone, Debug)]
@@ -63,8 +64,8 @@ impl RpcServer {
                 RpcImpl::new(app_version, mempool, state, latest_chain_tip, network);
 
             // Create handler compatible with V1 and V2 RPC protocols
-            let mut io =
-                jsonrpc_core::IoHandler::with_compatibility(jsonrpc_core::Compatibility::Both);
+            let mut io: MetaIoHandler<(), _> =
+                MetaIoHandler::new(Compatibility::Both, TracingMiddleware);
             io.extend_with(rpc_impl.to_delegate());
 
             let server = ServerBuilder::new(io)
