@@ -43,6 +43,7 @@ on:
       # workflow definitions
       - 'docker/**'
       - '.github/workflows/test-full-sync.yml'
+      - '.github/workflows/docker-image-build.yml'
 
 env:
   NETWORK: Mainnet

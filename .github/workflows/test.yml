@@ -49,6 +49,7 @@ on:
       # workflow definitions
       - 'docker/**'
       - '.github/workflows/test.yml'
+      - '.github/workflows/docker-image-build.yml'
 
 env:
   NETWORK: Mainnet
