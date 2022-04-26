@@ -779,7 +779,19 @@ impl Service<Request> for StateService {
 
                 self.pending_utxos
                     .check_against_ordered(&prepared.new_outputs);
-                let rsp_rx = self.queue_and_commit_non_finalized(prepared);
+
+                // # Performance
+                //
+                // Allow other async tasks to make progress while blocks are being verified
+                // and written to disk. But wait for the blocks to finish committing,
+                // so that `StateService` multi-block queries always observe a consistent state.
+                //
+                // Since each block is spawned into its own task,
+                // there shouldn't be any other code running in the same task,
+                // so we don't need to worry about blocking it:
+                // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html#
+                let rsp_rx =
+                    tokio::task::block_in_place(|| self.queue_and_commit_non_finalized(prepared));
 
                 async move {
                     rsp_rx
@@ -804,7 +816,16 @@ impl Service<Request> for StateService {
                 );
 
                 self.pending_utxos.check_against(&finalized.new_outputs);
-                let rsp_rx = self.queue_and_commit_finalized(finalized);
+
+                // # Performance
+                //
+                // Allow other async tasks to make progress while blocks are being verified
+                // and written to disk. But wait for the blocks to finish committing,
+                // so that `StateService` multi-block queries always observe a consistent state.
+                //
+                // See the note in `CommitBlock` for more details.
+                let rsp_rx =
+                    tokio::task::block_in_place(|| self.queue_and_commit_finalized(finalized));
 
                 async move {
                     rsp_rx
