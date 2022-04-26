@@ -53,7 +53,7 @@ const FANOUT: usize = 3;
 ///
 /// We also hedge requests, so we may retry up to twice this many times. Hedged
 /// retries may be concurrent, inner retries are sequential.
-const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 2;
+const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
 
 /// A lower bound on the user-specified lookahead limit.
 ///
