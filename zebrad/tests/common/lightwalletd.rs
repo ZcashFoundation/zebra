@@ -16,8 +16,8 @@ use zebrad::config::ZebradConfig;
 
 use super::{config::default_test_config, launch::ZebradTestDirExt};
 
-pub mod rpc;
 pub mod send_transaction_test;
+pub mod wallet_grpc;
 
 /// The name of the env var that enables Zebra lightwalletd integration tests.
 /// These tests need a `lightwalletd` binary in the test machine's path.

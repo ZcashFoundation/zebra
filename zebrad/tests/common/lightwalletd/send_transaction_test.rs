@@ -35,8 +35,7 @@ use crate::common::{
     },
     launch::spawn_zebrad_for_rpc_without_initial_peers,
     lightwalletd::{
-        self,
-        rpc::{connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server},
+        wallet_grpc::{self, connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server},
         zebra_skip_lightwalletd_tests, LIGHTWALLETD_TEST_TIMEOUT,
     },
     sync::perform_full_sync_starting_from,
@@ -79,7 +78,7 @@ pub async fn run() -> Result<()> {
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
 
     for transaction in transactions {
-        let expected_response = lightwalletd::rpc::SendResponse {
+        let expected_response = wallet_grpc::SendResponse {
             error_code: 0,
             error_message: format!("\"{}\"", transaction.hash()),
         };
@@ -212,12 +211,10 @@ where
 }
 
 /// Prepare a request to send to lightwalletd that contains a transaction to be sent.
-fn prepare_send_transaction_request(
-    transaction: Arc<Transaction>,
-) -> lightwalletd::rpc::RawTransaction {
+fn prepare_send_transaction_request(transaction: Arc<Transaction>) -> wallet_grpc::RawTransaction {
     let transaction_bytes = transaction.zcash_serialize_to_vec().unwrap();
 
-    lightwalletd::rpc::RawTransaction {
+    wallet_grpc::RawTransaction {
         data: transaction_bytes,
         height: -1,
     }

@@ -9,7 +9,7 @@ use zebra_test::{args, net::random_known_port, prelude::*};
 use crate::{
     common::{
         config::testdir,
-        lightwalletd::{self, LightWalletdTestDirExt, LIGHTWALLETD_TEST_TIMEOUT},
+        lightwalletd::{LightWalletdTestDirExt, LIGHTWALLETD_TEST_TIMEOUT},
     },
     LIGHTWALLETD_FAILURE_MESSAGES, LIGHTWALLETD_IGNORE_MESSAGES, PROCESS_FAILURE_MESSAGES,
 };
@@ -24,9 +24,7 @@ const LIGHTWALLETD_DATA_DIR_VAR: &str = "LIGHTWALLETD_DATA_DIR";
 
 /// Type alias for the RPC client to communicate with a lightwalletd instance.
 pub type LightwalletdRpcClient =
-    lightwalletd::rpc::compact_tx_streamer_client::CompactTxStreamerClient<
-        tonic::transport::Channel,
-    >;
+    compact_tx_streamer_client::CompactTxStreamerClient<tonic::transport::Channel>;
 
 /// Start a lightwalletd instance with its RPC server functionality enabled.
 ///
