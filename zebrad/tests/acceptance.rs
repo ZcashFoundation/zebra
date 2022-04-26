@@ -1584,7 +1584,7 @@ async fn sending_transactions_using_lightwalletd() -> Result<()> {
         load_transactions_from_a_future_block(network, cached_state_path).await?;
 
     let (_zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc_without_initial_peers(partial_sync_path)?;
+        spawn_zebrad_for_rpc_without_initial_peers(Network::Mainnet, partial_sync_path)?;
 
     let (_lightwalletd, lightwalletd_rpc_port) =
         spawn_lightwalletd_with_rpc_server(zebra_rpc_address)?;
@@ -1787,10 +1787,10 @@ async fn start_state_service(
 ///
 /// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
 /// providing an initial state to the zebrad instance.
-fn spawn_zebrad_for_rpc_without_initial_peers(
+fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
     network: Network,
-    zebra_directory: PathBuf,
-) -> Result<(TestChild<PathBuf>, SocketAddr)> {
+    zebra_directory: P,
+) -> Result<(TestChild<P>, SocketAddr)> {
     let mut config = random_known_rpc_port_config()
         .expect("Failed to create a config file with a known RPC listener port");
 
