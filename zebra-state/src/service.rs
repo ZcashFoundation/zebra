@@ -833,6 +833,7 @@ impl Service<Request> for StateService {
                     "type" => "depth",
                 );
 
+                // TODO: run this simple read request in spawn_blocking if Zebra hangs due to database locks
                 let rsp = Ok(self.best_depth(hash)).map(Response::Depth);
                 async move { rsp }.boxed()
             }
@@ -844,6 +845,7 @@ impl Service<Request> for StateService {
                     "type" => "tip",
                 );
 
+                // TODO: run this simple read request in spawn_blocking if Zebra hangs due to database locks
                 let rsp = Ok(self.best_tip()).map(Response::Tip);
                 async move { rsp }.boxed()
             }
@@ -855,6 +857,7 @@ impl Service<Request> for StateService {
                     "type" => "block_locator",
                 );
 
+                // TODO: run this multi-block read request in spawn_blocking for performance
                 let rsp = Ok(self.block_locator().unwrap_or_default()).map(Response::BlockLocator);
                 async move { rsp }.boxed()
             }
@@ -866,6 +869,7 @@ impl Service<Request> for StateService {
                     "type" => "transaction",
                 );
 
+                // TODO: run this large data read request in spawn_blocking for performance
                 let rsp = Ok(self.best_transaction(hash)).map(Response::Transaction);
                 async move { rsp }.boxed()
             }
@@ -877,6 +881,7 @@ impl Service<Request> for StateService {
                     "type" => "block",
                 );
 
+                // TODO: run this large data read request in spawn_blocking for performance
                 let rsp = Ok(self.best_block(hash_or_height)).map(Response::Block);
                 async move { rsp }.boxed()
             }
@@ -890,6 +895,7 @@ impl Service<Request> for StateService {
 
                 let fut = self.pending_utxos.queue(outpoint);
 
+                // TODO: run this large data read request in spawn_blocking for performance
                 if let Some(utxo) = self.any_utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
                 }
@@ -905,6 +911,7 @@ impl Service<Request> for StateService {
                 );
 
                 const MAX_FIND_BLOCK_HASHES_RESULTS: usize = 500;
+                // TODO: run this multi-block read request in spawn_blocking for performance
                 let res =
                     self.find_best_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
                 async move { Ok(Response::BlockHashes(res)) }.boxed()
@@ -916,6 +923,9 @@ impl Service<Request> for StateService {
                     "service" => "state",
                     "type" => "find_block_headers",
                 );
+
+                // TODO: move this complex read request into a separate method
+                //       run this multi-block & large data read request in spawn_blocking for performance
 
                 const MAX_FIND_BLOCK_HEADERS_RESULTS: usize = 160;
                 // Zcashd will blindly request more block headers as long as it
