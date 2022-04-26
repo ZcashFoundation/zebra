@@ -2,7 +2,7 @@
 name = "zebra-node-services"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.8"
 edition = "2021"
 repository = "https://github.com/ZcashFoundation/zebra"
 

@@ -18,6 +18,7 @@ const ZEBRA_SKIP_IPV6_TESTS: &str = "ZEBRA_SKIP_IPV6_TESTS";
 /// Should we skip Zebra tests which need reliable, fast network connectivity?
 //
 // TODO: separate "good and reliable" from "any network"?
+#[allow(clippy::print_stderr)]
 pub fn zebra_skip_network_tests() -> bool {
     if env::var_os(ZEBRA_SKIP_NETWORK_TESTS).is_some() {
         // This message is captured by the test runner, use
@@ -34,6 +35,7 @@ pub fn zebra_skip_network_tests() -> bool {
 ///
 /// Since `zebra_skip_network_tests` only disables tests which need reliable network connectivity,
 /// we allow IPv6 tests even when `ZEBRA_SKIP_NETWORK_TESTS` is set.
+#[allow(clippy::print_stderr)]
 pub fn zebra_skip_ipv6_tests() -> bool {
     if env::var_os(ZEBRA_SKIP_IPV6_TESTS).is_some() {
         eprintln!("Skipping IPv6 network test because '$ZEBRA_SKIP_IPV6_TESTS' is set.");
@@ -76,4 +78,17 @@ pub fn random_known_port() -> u16 {
     //      - https://dataplane.org/ephemeralports.html
 
     rand::thread_rng().gen_range(53500..60999)
+}
+
+/// Returns the "magic" port number that tells the operating system to
+/// choose a random unallocated port.
+///
+/// The OS chooses a different port each time it opens a connection or
+/// listener with this magic port number.
+///
+/// ## Usage
+///
+/// See the usage note for `random_known_port`.
+pub fn random_unallocated_port() -> u16 {
+    0
 }

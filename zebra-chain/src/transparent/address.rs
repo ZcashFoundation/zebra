@@ -2,19 +2,19 @@
 
 use std::{fmt, io};
 
-use ripemd160::{Digest, Ripemd160};
+use ripemd::{Digest, Ripemd160};
 use secp256k1::PublicKey;
+use sha2::Digest as Sha256Digest;
 use sha2::Sha256;
-
-#[cfg(test)]
-use proptest::{arbitrary::Arbitrary, collection::vec, prelude::*};
 
 use crate::{
     parameters::Network,
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
+    transparent::Script,
 };
 
-use super::Script;
+#[cfg(test)]
+use proptest::prelude::*;
 
 /// Magic numbers used to identify what networks Transparent Addresses
 /// are associated with.
@@ -41,7 +41,15 @@ mod magics {
 /// to a Bitcoin address just by removing the "t".)
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(
+        proptest_derive::Arbitrary,
+        serde_with::SerializeDisplay,
+        serde_with::DeserializeFromStr
+    )
+)]
 pub enum Address {
     /// P2SH (Pay to Script Hash) addresses
     PayToScriptHash {
@@ -50,6 +58,7 @@ pub enum Address {
         /// 20 bytes specifying a script hash.
         script_hash: [u8; 20],
     },
+
     /// P2PKH (Pay to Public Key Hash) addresses
     PayToPublicKeyHash {
         /// Production, test, or other network
@@ -192,6 +201,42 @@ impl ToAddressWithNetwork for PublicKey {
 }
 
 impl Address {
+    /// Create an address for the given public key hash and network.
+    pub fn from_pub_key_hash(network: Network, pub_key_hash: [u8; 20]) -> Self {
+        Self::PayToPublicKeyHash {
+            network,
+            pub_key_hash,
+        }
+    }
+
+    /// Create an address for the given script hash and network.
+    pub fn from_script_hash(network: Network, script_hash: [u8; 20]) -> Self {
+        Self::PayToScriptHash {
+            network,
+            script_hash,
+        }
+    }
+
+    /// Returns the network for this address.
+    pub fn network(&self) -> Network {
+        match *self {
+            Address::PayToScriptHash { network, .. } => network,
+            Address::PayToPublicKeyHash { network, .. } => network,
+        }
+    }
+
+    /// Returns the hash bytes for this address, regardless of the address type.
+    ///
+    /// # Correctness
+    ///
+    /// Use [`ZcashSerialize`] and [`ZcashDeserialize`] for consensus-critical serialization.
+    pub fn hash_bytes(&self) -> [u8; 20] {
+        match *self {
+            Address::PayToScriptHash { script_hash, .. } => script_hash,
+            Address::PayToPublicKeyHash { pub_key_hash, .. } => pub_key_hash,
+        }
+    }
+
     /// A hash of a transparent address payload, as used in
     /// transparent pay-to-script-hash and pay-to-publickey-hash
     /// addresses.
@@ -206,46 +251,6 @@ impl Address {
         payload[..].copy_from_slice(&ripe_hash[..]);
         payload
     }
-}
-
-#[cfg(test)]
-impl Address {
-    fn p2pkh_strategy() -> impl Strategy<Value = Self> {
-        (any::<Network>(), vec(any::<u8>(), 20))
-            .prop_map(|(network, payload_bytes)| {
-                let mut bytes = [0; 20];
-                bytes.copy_from_slice(payload_bytes.as_slice());
-                Self::PayToPublicKeyHash {
-                    network,
-                    pub_key_hash: bytes,
-                }
-            })
-            .boxed()
-    }
-
-    fn p2sh_strategy() -> impl Strategy<Value = Self> {
-        (any::<Network>(), vec(any::<u8>(), 20))
-            .prop_map(|(network, payload_bytes)| {
-                let mut bytes = [0; 20];
-                bytes.copy_from_slice(payload_bytes.as_slice());
-                Self::PayToScriptHash {
-                    network,
-                    script_hash: bytes,
-                }
-            })
-            .boxed()
-    }
-}
-
-#[cfg(test)]
-impl Arbitrary for Address {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        prop_oneof![Self::p2pkh_strategy(), Self::p2sh_strategy(),].boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
 }
 
 #[cfg(test)]

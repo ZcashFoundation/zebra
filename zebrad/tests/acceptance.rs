@@ -21,13 +21,14 @@
 //! or you have poor network connectivity,
 //! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
 
+use std::{
+    collections::HashSet, convert::TryInto, env, net::SocketAddr, path::PathBuf, time::Duration,
+};
+
 use color_eyre::{
     eyre::{Result, WrapErr},
     Help,
 };
-use tempfile::TempDir;
-
-use std::{collections::HashSet, convert::TryInto, env, path::Path, path::PathBuf, time::Duration};
 
 use zebra_chain::{
     block::Height,
@@ -35,219 +36,30 @@ use zebra_chain::{
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::LOCK_FILE_ERROR;
+
 use zebra_test::{
-    command::{ContextFrom, TestDirExt},
+    args,
+    command::{ContextFrom, NO_MATCHES_REGEX_ITER},
     net::random_known_port,
     prelude::*,
 };
-use zebrad::{
-    components::{mempool, sync},
-    config::{SyncSection, TracingSection, ZebradConfig},
+
+mod common;
+
+use common::{
+    check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
+    config::{default_test_config, persistent_test_config, testdir},
+    launch::{ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY, LIGHTWALLETD_DELAY},
+    lightwalletd::{
+        random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
+    },
+    sync::{
+        create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
+        LARGE_CHECKPOINT_TIMEOUT, MEDIUM_CHECKPOINT_TEST_HEIGHT, STOP_AT_HEIGHT_REGEX,
+        STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX, TINY_CHECKPOINT_TEST_HEIGHT,
+        TINY_CHECKPOINT_TIMEOUT,
+    },
 };
-
-/// The amount of time we wait after launching `zebrad`.
-///
-/// Previously, this value was 3 seconds, which caused rare
-/// metrics or tracing test failures in Windows CI.
-const LAUNCH_DELAY: Duration = Duration::from_secs(10);
-
-/// Returns a config with:
-/// - a Zcash listener on an unused port on IPv4 localhost, and
-/// - an ephemeral state,
-/// - the minimum syncer lookahead limit, and
-/// - shorter task intervals, to improve test coverage.
-fn default_test_config() -> Result<ZebradConfig> {
-    const TEST_DURATION: Duration = Duration::from_secs(30);
-
-    let network = zebra_network::Config {
-        // The OS automatically chooses an unused port.
-        listen_addr: "127.0.0.1:0".parse()?,
-        crawl_new_peer_interval: TEST_DURATION,
-        ..zebra_network::Config::default()
-    };
-
-    let sync = SyncSection {
-        // Avoid downloading unnecessary blocks.
-        lookahead_limit: sync::MIN_LOOKAHEAD_LIMIT,
-        ..SyncSection::default()
-    };
-
-    let mempool = mempool::Config {
-        eviction_memory_time: TEST_DURATION,
-        ..mempool::Config::default()
-    };
-
-    let consensus = zebra_consensus::Config {
-        debug_skip_parameter_preload: true,
-        ..zebra_consensus::Config::default()
-    };
-
-    let force_use_color = !matches!(
-        env::var("ZEBRA_FORCE_USE_COLOR"),
-        Err(env::VarError::NotPresent)
-    );
-    let tracing = TracingSection {
-        force_use_color,
-        ..TracingSection::default()
-    };
-
-    let config = ZebradConfig {
-        network,
-        state: zebra_state::Config::ephemeral(),
-        sync,
-        mempool,
-        consensus,
-        tracing,
-        ..ZebradConfig::default()
-    };
-
-    Ok(config)
-}
-
-fn persistent_test_config() -> Result<ZebradConfig> {
-    let mut config = default_test_config()?;
-    config.state.ephemeral = false;
-    Ok(config)
-}
-
-fn testdir() -> Result<TempDir> {
-    tempfile::Builder::new()
-        .prefix("zebrad_tests")
-        .tempdir()
-        .map_err(Into::into)
-}
-
-/// Extension trait for methods on `tempfile::TempDir` for using it as a test
-/// directory for `zebrad`.
-trait ZebradTestDirExt
-where
-    Self: AsRef<Path> + Sized,
-{
-    /// Spawn `zebrad` with `args` as a child process in this test directory,
-    /// potentially taking ownership of the tempdir for the duration of the
-    /// child process.
-    ///
-    /// If there is a config in the test directory, pass it to `zebrad`.
-    fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>>;
-
-    /// Create a config file and use it for all subsequently spawned processes.
-    /// Returns an error if the config already exists.
-    ///
-    /// If needed:
-    ///   - recursively create directories for the config and state
-    ///   - set `config.cache_dir` based on `self`
-    fn with_config(self, config: &mut ZebradConfig) -> Result<Self>;
-
-    /// Create a config file with the exact contents of `config`, and use it for
-    /// all subsequently spawned processes. Returns an error if the config
-    /// already exists.
-    ///
-    /// If needed:
-    ///   - recursively create directories for the config and state
-    fn with_exact_config(self, config: &ZebradConfig) -> Result<Self>;
-
-    /// Overwrite any existing config file, and use the newly written config for
-    /// all subsequently spawned processes.
-    ///
-    /// If needed:
-    ///   - recursively create directories for the config and state
-    ///   - set `config.cache_dir` based on `self`
-    fn replace_config(self, config: &mut ZebradConfig) -> Result<Self>;
-
-    /// `cache_dir` config update helper.
-    ///
-    /// If needed:
-    ///   - set the cache_dir in the config.
-    fn cache_config_update_helper(self, config: &mut ZebradConfig) -> Result<Self>;
-
-    /// Config writing helper.
-    ///
-    /// If needed:
-    ///   - recursively create directories for the config and state,
-    ///
-    /// Then write out the config.
-    fn write_config_helper(self, config: &ZebradConfig) -> Result<Self>;
-}
-
-impl<T> ZebradTestDirExt for T
-where
-    Self: TestDirExt + AsRef<Path> + Sized,
-{
-    fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>> {
-        let path = self.as_ref();
-        let default_config_path = path.join("zebrad.toml");
-
-        if default_config_path.exists() {
-            let mut extra_args: Vec<_> = vec![
-                "-c",
-                default_config_path
-                    .as_path()
-                    .to_str()
-                    .expect("Path is valid Unicode"),
-            ];
-            extra_args.extend_from_slice(args);
-            self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), &extra_args)
-        } else {
-            self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), args)
-        }
-    }
-
-    fn with_config(self, config: &mut ZebradConfig) -> Result<Self> {
-        self.cache_config_update_helper(config)?
-            .write_config_helper(config)
-    }
-
-    fn with_exact_config(self, config: &ZebradConfig) -> Result<Self> {
-        self.write_config_helper(config)
-    }
-
-    fn replace_config(self, config: &mut ZebradConfig) -> Result<Self> {
-        use std::fs;
-        use std::io::ErrorKind;
-
-        // Remove any existing config before writing a new one
-        let dir = self.as_ref();
-        let config_file = dir.join("zebrad.toml");
-        match fs::remove_file(config_file) {
-            Ok(()) => {}
-            // If the config file doesn't exist, that's ok
-            Err(e) if e.kind() == ErrorKind::NotFound => {}
-            Err(e) => Err(e)?,
-        }
-
-        self.cache_config_update_helper(config)?
-            .write_config_helper(config)
-    }
-
-    fn cache_config_update_helper(self, config: &mut ZebradConfig) -> Result<Self> {
-        if !config.state.ephemeral {
-            let dir = self.as_ref();
-            let cache_dir = dir.join("state");
-            config.state.cache_dir = cache_dir;
-        }
-
-        Ok(self)
-    }
-
-    fn write_config_helper(self, config: &ZebradConfig) -> Result<Self> {
-        use std::fs;
-        use std::io::Write;
-
-        let dir = self.as_ref();
-
-        if !config.state.ephemeral {
-            let cache_dir = dir.join("state");
-            fs::create_dir_all(&cache_dir)?;
-        } else {
-            fs::create_dir_all(&dir)?;
-        }
-
-        let config_file = dir.join("zebrad.toml");
-        fs::File::create(config_file)?.write_all(toml::to_string(&config)?.as_bytes())?;
-
-        Ok(self)
-    }
-}
 
 #[test]
 fn generate_no_args() -> Result<()> {
@@ -255,7 +67,7 @@ fn generate_no_args() -> Result<()> {
 
     let child = testdir()?
         .with_config(&mut default_test_config()?)?
-        .spawn_child(&["generate"])?;
+        .spawn_child(args!["generate"])?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
@@ -266,38 +78,6 @@ fn generate_no_args() -> Result<()> {
     Ok(())
 }
 
-/// Panics if `$pred` is false, with an error report containing:
-///   * context from `$source`, and
-///   * an optional wrapper error, using `$fmt_arg`+ as a format string and
-///     arguments.
-macro_rules! assert_with_context {
-    ($pred:expr, $source:expr) => {
-        if !$pred {
-            use color_eyre::Section as _;
-            use color_eyre::SectionExt as _;
-            use zebra_test::command::ContextFrom as _;
-            let report = color_eyre::eyre::eyre!("failed assertion")
-                .section(stringify!($pred).header("Predicate:"))
-                .context_from($source);
-
-            panic!("Error: {:?}", report);
-        }
-    };
-    ($pred:expr, $source:expr, $($fmt_arg:tt)+) => {
-        if !$pred {
-            use color_eyre::Section as _;
-            use color_eyre::SectionExt as _;
-            use zebra_test::command::ContextFrom as _;
-            let report = color_eyre::eyre::eyre!("failed assertion")
-                .section(stringify!($pred).header("Predicate:"))
-                .context_from($source)
-                .wrap_err(format!($($fmt_arg)+));
-
-            panic!("Error: {:?}", report);
-        }
-    };
-}
-
 #[test]
 fn generate_args() -> Result<()> {
     zebra_test::init();
@@ -306,17 +86,17 @@ fn generate_args() -> Result<()> {
     let testdir = &testdir;
 
     // unexpected free argument `argument`
-    let child = testdir.spawn_child(&["generate", "argument"])?;
+    let child = testdir.spawn_child(args!["generate", "argument"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = testdir.spawn_child(&["generate", "-f"])?;
+    let child = testdir.spawn_child(args!["generate", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // missing argument to option `-o`
-    let child = testdir.spawn_child(&["generate", "-o"])?;
+    let child = testdir.spawn_child(args!["generate", "-o"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -325,7 +105,7 @@ fn generate_args() -> Result<()> {
 
     // Valid
     let child =
-        testdir.spawn_child(&["generate", "-o", generated_config_path.to_str().unwrap()])?;
+        testdir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
@@ -344,24 +124,13 @@ fn generate_args() -> Result<()> {
     Ok(())
 }
 
-/// Is `s` a valid `zebrad` version string?
-///
-/// Trims whitespace before parsing the version.
-///
-/// Returns false if the version is invalid, or if there is anything else on the
-/// line that contains the version. In particular, this check will fail if `s`
-/// includes any terminal formatting.
-fn is_zebrad_version(s: &str) -> bool {
-    semver::Version::parse(s.replace("zebrad", "").trim()).is_ok()
-}
-
 #[test]
 fn help_no_args() -> Result<()> {
     zebra_test::init();
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
-    let child = testdir.spawn_child(&["help"])?;
+    let child = testdir.spawn_child(args!["help"])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -387,12 +156,12 @@ fn help_args() -> Result<()> {
     let testdir = &testdir;
 
     // The subcommand "argument" wasn't recognized.
-    let child = testdir.spawn_child(&["help", "argument"])?;
+    let child = testdir.spawn_child(args!["help", "argument"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // option `-f` does not accept an argument
-    let child = testdir.spawn_child(&["help", "-f"])?;
+    let child = testdir.spawn_child(args!["help", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -406,7 +175,7 @@ fn start_no_args() -> Result<()> {
     // start caches state, so run one of the start tests with persistent state
     let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
 
-    let mut child = testdir.spawn_child(&["-v", "start"])?;
+    let mut child = testdir.spawn_child(args!["-v", "start"])?;
 
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
@@ -434,7 +203,7 @@ fn start_args() -> Result<()> {
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
     let testdir = &testdir;
 
-    let mut child = testdir.spawn_child(&["start"])?;
+    let mut child = testdir.spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
@@ -446,7 +215,7 @@ fn start_args() -> Result<()> {
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = testdir.spawn_child(&["start", "-f"])?;
+    let child = testdir.spawn_child(args!["start", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -460,7 +229,7 @@ fn persistent_mode() -> Result<()> {
     let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
     let testdir = &testdir;
 
-    let mut child = testdir.spawn_child(&["-v", "start"])?;
+    let mut child = testdir.spawn_child(args!["-v", "start"])?;
 
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
@@ -478,24 +247,6 @@ fn persistent_mode() -> Result<()> {
     );
 
     Ok(())
-}
-
-/// The cache_dir config used in the ephemeral mode tests
-#[derive(Debug, PartialEq, Eq)]
-enum EphemeralConfig {
-    /// the cache_dir config is left at its default value
-    Default,
-    /// the cache_dir config is set to a path in the tempdir
-    MisconfiguredCacheDir,
-}
-
-/// The check performed by the ephemeral mode tests
-#[derive(Debug, PartialEq, Eq)]
-enum EphemeralCheck {
-    /// an existing directory is not deleted
-    ExistingDirectory,
-    /// a missing directory is not created
-    MissingDirectory,
 }
 
 #[test]
@@ -547,7 +298,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     let mut child = run_dir
         .path()
         .with_config(&mut config)?
-        .spawn_child(&["start"])?;
+        .spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
@@ -622,7 +373,7 @@ fn app_no_args() -> Result<()> {
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
-    let child = testdir.spawn_child(&[])?;
+    let child = testdir.spawn_child(args![])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -637,7 +388,7 @@ fn version_no_args() -> Result<()> {
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
-    let child = testdir.spawn_child(&["version"])?;
+    let child = testdir.spawn_child(args!["version"])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -660,12 +411,12 @@ fn version_args() -> Result<()> {
     let testdir = &testdir;
 
     // unexpected free argument `argument`
-    let child = testdir.spawn_child(&["version", "argument"])?;
+    let child = testdir.spawn_child(args!["version", "argument"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = testdir.spawn_child(&["version", "-f"])?;
+    let child = testdir.spawn_child(args!["version", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -693,7 +444,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
 
     // Generate configuration in temp dir path
     let child =
-        testdir.spawn_child(&["generate", "-o", generated_config_path.to_str().unwrap()])?;
+        testdir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
@@ -705,7 +456,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
     );
 
     // Run command using temp dir and kill it after a few seconds
-    let mut child = testdir.spawn_child(&[command])?;
+    let mut child = testdir.spawn_child(args![command])?;
     std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
 
@@ -730,45 +481,6 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
 
     Ok(())
 }
-
-const TINY_CHECKPOINT_TEST_HEIGHT: Height = Height(0);
-const MEDIUM_CHECKPOINT_TEST_HEIGHT: Height =
-    Height(zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP as u32);
-const LARGE_CHECKPOINT_TEST_HEIGHT: Height =
-    Height((zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2) as u32);
-
-const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
-
-/// The text that should be logged when the initial sync finishes at the estimated chain tip.
-///
-/// This message is only logged if:
-/// - we have reached the estimated chain tip,
-/// - we have synced all known checkpoints,
-/// - the syncer has stopped downloading lots of blocks, and
-/// - we are regularly downloading some blocks via the syncer or block gossip.
-const SYNC_FINISHED_REGEX: &str = "finished initial sync to chain tip, using gossiped blocks";
-
-/// The maximum amount of time Zebra should take to reload after shutting down.
-///
-/// This should only take a second, but sometimes CI VMs or RocksDB can be slow.
-const STOP_ON_LOAD_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// The maximum amount of time Zebra should take to sync a few hundred blocks.
-///
-/// Usually the small checkpoint is much shorter than this.
-const TINY_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(120);
-
-/// The maximum amount of time Zebra should take to sync a thousand blocks.
-const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
-
-/// The test sync height where we switch to using the default lookahead limit.
-///
-/// Most tests only download a few blocks. So tests default to the minimum lookahead limit,
-/// to avoid downloading extra blocks, and slowing down the test.
-///
-/// But if we're going to be downloading lots of blocks, we use the default lookahead limit,
-/// so that the sync is faster. This can increase the RAM needed for tests.
-const MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD: Height = Height(3 * sync::DEFAULT_LOOKAHEAD_LIMIT as u32);
 
 /// Test if `zebrad` can sync the first checkpoint on mainnet.
 ///
@@ -933,6 +645,7 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
 #[test]
 #[ignore]
 fn full_sync_mainnet() {
+    // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
     full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES").expect("unexpected test failure");
 }
 
@@ -944,6 +657,7 @@ fn full_sync_mainnet() {
 #[test]
 #[ignore]
 fn full_sync_testnet() {
+    // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
     full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES").expect("unexpected test failure");
 }
 
@@ -952,7 +666,7 @@ fn full_sync_testnet() {
 /// The timeout is specified using an environment variable, with the name configured by the
 /// `timeout_argument_name` parameter. The value of the environment variable must the number of
 /// minutes specified as an integer.
-fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Result<()> {
+fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
     let timeout_argument: Option<u64> = env::var(timeout_argument_name)
         .ok()
         .and_then(|timeout_string| timeout_string.parse().ok());
@@ -971,8 +685,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Resu
             // TODO: if full validation performance improves, do another test with checkpoint_sync off
             true,
             true,
-        )
-        .map(|_| ())
+        )?;
     } else {
         tracing::info!(
             ?network,
@@ -980,276 +693,38 @@ fn full_sync_test(network: Network, timeout_argument_name: &'static str) -> Resu
              set the {:?} environmental variable to run the test",
             timeout_argument_name,
         );
-
-        Ok(())
     }
-}
-
-/// Sync on `network` until `zebrad` reaches `height`, or until it logs `stop_regex`.
-///
-/// If `stop_regex` is encountered before the process exits, kills the
-/// process, and mark the test as successful, even if `height` has not
-/// been reached. To disable the height limit, and just stop at `stop_regex`,
-/// use `Height::MAX` for the `height`.
-///
-/// # Test Settings
-///
-/// If `reuse_tempdir` is supplied, use it as the test's temporary directory.
-///
-/// If `height` is higher than the mandatory checkpoint,
-/// configures `zebrad` to preload the Zcash parameters.
-/// If it is lower, skips the parameter preload.
-///
-/// Configures `zebrad` to debug-enable the mempool based on `mempool_behavior`,
-/// then check the logs for the expected `mempool_behavior`.
-///
-/// If `checkpoint_sync` is true, configures `zebrad` to use as many checkpoints as possible.
-/// If it is false, only use the mandatory checkpoints.
-///
-/// If `check_legacy_chain` is true, make sure the logs contain the legacy chain check.
-///
-/// If your test environment does not have network access, skip
-/// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
-///
-/// # Test Status
-///
-/// On success, returns the associated `TempDir`. Returns an error if
-/// the child exits or `timeout` elapses before `stop_regex` is found.
-#[allow(clippy::too_many_arguments)]
-fn sync_until(
-    height: Height,
-    network: Network,
-    stop_regex: &str,
-    timeout: Duration,
-    // Test Settings
-    // TODO: turn these into an argument struct
-    reuse_tempdir: impl Into<Option<TempDir>>,
-    mempool_behavior: MempoolBehavior,
-    checkpoint_sync: bool,
-    check_legacy_chain: bool,
-) -> Result<TempDir> {
-    zebra_test::init();
-
-    if zebra_test::net::zebra_skip_network_tests() {
-        return testdir();
-    }
-
-    let reuse_tempdir = reuse_tempdir.into();
-
-    // Use a persistent state, so we can handle large syncs
-    let mut config = persistent_test_config()?;
-    config.network.network = network;
-    config.state.debug_stop_at_height = Some(height.0);
-    config.mempool.debug_enable_at_height = mempool_behavior.enable_at_height();
-    config.consensus.checkpoint_sync = checkpoint_sync;
-
-    // Download the parameters at launch, if we're going to need them later.
-    if height > network.mandatory_checkpoint_height() {
-        config.consensus.debug_skip_parameter_preload = false;
-    }
-
-    // Use the default lookahead limit if we're syncing lots of blocks.
-    // (Most tests use a smaller limit to minimise redundant block downloads.)
-    if height > MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD {
-        config.sync.lookahead_limit = sync::DEFAULT_LOOKAHEAD_LIMIT;
-    }
-
-    let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {
-        reuse_tempdir.replace_config(&mut config)?
-    } else {
-        testdir()?.with_config(&mut config)?
-    };
-
-    let mut child = tempdir.spawn_child(&["start"])?.with_timeout(timeout);
-
-    let network = format!("network: {},", network);
-
-    if mempool_behavior.require_activation() {
-        // require that the mempool activated,
-        // checking logs as they arrive
-
-        child.expect_stdout_line_matches(&network)?;
-
-        if check_legacy_chain {
-            child.expect_stdout_line_matches("starting legacy chain check")?;
-            child.expect_stdout_line_matches("no legacy chain found")?;
-        }
-
-        // before the stop regex, expect mempool activation
-        if mempool_behavior.require_forced_activation() {
-            child.expect_stdout_line_matches("enabling mempool for debugging")?;
-        }
-        child.expect_stdout_line_matches("activating mempool")?;
-
-        // then wait for the stop log, which must happen after the mempool becomes active
-        child.expect_stdout_line_matches(stop_regex)?;
-
-        // make sure the child process is dead
-        // if it has already exited, ignore that error
-        let _ = child.kill();
-
-        Ok(child.dir)
-    } else {
-        // Require that the mempool didn't activate,
-        // checking the entire `zebrad` output after it exits.
-        //
-        // # Correctness
-        //
-        // Unlike the other mempool behaviours, `zebrad` must stop after logging the stop regex,
-        // without being killed by [`sync_until`] test harness.
-        //
-        // Since it needs to collect all the output,
-        // the test harness can't kill `zebrad` after it logs the `stop_regex`.
-        assert!(
-            height.0 < 2_000_000,
-            "zebrad must exit by itself, so we can collect all the output",
-        );
-        let output = child.wait_with_output()?;
-
-        output.stdout_line_contains(&network)?;
-
-        if check_legacy_chain {
-            output.stdout_line_contains("starting legacy chain check")?;
-            output.stdout_line_contains("no legacy chain found")?;
-        }
-
-        // check it did not activate or use the mempool
-        assert!(output.stdout_line_contains("activating mempool").is_err());
-        assert!(output
-            .stdout_line_contains("sending mempool transaction broadcast")
-            .is_err());
-
-        // check it logged the stop regex before exiting
-        output.stdout_line_matches(stop_regex)?;
-
-        // check exited by itself, successfully
-        output.assert_was_not_killed()?;
-        let output = output.assert_success()?;
-
-        Ok(output.dir.expect("wait_with_output sets dir"))
-    }
-}
-
-fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
-    let mut config = persistent_test_config()?;
-    config.state.cache_dir = "/zebrad-cache".into();
-
-    // To get to the mandatory checkpoint, we need to sync lots of blocks.
-    // (Most tests use a smaller limit to minimise redundant block downloads.)
-    //
-    // If we're syncing past the checkpoint with cached state, we don't need the extra lookahead.
-    // But the extra downloaded blocks shouldn't slow down the test that much,
-    // and testing with the defaults gives us better test coverage.
-    config.sync.lookahead_limit = sync::DEFAULT_LOOKAHEAD_LIMIT;
-
-    Ok(config)
-}
-
-/// Create or update a cached state for `network`, stopping at `height`.
-///
-/// # Test Settings
-///
-/// If `debug_skip_parameter_preload` is true, configures `zebrad` to preload the Zcash parameters.
-/// If it is false, skips the parameter preload.
-///
-/// If `checkpoint_sync` is true, configures `zebrad` to use as many checkpoints as possible.
-/// If it is false, only use the mandatory checkpoints.
-///
-/// If `check_legacy_chain` is true, make sure the logs contain the legacy chain check.
-///
-/// Callers can supply an extra `test_child_predicate`, which is called on
-/// the `TestChild` between the startup checks, and the final
-/// `STOP_AT_HEIGHT_REGEX` check.
-///
-/// The `TestChild` is spawned with a timeout, so the predicate should use
-/// `expect_stdout_line_matches` or `expect_stderr_line_matches`.
-///
-/// This test ignores the `ZEBRA_SKIP_NETWORK_TESTS` env var.
-///
-/// # Test Status
-///
-/// Returns an error if the child exits or the fixed timeout elapses
-/// before `STOP_AT_HEIGHT_REGEX` is found.
-fn create_cached_database_height<P>(
-    network: Network,
-    height: Height,
-    debug_skip_parameter_preload: bool,
-    checkpoint_sync: bool,
-    test_child_predicate: impl Into<Option<P>>,
-) -> Result<()>
-where
-    P: FnOnce(&mut TestChild<PathBuf>) -> Result<()>,
-{
-    println!("Creating cached database");
-    // 16 hours
-    let timeout = Duration::from_secs(60 * 60 * 16);
-
-    // Use a persistent state, so we can handle large syncs
-    let mut config = cached_mandatory_checkpoint_test_config()?;
-    // TODO: add convenience methods?
-    config.network.network = network;
-    config.state.debug_stop_at_height = Some(height.0);
-    config.consensus.debug_skip_parameter_preload = debug_skip_parameter_preload;
-    config.consensus.checkpoint_sync = checkpoint_sync;
-
-    let dir = PathBuf::from("/zebrad-cache");
-    let mut child = dir
-        .with_exact_config(&config)?
-        .spawn_child(&["start"])?
-        .with_timeout(timeout)
-        .bypass_test_capture(true);
-
-    let network = format!("network: {},", network);
-    child.expect_stdout_line_matches(&network)?;
-
-    child.expect_stdout_line_matches("starting legacy chain check")?;
-    child.expect_stdout_line_matches("no legacy chain found")?;
-
-    if let Some(test_child_predicate) = test_child_predicate.into() {
-        test_child_predicate(&mut child)?;
-    }
-
-    child.expect_stdout_line_matches(STOP_AT_HEIGHT_REGEX)?;
-
-    child.kill()?;
 
     Ok(())
 }
 
 fn create_cached_database(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height();
+    let checkpoint_stop_regex = format!("{}.*CommitFinalized request", STOP_AT_HEIGHT_REGEX);
+
     create_cached_database_height(
         network,
         height,
         true,
         // Use checkpoints to increase sync performance while caching the database
         true,
-        |test_child: &mut TestChild<PathBuf>| {
-            // make sure pre-cached databases finish before the mandatory checkpoint
-            //
-            // TODO: this check passes even if we reach the mandatory checkpoint,
-            //       because we sync finalized state, then non-finalized state.
-            //       Instead, fail if we see "best non-finalized chain root" in the logs.
-            test_child.expect_stdout_line_matches("CommitFinalized request")?;
-            Ok(())
-        },
+        // Check that we're still using checkpoints when we finish the cached sync
+        &checkpoint_stop_regex,
     )
 }
 
 fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height() + 1200;
+    let full_validation_stop_regex =
+        format!("{}.*best non-finalized chain root", STOP_AT_HEIGHT_REGEX);
+
     create_cached_database_height(
         network,
         height.unwrap(),
         false,
         // Test full validation by turning checkpoints off
         false,
-        |test_child: &mut TestChild<PathBuf>| {
-            // make sure cached database tests finish after the mandatory checkpoint,
-            // using the non-finalized state (the checkpoint_sync config must be false)
-            test_child.expect_stdout_line_matches("best non-finalized chain root")?;
-            Ok(())
-        },
+        &full_validation_stop_regex,
     )
 }
 
@@ -1304,20 +779,6 @@ fn sync_past_mandatory_checkpoint_testnet() {
     sync_past_mandatory_checkpoint(network).unwrap();
 }
 
-/// Returns the "magic" port number that tells the operating system to
-/// choose a random unallocated port.
-///
-/// The OS chooses a different port each time it opens a connection or
-/// listener with this magic port number.
-///
-/// ## Usage
-///
-/// See the usage note for `random_known_port`.
-#[allow(dead_code)]
-fn random_unallocated_port() -> u16 {
-    0
-}
-
 #[tokio::test]
 async fn metrics_endpoint() -> Result<()> {
     use hyper::Client;
@@ -1334,7 +795,7 @@ async fn metrics_endpoint() -> Result<()> {
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
-    let child = dir.spawn_child(&["start"])?;
+    let child = dir.spawn_child(args!["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
     // Since we're an async function, we have to use a sleep future, not thread sleep.
@@ -1390,7 +851,7 @@ async fn tracing_endpoint() -> Result<()> {
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
-    let child = dir.spawn_child(&["start"])?;
+    let child = dir.spawn_child(args!["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
     // Since we're an async function, we have to use a sleep future, not thread sleep.
@@ -1467,7 +928,189 @@ async fn tracing_endpoint() -> Result<()> {
     Ok(())
 }
 
-// TODO: RPC endpoint and port conflict tests (#3165)
+#[tokio::test]
+async fn rpc_endpoint() -> Result<()> {
+    use hyper::{body::to_bytes, Body, Client, Method, Request};
+    use serde_json::Value;
+
+    zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return Ok(());
+    }
+
+    // Write a configuration that has RPC listen_addr set
+    // [Note on port conflict](#Note on port conflict)
+    let mut config = random_known_rpc_port_config()?;
+    let url = format!("http://{}", config.rpc.listen_addr.unwrap());
+
+    let dir = testdir()?.with_config(&mut config)?;
+    let mut child = dir.spawn_child(args!["start"])?;
+
+    // Wait until port is open.
+    child.expect_stdout_line_matches(
+        format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
+    )?;
+
+    // Create an http client
+    let client = Client::new();
+
+    // Create a request to call `getinfo` RPC method
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri(url)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"jsonrpc":"1.0","method":"getinfo","params":[],"id":123}"#,
+        ))?;
+
+    // Make the call to the RPC endpoint
+    let res = client.request(req).await?;
+
+    // Test rpc endpoint response
+    assert!(res.status().is_success());
+
+    let body = to_bytes(res).await;
+    let (body, mut child) = child.kill_on_error(body)?;
+
+    let parsed: Value = serde_json::from_slice(&body)?;
+
+    // Check that we have at least 4 characters in the `build` field.
+    let build = parsed["result"]["build"].as_str().unwrap();
+    assert!(build.len() > 4, "Got {}", build);
+
+    // Check that the `subversion` field has "Zebra" in it.
+    let subversion = parsed["result"]["subversion"].as_str().unwrap();
+    assert!(subversion.contains("Zebra"), "Got {}", subversion);
+
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
+
+/// Failure log messages for any process, from the OS or shell.
+///
+/// These messages show that the child process has failed.
+/// So when we see them in the logs, we make the test fail.
+const PROCESS_FAILURE_MESSAGES: &[&str] = &[
+    // Linux
+    "Aborted",
+    // macOS / BSDs
+    "Abort trap",
+    // TODO: add other OS or C library errors?
+];
+
+/// Failure log messages from Zebra.
+///
+/// These `zebrad` messages show that the `lightwalletd` integration test has failed.
+/// So when we see them in the logs, we make the test fail.
+const ZEBRA_FAILURE_MESSAGES: &[&str] = &[
+    // Rust-specific panics
+    "The application panicked",
+    // RPC port errors
+    "Unable to start RPC server",
+    // TODO: disable if this actually happens during test zebrad shutdown
+    "Stopping RPC endpoint",
+    // Missing RPCs in zebrad logs (this log is from PR #3860)
+    //
+    // TODO: temporarily disable until enough RPCs are implemented, if needed
+    "Received unrecognized RPC request",
+    // RPC argument errors: parsing and data
+    //
+    // These logs are produced by jsonrpc_core inside Zebra,
+    // but it doesn't log them yet.
+    //
+    // TODO: log these errors in Zebra, and check for them in the Zebra logs?
+    "Invalid params",
+    "Method not found",
+];
+
+/// Failure log messages from lightwalletd.
+///
+/// These `lightwalletd` messages show that the `lightwalletd` integration test has failed.
+/// So when we see them in the logs, we make the test fail.
+const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
+    // Go-specific panics
+    "panic:",
+    // Missing RPCs in lightwalletd logs
+    // TODO: temporarily disable until enough RPCs are implemented, if needed
+    "unable to issue RPC call",
+    // RPC response errors: parsing and data
+    //
+    // jsonrpc_core error messages from Zebra,
+    // received by lightwalletd and written to its logs
+    "Invalid params",
+    "Method not found",
+    // Early termination
+    //
+    // TODO: temporarily disable until enough RPCs are implemented, if needed
+    "Lightwalletd died with a Fatal error",
+    // Go json package error messages:
+    "json: cannot unmarshal",
+    "into Go value of type",
+    // lightwalletd custom RPC error messages from:
+    // https://github.com/adityapk00/lightwalletd/blob/master/common/common.go
+    "block requested is newer than latest block",
+    "Cache add failed",
+    "error decoding",
+    "error marshaling",
+    "error parsing JSON",
+    "error reading JSON response",
+    "error with",
+    // We expect these errors when lightwalletd reaches the end of the zebrad cached state
+    // "error requesting block: 0: Block not found",
+    // "error zcashd getblock rpc",
+    "received overlong message",
+    "received unexpected height block",
+    "Reorg exceeded max",
+    "unable to issue RPC call",
+    // Missing fields for each specific RPC
+    //
+    // get_block_chain_info
+    //
+    // invalid sapling height
+    "Got sapling height 0",
+    // missing BIP70 chain name, should be "main" or "test"
+    " chain  ",
+    // missing branchID, should be 8 hex digits
+    " branchID \"",
+    // get_block
+    //
+    // a block error other than "-8: Block not found"
+    "error requesting block",
+    // a missing block with an incorrect error code
+    "Block not found",
+    //
+    // TODO: complete this list for each RPC with fields, if that RPC generates logs
+    // get_info - doesn't generate logs
+    // get_raw_transaction - might not generate logs
+    // z_get_tree_state
+    // get_address_txids
+    // get_address_balance
+    // get_address_utxos
+];
+
+/// Ignored failure logs for lightwalletd.
+/// These regexes override the [`LIGHTWALLETD_FAILURE_MESSAGES`].
+///
+/// These `lightwalletd` messages look like failure messages, but they are actually ok.
+/// So when we see them in the logs, we make the test continue.
+const LIGHTWALLETD_IGNORE_MESSAGES: &[&str] = &[
+    // Exceptions to lightwalletd custom RPC error messages:
+    //
+    // This log matches the "error with" RPC error message,
+    // but we expect Zebra to start with an empty state.
+    //
+    // TODO: this exception should not be used for the cached state tests (#3511)
+    r#"No Chain tip available yet","level":"warning","msg":"error with getblockchaininfo rpc, retrying"#,
+];
 
 /// Launch `zebrad` with an RPC port, and make sure `lightwalletd` works with Zebra.
 ///
@@ -1477,140 +1120,109 @@ async fn tracing_endpoint() -> Result<()> {
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_integration() -> Result<()> {
-    use std::net::SocketAddr;
-
     zebra_test::init();
 
-    // Skip the test unless we specifically asked for it
-    //
-    // TODO: check if the lightwalletd binary is in the PATH?
-    //       (this doesn't seem to be implemented in the standard library)
-    if env::var("ZEBRA_TEST_LIGHTWALLETD").is_err() {
-        tracing::info!(
-            "skipped lightwalletd integration test, \
-             set the 'ZEBRA_TEST_LIGHTWALLETD' environmental variable to run the test",
-        );
-
+    // Skip the test unless the user specifically asked for it
+    if zebra_skip_lightwalletd_tests() {
         return Ok(());
     }
 
     // Launch zebrad
 
+    // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let listen_port = random_known_port();
-    let listen_ip = "127.0.0.1".parse().expect("hard-coded IP is valid");
-    let listen_addr = SocketAddr::new(listen_ip, listen_port);
+    let mut config = random_known_rpc_port_config()?;
 
-    // Write a configuration that has the rpc listen_addr option set
-    // TODO: split this config into another function?
-    let mut config = default_test_config()?;
-    config.rpc.listen_addr = Some(listen_addr);
-
-    let dir = testdir()?.with_config(&mut config)?;
-    let mut zebrad = dir.spawn_child(&["start"])?.with_timeout(LAUNCH_DELAY);
-
-    // Wait until `zebrad` has opened the RPC endpoint
-    zebrad
-        .expect_stdout_line_matches(format!("Opened RPC endpoint at {}", listen_addr).as_str())?;
-
-    // Launch lightwalletd
-    // TODO: split this into another function
-
-    // Write a fake zcashd configuration that has the rpcbind and rpcport options set
-    // TODO: split this into another function
-    let dir = testdir()?;
-    let lightwalletd_config = format!(
-        "\
-        rpcbind={}\n\
-        rpcport={}\n\
-        ",
-        listen_ip, listen_port
-    );
-
-    use std::fs;
-    use std::io::Write;
-
-    let path = dir.path().to_owned();
-
-    // TODO: split this into another function
-    if !config.state.ephemeral {
-        let cache_dir = path.join("state");
-        fs::create_dir_all(&cache_dir)?;
-    } else {
-        fs::create_dir_all(&path)?;
-    }
-
-    let config_file = path.join("lightwalletd-zcash.conf");
-    fs::File::create(config_file)?.write_all(lightwalletd_config.as_bytes())?;
-
-    let result = {
-        let default_config_path = path.join("lightwalletd-zcash.conf");
-
-        assert!(
-            default_config_path.exists(),
-            "lightwalletd requires a config"
+    let zdir = testdir()?.with_config(&mut config)?;
+    let mut zebrad = zdir
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)
+        .with_failure_regex_iter(
+            // TODO: replace with a function that returns the full list and correct return type
+            ZEBRA_FAILURE_MESSAGES
+                .iter()
+                .chain(PROCESS_FAILURE_MESSAGES)
+                .cloned(),
+            NO_MATCHES_REGEX_ITER.iter().cloned(),
         );
 
-        dir.spawn_child_with_command(
-            "lightwalletd",
-            &[
-                // the fake zcashd conf we just wrote
-                "--zcash-conf-path",
-                default_config_path
-                    .as_path()
-                    .to_str()
-                    .expect("Path is valid Unicode"),
-                // the lightwalletd cache directory
-                //
-                // TODO: create a sub-directory for lightwalletd
-                "--data-dir",
-                path.to_str().expect("Path is valid Unicode"),
-                // log to standard output
-                "--log-file",
-                "/dev/stdout",
-                // randomise wallet client ports
-                "--grpc-bind-addr",
-                "127.0.0.1:0",
-                "--http-bind-addr",
-                "127.0.0.1:0",
-                // don't require a TLS certificate
-                "--no-tls-very-insecure",
-            ],
-        )
-    };
+    // Wait until `zebrad` has opened the RPC endpoint
+    zebrad.expect_stdout_line_matches(
+        format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
+    )?;
 
+    // Launch lightwalletd
+
+    // Write a fake zcashd configuration that has the rpcbind and rpcport options set
+    let ldir = testdir()?;
+    let ldir = ldir.with_lightwalletd_config(config.rpc.listen_addr.unwrap())?;
+
+    // Launch the lightwalletd process
+    let result = ldir.spawn_lightwalletd_child(args![]);
     let (lightwalletd, zebrad) = zebrad.kill_on_error(result)?;
-    let mut lightwalletd = lightwalletd.with_timeout(LAUNCH_DELAY);
+    let mut lightwalletd = lightwalletd
+        .with_timeout(LIGHTWALLETD_DELAY)
+        .with_failure_regex_iter(
+            // TODO: replace with a function that returns the full list and correct return type
+            LIGHTWALLETD_FAILURE_MESSAGES
+                .iter()
+                .chain(PROCESS_FAILURE_MESSAGES)
+                .cloned(),
+            // TODO: some exceptions do not apply to the cached state tests (#3511)
+            LIGHTWALLETD_IGNORE_MESSAGES.iter().cloned(),
+        );
 
     // Wait until `lightwalletd` has launched
     let result = lightwalletd.expect_stdout_line_matches("Starting gRPC server");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     // Check that `lightwalletd` is calling the expected Zebra RPCs
-    //
-    // TODO: add extra checks when we add new Zebra RPCs
 
-    // get_blockchain_info
-    let result = lightwalletd.expect_stdout_line_matches("Got sapling height");
+    // getblockchaininfo
+    //
+    // TODO: update branchID when we're using cached state (#3511)
+    //       add "Waiting for zcashd height to reach Sapling activation height"
+    let result = lightwalletd.expect_stdout_line_matches(
+        "Got sapling height 419200 block height [0-9]+ chain main branchID 00000000",
+    );
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
     let result = lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache");
     let (_, zebrad) = zebrad.kill_on_error(result)?;
 
-    // Check that `lightwalletd` got to the first unimplemented Zebra RPC
+    // getblock with the first Sapling block in Zebra's state
     //
-    // TODO: update the missing method name when we add a new Zebra RPC
+    // zcash/lightwalletd calls getbestblockhash here, but
+    // adityapk00/lightwalletd calls getblock
+    //
+    // The log also depends on what is in Zebra's state:
+    //
+    // # Empty Zebra State
+    //
+    // lightwalletd tries to download the Sapling activation block, but it's not in the state.
+    //
+    // Until the Sapling activation block has been downloaded, lightwalletd will log Zebra's RPC error:
+    // "error requesting block: 0: Block not found"
+    // We also get a similar log when lightwalletd reaches the end of Zebra's cache.
+    //
+    // # Cached Zebra State
+    //
+    // After the first successful getblock call, lightwalletd will log:
+    // "Block hash changed, clearing mempool clients"
+    // But we can't check for that, because it can come before or after the Ingestor log.
+    //
+    // TODO: expect Ingestor log when we're using cached state (#3511)
+    //       "Ingestor adding block to cache"
+    let result = lightwalletd.expect_stdout_line_matches(regex::escape(
+        "Waiting for zcashd height to reach Sapling activation height (419200)",
+    ));
+    let (_, zebrad) = zebrad.kill_on_error(result)?;
 
-    let result = lightwalletd
-        .expect_stdout_line_matches("Method not found.*error zcashd getbestblockhash rpc");
-    let (_, zebrad) = zebrad.kill_on_error(result)?;
-    let result = lightwalletd.expect_stdout_line_matches(
-        "Lightwalletd died with a Fatal error. Check logfile for details",
-    );
-    let (_, zebrad) = zebrad.kill_on_error(result)?;
+    // (next RPC)
+    //
+    // TODO: add extra checks when we add new Zebra RPCs
 
     // Cleanup both processes
-
     let result = lightwalletd.kill();
     let (_, mut zebrad) = zebrad.kill_on_error(result)?;
     zebrad.kill()?;
@@ -1620,9 +1232,11 @@ fn lightwalletd_integration() -> Result<()> {
 
     // If the test fails here, see the [note on port conflict](#Note on port conflict)
     //
-    // TODO: change lightwalletd to `assert_was_killed` when enough RPCs are implemented
+    // zcash/lightwalletd exits by itself, but
+    // adityapk00/lightwalletd keeps on going, so it gets killed by the test harness.
+
     lightwalletd_output
-        .assert_was_not_killed()
+        .assert_was_killed()
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
     zebrad_output
         .assert_was_killed()
@@ -1717,6 +1331,38 @@ fn zebra_tracing_conflict() -> Result<()> {
     Ok(())
 }
 
+/// Start 2 zebrad nodes using the same RPC listener port, but different
+/// state directories and Zcash listener ports. The first node should get
+/// exclusive use of the port. The second node will panic.
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn zebra_rpc_conflict() -> Result<()> {
+    zebra_test::init();
+
+    if zebra_test::net::zebra_skip_network_tests() {
+        return Ok(());
+    }
+
+    // Write a configuration that has RPC listen_addr set
+    // [Note on port conflict](#Note on port conflict)
+    let mut config = random_known_rpc_port_config()?;
+
+    let dir1 = testdir()?.with_config(&mut config)?;
+    let regex1 = regex::escape(&format!(
+        r"Opened RPC endpoint at {}",
+        config.rpc.listen_addr.unwrap(),
+    ));
+
+    // From another folder create a configuration with the same endpoint.
+    // `rpc.listen_addr` will be the same in the 2 nodes.
+    // But they will have different Zcash listeners (auto port) and states (ephemeral)
+    let dir2 = testdir()?.with_config(&mut config)?;
+
+    check_config_conflict(dir1, regex1.as_str(), dir2, "Unable to start RPC server")?;
+
+    Ok(())
+}
+
 /// Start 2 zebrad nodes using the same state directory, but different Zcash
 /// listener ports. The first node should get exclusive access to the database.
 /// The second node will panic with the Zcash state conflict hint added in #1535.
@@ -1734,7 +1380,6 @@ fn zebra_state_conflict() -> Result<()> {
     let contains = if cfg!(unix) {
         let mut dir_conflict_full = PathBuf::new();
         dir_conflict_full.push(dir_conflict.path());
-        dir_conflict_full.push("state");
         dir_conflict_full.push("state");
         dir_conflict_full.push(format!(
             "v{}",
@@ -1774,13 +1419,16 @@ where
     U: ZebradTestDirExt,
 {
     // Start the first node
-    let mut node1 = first_dir.spawn_child(&["start"])?;
+    let mut node1 = first_dir.spawn_child(args!["start"])?;
 
     // Wait until node1 has used the conflicting resource.
     node1.expect_stdout_line_matches(first_stdout_regex)?;
 
+    // Wait a bit before launching the second node.
+    std::thread::sleep(BETWEEN_NODES_DELAY);
+
     // Spawn the second node
-    let node2 = second_dir.spawn_child(&["start"]);
+    let node2 = second_dir.spawn_child(args!["start"]);
     let (node2, mut node1) = node1.kill_on_error(node2)?;
 
     // Wait a few seconds and kill first node.
@@ -1828,62 +1476,83 @@ where
     Ok(())
 }
 
-/// What the expected behavior of the mempool is for a test that uses [`sync_until`].
-enum MempoolBehavior {
-    /// The mempool should be forced to activate at a certain height, for debug purposes.
-    ///
-    /// [`sync_until`] will kill `zebrad` after it logs mempool activation,
-    /// then the `stop_regex`.
-    ForceActivationAt(Height),
+#[tokio::test]
+#[ignore]
+async fn fully_synced_rpc_test() -> Result<()> {
+    zebra_test::init();
 
-    /// The mempool should be automatically activated.
-    ///
-    /// [`sync_until`] will kill `zebrad` after it logs mempool activation,
-    /// then the `stop_regex`.
-    ShouldAutomaticallyActivate,
+    // TODO: reuse code from https://github.com/ZcashFoundation/zebra/pull/4177/
+    // to get the cached_state_path
+    const CACHED_STATE_PATH_VAR: &str = "ZEBRA_CACHED_STATE_PATH";
+    let cached_state_path = match env::var_os(CACHED_STATE_PATH_VAR) {
+        Some(argument) => PathBuf::from(argument),
+        None => {
+            tracing::info!(
+                "skipped send transactions using lightwalletd test, \
+                 set the {CACHED_STATE_PATH_VAR:?} environment variable to run the test",
+            );
+            return Ok(());
+        }
+    };
 
-    /// The mempool should not become active during the test.
-    ///
-    /// # Correctness
-    ///
-    /// Unlike the other mempool behaviours, `zebrad` must stop after logging the stop regex,
-    /// without being killed by [`sync_until`] test harness.
-    ///
-    /// Since it needs to collect all the output,
-    /// the test harness can't kill `zebrad` after it logs the `stop_regex`.
-    ShouldNotActivate,
+    let network = Network::Mainnet;
+
+    let (_zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc_without_initial_peers(network, cached_state_path)?;
+
+    // Make a getblock test that works only on synced node (high block number).
+    // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
+    // if desired.
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("http://{}", &zebra_rpc_address.to_string()))
+        // Manually constructed request to avoid encoding it, for simplicity
+        .body(r#"{"jsonrpc": "2.0", "method": "getblock", "params": ["1180900", 0], "id":123 }"#)
+        .header("Content-Type", "application/json")
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    // Simple textual check to avoid fully parsing the response, for simplicity
+    let expected_bytes = zebra_test::vectors::MAINNET_BLOCKS
+        .get(&1_180_900)
+        .expect("test block must exist");
+    let expected_hex = hex::encode(expected_bytes);
+    assert!(
+        res.contains(&expected_hex),
+        "response did not contain the desired block: {}",
+        res
+    );
+
+    Ok(())
 }
 
-impl MempoolBehavior {
-    /// Return the height value that the mempool should be enabled at, if available.
-    pub fn enable_at_height(&self) -> Option<u32> {
-        match self {
-            MempoolBehavior::ForceActivationAt(height) => Some(height.0),
-            MempoolBehavior::ShouldAutomaticallyActivate | MempoolBehavior::ShouldNotActivate => {
-                None
-            }
-        }
-    }
+/// Spawns a zebrad instance to interact with lightwalletd, but without an internet connection.
+///
+/// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
+/// providing an initial state to the zebrad instance.
+fn spawn_zebrad_for_rpc_without_initial_peers(
+    network: Network,
+    zebra_directory: PathBuf,
+) -> Result<(TestChild<PathBuf>, SocketAddr)> {
+    let mut config = random_known_rpc_port_config()
+        .expect("Failed to create a config file with a known RPC listener port");
 
-    /// Returns `true` if the mempool should activate,
-    /// either by forced or automatic activation.
-    pub fn require_activation(&self) -> bool {
-        self.require_forced_activation() || self.require_automatic_activation()
-    }
+    config.state.ephemeral = false;
+    config.network.initial_mainnet_peers = HashSet::new();
+    config.network.initial_testnet_peers = HashSet::new();
+    config.network.network = network;
 
-    /// Returns `true` if the mempool should be forcefully activated at a specified height.
-    pub fn require_forced_activation(&self) -> bool {
-        matches!(self, MempoolBehavior::ForceActivationAt(_))
-    }
+    let mut zebrad = zebra_directory
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(Duration::from_secs(60 * 60))
+        .bypass_test_capture(true);
 
-    /// Returns `true` if the mempool should automatically activate.
-    pub fn require_automatic_activation(&self) -> bool {
-        matches!(self, MempoolBehavior::ShouldAutomaticallyActivate)
-    }
+    let rpc_address = config.rpc.listen_addr.unwrap();
 
-    /// Returns `true` if the mempool should not activate.
-    #[allow(dead_code)]
-    pub fn require_no_activation(&self) -> bool {
-        matches!(self, MempoolBehavior::ShouldNotActivate)
-    }
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
+
+    Ok((zebrad, rpc_address))
 }

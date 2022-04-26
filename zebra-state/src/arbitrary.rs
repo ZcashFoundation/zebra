@@ -1,3 +1,5 @@
+//! Randomised data generation for state data.
+
 use std::sync::Arc;
 
 use zebra_chain::{
@@ -8,7 +10,10 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
-use crate::{request::ContextuallyValidBlock, service::chain_tip::ChainTipBlock, PreparedBlock};
+use crate::{
+    request::ContextuallyValidBlock, service::chain_tip::ChainTipBlock, FinalizedBlock,
+    PreparedBlock,
+};
 
 /// Mocks computation done during semantic validation
 pub trait Prepare {
@@ -21,7 +26,8 @@ impl Prepare for Arc<Block> {
         let hash = block.hash();
         let height = block.coinbase_height().unwrap();
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
+        let new_outputs =
+            transparent::new_ordered_outputs_with_height(&block, height, &transaction_hashes);
 
         PreparedBlock {
             block,
@@ -98,14 +104,12 @@ impl ContextuallyValidBlock {
     pub fn test_with_zero_spent_utxos(block: impl Into<PreparedBlock>) -> Self {
         let block = block.into();
 
-        let zero_utxo = transparent::Utxo {
-            output: transparent::Output {
-                value: Amount::zero(),
-                lock_script: transparent::Script::new(&[]),
-            },
-            height: block::Height(1),
-            from_coinbase: false,
+        let zero_output = transparent::Output {
+            value: Amount::zero(),
+            lock_script: transparent::Script::new(&[]),
         };
+
+        let zero_utxo = transparent::OrderedUtxo::new(zero_output, block::Height(1), 1);
 
         let zero_spent_utxos = block
             .block
@@ -141,7 +145,11 @@ impl ContextuallyValidBlock {
             block,
             hash,
             height,
-            new_outputs: transparent::utxos_from_ordered_utxos(new_outputs),
+            new_outputs: new_outputs.clone(),
+            // Just re-use the outputs we created in this block, even though that's incorrect.
+            //
+            // TODO: fix the tests, and stop adding unrelated inputs and outputs.
+            spent_outputs: new_outputs,
             transaction_hashes,
             chain_value_pool_change: fake_chain_value_pool_change,
         }
@@ -153,5 +161,29 @@ impl ContextuallyValidBlock {
     /// Only for use in tests.
     pub fn test_with_zero_chain_pool_change(block: impl Into<PreparedBlock>) -> Self {
         Self::test_with_chain_pool_change(block, ValueBalance::zero())
+    }
+}
+
+impl FinalizedBlock {
+    /// Create a block that's ready to be committed to the finalized state,
+    /// using a precalculated [`block::Hash`] and [`block::Height`].
+    ///
+    /// This is a test-only method, prefer [`FinalizedBlock::with_hash`].
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn with_hash_and_height(
+        block: Arc<Block>,
+        hash: block::Hash,
+        height: block::Height,
+    ) -> Self {
+        let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
+        let new_outputs = transparent::new_outputs_with_height(&block, height, &transaction_hashes);
+
+        Self {
+            block,
+            hash,
+            height,
+            new_outputs,
+            transaction_hashes,
+        }
     }
 }

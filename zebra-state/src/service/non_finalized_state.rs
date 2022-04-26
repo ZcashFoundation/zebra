@@ -2,6 +2,22 @@
 //!
 //! [RFC0005]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html
 
+use std::{collections::BTreeSet, mem, sync::Arc};
+
+use zebra_chain::{
+    block::{self, Block},
+    history_tree::HistoryTree,
+    orchard,
+    parameters::Network,
+    sapling, sprout, transparent,
+};
+
+use crate::{
+    request::ContextuallyValidBlock,
+    service::{check, finalized_state::ZebraDb},
+    FinalizedBlock, PreparedBlock, ValidateContextError,
+};
+
 mod chain;
 mod queued_blocks;
 
@@ -10,26 +26,7 @@ mod tests;
 
 pub use queued_blocks::QueuedBlocks;
 
-use std::{collections::BTreeSet, mem, ops::Deref, sync::Arc};
-
-use zebra_chain::{
-    block::{self, Block},
-    history_tree::HistoryTree,
-    orchard,
-    parameters::Network,
-    sapling, sprout,
-    transaction::{self, Transaction},
-    transparent,
-};
-
-use crate::{
-    request::ContextuallyValidBlock, FinalizedBlock, HashOrHeight, PreparedBlock,
-    ValidateContextError,
-};
-
-pub(crate) use self::chain::Chain;
-
-use super::{check, finalized_state::FinalizedState};
+pub(crate) use chain::Chain;
 
 /// The state of the chains in memory, including queued blocks.
 #[derive(Debug, Clone)]
@@ -37,7 +34,7 @@ pub struct NonFinalizedState {
     /// Verified, non-finalized chains, in ascending order.
     ///
     /// The best chain is `chain_set.last()` or `chain_set.iter().next_back()`.
-    pub chain_set: BTreeSet<Box<Chain>>,
+    pub chain_set: BTreeSet<Arc<Chain>>,
 
     /// The configured Zcash network.
     //
@@ -89,11 +86,14 @@ impl NonFinalizedState {
 
         // extract best chain
         let mut best_chain = chains.next_back().expect("there's at least one chain");
+        // clone if required
+        let write_best_chain = Arc::make_mut(&mut best_chain);
+
         // extract the rest into side_chains so they can be mutated
         let side_chains = chains;
 
         // remove the lowest height block from the best_chain to be finalized
-        let finalizing = best_chain.pop_root();
+        let finalizing = write_best_chain.pop_root();
 
         // add best_chain back to `self.chain_set`
         if !best_chain.is_empty() {
@@ -102,16 +102,25 @@ impl NonFinalizedState {
 
         // for each remaining chain in side_chains
         for mut chain in side_chains {
-            // remove the first block from `chain`
-            let chain_start = chain.pop_root();
-            // if block equals finalized_block
-            if !chain.is_empty() && chain_start.hash == finalizing.hash {
-                // add the chain back to `self.chain_set`
-                self.chain_set.insert(chain);
-            } else {
-                // else discard `chain`
+            if chain.non_finalized_root_hash() != finalizing.hash {
+                // If we popped the root, the chain would be empty or orphaned,
+                // so just drop it now.
                 drop(chain);
+
+                continue;
             }
+
+            // otherwise, the popped root block is the same as the finalizing block
+
+            // clone if required
+            let write_chain = Arc::make_mut(&mut chain);
+
+            // remove the first block from `chain`
+            let chain_start = write_chain.pop_root();
+            assert_eq!(chain_start.hash, finalizing.hash);
+
+            // add the chain back to `self.chain_set`
+            self.chain_set.insert(chain);
         }
 
         self.update_metrics_for_chains();
@@ -126,7 +135,7 @@ impl NonFinalizedState {
     pub fn commit_block(
         &mut self,
         prepared: PreparedBlock,
-        finalized_state: &FinalizedState,
+        finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
@@ -139,26 +148,21 @@ impl NonFinalizedState {
             finalized_state.history_tree(),
         )?;
 
-        // We might have taken a chain, so all validation must happen within
-        // validate_and_commit, so that the chain is restored correctly.
-        match self.validate_and_commit(*parent_chain.clone(), prepared, finalized_state) {
-            Ok(child_chain) => {
-                // if the block is valid, keep the child chain, and drop the parent chain
-                self.chain_set.insert(Box::new(child_chain));
-                self.update_metrics_for_committed_block(height, hash);
-                Ok(())
-            }
-            Err(err) => {
-                // if the block is invalid, restore the unmodified parent chain
-                // (the child chain might have been modified before the error)
-                //
-                // If the chain was forked, this adds an extra chain to the
-                // chain set. This extra chain will eventually get deleted
-                // (or re-used for a valid fork).
-                self.chain_set.insert(parent_chain);
-                Err(err)
-            }
-        }
+        // If the block is invalid, return the error,
+        // and drop the cloned parent Arc, or newly created chain fork.
+        let modified_chain = self.validate_and_commit(parent_chain, prepared, finalized_state)?;
+
+        // If the block is valid:
+        // - add the new chain fork or updated chain to the set of recent chains
+        // - remove the parent chain, if it was in the chain set
+        //   (if it was a newly created fork, it won't be in the chain set)
+        self.chain_set.insert(modified_chain);
+        self.chain_set
+            .retain(|chain| chain.non_finalized_tip_hash() != parent_hash);
+
+        self.update_metrics_for_committed_block(height, hash);
+
+        Ok(())
     }
 
     /// Commit block to the non-finalized state as a new chain where its parent
@@ -167,7 +171,7 @@ impl NonFinalizedState {
     pub fn commit_new_chain(
         &mut self,
         prepared: PreparedBlock,
-        finalized_state: &FinalizedState,
+        finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
         let chain = Chain::new(
             self.network,
@@ -179,38 +183,44 @@ impl NonFinalizedState {
         );
         let (height, hash) = (prepared.height, prepared.hash);
 
-        // if the block is invalid, drop the newly created chain fork
-        let chain = self.validate_and_commit(chain, prepared, finalized_state)?;
-        self.chain_set.insert(Box::new(chain));
+        // If the block is invalid, return the error, and drop the newly created chain fork
+        let chain = self.validate_and_commit(Arc::new(chain), prepared, finalized_state)?;
+
+        // If the block is valid, add the new chain fork to the set of recent chains.
+        self.chain_set.insert(chain);
         self.update_metrics_for_committed_block(height, hash);
+
         Ok(())
     }
 
     /// Contextually validate `prepared` using `finalized_state`.
-    /// If validation succeeds, push `prepared` onto `parent_chain`.
-    #[tracing::instrument(level = "debug", skip(self, finalized_state, parent_chain))]
+    /// If validation succeeds, push `prepared` onto `new_chain`.
+    ///
+    /// `new_chain` should start as a clone of the parent chain fork,
+    /// or the finalized tip.
+    #[tracing::instrument(level = "debug", skip(self, finalized_state, new_chain))]
     fn validate_and_commit(
         &self,
-        parent_chain: Chain,
+        new_chain: Arc<Chain>,
         prepared: PreparedBlock,
-        finalized_state: &FinalizedState,
-    ) -> Result<Chain, ValidateContextError> {
+        finalized_state: &ZebraDb,
+    ) -> Result<Arc<Chain>, ValidateContextError> {
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,
-            &parent_chain.unspent_utxos(),
-            &parent_chain.spent_utxos,
+            &new_chain.unspent_utxos(),
+            &new_chain.spent_utxos,
             finalized_state,
         )?;
 
         check::prepared_block_commitment_is_valid_for_chain_history(
             &prepared,
             self.network,
-            &parent_chain.history_tree,
+            &new_chain.history_tree,
         )?;
 
         check::anchors::anchors_refer_to_earlier_treestates(
             finalized_state,
-            &parent_chain,
+            &new_chain,
             &prepared,
         )?;
 
@@ -228,7 +238,12 @@ impl NonFinalizedState {
             }
         })?;
 
-        parent_chain.push(contextual)
+        // We're pretty sure the new block is valid,
+        // so clone the inner chain if needed, then add the new block.
+        Arc::try_unwrap(new_chain)
+            .unwrap_or_else(|shared_chain| (*shared_chain).clone())
+            .push(contextual)
+            .map(Arc::new)
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.
@@ -248,42 +263,24 @@ impl NonFinalizedState {
             .any(|chain| chain.height_by_hash.contains_key(hash))
     }
 
-    /// Remove and return the first chain satisfying the given predicate.
-    fn take_chain_if<F>(&mut self, predicate: F) -> Option<Box<Chain>>
+    /// Removes and returns the first chain satisfying the given predicate.
+    ///
+    /// If multiple chains satisfy the predicate, returns the chain with the highest difficulty.
+    /// (Using the tip block hash tie-breaker.)
+    fn find_chain<P>(&mut self, mut predicate: P) -> Option<&Arc<Chain>>
     where
-        F: Fn(&Chain) -> bool,
+        P: FnMut(&Chain) -> bool,
     {
-        // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
-        // Neither of these fields has interior mutability.
-        #[allow(clippy::mutable_key_type)]
-        let chains = mem::take(&mut self.chain_set);
-        let mut best_chain_iter = chains.into_iter().rev();
-
-        while let Some(next_best_chain) = best_chain_iter.next() {
-            // if the predicate says we should remove it
-            if predicate(&next_best_chain) {
-                // add back the remaining chains
-                for remaining_chain in best_chain_iter {
-                    self.chain_set.insert(remaining_chain);
-                }
-
-                // and return the chain
-                return Some(next_best_chain);
-            } else {
-                // add the chain back to the set and continue
-                self.chain_set.insert(next_best_chain);
-            }
-        }
-
-        None
+        // Reverse the iteration order, to find highest difficulty chains first.
+        self.chain_set.iter().rev().find(|chain| predicate(chain))
     }
 
-    /// Returns the `transparent::Output` pointed to by the given
-    /// `transparent::OutPoint` if it is present in any chain.
+    /// Returns the [`transparent::Utxo`] pointed to by the given
+    /// [`transparent::OutPoint`] if it is present in any chain.
     pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         for chain in self.chain_set.iter().rev() {
             if let Some(utxo) = chain.created_utxos.get(outpoint) {
-                return Some(utxo.clone());
+                return Some(utxo.utxo.clone());
             }
         }
 
@@ -305,15 +302,6 @@ impl NonFinalizedState {
         None
     }
 
-    /// Returns the [`ContextuallyValidBlock`] at a given height or hash in the best chain.
-    pub fn best_block(&self, hash_or_height: HashOrHeight) -> Option<ContextuallyValidBlock> {
-        let best_chain = self.best_chain()?;
-        let height =
-            hash_or_height.height_or_else(|hash| best_chain.height_by_hash.get(&hash).cloned())?;
-
-        best_chain.blocks.get(&height).map(Clone::clone)
-    }
-
     /// Returns the hash for a given `block::Height` if it is present in the best chain.
     pub fn best_hash(&self, height: block::Height) -> Option<block::Hash> {
         self.best_chain()?
@@ -332,9 +320,11 @@ impl NonFinalizedState {
     }
 
     /// Returns the block at the tip of the best chain.
-    pub fn best_tip_block(&self) -> Option<ContextuallyValidBlock> {
-        let (height, _hash) = self.best_tip()?;
-        self.best_block(height.into())
+    #[allow(dead_code)]
+    pub fn best_tip_block(&self) -> Option<&ContextuallyValidBlock> {
+        let best_chain = self.best_chain()?;
+
+        best_chain.tip_block()
     }
 
     /// Returns the height of `hash` in the best chain.
@@ -353,15 +343,6 @@ impl NonFinalizedState {
         }
 
         None
-    }
-
-    /// Returns the given transaction if it exists in the best chain.
-    pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
-        let best_chain = self.best_chain()?;
-        best_chain
-            .tx_by_hash
-            .get(&hash)
-            .map(|(height, index)| best_chain.blocks[height].block.transactions[*index].clone())
     }
 
     /// Returns `true` if the best chain contains `sprout_nullifier`.
@@ -388,12 +369,9 @@ impl NonFinalizedState {
             .unwrap_or(false)
     }
 
-    /// Return the non-finalized portion of the current best chain
-    pub(crate) fn best_chain(&self) -> Option<&Chain> {
-        self.chain_set
-            .iter()
-            .next_back()
-            .map(|box_chain| box_chain.deref())
+    /// Return the non-finalized portion of the current best chain.
+    pub(crate) fn best_chain(&self) -> Option<&Arc<Chain>> {
+        self.chain_set.iter().next_back()
     }
 
     /// Return the chain whose tip block hash is `parent_hash`.
@@ -410,13 +388,16 @@ impl NonFinalizedState {
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
-    ) -> Result<Box<Chain>, ValidateContextError> {
-        match self.take_chain_if(|chain| chain.non_finalized_tip_hash() == parent_hash) {
-            // An existing chain in the non-finalized state
-            Some(chain) => Ok(chain),
+    ) -> Result<Arc<Chain>, ValidateContextError> {
+        match self.find_chain(|chain| chain.non_finalized_tip_hash() == parent_hash) {
+            // Clone the existing Arc<Chain> in the non-finalized state
+            Some(chain) => Ok(chain.clone()),
             // Create a new fork
-            None => Ok(Box::new(
-                self.chain_set
+            None => {
+                // Check the lowest difficulty chains first,
+                // because the fork could be closer to their tip.
+                let fork_chain = self
+                    .chain_set
                     .iter()
                     .find_map(|chain| {
                         chain
@@ -431,8 +412,10 @@ impl NonFinalizedState {
                     })
                     .expect(
                         "commit_block is only called with blocks that are ready to be committed",
-                    )?,
-            )),
+                    )?;
+
+                Ok(Arc::new(fork_chain))
+            }
         }
     }
 

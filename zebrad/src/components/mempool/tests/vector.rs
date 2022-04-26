@@ -98,6 +98,30 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     // response of `Request::TransactionsById`
     assert_eq!(genesis_transaction.transaction, transactions[0]);
 
+    // Test `Request::TransactionsByMinedId`
+    // TODO: use a V5 tx to test if it's really matched by mined ID
+    let genesis_transactions_mined_hash_set = genesis_transaction_ids
+        .iter()
+        .map(|txid| txid.mined_id())
+        .collect::<HashSet<_>>();
+    let response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::TransactionsByMinedId(
+            genesis_transactions_mined_hash_set,
+        ))
+        .await
+        .unwrap();
+    let transactions = match response {
+        Response::Transactions(transactions) => transactions,
+        _ => unreachable!("will never happen in this test"),
+    };
+
+    // Make sure the transaction from the blockchain test vector is the same as the
+    // response of `Request::TransactionsByMinedId`
+    assert_eq!(genesis_transaction.transaction, transactions[0]);
+
     // Insert more transactions into the mempool storage.
     // This will cause the genesis transaction to be moved into rejected.
     // Skip the last (will be used later)
@@ -704,7 +728,8 @@ async fn setup(
     let peer_set = MockService::build().for_unit_tests();
 
     let state_config = StateConfig::ephemeral();
-    let (state, latest_chain_tip, chain_tip_change) = zebra_state::init(state_config, network);
+    let (state, _read_only_state_service, latest_chain_tip, chain_tip_change) =
+        zebra_state::init(state_config, network);
     let state_service = ServiceBuilder::new().buffer(1).service(state);
 
     let tx_verifier = MockService::build().for_unit_tests();

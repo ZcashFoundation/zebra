@@ -1,21 +1,43 @@
 name: Lint Rust files
 
 on:
+  # we build Rust caches on main, so they can be shared by all branches:
+  # https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows#restrictions-for-accessing-a-cache
   push:
     branches:
-      - "**"
-      - "!main"
+      - main
     paths:
+      # production code and test code
       - '**/*.rs'
+      # hard-coded checkpoints
+      # TODO: skip proptest regressions
+      - '**/*.txt'
+      # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      # workflow definitions that change the clippy cache
+      - '.cargo/config.toml'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches:
+      - 'main'
+    paths:
+      # code and tests
+      - '**/*.rs'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
       - 'clippy.toml'
       - '.cargo/config.toml'
-      - '.github/workflows/lint.yml'
+      # TODO: we might want to run this in a separate workflow in the future for the `actionlint` job
+      - '.github/workflows/*.yml'
 
 env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: full
+  RUST_LIB_BACKTRACE: full
+  COLORBT_SHOW_HIDDEN: '1'
 
 jobs:
   clippy:
@@ -24,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
 
@@ -35,6 +57,8 @@ jobs:
           required-permission: write
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: Swatinem/rust-cache@v1
 
       - name: Run clippy action to produce annotations
         uses: actions-rs/clippy-check@v1.0.7
@@ -61,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
 
@@ -71,9 +95,15 @@ jobs:
           components: rustfmt
           override: true
 
-      - uses: Swatinem/rust-cache@v1 # TODO: No cache is being found
+      - uses: Swatinem/rust-cache@v1
 
       - uses: actions-rs/cargo@v1.0.3
         with:
           command: fmt
           args: --all -- --check
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3.0.2
+      - uses: reviewdog/action-actionlint@v1.24.0

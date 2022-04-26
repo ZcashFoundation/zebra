@@ -2,35 +2,61 @@ name: CI
 
 on:
   workflow_dispatch:
+  # we build Rust and Zcash parameter caches on main,
+  # so they can be shared by all branches:
+  # https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows#restrictions-for-accessing-a-cache
+  push:
+    branches:
+      - main
+    paths:
+      # production code and test code
+      - '**/*.rs'
+      # hard-coded checkpoints
+      # TODO: skip proptest regressions
+      - '**/*.txt'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
+      - '.github/workflows/ci.yml'
   pull_request:
     paths:
+      # code and tests
       - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
       - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
+      # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - '**/deny.toml'
+      # workflow definitions
       - '.github/workflows/ci.yml'
 
 env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: full
+  RUST_LIB_BACKTRACE: full
+  COLORBT_SHOW_HIDDEN: '1'
 
 jobs:
   test:
     name: Test ${{ matrix.rust }} on ${{ matrix.os }}
     # The large timeout is to accommodate:
-    # - Windows builds (75 minutes, typically 30-50 minutes)
-    # - parameter downloads (40 minutes, but only when the cache expires)
-    timeout-minutes: 115
+    # - Windows builds (75 minutes, typically 30-50 minutes), and
+    # - parameter downloads (an extra 90 minutes, but only when the cache expires)
+    timeout-minutes: 165
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macOS-latest]
+        # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
+        os: [ubuntu-latest, macos-latest]
         rust: [stable]
 
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
 
@@ -58,7 +84,7 @@ jobs:
         # Ubuntu runners don't have reliable network or DNS during test steps.
         # Windows runners have an unreliable network.
         shell: bash
-        if: matrix.os != 'macOS-latest'
+        if: matrix.os != 'macos-latest'
         run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
 
       - name: Minimise proptest cases on macOS and Windows
@@ -70,8 +96,8 @@ jobs:
         shell: bash
         if: matrix.os != 'ubuntu-latest'
         run: |
-             echo "PROPTEST_CASES=1" >> $GITHUB_ENV
-             echo "PROPTEST_MAX_SHRINK_ITERS=1024" >> $GITHUB_ENV
+          echo "PROPTEST_CASES=1" >> $GITHUB_ENV
+          echo "PROPTEST_MAX_SHRINK_ITERS=1024" >> $GITHUB_ENV
 
       - name: Change target output directory on Windows
         # Windows doesn't have enough space on the D: drive, so we redirect the build output to the
@@ -90,7 +116,7 @@ jobs:
         run: echo "ZCASH_PARAMS=$(cargo run --example get-params-path)" >> $GITHUB_ENV
       - name: Cache Zcash parameters
         id: cache-params
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: ${{ env.ZCASH_PARAMS }}
           key: ${{ runner.os }}-sprout-and-sapling-params
@@ -109,7 +135,7 @@ jobs:
 
       - name: Run zebrad large sync tests
         # Skip the entire step on Ubuntu and Windows, because the test would be skipped anyway due to ZEBRA_SKIP_NETWORK_TESTS
-        if: matrix.os == 'macOS-latest'
+        if: matrix.os == 'macos-latest'
         uses: actions-rs/cargo@v1.0.3
         with:
           command: test
@@ -125,7 +151,7 @@ jobs:
         rust: [stable]
 
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
 
@@ -150,7 +176,7 @@ jobs:
       - name: Run tests with fake activation heights
         uses: actions-rs/cargo@v1.0.3
         env:
-          TEST_FAKE_ACTIVATION_HEIGHTS: ""
+          TEST_FAKE_ACTIVATION_HEIGHTS: ''
         with:
           command: test
           # Note: this only runs the zebra-state crate tests,
@@ -166,7 +192,7 @@ jobs:
         rust: [stable, beta]
 
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
 
@@ -187,13 +213,35 @@ jobs:
         working-directory: ./zebra-chain
         run: cargo build --verbose --no-default-features
 
+  install-from-lockfile-no-cache:
+    name: Install zebrad from lockfile without cache on ubuntu-latest
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Install
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: install
+          args: --locked --path ./zebrad/ zebrad
+
   build:
     name: Build stable on ubuntu-latest
     timeout-minutes: 60
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2.4.0
+      - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
 
@@ -237,18 +285,18 @@ jobs:
     continue-on-error: ${{ matrix.checks == 'advisories' || matrix.checks == 'licenses'}}
 
     steps:
-    - uses: actions/checkout@v2
-      with:
-        persist-credentials: false
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
 
-    - uses: EmbarkStudios/cargo-deny-action@v1
-      with:
-        command: check ${{ matrix.checks }}
-        args: --all-features --workspace
+      - uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          command: check ${{ matrix.checks }}
+          args: --all-features --workspace
 
-    # this check runs with optional features off
-    # so we expect some warnings about "skip tree root was not found"
-    - uses: EmbarkStudios/cargo-deny-action@v1
-      with:
-        command: check ${{ matrix.checks }}
-        args: --workspace
+      # this check runs with optional features off
+      # so we expect some warnings about "skip tree root was not found"
+      - uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          command: check ${{ matrix.checks }}
+          args: --workspace

@@ -1,20 +1,29 @@
+//! Arbitrary data generation and test setup for Zebra's state.
+
 use std::sync::Arc;
 
+use futures::{stream::FuturesUnordered, StreamExt};
 use proptest::{
     num::usize::BinarySearch,
     prelude::*,
     strategy::{NewTree, ValueTree},
     test_runner::TestRunner,
 };
+use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
-    block::Block, fmt::SummaryDebug, history_tree::HistoryTree, parameters::NetworkUpgrade,
+    block::Block,
+    fmt::SummaryDebug,
+    history_tree::HistoryTree,
+    parameters::{Network, NetworkUpgrade},
     LedgerState,
 };
 
-use crate::arbitrary::Prepare;
-
-use super::*;
+use crate::{
+    arbitrary::Prepare,
+    service::{check, ReadStateService, StateService},
+    BoxError, ChainTipChange, Config, LatestChainTip, PreparedBlock, Request, Response,
+};
 
 pub use zebra_chain::block::arbitrary::MAX_PARTIAL_CHAIN_BLOCKS;
 
@@ -157,4 +166,40 @@ impl Strategy for PreparedChain {
             history_tree: chain.2,
         })
     }
+}
+
+/// Initialize a state service with blocks, and return:
+/// - a read-write [`StateService`]
+/// - a read-only [`ReadStateService`]
+/// - a [`LatestChainTip`]
+/// - a [`ChainTipChange`] tracker
+pub async fn populated_state(
+    blocks: impl IntoIterator<Item = Arc<Block>>,
+    network: Network,
+) -> (
+    Buffer<BoxService<Request, Response, BoxError>, Request>,
+    ReadStateService,
+    LatestChainTip,
+    ChainTipChange,
+) {
+    let requests = blocks
+        .into_iter()
+        .map(|block| Request::CommitFinalizedBlock(block.into()));
+
+    let (state, read_state, latest_chain_tip, chain_tip_change) =
+        StateService::new(Config::ephemeral(), network);
+    let mut state = Buffer::new(BoxService::new(state), 1);
+
+    let mut responses = FuturesUnordered::new();
+
+    for request in requests {
+        let rsp = state.ready().await.unwrap().call(request);
+        responses.push(rsp);
+    }
+
+    while let Some(rsp) = responses.next().await {
+        rsp.expect("blocks should commit just fine");
+    }
+
+    (state, read_state, latest_chain_tip, chain_tip_change)
 }

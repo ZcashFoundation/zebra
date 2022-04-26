@@ -14,7 +14,7 @@ pub mod arbitrary;
 #[cfg(any(test, feature = "bench", feature = "proptest-impl"))]
 pub mod tests;
 
-use std::{collections::HashMap, convert::TryInto, fmt, ops::Neg};
+use std::{collections::HashMap, fmt, ops::Neg};
 
 pub use commitment::{
     ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Commitment, CommitmentError,
@@ -22,12 +22,10 @@ pub use commitment::{
 pub use hash::Hash;
 pub use header::{BlockTimeError, CountedHeader, Header};
 pub use height::Height;
-pub use serialize::MAX_BLOCK_BYTES;
+pub use serialize::{SerializedBlock, MAX_BLOCK_BYTES};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use arbitrary::LedgerState;
-
-use serde::{Deserialize, Serialize};
 
 use crate::{
     amount::NegativeAllowed,
@@ -44,7 +42,8 @@ use crate::{
 };
 
 /// A Zcash block, containing a header and a list of transactions.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]
 pub struct Block {
     /// The block header, containing block metadata.
     pub header: Header,
@@ -186,6 +185,7 @@ impl Block {
     ///
     /// `utxos` must contain the [`Utxo`]s of every input in this block,
     /// including UTXOs created by earlier transactions in this block.
+    /// (It can also contain unrelated UTXOs, which are ignored.)
     ///
     /// Note: the chain value pool has the opposite sign to the transaction
     /// value pool.

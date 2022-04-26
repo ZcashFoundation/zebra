@@ -53,6 +53,11 @@
 //!  * Transaction Gossip Task
 //!    * runs in the background and gossips newly added mempool transactions
 //!      to peers
+//!
+//! Remote Procedure Calls:
+//!  * JSON-RPC Service
+//!    * answers RPC client requests using the State Service and Mempool Service
+//!    * submits client transactions to the node's mempool
 
 use std::{cmp::max, ops::Add, time::Duration};
 
@@ -101,7 +106,7 @@ impl StartCmd {
         info!(?config);
 
         info!("initializing node state");
-        let (state_service, latest_chain_tip, chain_tip_change) =
+        let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
             zebra_state::init(config.state.clone(), config.network.network);
         let state = ServiceBuilder::new()
             .buffer(Self::state_buffer_bound())
@@ -154,6 +159,16 @@ impl StartCmd {
             .buffer(mempool::downloads::MAX_INBOUND_CONCURRENCY)
             .service(mempool);
 
+        // Launch RPC server
+        let (rpc_task_handle, rpc_tx_queue_task_handle) = RpcServer::spawn(
+            config.rpc,
+            app_version(),
+            mempool.clone(),
+            read_only_state_service,
+            latest_chain_tip.clone(),
+            config.network.network,
+        );
+
         let setup_data = InboundSetupData {
             address_book,
             block_download_peer_set: peer_set.clone(),
@@ -168,7 +183,7 @@ impl StartCmd {
 
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
-        let mut block_gossip_task_handle = tokio::spawn(
+        let block_gossip_task_handle = tokio::spawn(
             sync::gossip_best_tip_block_hashes(
                 sync_status.clone(),
                 chain_tip_change.clone(),
@@ -185,7 +200,7 @@ impl StartCmd {
             chain_tip_change,
         );
 
-        let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool);
+        let mempool_queue_checker_task_handle = mempool::QueueChecker::spawn(mempool.clone());
 
         let tx_gossip_task_handle = tokio::spawn(
             mempool::gossip_mempool_transaction_id(mempool_transaction_receiver, peer_set)
@@ -197,19 +212,19 @@ impl StartCmd {
                 .in_current_span(),
         );
 
-        let rpc_task_handle = RpcServer::spawn(config.rpc, app_version().to_string());
-
         info!("spawned initial Zebra tasks");
 
         // TODO: put tasks into an ongoing FuturesUnordered and a startup FuturesUnordered?
 
         // ongoing tasks
+        pin!(rpc_task_handle);
+        pin!(rpc_tx_queue_task_handle);
         pin!(syncer_task_handle);
+        pin!(block_gossip_task_handle);
         pin!(mempool_crawler_task_handle);
         pin!(mempool_queue_checker_task_handle);
         pin!(tx_gossip_task_handle);
         pin!(progress_task_handle);
-        pin!(rpc_task_handle);
 
         // startup tasks
         let groth16_download_handle_fused = (&mut groth16_download_handle).fuse();
@@ -220,6 +235,20 @@ impl StartCmd {
             let mut exit_when_task_finishes = true;
 
             let result = select! {
+                rpc_result = &mut rpc_task_handle => {
+                    rpc_result
+                        .expect("unexpected panic in the rpc task");
+                    info!("rpc task exited");
+                    Ok(())
+                }
+
+                rpc_tx_queue_result = &mut rpc_tx_queue_task_handle => {
+                    rpc_tx_queue_result
+                        .expect("unexpected panic in the rpc transaction queue task");
+                    info!("rpc transaction queue task exited");
+                    Ok(())
+                }
+
                 sync_result = &mut syncer_task_handle => sync_result
                     .expect("unexpected panic in the syncer task")
                     .map(|_| info!("syncer task exited")),
@@ -251,13 +280,6 @@ impl StartCmd {
                     Ok(())
                 }
 
-                rpc_result = &mut rpc_task_handle => {
-                    rpc_result
-                        .expect("unexpected panic in the rpc task");
-                    info!("rpc task exited");
-                    Ok(())
-                }
-
                 // Unlike other tasks, we expect the download task to finish while Zebra is running.
                 groth16_download_result = &mut groth16_download_handle_fused => {
                     groth16_download_result
@@ -285,12 +307,14 @@ impl StartCmd {
         info!("exiting Zebra because an ongoing task exited: stopping other tasks");
 
         // ongoing tasks
+        rpc_task_handle.abort();
+        rpc_tx_queue_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
         mempool_crawler_task_handle.abort();
         mempool_queue_checker_task_handle.abort();
         tx_gossip_task_handle.abort();
-        rpc_task_handle.abort();
+        progress_task_handle.abort();
 
         // startup tasks
         groth16_download_handle.abort();

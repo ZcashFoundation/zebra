@@ -3,20 +3,28 @@
 //! This endpoint is compatible with clients that incorrectly send
 //! `"jsonrpc" = 1.0` fields in JSON-RPC 1.0 requests,
 //! such as `lightwalletd`.
+//!
+//! See the full list of
+//! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
+use jsonrpc_core::{Compatibility, MetaIoHandler};
+use jsonrpc_http_server::ServerBuilder;
+use tokio::task::JoinHandle;
+use tower::{buffer::Buffer, Service};
 use tracing::*;
 use tracing_futures::Instrument;
 
-use jsonrpc_core;
-use jsonrpc_http_server::ServerBuilder;
+use zebra_chain::{chain_tip::ChainTip, parameters::Network};
+use zebra_node_services::{mempool, BoxError};
 
 use crate::{
     config::Config,
     methods::{Rpc, RpcImpl},
-    server::compatibility::FixHttpRequestMiddleware,
+    server::{compatibility::FixHttpRequestMiddleware, tracing_middleware::TracingMiddleware},
 };
 
 pub mod compatibility;
+mod tracing_middleware;
 
 /// Zebra RPC Server
 #[derive(Clone, Debug)]
@@ -24,16 +32,40 @@ pub struct RpcServer;
 
 impl RpcServer {
     /// Start a new RPC server endpoint
-    pub fn spawn(config: Config, app_version: String) -> tokio::task::JoinHandle<()> {
+    pub fn spawn<Version, Mempool, State, Tip>(
+        config: Config,
+        app_version: Version,
+        mempool: Buffer<Mempool, mempool::Request>,
+        state: State,
+        latest_chain_tip: Tip,
+        network: Network,
+    ) -> (JoinHandle<()>, JoinHandle<()>)
+    where
+        Version: ToString,
+        Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
+            + 'static,
+        Mempool::Future: Send,
+        State: Service<
+                zebra_state::ReadRequest,
+                Response = zebra_state::ReadResponse,
+                Error = zebra_state::BoxError,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
+        State::Future: Send,
+        Tip: ChainTip + Clone + Send + Sync + 'static,
+    {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
             // Initialize the rpc methods with the zebra version
-            let rpc_impl = RpcImpl { app_version };
+            let (rpc_impl, rpc_tx_queue_task_handle) =
+                RpcImpl::new(app_version, mempool, state, latest_chain_tip, network);
 
             // Create handler compatible with V1 and V2 RPC protocols
-            let mut io =
-                jsonrpc_core::IoHandler::with_compatibility(jsonrpc_core::Compatibility::Both);
+            let mut io: MetaIoHandler<(), _> =
+                MetaIoHandler::new(Compatibility::Both, TracingMiddleware);
             io.extend_with(rpc_impl.to_delegate());
 
             let server = ServerBuilder::new(io)
@@ -58,10 +90,16 @@ impl RpcServer {
                 })
             };
 
-            tokio::task::spawn_blocking(server)
+            (
+                tokio::task::spawn_blocking(server),
+                rpc_tx_queue_task_handle,
+            )
         } else {
-            // There is no RPC port, so the RPC task does nothing.
-            tokio::task::spawn(futures::future::pending().in_current_span())
+            // There is no RPC port, so the RPC tasks do nothing.
+            (
+                tokio::task::spawn(futures::future::pending().in_current_span()),
+                tokio::task::spawn(futures::future::pending().in_current_span()),
+            )
         }
     }
 }

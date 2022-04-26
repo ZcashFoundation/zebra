@@ -1,0 +1,14 @@
+---
+source: zebra-state/src/service/finalized_state/zebra_db/block/tests/snapshot.rs
+expression: stored_orchard_trees
+---
+[
+  (Height(0), NoteCommitmentTree(
+    inner: Frontier(
+      frontier: None,
+    ),
+    cached_root: Some(Root(Base(
+      bytes: (174, 41, 53, 241, 223, 216, 162, 74, 237, 124, 112, 223, 125, 227, 166, 104, 235, 122, 73, 177, 49, 152, 128, 221, 226, 187, 217, 3, 26, 229, 216, 47),
+    ))),
+  )),
+]

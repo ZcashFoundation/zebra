@@ -1,6 +1,6 @@
 //! Zebra script verification wrapping zcashd's zcash_script library
-#![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
-#![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
+#![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
+#![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_script")]
 // We allow unsafe code, so we can call zcash_script
 #![allow(unsafe_code)]
@@ -103,9 +103,8 @@ impl CachedFfiTransaction {
         let all_previous_outputs_serialized = all_previous_outputs
             .zcash_serialize_to_vec()
             .expect("serialization into a vec is infallible");
-        // TODO: pass to zcash_script after API update
-        let _all_previous_outputs_serialized_ptr = all_previous_outputs_serialized.as_ptr();
-        let _all_previous_outputs_serialized_len: u32 = all_previous_outputs_serialized
+        let all_previous_outputs_serialized_ptr = all_previous_outputs_serialized.as_ptr();
+        let all_previous_outputs_serialized_len: u32 = all_previous_outputs_serialized
             .len()
             .try_into()
             .expect("serialized transaction lengths are much less than u32::MAX");
@@ -114,11 +113,11 @@ impl CachedFfiTransaction {
         // the `tx_to_*` fields are created from a valid Rust `Vec`
         // the `all_previous_outputs_*` fields are created from a valid Rust `Vec`
         let precomputed = unsafe {
-            zcash_script::zcash_script_new_precomputed_tx(
+            zcash_script::zcash_script_new_precomputed_tx_v5(
                 tx_to_serialized_ptr,
                 tx_to_serialized_len,
-                // all_previous_outputs_ptr,
-                // all_previous_outputs_len,
+                all_previous_outputs_serialized_ptr,
+                all_previous_outputs_serialized_len,
                 &mut err,
             )
         };
@@ -279,7 +278,9 @@ mod tests {
     use std::convert::TryInto;
     use std::sync::Arc;
     use zebra_chain::{
-        parameters::NetworkUpgrade::*, serialization::ZcashDeserializeInto, transparent,
+        parameters::{ConsensusBranchId, NetworkUpgrade::*},
+        serialization::ZcashDeserializeInto,
+        transparent,
     };
     use zebra_test::prelude::*;
 
@@ -290,28 +291,37 @@ mod tests {
             .expect("Block bytes are in valid hex representation");
     }
 
-    #[test]
-    fn verify_valid_script() -> Result<()> {
-        zebra_test::init();
-
+    fn verify_valid_script(
+        branch_id: ConsensusBranchId,
+        tx: &[u8],
+        amount: u64,
+        pubkey: &[u8],
+    ) -> Result<()> {
         let transaction =
-            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
-        let coin = u64::pow(10, 8);
-        let amount = 212 * coin;
+            tx.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
         let output = transparent::Output {
             value: amount.try_into()?,
-            lock_script: transparent::Script::new(&SCRIPT_PUBKEY.clone()),
+            lock_script: transparent::Script::new(pubkey),
         };
         let input_index = 0;
-        let branch_id = Blossom
-            .branch_id()
-            .expect("Blossom has a ConsensusBranchId");
 
         let previous_output = vec![output];
         let verifier = super::CachedFfiTransaction::new(transaction, previous_output);
         verifier.is_valid(branch_id, input_index)?;
 
         Ok(())
+    }
+
+    #[test]
+    fn verify_valid_script_v4() -> Result<()> {
+        zebra_test::init();
+
+        verify_valid_script(
+            Blossom.branch_id().unwrap(),
+            &SCRIPT_TX,
+            212 * u64::pow(10, 8),
+            &SCRIPT_PUBKEY,
+        )
     }
 
     #[test]

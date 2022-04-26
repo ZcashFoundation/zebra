@@ -4,12 +4,12 @@ use std::collections::{HashMap, HashSet};
 
 use zebra_chain::{
     amount, block,
-    transparent::{self, CoinbaseSpendRestriction::*},
+    transparent::{self, utxos_from_ordered_utxos, CoinbaseSpendRestriction::*},
 };
 
 use crate::{
     constants::MIN_TRANSPARENT_COINBASE_MATURITY,
-    service::finalized_state::FinalizedState,
+    service::finalized_state::ZebraDb,
     PreparedBlock,
     ValidateContextError::{
         self, DuplicateTransparentSpend, EarlyTransparentSpend, ImmatureTransparentCoinbaseSpend,
@@ -37,23 +37,23 @@ use crate::{
 /// - unshielded spends of a transparent coinbase output.
 pub fn transparent_spend(
     prepared: &PreparedBlock,
-    non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     non_finalized_chain_spent_utxos: &HashSet<transparent::OutPoint>,
-    finalized_state: &FinalizedState,
-) -> Result<HashMap<transparent::OutPoint, transparent::Utxo>, ValidateContextError> {
+    finalized_state: &ZebraDb,
+) -> Result<HashMap<transparent::OutPoint, transparent::OrderedUtxo>, ValidateContextError> {
     let mut block_spends = HashMap::new();
 
     for (spend_tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
-        let spends = transaction.inputs().iter().filter_map(|input| match input {
-            transparent::Input::PrevOut { outpoint, .. } => Some(outpoint),
-            // Coinbase inputs represent new coins,
-            // so there are no UTXOs to mark as spent.
-            transparent::Input::Coinbase { .. } => None,
-        });
+        // Coinbase inputs represent new coins,
+        // so there are no UTXOs to mark as spent.
+        let spends = transaction
+            .inputs()
+            .iter()
+            .filter_map(transparent::Input::outpoint);
 
         for spend in spends {
             let utxo = transparent_spend_chain_order(
-                *spend,
+                spend,
                 spend_tx_index_in_block,
                 &prepared.new_outputs,
                 non_finalized_chain_unspent_utxos,
@@ -71,15 +71,15 @@ pub fn transparent_spend(
             // so we check transparent coinbase maturity and shielding
             // using known valid UTXOs during non-finalized chain validation.
             let spend_restriction = transaction.coinbase_spend_restriction(prepared.height);
-            let utxo = transparent_coinbase_spend(*spend, spend_restriction, utxo)?;
+            let utxo = transparent_coinbase_spend(spend, spend_restriction, utxo)?;
 
             // We don't delete the UTXOs until the block is committed,
             // so we  need to check for duplicate spends within the same block.
             //
             // See `transparent_spend_chain_order` for the relevant consensus rule.
-            if block_spends.insert(*spend, utxo).is_some() {
+            if block_spends.insert(spend, utxo).is_some() {
                 return Err(DuplicateTransparentSpend {
-                    outpoint: *spend,
+                    outpoint: spend,
                     location: "the same block",
                 });
             }
@@ -111,14 +111,21 @@ pub fn transparent_spend(
 /// an attempt to spend the same satoshis twice."
 ///
 /// https://developer.bitcoin.org/devguide/block_chain.html#introduction
+///
+/// # Consensus
+///
+/// > Every non-null prevout MUST point to a unique UTXO in either a preceding block,
+/// > or a previous transaction in the same block.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 fn transparent_spend_chain_order(
     spend: transparent::OutPoint,
     spend_tx_index_in_block: usize,
     block_new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     non_finalized_chain_spent_utxos: &HashSet<transparent::OutPoint>,
-    finalized_state: &FinalizedState,
-) -> Result<transparent::Utxo, ValidateContextError> {
+    finalized_state: &ZebraDb,
+) -> Result<transparent::OrderedUtxo, ValidateContextError> {
     if let Some(output) = block_new_outputs.get(&spend) {
         // reject the spend if it uses an output from this block,
         // but the output was not created by an earlier transaction
@@ -132,7 +139,7 @@ fn transparent_spend_chain_order(
             return Err(EarlyTransparentSpend { outpoint: spend });
         } else {
             // a unique spend of a previous transaction's output is ok
-            return Ok(output.utxo.clone());
+            return Ok(output.clone());
         }
     }
 
@@ -184,15 +191,16 @@ fn transparent_spend_chain_order(
 pub fn transparent_coinbase_spend(
     outpoint: transparent::OutPoint,
     spend_restriction: transparent::CoinbaseSpendRestriction,
-    utxo: transparent::Utxo,
-) -> Result<transparent::Utxo, ValidateContextError> {
-    if !utxo.from_coinbase {
+    utxo: transparent::OrderedUtxo,
+) -> Result<transparent::OrderedUtxo, ValidateContextError> {
+    if !utxo.utxo.from_coinbase {
         return Ok(utxo);
     }
 
     match spend_restriction {
         OnlyShieldedOutputs { spend_height } => {
-            let min_spend_height = utxo.height + block::Height(MIN_TRANSPARENT_COINBASE_MATURITY);
+            let min_spend_height =
+                utxo.utxo.height + block::Height(MIN_TRANSPARENT_COINBASE_MATURITY);
             let min_spend_height =
                 min_spend_height.expect("valid UTXOs have coinbase heights far below Height::MAX");
             if spend_height >= min_spend_height {
@@ -202,7 +210,7 @@ pub fn transparent_coinbase_spend(
                     outpoint,
                     spend_height,
                     min_spend_height,
-                    created_height: utxo.height,
+                    created_height: utxo.utxo.height,
                 })
             }
         }
@@ -222,19 +230,18 @@ pub fn transparent_coinbase_spend(
 /// MUST be nonnegative."
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#transactions
-#[allow(dead_code)]
 pub fn remaining_transaction_value(
     prepared: &PreparedBlock,
-    utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
 ) -> Result<(), ValidateContextError> {
     for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
         // TODO: check coinbase transaction remaining value (#338, #1162)
-        if transaction.has_valid_coinbase_transaction_inputs() {
+        if transaction.is_coinbase() {
             continue;
         }
 
         // Check the remaining transparent value pool for this transaction
-        let value_balance = transaction.value_balance(utxos);
+        let value_balance = transaction.value_balance(&utxos_from_ordered_utxos(utxos.clone()));
         match value_balance {
             Ok(vb) => match vb.remaining_transaction_value() {
                 Ok(_) => Ok(()),

@@ -1,10 +1,9 @@
 //! Sinsemilla hash functions and helpers.
 
 use bitvec::prelude::*;
-use group::Group;
 use halo2::{
     arithmetic::{Coordinates, CurveAffine, CurveExt},
-    pasta::pallas,
+    pasta::{group::Group, pallas},
 };
 
 /// [Coordinate Extractor for Pallas][concreteextractorpallas]
@@ -204,7 +203,7 @@ mod tests {
 
     #[cfg(test)]
     fn x_from_str(s: &str) -> pallas::Base {
-        use group::ff::PrimeField;
+        use halo2::pasta::group::ff::PrimeField;
 
         pallas::Base::from_str_vartime(s).unwrap()
     }
@@ -212,7 +211,7 @@ mod tests {
     #[test]
     #[allow(non_snake_case)]
     fn single_test_vector() {
-        use group::Curve;
+        use halo2::pasta::group::Curve;
 
         let D = b"z.cash:test-Sinsemilla";
         let M = bitvec![
@@ -244,8 +243,7 @@ mod tests {
     #[test]
     #[allow(non_snake_case)]
     fn hackworks_test_vectors() {
-        use group::GroupEncoding;
-        use halo2::arithmetic::FieldExt;
+        use halo2::pasta::group::{ff::PrimeField, GroupEncoding};
 
         for tv in tests::vectors::SINSEMILLA.iter() {
             let D = tv.domain.as_slice();
@@ -258,7 +256,7 @@ mod tests {
 
             assert_eq!(
                 sinsemilla_hash(D, M).expect("should not fail per Theorem 5.4.4"),
-                pallas::Base::from_bytes(&tv.hash).unwrap()
+                pallas::Base::from_repr(tv.hash).unwrap()
             )
         }
     }
@@ -270,7 +268,7 @@ mod tests {
     #[test]
     #[allow(non_snake_case)]
     fn hackworks_group_hash_test_vectors() {
-        use group::GroupEncoding;
+        use halo2::pasta::group::GroupEncoding;
 
         for tv in tests::vectors::GROUP_HASHES.iter() {
             let D = tv.domain.as_slice();

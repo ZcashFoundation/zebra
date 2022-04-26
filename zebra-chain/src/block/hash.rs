@@ -1,5 +1,7 @@
 use std::{fmt, io};
 
+use hex::{FromHex, ToHex};
+
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
@@ -22,21 +24,66 @@ use super::Header;
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
 
-impl fmt::Display for Hash {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Hash {
+    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    fn bytes_in_display_order(&self) -> [u8; 32] {
         let mut reversed_bytes = self.0;
         reversed_bytes.reverse();
-        f.write_str(&hex::encode(&reversed_bytes))
+        reversed_bytes
+    }
+}
+
+impl fmt::Display for Hash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.encode_hex::<String>())
     }
 }
 
 impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut reversed_bytes = self.0;
-        reversed_bytes.reverse();
         f.debug_tuple("block::Hash")
-            .field(&hex::encode(&reversed_bytes))
+            .field(&self.encode_hex::<String>())
             .finish()
+    }
+}
+
+impl ToHex for &Hash {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
+    }
+}
+
+impl ToHex for Hash {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
+    }
+}
+
+impl FromHex for Hash {
+    type Error = <[u8; 32] as FromHex>::Error;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let mut hash = <[u8; 32]>::from_hex(hex)?;
+        hash.reverse();
+
+        Ok(hash.into())
+    }
+}
+
+impl From<[u8; 32]> for Hash {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
     }
 }
 

@@ -600,36 +600,36 @@ order on byte strings is the numeric ordering).
 
 We use the following rocksdb column families:
 
-| Column Family                  | Keys                   | Values                              | Updates |
-| ------------------------------ | ---------------------- | ----------------------------------- | ------- |
-| *Blocks*                       |                        |                                     |         |
-| `hash_by_height`               | `block::Height`        | `block::Hash`                       | Never   |
-| `height_tx_count_by_hash`      | `block::Hash`          | `HeightTransactionCount`            | Never   |
-| `block_header_by_height`       | `block::Height`        | `block::Header`                     | Never   |
-| *Transactions*                 |                        |                                     |         |
-| `tx_by_loc`                    | `TransactionLocation`  | `Transaction`                       | Never   |
-| `hash_by_tx_loc`               | `TransactionLocation`  | `transaction::Hash`                 | Never   |
-| `tx_loc_by_hash`               | `transaction::Hash`    | `TransactionLocation`               | Never   |
-| *Transparent*                  |                        |                                     |         |
-| `utxo_by_out_loc`              | `OutLocation`          | `transparent::Output`               | Delete  |
-| `balance_by_transparent_addr`  | `transparent::Address` | `Amount \|\| TransparentAddrLoc`    | Update  |
-| `utxo_by_transparent_addr_loc` | `TransparentAddrLoc`   | `AtLeastOne<OutLocation>`           | Up/Del  |
-| `tx_by_transparent_addr_loc`   | `TransparentAddrLoc`   | `AtLeastOne<TransactionLocation>`   | Append  |
-| *Sprout*                       |                        |                                     |         |
-| `sprout_nullifiers`            | `sprout::Nullifier`    | `()`                                | Never   |
-| `sprout_anchors`               | `sprout::tree::Root`   | `sprout::tree::NoteCommitmentTree`  | Never   |
-| `sprout_note_commitment_tree`  | `block::Height`        | `sprout::tree::NoteCommitmentTree`  | Delete  |
-| *Sapling*                      |                        |                                     |         |
-| `sapling_nullifiers`           | `sapling::Nullifier`   | `()`                                | Never   |
-| `sapling_anchors`              | `sapling::tree::Root`  | `()`                                | Never   |
-| `sapling_note_commitment_tree` | `block::Height`        | `sapling::tree::NoteCommitmentTree` | Delete  |
-| *Orchard*                      |                        |                                     |         |
-| `orchard_nullifiers`           | `orchard::Nullifier`   | `()`                                | Never   |
-| `orchard_anchors`              | `orchard::tree::Root`  | `()`                                | Never   |
-| `orchard_note_commitment_tree` | `block::Height`        | `orchard::tree::NoteCommitmentTree` | Delete  |
-| *Chain*                        |                        |                                     |         |
-| `history_tree`                 | `block::Height`        | `NonEmptyHistoryTree`               | Delete  |
-| `tip_chain_value_pool`         | `()`                   | `ValueBalance`                      | Update  |
+| Column Family                      | Keys                   | Values                        | Changes |
+| ---------------------------------- | ---------------------- | ----------------------------- | ------- |
+| *Blocks*                           |                        |                               |         |
+| `hash_by_height`                   | `block::Height`        | `block::Hash`                 | Create  |
+| `height_by_hash`                   | `block::Hash`          | `block::Height`               | Create  |
+| `block_header_by_height`           | `block::Height`        | `block::Header`               | Create  |
+| *Transactions*                     |                        |                               |         |
+| `tx_by_loc`                        | `TransactionLocation`  | `Transaction`                 | Create  |
+| `hash_by_tx_loc`                   | `TransactionLocation`  | `transaction::Hash`           | Create  |
+| `tx_loc_by_hash`                   | `transaction::Hash`    | `TransactionLocation`         | Create  |
+| *Transparent*                      |                        |                               |         |
+| `balance_by_transparent_addr`      | `transparent::Address` | `Amount \|\| AddressLocation` | Update  |
+| `tx_loc_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                          | Create  |
+| `utxo_by_out_loc`                  | `OutputLocation`       | `transparent::Output`         | Delete  |
+| `utxo_loc_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                          | Delete  |
+| *Sprout*                           |                        |                               |         |
+| `sprout_nullifiers`                | `sprout::Nullifier`    | `()`                          | Create  |
+| `sprout_anchors`                   | `sprout::tree::Root`   | `sprout::NoteCommitmentTree`  | Create  |
+| `sprout_note_commitment_tree`      | `block::Height`        | `sprout::NoteCommitmentTree`  | Delete  |
+| *Sapling*                          |                        |                               |         |
+| `sapling_nullifiers`               | `sapling::Nullifier`   | `()`                          | Create  |
+| `sapling_anchors`                  | `sapling::tree::Root`  | `()`                          | Create  |
+| `sapling_note_commitment_tree`     | `block::Height`        | `sapling::NoteCommitmentTree` | Create  |
+| *Orchard*                          |                        |                               |         |
+| `orchard_nullifiers`               | `orchard::Nullifier`   | `()`                          | Create  |
+| `orchard_anchors`                  | `orchard::tree::Root`  | `()`                          | Create  |
+| `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
+| *Chain*                            |                        |                               |         |
+| `history_tree`                     | `block::Height`        | `NonEmptyHistoryTree`         | Delete  |
+| `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
 
 Zcash structures are encoded using `ZcashSerialize`/`ZcashDeserialize`.
 Other structures are encoded using `IntoDisk`/`FromDisk`.
@@ -639,14 +639,16 @@ Block and Transaction Data:
 - `TransactionIndex`: 16 bits, big-endian, unsigned (max ~23,000 transactions in the 2 MB block limit)
 - `TransactionCount`: same as `TransactionIndex`
 - `TransactionLocation`: `Height \|\| TransactionIndex`
-- `HeightTransactionCount`: `Height \|\| TransactionCount`
-- `TransparentOutputIndex`: 24 bits, big-endian, unsigned (max ~223,000 transfers in the 2 MB block limit)
+- `OutputIndex`: 24 bits, big-endian, unsigned (max ~223,000 transfers in the 2 MB block limit)
 - transparent and shielded input indexes, and shielded output indexes: 16 bits, big-endian, unsigned (max ~49,000 transfers in the 2 MB block limit)
-- `OutLocation`: `TransactionLocation \|\| TransparentOutputIndex`
-- `TransparentAddrLoc`: the first `OutLocation` used by a `transparent::Address`.
+- `OutputLocation`: `TransactionLocation \|\| OutputIndex`
+- `AddressLocation`: the first `OutputLocation` used by a `transparent::Address`.
   Always has the same value for each address, even if the first output is spent.
-- `Utxo`: `Output`, derives extra fields from the `OutLocation` key
-- `AtLeastOne<T>`: `[T; AtLeastOne::len()]` (for known-size `T`)
+- `Utxo`: `Output`, derives extra fields from the `OutputLocation` key
+- `AddressUnspentOutput`: `AddressLocation \|\| OutputLocation`,
+  used instead of a `BTreeSet<OutputLocation>` value, to improve database performance
+- `AddressTransaction`: `AddressLocation \|\| TransactionLocation`
+  used instead of a `BTreeSet<TransactionLocation>` value, to improve database performance
 
 We use big-endian encoding for keys, to allow database index prefix searches.
 
@@ -662,16 +664,63 @@ Derived Formats:
 [rocksdb-consensus-rules]: #rocksdb-consensus-rules
 
 Each column family handles updates differently, based on its specific consensus rules:
-- Never: Keys are never deleted, values are never updated. The value for each key is inserted once.
-- Delete: Keys can be deleted, but values are never updated. The value for each key is inserted once.
+- Create:
+  - Each key-value entry is created once.
+  - Keys are never deleted, values are never updated.
+- Delete:
+  - Each key-value entry is created once.
+  - Keys can be deleted, but values are never updated.
+  - Code called by ReadStateService must ignore deleted keys, or use a read lock.
   - TODO: should we prevent re-inserts of keys that have been deleted?
-- Update: Keys are never deleted, but values can be updated.
-- Append: Keys are never deleted, existing values are never updated,
-  but sets of values can be extended with more entries.
-- Up/Del: Keys can be deleted, existing entries can be removed,
-  sets of values can be extended with more entries.
+- Update:
+  - Each key-value entry is created once.
+  - Keys are never deleted, but values can be updated.
+  - Code called by ReadStateService must handle old or new values, or use a read lock.
 
-Currently, there are no column families that both delete and update keys.
+We can't do some kinds of value updates, because they cause RocksDB performance issues:
+- Append:
+  - Keys are never deleted.
+  - Existing values are never updated.
+  - Sets of values have additional items appended to the end of the set.
+  - Code called by ReadStateService must handle shorter or longer sets, or use a read lock.
+- Up/Del:
+  - Keys can be deleted.
+  - Sets of values have items added or deleted (in any position).
+  - Code called by ReadStateService must ignore deleted keys and values,
+    accept shorter or longer sets, and accept old or new values.
+    Or it should use a read lock.
+
+Avoid using large sets of values as RocksDB keys or values.
+
+### RocksDB read locks
+[rocksdb-read-locks]: #rocksdb-read-locks
+
+The read-only ReadStateService needs to handle concurrent writes and deletes of the finalized
+column families it reads. It must also handle overlaps between the cached non-finalized `Chain`,
+and the current finalized state database.
+
+The StateService uses RocksDB transactions for each block write.
+So ReadStateService queries that only access a single key or value will always see
+a consistent view of the database.
+
+If a ReadStateService query only uses column families that have keys and values appended
+(`Never` in the Updates table above), it should ignore extra appended values.
+Most queries do this by default.
+
+For more complex queries, there are several options:
+
+Reading across multiple column families:
+1. Ignore deleted values using custom Rust code
+2. Take a database snapshot - https://docs.rs/rocksdb/latest/rocksdb/struct.DBWithThreadMode.html#method.snapshot
+
+Reading a single column family:
+3. multi_get - https://docs.rs/rocksdb/latest/rocksdb/struct.DBWithThreadMode.html#method.multi_get_cf
+4. iterator - https://docs.rs/rocksdb/latest/rocksdb/struct.DBWithThreadMode.html#method.iterator_cf
+
+RocksDB also has read transactions, but they don't seem to be exposed in the Rust crate.
+
+### Low-Level Implementation Details
+[rocksdb-low-level]: #rocksdb-low-level
 
 RocksDB ignores duplicate puts and deletes, preserving the latest values.
 If rejecting duplicate puts or deletes is consensus-critical,
@@ -693,29 +742,30 @@ and merge operators are unreliable (or have undocumented behaviour).
 So they should not be used for consensus-critical checks.
 
 ### Notes on rocksdb column families
+[rocksdb-column-families]: #rocksdb-column-families
 
-- The `hash_by_height` and `height_tx_count_by_hash` column families provide a bijection between
+- The `hash_by_height` and `height_by_hash` column families provide a bijection between
   block heights and block hashes.  (Since the rocksdb state only stores finalized
   state, they are actually a bijection).
 
-- Similarly, the `tx_by_hash` and `hash_by_tx` column families provide a bijection between
+- Similarly, the `tx_loc_by_hash` and `hash_by_tx_loc` column families provide a bijection between
   transaction locations and transaction hashes.
 
 - The `block_header_by_height` column family provides a bijection between block
   heights and block header data. There is no corresponding `height_by_block` column
-  family: instead, hash the block, and use the hash from `height_tx_count_by_hash`. (Since the
-  rocksdb state only stores finalized state, they are actually a bijection).
+  family: instead, hash the block header, and use the hash from `height_by_hash`.
+  (Since the rocksdb state only stores finalized state, they are actually a bijection).
   Similarly, there are no column families that go from transaction data
-  to transaction locations: hash the transaction and use `tx_by_hash`.
+  to transaction locations: hash the transaction and use `tx_loc_by_hash`.
 
 - Block headers and transactions are stored separately in the database,
   so that individual transactions can be accessed efficiently.
   Blocks can be re-created on request using the following process:
-  - Look up `height` and `tx_count` in `height_tx_count_by_hash`
+  - Look up `height` in `height_by_hash`
   - Get the block header for `height` from `block_header_by_height`
-  - Use [`prefix_iterator`](https://docs.rs/rocksdb/0.17.0/rocksdb/struct.DBWithThreadMode.html#method.prefix_iterator)
-    or [`multi_get`](https://github.com/facebook/rocksdb/wiki/MultiGet-Performance)
-    to get each transaction from `0..tx_count` from `tx_by_location`
+  - Iterate from `TransactionIndex` 0,
+    to get each transaction with `height` from `tx_by_loc`,
+    stopping when there are no more transactions in the block
 
 - Block headers are stored by height, not by hash.  This has the downside that looking
   up a block by hash requires an extra level of indirection.  The upside is
@@ -725,60 +775,76 @@ So they should not be used for consensus-critical checks.
   the fact that we commit blocks in order means we're writing only to the end
   of the rocksdb column family, which may help save space.
 
-- Similarly, transaction data is stored in chain order in `tx_by_location`,
-  and chain order within each vector in `tx_by_transparent_address`.
+- Similarly, transaction data is stored in chain order in `tx_by_loc` and `utxo_by_out_loc`,
+  and chain order within each vector in `utxo_loc_by_transparent_addr_loc` and
+  `tx_loc_by_transparent_addr_loc`.
 
 - `TransactionLocation`s are stored as a `(height, index)` pair referencing the
   height of the transaction's parent block and the transaction's index in that
   block.  This would more traditionally be a `(hash, index)` pair, but because
   we store blocks by height, storing the height saves one level of indirection.
-  Transaction hashes can be looked up using `hash_by_tx`.
+  Transaction hashes can be looked up using `hash_by_tx_loc`.
 
-- Similarly, UTXOs are stored in `utxo_by_outpoint` by `OutLocation`,
-  rather than `OutPoint`. `OutPoint`s can be looked up using `tx_by_hash`,
-  and reconstructed using `hash_by_tx`.
+- Similarly, UTXOs are stored in `utxo_by_out_loc` by `OutputLocation`,
+  rather than `OutPoint`. `OutPoint`s can be looked up using `tx_loc_by_hash`,
+  and reconstructed using `hash_by_tx_loc`.
 
-- The `Utxo` type can be constructed from the `Output` data,
-  `height: TransactionLocation.height`, and
-  `is_coinbase: OutLocation.output_index == 1`.
+- The `Utxo` type can be constructed from the `OutputLocation` and `Output` data,
+  `height: OutputLocation.height`, and
+  `is_coinbase: OutputLocation.transaction_index == 0`
+  (coinbase transactions are always the first transaction in a block).
 
-- `balance_by_transparent_addr` is the sum of all `utxo_by_transparent_addr_loc`s
-  that are still in `utxo_by_outpoint`. It is cached to improve performance for
-  addresses with large UTXO sets. It also stores the `TransparentAddrLoc` for each
+- `balance_by_transparent_addr` is the sum of all `utxo_loc_by_transparent_addr_loc`s
+  that are still in `utxo_by_out_loc`. It is cached to improve performance for
+  addresses with large UTXO sets. It also stores the `AddressLocation` for each
   address, which allows for efficient lookups.
 
-- `utxo_by_transparent_addr_loc` stores unspent transparent output locations by address.
-  UTXO locations are appended by each block. If an address lookup discovers a UTXO
-  has been spent in `utxo_by_outpoint`, that UTXO location can be deleted from
-  `utxo_by_transparent_addr_loc`. (We don't do these deletions every time a block is
-  committed, because that requires an expensive full index search.)
-  This list includes the `TransparentAddrLoc`, if it has not been spent.
-  (This duplicate data is small, and helps simplify the code.)
+- `utxo_loc_by_transparent_addr_loc` stores unspent transparent output locations
+  by address. The address location and UTXO location are stored as a RocksDB key,
+  so they are in chain order, and get good database performance.
+  This column family includes also includes the original address location UTXO,
+  if it has not been spent.
 
-- `tx_by_transparent_addr_loc` stores transaction locations by address.
+- When a block write deletes a UTXO from `utxo_by_out_loc`,
+  that UTXO location should be deleted from `utxo_loc_by_transparent_addr_loc`.
+  The deleted UTXO can be removed efficiently, because the UTXO location is part of the key.
+  This is an index optimisation, which does not affect query results.
+
+- `tx_loc_by_transparent_addr_loc` stores transaction locations by address.
   This list includes transactions containing spent UTXOs.
-  It also includes the `TransactionLocation` from the `TransparentAddrLoc`.
-  (This duplicate data is small, and helps simplify the code.)
+  The address location and transaction location are stored as a RocksDB key,
+  so they are in chain order, and get good database performance.
+  This column family also includes the `TransactionLocation`
+  of the transaction for the `AddressLocation`.
 
-- Each `*_note_commitment_tree` stores the note commitment tree state
+- The `sprout_note_commitment_tree` stores the note commitment tree state
   at the tip of the finalized state, for the specific pool. There is always
-  a single entry for those; they are indexed by height just to make testing
-  and debugging easier (so for each block committed, the old tree is
-  deleted and a new one is inserted by its new height). Each tree is stored
+  a single entry. Each tree is stored
+  as a "Merkle tree frontier" which is basically a (logarithmic) subset of
+  the Merkle tree nodes as required to insert new items.
+  For each block committed, the old tree is deleted and a new one is inserted
+  by its new height.
+  **TODO:** store the sprout note commitment tree by `()`,
+  to avoid ReadStateService concurrent write issues.
+
+- The `{sapling, orchard}_note_commitment_tree` stores the note commitment tree
+  state for every height, for the specific pool. Each tree is stored
   as a "Merkle tree frontier" which is basically a (logarithmic) subset of
   the Merkle tree nodes as required to insert new items.
 
 - `history_tree` stores the ZIP-221 history tree state at the tip of the finalized
-  state. There is always a single entry for it; it is indexed by height just
-  to make testing and debugging easier. The tree is stored as the set of "peaks"
+  state. There is always a single entry for it. The tree is stored as the set of "peaks"
   of the "Merkle mountain range" tree structure, which is what is required to
   insert new items.
+  **TODO:** store the history tree by `()`, to avoid ReadStateService concurrent write issues.
 
 - Each `*_anchors` stores the anchor (the root of a Merkle tree) of the note commitment
   tree of a certain block. We only use the keys since we just need the set of anchors,
   regardless of where they come from. The exception is `sprout_anchors` which also maps
   the anchor to the matching note commitment tree. This is required to support interstitial
   treestates, which are unique to Sprout.
+  **TODO:** store the `Root` hash in `sprout_note_commitment_tree`, and use it to look up the
+  note commitment tree. This de-duplicates tree state data. But we currently only store one sprout tree by height.
 
 - The value pools are only stored for the finalized tip.
 

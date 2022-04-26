@@ -1,4 +1,4 @@
-![Zebra logotype](https://www.zfnd.org/images/zebra-logotype.png)
+![Zebra logotype](https://zfnd.org/wp-content/uploads/2022/03/zebra-logotype.png)
 
 ---
 
@@ -81,7 +81,10 @@ and Zebra implements all the features required to reach Zcash network consensus.
 The goals of the beta release series are for Zebra to act as a fully validating Zcash node,
 for all active consensus rules as of NU5 activation.
 
-Currently, Zebra validates all of the documented Zcash consensus rules, but it may not validate any:
+Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
+(As of the second NU5 activation on testnet.)
+
+But it may not validate any:
 - Undocumented rules derived from Bitcoin
 - Undocumented network protocol requirements
 
@@ -100,8 +103,8 @@ for your platform:
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.5 zebrad`
-4. Run `zebrad start` (see [Running Zebra](user/run.md) for more information)
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.8 zebrad`
+4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
 that there is a lot of key functionality still missing.
@@ -119,7 +122,6 @@ The recommended requirements for compiling and running `zebrad` are:
 We continuously test that our builds and tests pass on:
 
 The *latest* [GitHub Runners](https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources) for:
-- Windows Server
 - macOS
 - Ubuntu
 
@@ -206,6 +208,8 @@ There are a few bugs in Zebra that we're still working on fixing:
   - These panics can be ignored, unless they happen frequently.
 - [Interrupt handler does not work when a blocking task is running #1351](https://github.com/ZcashFoundation/zebra/issues/1351)
   - Zebra should eventually exit once the task finishes. Or you can forcibly terminate the process.
+- [No Windows support #3801](https://github.com/ZcashFoundation/zebra/issues/3801)
+  - We used to test with Windows Server 2019, but not anymore; see issue for details
 
 ## Future Work
 

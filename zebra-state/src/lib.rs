@@ -8,8 +8,8 @@
 //!
 //! Otherwise, verification of out-of-order and invalid blocks can hang indefinitely.
 
-#![doc(html_favicon_url = "https://www.zfnd.org/images/zebra-favicon-128.png")]
-#![doc(html_logo_url = "https://www.zfnd.org/images/zebra-icon.png")]
+#![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
+#![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_state")]
 
 #[macro_use]
@@ -31,17 +31,18 @@ mod tests;
 pub use config::Config;
 pub use constants::MAX_BLOCK_REORG_HEIGHT;
 pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
-pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, Request};
-pub use response::Response;
+pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, ReadRequest, Request};
+pub use response::{ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipChange, LatestChainTip, TipAction},
-    init,
+    init, OutputLocation, TransactionLocation,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::{
+    arbitrary::populated_state,
     chain_tip::{ChainTipBlock, ChainTipSender},
-    init_test,
+    init_test, init_test_services,
 };
 
 pub(crate) use request::ContextuallyValidBlock;

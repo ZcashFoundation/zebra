@@ -1,0 +1,14 @@
+---
+source: zebra-state/src/service/finalized_state/zebra_db/block/tests/snapshot.rs
+expression: stored_sapling_trees
+---
+[
+  (Height(0), NoteCommitmentTree(
+    inner: Frontier(
+      frontier: None,
+    ),
+    cached_root: Some(Root(Fq(
+      bytes: (251, 194, 244, 48, 12, 1, 240, 183, 130, 13, 0, 227, 52, 124, 141, 164, 238, 97, 70, 116, 55, 108, 188, 69, 53, 157, 170, 84, 249, 181, 73, 62),
+    ))),
+  )),
+]

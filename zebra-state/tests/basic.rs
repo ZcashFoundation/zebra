@@ -1,6 +1,10 @@
+//! Basic integration tests for zebra-state
+
+use std::sync::Arc;
+
 use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
-use std::sync::Arc;
+
 use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserialize};
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
@@ -69,7 +73,7 @@ async fn check_transcripts(network: Network) -> Result<(), Report> {
         Network::Mainnet => mainnet_transcript,
         Network::Testnet => testnet_transcript,
     } {
-        let (service, _, _) = zebra_state::init(Config::ephemeral(), network);
+        let (service, _, _, _) = zebra_state::init(Config::ephemeral(), network);
         let transcript = Transcript::from(transcript_data.iter().cloned());
         /// SPANDOC: check the on disk service against the transcript
         transcript.check(service).await?;

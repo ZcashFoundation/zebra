@@ -1,7 +1,8 @@
 //! Transactions and transaction-related structures.
 
+use std::{collections::HashMap, fmt, iter};
+
 use halo2::pasta::pallas;
-use serde::{Deserialize, Serialize};
 
 mod auth_digest;
 mod hash;
@@ -24,6 +25,7 @@ pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
 pub use sapling::FieldNotPresent;
+pub use serialize::SerializedTransaction;
 pub use sighash::{HashType, SigHash};
 pub use unmined::{UnminedTx, UnminedTxId, VerifiedUnminedTx};
 
@@ -40,8 +42,6 @@ use crate::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
-use std::{collections::HashMap, fmt, iter};
-
 /// A Zcash transaction.
 ///
 /// A transaction is an encoded data structure that facilitates the transfer of
@@ -53,7 +53,8 @@ use std::{collections::HashMap, fmt, iter};
 /// Zcash has a number of different transaction formats. They are represented
 /// internally by different enum variants. Because we checkpoint on Canopy
 /// activation, we do not validate any pre-Sapling transaction types.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]
 // XXX consider boxing the Optional fields of V4 and V5 txs
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction {
@@ -475,8 +476,9 @@ impl Transaction {
     }
 
     /// Returns `true` if this transaction has valid inputs for a coinbase
-    /// transaction, that is, has a single input and it is a coinbase input.
-    pub fn has_valid_coinbase_transaction_inputs(&self) -> bool {
+    /// transaction, that is, has a single input and it is a coinbase input
+    /// (null prevout).
+    pub fn is_coinbase(&self) -> bool {
         self.inputs().len() == 1
             && matches!(
                 self.inputs().get(0),
@@ -484,20 +486,16 @@ impl Transaction {
             )
     }
 
-    /// Returns `true` if transaction contains any coinbase inputs.
-    pub fn has_any_coinbase_inputs(&self) -> bool {
-        self.inputs()
-            .iter()
-            .any(|input| matches!(input, transparent::Input::Coinbase { .. }))
-    }
-
-    /// Returns `true` if transaction contains any `PrevOut` inputs.
+    /// Returns `true` if this transaction has valid inputs for a non-coinbase
+    /// transaction, that is, does not have any coinbase input (non-null prevouts).
     ///
-    /// `PrevOut` inputs are also known as `transparent` inputs in the spec.
-    pub fn contains_prevout_input(&self) -> bool {
+    /// Note that it's possible for a transaction return false in both
+    /// [`Transaction::is_coinbase`] and [`Transaction::is_valid_non_coinbase`],
+    /// though those transactions will be rejected.
+    pub fn is_valid_non_coinbase(&self) -> bool {
         self.inputs()
             .iter()
-            .any(|input| matches!(input, transparent::Input::PrevOut { .. }))
+            .all(|input| matches!(input, transparent::Input::PrevOut { .. }))
     }
 
     // sprout

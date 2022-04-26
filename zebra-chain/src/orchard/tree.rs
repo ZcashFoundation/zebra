@@ -10,20 +10,18 @@
 //!
 //! A root of a note commitment tree is associated with each treestate.
 
-#![allow(clippy::unit_arg)]
 #![allow(clippy::derive_hash_xor_eq)]
 #![allow(dead_code)]
 
 use std::{
-    cell::Cell,
-    convert::TryFrom,
     fmt,
     hash::{Hash, Hasher},
     io,
+    ops::Deref,
 };
 
 use bitvec::prelude::*;
-use halo2::{arithmetic::FieldExt, pasta::pallas};
+use halo2::pasta::{group::ff::PrimeField, pallas};
 use incrementalmerkletree::{bridgetree, Frontier};
 use lazy_static::lazy_static;
 use thiserror::Error;
@@ -56,8 +54,8 @@ fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pal
     // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
     let l = MERKLE_DEPTH - 1 - layer as usize;
     s.extend_from_bitslice(&BitArray::<Lsb0, _>::from([l, 0])[0..10]);
-    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(left.to_bytes())[0..255]);
-    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(right.to_bytes())[0..255]);
+    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(left.to_repr())[0..255]);
+    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(right.to_repr())[0..255]);
 
     match sinsemilla_hash(b"z.cash:Orchard-MerkleCRH", &s) {
         Some(h) => h,
@@ -101,7 +99,7 @@ pub struct Root(#[serde(with = "serde_helpers::Base")] pub(crate) pallas::Base);
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Root")
-            .field(&hex::encode(&self.0.to_bytes()))
+            .field(&hex::encode(&self.0.to_repr()))
             .finish()
     }
 }
@@ -120,7 +118,7 @@ impl From<&Root> for [u8; 32] {
 
 impl Hash for Root {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.to_bytes().hash(state)
+        self.0.to_repr().hash(state)
     }
 }
 
@@ -128,7 +126,7 @@ impl TryFrom<[u8; 32]> for Root {
     type Error = SerializationError;
 
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        let possible_point = pallas::Base::from_bytes(&bytes);
+        let possible_point = pallas::Base::from_repr(bytes);
 
         if possible_point.is_some().into() {
             Ok(Self(possible_point.unwrap()))
@@ -189,7 +187,7 @@ impl serde::Serialize for Node {
     where
         S: serde::Serializer,
     {
-        self.0.to_bytes().serialize(serializer)
+        self.0.to_repr().serialize(serializer)
     }
 }
 
@@ -199,7 +197,7 @@ impl<'de> serde::Deserialize<'de> for Node {
         D: serde::Deserializer<'de>,
     {
         let bytes = <[u8; 32]>::deserialize(deserializer)?;
-        Option::<pallas::Base>::from(pallas::Base::from_bytes(&bytes))
+        Option::<pallas::Base>::from(pallas::Base::from_repr(bytes))
             .map(Node)
             .ok_or_else(|| serde::de::Error::custom("invalid Pallas field element"))
     }
@@ -213,7 +211,7 @@ pub enum NoteCommitmentTreeError {
 }
 
 /// Orchard Incremental Note Commitment Tree
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NoteCommitmentTree {
     /// The tree represented as a Frontier.
     ///
@@ -244,12 +242,9 @@ pub struct NoteCommitmentTree {
     /// serialized with the tree). This is particularly important since we decided
     /// to instantiate the trees from the genesis block, for simplicity.
     ///
-    /// [`Cell`] offers interior mutability (it works even with a non-mutable
-    /// reference to the tree) but it prevents the tree (and anything that uses it)
-    /// from being shared between threads. If this ever becomes an issue we can
-    /// leave caching to the callers (which requires much more code), or replace
-    /// `Cell` with `Arc<Mutex<_>>` (and be careful of deadlocks and async code.)
-    cached_root: Cell<Option<Root>>,
+    /// We use a [`RwLock`] for this cache, because it is only written once per tree update.
+    /// Each tree has its own cached root, a new lock is created for each clone.
+    cached_root: std::sync::RwLock<Option<Root>>,
 }
 
 impl NoteCommitmentTree {
@@ -263,7 +258,13 @@ impl NoteCommitmentTree {
     pub fn append(&mut self, cm_x: pallas::Base) -> Result<(), NoteCommitmentTreeError> {
         if self.inner.append(&cm_x.into()) {
             // Invalidate cached root
-            self.cached_root.replace(None);
+            let cached_root = self
+                .cached_root
+                .get_mut()
+                .expect("a thread that previously held exclusive lock access panicked");
+
+            *cached_root = None;
+
             Ok(())
         } else {
             Err(NoteCommitmentTreeError::FullTree)
@@ -273,13 +274,28 @@ impl NoteCommitmentTree {
     /// Returns the current root of the tree, used as an anchor in Orchard
     /// shielded transactions.
     pub fn root(&self) -> Root {
-        match self.cached_root.get() {
-            // Return cached root
-            Some(root) => root,
+        if let Some(root) = self
+            .cached_root
+            .read()
+            .expect("a thread that previously held exclusive lock access panicked")
+            .deref()
+        {
+            // Return cached root.
+            return *root;
+        }
+
+        // Get exclusive access, compute the root, and cache it.
+        let mut write_root = self
+            .cached_root
+            .write()
+            .expect("a thread that previously held exclusive lock access panicked");
+        match write_root.deref() {
+            // Another thread got write access first, return cached root.
+            Some(root) => *root,
             None => {
-                // Compute root and cache it
+                // Compute root and cache it.
                 let root = Root(self.inner.root().0);
-                self.cached_root.replace(Some(root));
+                *write_root = Some(root);
                 root
             }
         }
@@ -305,6 +321,21 @@ impl NoteCommitmentTree {
     /// For Orchard, the tree is capped at 2^32.
     pub fn count(&self) -> u64 {
         self.inner.position().map_or(0, |pos| u64::from(pos) + 1)
+    }
+}
+
+impl Clone for NoteCommitmentTree {
+    /// Clones the inner tree, and creates a new `RwLock` with the cloned root data.
+    fn clone(&self) -> Self {
+        let cached_root = *self
+            .cached_root
+            .read()
+            .expect("a thread that previously held exclusive lock access panicked");
+
+        Self {
+            inner: self.inner.clone(),
+            cached_root: std::sync::RwLock::new(cached_root),
+        }
     }
 }
 

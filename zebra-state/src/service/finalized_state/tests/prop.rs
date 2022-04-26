@@ -45,10 +45,18 @@ fn blocks_with_v5_transactions() -> Result<()> {
 /// Test if committing blocks from all upgrades work correctly, to make
 /// sure the contextual validation done by the finalized state works.
 /// Also test if a block with the wrong commitment is correctly rejected.
-#[allow(dead_code)]
-#[cfg_attr(test_fake_activation_heights, test)]
+///
+/// This test requires setting the TEST_FAKE_ACTIVATION_HEIGHTS.
+#[test]
+#[allow(clippy::print_stderr)]
 fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<()> {
     zebra_test::init();
+
+    if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_none() {
+        eprintln!("Skipping all_upgrades_and_wrong_commitments_with_fake_activation_heights() since $TEST_FAKE_ACTIVATION_HEIGHTS is NOT set");
+        return Ok(());
+    }
+
     // Use no_shrink() because we're ignoring _count and there is nothing to actually shrink.
     proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
         .ok()

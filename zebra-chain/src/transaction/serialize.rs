@@ -1,10 +1,10 @@
 //! Contains impls of `ZcashSerialize`, `ZcashDeserialize` for all of the
 //! transaction types, so that all of the serialization logic is in one place.
 
-use std::{convert::TryInto, io, sync::Arc};
+use std::{borrow::Borrow, convert::TryInto, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use halo2::{arithmetic::FieldExt, pasta::pallas};
+use halo2::pasta::{group::ff::PrimeField, pallas};
 
 use crate::{
     amount,
@@ -41,7 +41,7 @@ impl ZcashDeserialize for jubjub::Fq {
 
 impl ZcashDeserialize for pallas::Scalar {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let possible_scalar = pallas::Scalar::from_bytes(&reader.read_32_bytes()?);
+        let possible_scalar = pallas::Scalar::from_repr(reader.read_32_bytes()?);
 
         if possible_scalar.is_some().into() {
             Ok(possible_scalar.unwrap())
@@ -55,7 +55,7 @@ impl ZcashDeserialize for pallas::Scalar {
 
 impl ZcashDeserialize for pallas::Base {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let possible_field_element = pallas::Base::from_bytes(&reader.read_32_bytes()?);
+        let possible_field_element = pallas::Base::from_repr(reader.read_32_bytes()?);
 
         if possible_field_element.is_some().into() {
             Ok(possible_field_element.unwrap())
@@ -975,5 +975,38 @@ impl TrustedPreallocate for transparent::Input {
 impl TrustedPreallocate for transparent::Output {
     fn max_allocation() -> u64 {
         MAX_BLOCK_BYTES / MIN_TRANSPARENT_OUTPUT_SIZE
+    }
+}
+
+/// A serialized transaction.
+///
+/// Stores bytes that are guaranteed to be deserializable into a [`Transaction`].
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct SerializedTransaction {
+    bytes: Vec<u8>,
+}
+
+/// Build a [`SerializedTransaction`] by serializing a block.
+impl<B: Borrow<Transaction>> From<B> for SerializedTransaction {
+    fn from(tx: B) -> Self {
+        SerializedTransaction {
+            bytes: tx
+                .borrow()
+                .zcash_serialize_to_vec()
+                .expect("Writing to a `Vec` should never fail"),
+        }
+    }
+}
+
+/// Access the serialized bytes of a [`SerializedTransaction`].
+impl AsRef<[u8]> for SerializedTransaction {
+    fn as_ref(&self) -> &[u8] {
+        self.bytes.as_ref()
+    }
+}
+
+impl From<Vec<u8>> for SerializedTransaction {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self { bytes }
     }
 }

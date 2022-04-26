@@ -1,3 +1,5 @@
+//! Initialization and arbitrary data generation functions for zebra-state.
+
 use std::sync::Arc;
 
 use proptest::prelude::*;
@@ -84,7 +86,7 @@ pub(crate) fn new_state_with_mainnet_genesis() -> (StateService, FinalizedBlock)
         .zcash_deserialize_into::<Arc<Block>>()
         .expect("block should deserialize");
 
-    let (mut state, _, _) = StateService::new(Config::ephemeral(), Mainnet);
+    let (mut state, _, _, _) = StateService::new(Config::ephemeral(), Mainnet);
 
     assert_eq!(None, state.best_tip());
 

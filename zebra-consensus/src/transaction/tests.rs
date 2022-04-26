@@ -1,13 +1,12 @@
 //! Tests for Zcash transaction consensus checks.
 
 use std::{
-    cmp::max,
     collections::HashMap,
     convert::{TryFrom, TryInto},
     sync::Arc,
 };
 
-use halo2::{arithmetic::FieldExt, pasta::pallas};
+use halo2::pasta::{group::ff::PrimeField, pallas};
 use tower::{service_fn, ServiceExt};
 
 use zebra_chain::{
@@ -211,7 +210,7 @@ fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
         zebra_test::vectors::MAINNET_BLOCKS.iter(),
     )
     .rev()
-    .find(|transaction| transaction.has_valid_coinbase_transaction_inputs())
+    .find(|transaction| transaction.is_coinbase())
     .expect("At least one fake V5 coinbase transaction in the test vectors");
 
     insert_fake_orchard_shielded_data(&mut transaction);
@@ -226,7 +225,7 @@ fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
         zebra_test::vectors::MAINNET_BLOCKS.iter(),
     )
     .rev()
-    .find(|transaction| transaction.has_valid_coinbase_transaction_inputs())
+    .find(|transaction| transaction.is_coinbase())
     .expect("At least one fake V5 coinbase transaction in the test vectors");
 
     let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
@@ -306,23 +305,29 @@ async fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Ne
     let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
     let verifier = Verifier::new(network, state_service);
 
-    let transaction = fake_v5_transactions_for_network(network, blocks)
+    let mut transaction = fake_v5_transactions_for_network(network, blocks)
         .rev()
         .next()
         .expect("At least one fake V5 transaction in the test vectors");
+    if transaction
+        .expiry_height()
+        .expect("V5 must have expiry_height")
+        < nu5_activation_height
+    {
+        let expiry_height = transaction.expiry_height_mut();
+        *expiry_height = nu5_activation_height;
+    }
 
     let expected_hash = transaction.unmined_id();
-
-    let fake_block_height = max(
-        nu5_activation_height,
-        transaction.expiry_height().unwrap_or(nu5_activation_height),
-    );
+    let expiry_height = transaction
+        .expiry_height()
+        .expect("V5 must have expiry_height");
 
     let result = verifier
         .oneshot(Request::Block {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(HashMap::new()),
-            height: fake_block_height,
+            height: expiry_height,
             time: chrono::MAX_DATETIME,
         })
         .await;
@@ -1381,8 +1386,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
         let (height, transaction) = test_transactions(network)
             .rev()
             .filter(|(_, transaction)| {
-                !transaction.has_valid_coinbase_transaction_inputs()
-                    && transaction.inputs().is_empty()
+                !transaction.is_coinbase() && transaction.inputs().is_empty()
             })
             .find(|(_, transaction)| transaction.sprout_groth16_joinsplits().next().is_some())
             .expect("No transaction found with Groth16 JoinSplits");
@@ -1451,9 +1455,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
 
     let (height, mut transaction) = test_transactions(network)
         .rev()
-        .filter(|(_, transaction)| {
-            !transaction.has_valid_coinbase_transaction_inputs() && transaction.inputs().is_empty()
-        })
+        .filter(|(_, transaction)| !transaction.is_coinbase() && transaction.inputs().is_empty())
         .find(|(_, transaction)| transaction.sprout_groth16_joinsplits().next().is_some())
         .expect("No transaction found with Groth16 JoinSplits");
 
@@ -1491,8 +1493,7 @@ fn v4_with_sapling_spends() {
         let (height, transaction) = test_transactions(network)
             .rev()
             .filter(|(_, transaction)| {
-                !transaction.has_valid_coinbase_transaction_inputs()
-                    && transaction.inputs().is_empty()
+                !transaction.is_coinbase() && transaction.inputs().is_empty()
             })
             .find(|(_, transaction)| transaction.sapling_spends_per_anchor().next().is_some())
             .expect("No transaction found with Sapling spends");
@@ -1532,8 +1533,7 @@ fn v4_with_duplicate_sapling_spends() {
         let (height, mut transaction) = test_transactions(network)
             .rev()
             .filter(|(_, transaction)| {
-                !transaction.has_valid_coinbase_transaction_inputs()
-                    && transaction.inputs().is_empty()
+                !transaction.is_coinbase() && transaction.inputs().is_empty()
             })
             .find(|(_, transaction)| transaction.sapling_spends_per_anchor().next().is_some())
             .expect("No transaction found with Sapling spends");
@@ -1578,8 +1578,7 @@ fn v4_with_sapling_outputs_and_no_spends() {
         let (height, transaction) = test_transactions(network)
             .rev()
             .filter(|(_, transaction)| {
-                !transaction.has_valid_coinbase_transaction_inputs()
-                    && transaction.inputs().is_empty()
+                !transaction.is_coinbase() && transaction.inputs().is_empty()
             })
             .find(|(_, transaction)| {
                 transaction.sapling_spends_per_anchor().next().is_none()
@@ -1624,10 +1623,7 @@ fn v5_with_sapling_spends() {
         let transaction =
             fake_v5_transactions_for_network(network, zebra_test::vectors::MAINNET_BLOCKS.iter())
                 .rev()
-                .filter(|transaction| {
-                    !transaction.has_valid_coinbase_transaction_inputs()
-                        && transaction.inputs().is_empty()
-                })
+                .filter(|transaction| !transaction.is_coinbase() && transaction.inputs().is_empty())
                 .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
                 .expect("No transaction found with Sapling spends");
 
@@ -1669,10 +1665,7 @@ fn v5_with_duplicate_sapling_spends() {
         let mut transaction =
             fake_v5_transactions_for_network(network, zebra_test::vectors::MAINNET_BLOCKS.iter())
                 .rev()
-                .filter(|transaction| {
-                    !transaction.has_valid_coinbase_transaction_inputs()
-                        && transaction.inputs().is_empty()
-                })
+                .filter(|transaction| !transaction.is_coinbase() && transaction.inputs().is_empty())
                 .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
                 .expect("No transaction found with Sapling spends");
 
@@ -1823,8 +1816,7 @@ fn mock_transparent_transfer(
         lock_script,
     };
 
-    let previous_utxo =
-        transparent::OrderedUtxo::new(previous_output, previous_utxo_height, false, 1);
+    let previous_utxo = transparent::OrderedUtxo::new(previous_output, previous_utxo_height, 1);
 
     // Use the `previous_outpoint` as input
     let input = transparent::Input::PrevOut {
@@ -2167,7 +2159,7 @@ fn fill_action_with_note_encryption_test_vector(
 ) -> zebra_chain::orchard::Action {
     let mut action = action.clone();
     action.cv = v.cv_net.try_into().expect("test vector must be valid");
-    action.cm_x = pallas::Base::from_bytes(&v.cmx).unwrap();
+    action.cm_x = pallas::Base::from_repr(v.cmx).unwrap();
     action.nullifier = v.rho.try_into().expect("test vector must be valid");
     action.ephemeral_key = v
         .ephemeral_key

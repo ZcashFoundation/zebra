@@ -217,7 +217,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     let test_transaction = block
         .transactions
         .into_iter()
-        .find(|tx| !tx.has_any_coinbase_inputs())
+        .find(|tx| !tx.is_coinbase())
         .expect("at least one non-coinbase transaction");
     let test_transaction_id = test_transaction.unmined_id();
     let txs = HashSet::from_iter([test_transaction_id]);
@@ -698,7 +698,7 @@ async fn setup(
     let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
     let (sync_status, mut recent_syncs) = SyncStatus::new();
-    let (state, latest_chain_tip, chain_tip_change) =
+    let (state, _read_only_state_service, latest_chain_tip, chain_tip_change) =
         zebra_state::init(state_config.clone(), network);
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);

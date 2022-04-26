@@ -1,17 +1,5 @@
-use group::GroupEncoding;
-use halo2::{arithmetic::FieldExt, pasta::pallas};
-use serde_big_array::big_array;
-
-big_array! {
-    BigArray;
-    + 1344, // `EquihashSolution`
-    80,   // `sapling::OutCiphertext`
-    580,  // `sapling::EncryptedCiphertext`
-    601,  // `sprout::EncryptedCiphertext`
-    296,  // `Bctv14Proof`
-    196,  // `Groth16Proof`
-}
-
+use group::{ff::PrimeField, GroupEncoding};
+use halo2::pasta::pallas;
 #[derive(Deserialize, Serialize)]
 #[serde(remote = "jubjub::AffinePoint")]
 pub struct AffinePoint {
@@ -54,25 +42,25 @@ impl From<Affine> for pallas::Affine {
 #[derive(Deserialize, Serialize)]
 #[serde(remote = "pallas::Scalar")]
 pub struct Scalar {
-    #[serde(getter = "pallas::Scalar::to_bytes")]
+    #[serde(getter = "pallas::Scalar::to_repr")]
     bytes: [u8; 32],
 }
 
 impl From<Scalar> for pallas::Scalar {
     fn from(local: Scalar) -> Self {
-        pallas::Scalar::from_bytes(&local.bytes).unwrap()
+        pallas::Scalar::from_repr(local.bytes).unwrap()
     }
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(remote = "pallas::Base")]
 pub struct Base {
-    #[serde(getter = "pallas::Base::to_bytes")]
+    #[serde(getter = "pallas::Base::to_repr")]
     bytes: [u8; 32],
 }
 
 impl From<Base> for pallas::Base {
     fn from(local: Base) -> Self {
-        pallas::Base::from_bytes(&local.bytes).unwrap()
+        pallas::Base::from_repr(local.bytes).unwrap()
     }
 }

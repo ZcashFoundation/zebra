@@ -1,0 +1,13 @@
+---
+source: zebra-state/src/service/finalized_state/zebra_db/block/tests/snapshot.rs
+expression: stored_utxos
+---
+[
+  (OutputLocation(
+    transaction_location: TransactionLocation(
+      height: Height(0),
+      index: TransactionIndex(0),
+    ),
+    output_index: OutputIndex(0),
+  ), None),
+]

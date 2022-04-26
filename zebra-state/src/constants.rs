@@ -18,7 +18,7 @@ pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 pub const MAX_BLOCK_REORG_HEIGHT: u32 = MIN_TRANSPARENT_COINBASE_MATURITY - 1;
 
 /// The database format version, incremented each time the database format changes.
-pub const DATABASE_FORMAT_VERSION: u32 = 12;
+pub const DATABASE_FORMAT_VERSION: u32 = 23;
 
 /// The maximum number of blocks to check for NU5 transactions,
 /// before we assume we are on a pre-NU5 legacy chain.

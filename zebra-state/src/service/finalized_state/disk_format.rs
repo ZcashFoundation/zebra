@@ -5,43 +5,50 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::{collections::BTreeMap, convert::TryInto, fmt::Debug, sync::Arc};
+use std::sync::Arc;
 
-use bincode::Options;
-use zebra_chain::{
-    amount::NonNegative,
-    block,
-    block::{Block, Height},
-    history_tree::NonEmptyHistoryTree,
-    orchard,
-    parameters::Network,
-    primitives::zcash_history,
-    sapling,
-    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
-    sprout, transaction, transparent,
-    value_balance::ValueBalance,
-};
+pub mod block;
+pub mod chain;
+pub mod shielded;
+pub mod transparent;
 
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TransactionLocation {
-    pub height: block::Height,
-    pub index: u32,
-}
+pub use block::{TransactionIndex, TransactionLocation};
+pub use transparent::OutputLocation;
 
-// Helper trait for defining the exact format used to interact with disk per
-// type.
+/// Helper type for writing types to disk as raw bytes.
+/// Also used to convert key types to raw bytes for disk lookups.
 pub trait IntoDisk {
-    // The type used to compare a value as a key to other keys stored in a
-    // database
+    /// The type used to write bytes to disk,
+    /// and compare a value as a key to on-disk keys.
     type Bytes: AsRef<[u8]>;
 
-    // function to convert the current type to its disk format in `zs_get()`
-    // without necessarily allocating a new IVec
+    /// Converts the current type into serialized raw bytes.
+    ///
+    /// Used to convert keys to bytes in [`ReadDisk`],
+    /// and keys and values to bytes in [`WriteDisk`].
+    ///
+    /// # Panics
+    ///
+    /// - if the input data doesn't serialize correctly
     fn as_bytes(&self) -> Self::Bytes;
 }
+
+/// Helper type for reading types from disk as raw bytes.
+pub trait FromDisk: Sized {
+    /// Converts raw disk bytes back into the deserialized type.
+    ///
+    /// Used to convert keys and values from bytes in [`ReadDisk`].
+    ///
+    /// # Panics
+    ///
+    /// - if the input data doesn't deserialize correctly
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self;
+}
+
+// Generic serialization impls
 
 impl<'a, T> IntoDisk for &'a T
 where
@@ -65,18 +72,6 @@ where
     }
 }
 
-/// Helper type for retrieving types from the disk with the correct format.
-///
-/// The ivec should be correctly encoded by IntoDisk.
-pub trait FromDisk: Sized {
-    /// Function to convert the disk bytes back into the deserialized type.
-    ///
-    /// # Panics
-    ///
-    /// - if the input data doesn't deserialize correctly
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self;
-}
-
 impl<T> FromDisk for Arc<T>
 where
     T: FromDisk,
@@ -86,105 +81,7 @@ where
     }
 }
 
-impl IntoDisk for Block {
-    type Bytes = Vec<u8>;
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.zcash_serialize_to_vec()
-            .expect("serialization to vec doesn't fail")
-    }
-}
-
-impl FromDisk for Block {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        Block::zcash_deserialize(bytes.as_ref())
-            .expect("deserialization format should match the serialization format used by IntoDisk")
-    }
-}
-
-impl IntoDisk for TransactionLocation {
-    type Bytes = [u8; 8];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        let height_bytes = self.height.0.to_be_bytes();
-        let index_bytes = self.index.to_be_bytes();
-
-        let mut bytes = [0; 8];
-
-        bytes[0..4].copy_from_slice(&height_bytes);
-        bytes[4..8].copy_from_slice(&index_bytes);
-
-        bytes
-    }
-}
-
-impl FromDisk for TransactionLocation {
-    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let disk_bytes = disk_bytes.as_ref();
-        let height = {
-            let mut bytes = [0; 4];
-            bytes.copy_from_slice(&disk_bytes[0..4]);
-            let height = u32::from_be_bytes(bytes);
-            block::Height(height)
-        };
-
-        let index = {
-            let mut bytes = [0; 4];
-            bytes.copy_from_slice(&disk_bytes[4..8]);
-            u32::from_be_bytes(bytes)
-        };
-
-        TransactionLocation { height, index }
-    }
-}
-
-impl IntoDisk for transaction::Hash {
-    type Bytes = [u8; 32];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.0
-    }
-}
-
-impl IntoDisk for block::Hash {
-    type Bytes = [u8; 32];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.0
-    }
-}
-
-impl FromDisk for block::Hash {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let array = bytes.as_ref().try_into().unwrap();
-        Self(array)
-    }
-}
-
-impl IntoDisk for sprout::Nullifier {
-    type Bytes = [u8; 32];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.0
-    }
-}
-
-impl IntoDisk for sapling::Nullifier {
-    type Bytes = [u8; 32];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.0
-    }
-}
-
-impl IntoDisk for orchard::Nullifier {
-    type Bytes = [u8; 32];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        let nullifier: orchard::Nullifier = *self;
-        nullifier.into()
-    }
-}
+// Commonly used serialization impls
 
 impl IntoDisk for () {
     type Bytes = [u8; 0];
@@ -194,196 +91,72 @@ impl IntoDisk for () {
     }
 }
 
-impl IntoDisk for block::Height {
-    type Bytes = [u8; 4];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.0.to_be_bytes()
-    }
-}
-
-impl FromDisk for block::Height {
+impl FromDisk for () {
+    #[allow(clippy::unused_unit)]
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let array = bytes.as_ref().try_into().unwrap();
-        block::Height(u32::from_be_bytes(array))
+        assert_eq!(
+            bytes.as_ref().len(),
+            0,
+            "unexpected data in zero-sized column family type",
+        );
+
+        ()
     }
 }
 
-impl IntoDisk for transparent::Utxo {
-    type Bytes = Vec<u8>;
+// Serialization Modification Functions
 
-    fn as_bytes(&self) -> Self::Bytes {
-        let mut bytes = vec![0; 5];
-        bytes[0..4].copy_from_slice(&self.height.0.to_be_bytes());
-        bytes[4] = self.from_coinbase as u8;
-        self.output
-            .zcash_serialize(&mut bytes)
-            .expect("serialization to vec doesn't fail");
-        bytes
+/// Truncates `mem_bytes` to `disk_len`, by removing zero bytes from the start of the slice.
+/// Used to discard unused zero bytes during serialization.
+///
+/// # Panics
+///
+/// - if `mem_bytes` is shorter than `disk_len`
+/// - if any of the truncated bytes are non-zero
+pub fn truncate_zero_be_bytes(mem_bytes: &[u8], disk_len: usize) -> &[u8] {
+    let truncated_bytes = mem_bytes
+        .len()
+        .checked_sub(disk_len)
+        .expect("unexpected `mem_bytes` length: must be at least `disk_len`");
+
+    if truncated_bytes == 0 {
+        return mem_bytes;
     }
+
+    let (discarded, truncated) = mem_bytes.split_at(truncated_bytes);
+
+    assert!(
+        discarded.iter().all(|&byte| byte == 0),
+        "unexpected `mem_bytes` content: non-zero discarded bytes: {:?}\n\
+         truncated: {:?}",
+        discarded,
+        truncated,
+    );
+
+    assert_eq!(truncated.len(), disk_len);
+
+    truncated
 }
 
-impl FromDisk for transparent::Utxo {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let (meta_bytes, output_bytes) = bytes.as_ref().split_at(5);
-        let height = block::Height(u32::from_be_bytes(meta_bytes[0..4].try_into().unwrap()));
-        let from_coinbase = meta_bytes[4] == 1u8;
-        let output = output_bytes
-            .zcash_deserialize_into()
-            .expect("db has serialized data");
-        Self {
-            output,
-            height,
-            from_coinbase,
-        }
+/// Expands `disk_bytes` to `mem_len`, by adding zero bytes at the start of the slice.
+/// Used to zero-fill bytes that were discarded during serialization.
+///
+/// # Panics
+///
+/// - if `disk_bytes` is longer than `mem_len`
+pub fn expand_zero_be_bytes(disk_bytes: &[u8], mem_len: usize) -> Vec<u8> {
+    let extra_bytes = mem_len
+        .checked_sub(disk_bytes.len())
+        .expect("unexpected `disk_bytes` length: must not exceed `mem_len`");
+
+    if extra_bytes == 0 {
+        return disk_bytes.to_vec();
     }
-}
 
-impl IntoDisk for transparent::OutPoint {
-    type Bytes = Vec<u8>;
+    let mut expanded = vec![0; extra_bytes];
+    expanded.extend(disk_bytes);
 
-    fn as_bytes(&self) -> Self::Bytes {
-        self.zcash_serialize_to_vec()
-            .expect("serialization to vec doesn't fail")
-    }
-}
+    assert_eq!(expanded.len(), mem_len);
 
-impl IntoDisk for sprout::tree::Root {
-    type Bytes = [u8; 32];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.into()
-    }
-}
-
-impl IntoDisk for sapling::tree::Root {
-    type Bytes = [u8; 32];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.into()
-    }
-}
-
-impl IntoDisk for orchard::tree::Root {
-    type Bytes = [u8; 32];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.into()
-    }
-}
-
-impl IntoDisk for ValueBalance<NonNegative> {
-    type Bytes = [u8; 32];
-
-    fn as_bytes(&self) -> Self::Bytes {
-        self.to_bytes()
-    }
-}
-
-impl FromDisk for ValueBalance<NonNegative> {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let array = bytes.as_ref().try_into().unwrap();
-        ValueBalance::from_bytes(array).unwrap()
-    }
-}
-
-// The following implementations for the note commitment trees use `serde` and
-// `bincode` because currently the inner Merkle tree frontier (from
-// `incrementalmerkletree`) only supports `serde` for serialization. `bincode`
-// was chosen because it is small and fast. We explicitly use `DefaultOptions`
-// in particular to disallow trailing bytes; see
-// https://docs.rs/bincode/1.3.3/bincode/config/index.html#options-struct-vs-bincode-functions
-
-impl IntoDisk for sprout::tree::NoteCommitmentTree {
-    type Bytes = Vec<u8>;
-
-    fn as_bytes(&self) -> Self::Bytes {
-        bincode::DefaultOptions::new()
-            .serialize(self)
-            .expect("serialization to vec doesn't fail")
-    }
-}
-
-impl FromDisk for sprout::tree::NoteCommitmentTree {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bincode::DefaultOptions::new()
-            .deserialize(bytes.as_ref())
-            .expect("deserialization format should match the serialization format used by IntoDisk")
-    }
-}
-impl IntoDisk for sapling::tree::NoteCommitmentTree {
-    type Bytes = Vec<u8>;
-
-    fn as_bytes(&self) -> Self::Bytes {
-        bincode::DefaultOptions::new()
-            .serialize(self)
-            .expect("serialization to vec doesn't fail")
-    }
-}
-
-impl FromDisk for sapling::tree::NoteCommitmentTree {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bincode::DefaultOptions::new()
-            .deserialize(bytes.as_ref())
-            .expect("deserialization format should match the serialization format used by IntoDisk")
-    }
-}
-
-impl IntoDisk for orchard::tree::NoteCommitmentTree {
-    type Bytes = Vec<u8>;
-
-    fn as_bytes(&self) -> Self::Bytes {
-        bincode::DefaultOptions::new()
-            .serialize(self)
-            .expect("serialization to vec doesn't fail")
-    }
-}
-
-impl FromDisk for orchard::tree::NoteCommitmentTree {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bincode::DefaultOptions::new()
-            .deserialize(bytes.as_ref())
-            .expect("deserialization format should match the serialization format used by IntoDisk")
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct HistoryTreeParts {
-    network: Network,
-    size: u32,
-    peaks: BTreeMap<u32, zcash_history::Entry>,
-    current_height: Height,
-}
-
-impl IntoDisk for NonEmptyHistoryTree {
-    type Bytes = Vec<u8>;
-
-    fn as_bytes(&self) -> Self::Bytes {
-        let data = HistoryTreeParts {
-            network: self.network(),
-            size: self.size(),
-            peaks: self.peaks().clone(),
-            current_height: self.current_height(),
-        };
-        bincode::DefaultOptions::new()
-            .serialize(&data)
-            .expect("serialization to vec doesn't fail")
-    }
-}
-
-impl FromDisk for NonEmptyHistoryTree {
-    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let parts: HistoryTreeParts = bincode::DefaultOptions::new()
-            .deserialize(bytes.as_ref())
-            .expect(
-                "deserialization format should match the serialization format used by IntoDisk",
-            );
-        NonEmptyHistoryTree::from_cache(
-            parts.network,
-            parts.size,
-            parts.peaks,
-            parts.current_height,
-        )
-        .expect("deserialization format should match the serialization format used by IntoDisk")
-    }
+    expanded
 }

@@ -5,8 +5,12 @@ on:
     inputs:
       network:
         default: 'Mainnet'
+        description: 'Network to deploy: Mainnet or Testnet'
+        required: true
       checkpoint_sync:
-        default: true
+        default: 'true'
+        description: 'Use as many checkpoints as possible when syncing'
+        required: true
   push:
     branches:
       - main
@@ -14,9 +18,9 @@ on:
 env:
   CARGO_INCREMENTAL: '1'
   NETWORK: Mainnet
-  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  GAR_BASE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/zebra
-  GCR_BASE: gcr.io/${{ secrets.GCP_PROJECT_ID }}
+  PROJECT_ID: zealous-zebra
+  GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
+  GCR_BASE: gcr.io/zealous-zebra
   REGION: us-central1
   ZONE: us-central1-a
   MACHINE_TYPE: c2-standard-4
@@ -24,98 +28,132 @@ env:
 jobs:
   build:
     name: Build images
-    timeout-minutes: 60
+    # TODO: remove timeout until we have an average build time
+    # timeout-minutes: 180
     runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
 
     steps:
-    - uses: actions/checkout@v2.4.0
-      with:
-        persist-credentials: false
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
 
-    - name: Inject slug/short variables
-      uses: rlespinasse/github-slug-action@v4
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
 
-    # Setup gcloud CLI
-    - name: Authenticate to Google Cloud
-      id: auth
-      uses: google-github-actions/auth@v0.6.0
-      with:
-        credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
+        # Automatic tag management and OCI Image Format Specification for labels
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v3.7.0
+        with:
+          # list of Docker images to use as base name for tags
+          images: |
+            ${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}
+            ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_REF_SLUG_URL }}
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
 
-    # Setup Docker Buildx to allow use of docker cache layers from GH
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v1
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.7.1
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
-    - name: Login to Google Artifact Registry
-      uses: docker/login-action@v1.12.0
-      with:
-        registry: us-docker.pkg.dev
-        username: _json_key
-        password: ${{ secrets.GOOGLE_CREDENTIALS }}
+      - name: Set up QEMU
+        id: qemu
+        uses: docker/setup-qemu-action@v1
+        with:
+          image: tonistiigi/binfmt:latest
+          platforms: all
 
-    - name: Login to Google Container Registry
-      uses: docker/login-action@v1.12.0
-      with:
-        registry: gcr.io
-        username: _json_key
-        password: ${{ secrets.GOOGLE_CREDENTIALS }}
+      # Setup Docker Buildx to allow use of docker cache layers from GH
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
 
-    # Build and push image to Google Artifact Registry
-    - name: Build & push
-      id: docker_build
-      uses: docker/build-push-action@v2.9.0
-      with:
-        target: runtime
-        context: .
-        file: ./docker/Dockerfile.build
-        tags: |
-          ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}:latest
-          ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}:${{ env.GITHUB_SHA_SHORT }}
-          ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}:latest
-          ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}:${{ env.GITHUB_SHA_SHORT }}
-        build-args: |
-          NETWORK=${{ github.event.inputs.network || env.NETWORK }}
-          SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
-          RUST_BACKTRACE=1
-          ZEBRA_SKIP_IPV6_TESTS="1"
-          CHECKPOINT_SYNC=${{ github.event.inputs.checkpoint_sync || true }}
-          SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
-        push: true
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      - name: Login to Google Artifact Registry
+        uses: docker/login-action@v1.14.1
+        with:
+          registry: us-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Login to Google Container Registry
+        uses: docker/login-action@v1.14.1
+        with:
+          registry: gcr.io
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      # Build and push image to Google Artifact Registry
+      - name: Build & push
+        id: docker_build
+        uses: docker/build-push-action@v2.10.0
+        with:
+          target: runtime
+          context: .
+          file: ./docker/Dockerfile
+          # TODO: building crates is taking too long with arm64 and it's timing out on GHA
+          # platforms: |
+          #   linux/amd64
+          #   linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            NETWORK=${{ github.event.inputs.network || env.NETWORK }}
+            SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
+            RUST_BACKTRACE=1
+            ZEBRA_SKIP_IPV6_TESTS="1"
+            CHECKPOINT_SYNC=${{ github.event.inputs.checkpoint_sync || true }}
+            SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
+          push: true
+          cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}:buildcache
+          cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}:buildcache,mode=max
 
   deploy-nodes:
     name: Deploy Mainnet nodes
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: github.event_name == 'push' && github.ref == 'ref/head/main'
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
 
     steps:
-      - uses: actions/checkout@v2.4.0
-        with:
-          persist-credentials: false
-
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.6.0
+        uses: google-github-actions/auth@v0.7.1
         with:
-          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
-
-      - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@v0.5.1
-        with:
-          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
       - name: Create instance template
         run: |
-          gcloud compute instance-templates create-with-container zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute instance-templates create-with-container zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --boot-disk-type=pd-ssd \
-          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}:${{ env.GITHUB_SHA_SHORT }} \
+          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}:${{ env.GITHUB_SHA_SHORT }} \
           --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-ssd \
           --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
@@ -127,15 +165,15 @@ jobs:
         id: does-group-exist
         continue-on-error: true
         run: |
-          gcloud compute instance-groups list | grep "zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}" | grep "${{ env.REGION }}"
+          gcloud compute instance-groups list | grep "zebrad-${{ env.GITHUB_REF_SLUG_URL }}" | grep "${{ env.REGION }}"
 
       # Deploy new managed instance group using the new instance template
       - name: Create managed instance group
         if: steps.does-group-exist.outcome == 'failure'
         run: |
           gcloud compute instance-groups managed create \
-          "zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}" \
-          --template "zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          "zebrad-${{ env.GITHUB_REF_SLUG_URL }}" \
+          --template "zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --health-check zebrad-tracing-filter \
           --initial-delay 30 \
           --region "${{ env.REGION }}" \
@@ -146,8 +184,8 @@ jobs:
         if: steps.does-group-exist.outcome == 'success'
         run: |
           gcloud compute instance-groups managed rolling-action start-update \
-          "zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}" \
-          --version template="zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          "zebrad-${{ env.GITHUB_REF_SLUG_URL }}" \
+          --version template="zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --region "${{ env.REGION }}"
 
   deploy-instance:
@@ -155,37 +193,35 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: 'read'
+      id-token: 'write'
     if: github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v2.4.0
-        with:
-          persist-credentials: false
-
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.6.0
+        uses: google-github-actions/auth@v0.7.1
         with:
-          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
-
-      - name: Set up gcloud SDK environment
-        uses: google-github-actions/setup-gcloud@v0.5.1
-        with:
-          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
       # Create instance template from container image
       - name: Manual deploy of a single instance running zebrad
         run: |
-          gcloud compute instances create-with-container "zebrad-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          gcloud compute instances create-with-container "zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type=pd-ssd \
           --container-stdin \
           --container-tty \
-          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}:${{ env.GITHUB_SHA_SHORT }} \
+          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}:${{ env.GITHUB_SHA_SHORT }} \
           --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-ssd \
           --container-mount-disk mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \

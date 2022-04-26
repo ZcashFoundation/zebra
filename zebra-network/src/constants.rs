@@ -1,4 +1,9 @@
-//! Definitions of constants.
+//! Definitions of Zebra network constants, including:
+//! - network protocol versions,
+//! - network protocol user agents,
+//! - peer address limits,
+//! - peer connection limits, and
+//! - peer connection timeouts.
 
 use std::{collections::HashMap, time::Duration};
 
@@ -9,7 +14,10 @@ use regex::Regex;
 use crate::protocol::external::types::*;
 
 use zebra_chain::{
-    parameters::{Network, NetworkUpgrade},
+    parameters::{
+        Network::{self, *},
+        NetworkUpgrade::*,
+    },
     serialization::Duration32,
 };
 
@@ -231,7 +239,7 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 /// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
 //
 // TODO: generate this from crate metadata (#2375)
-pub const USER_AGENT: &str = "/Zebra:1.0.0-beta.5/";
+pub const USER_AGENT: &str = "/Zebra:1.0.0-beta.8/";
 
 /// The Zcash network protocol version implemented by this crate, and advertised
 /// during connection setup.
@@ -241,7 +249,9 @@ pub const USER_AGENT: &str = "/Zebra:1.0.0-beta.5/";
 ///
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_015);
+//
+// TODO: update to Nu5 mainnet (#4115)
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_050);
 
 /// The default RTT estimate for peer responses.
 ///
@@ -275,10 +285,22 @@ lazy_static! {
     ///
     /// The minimum network protocol version typically changes after Mainnet and/or
     /// Testnet network upgrades.
-    pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<Network, NetworkUpgrade> = {
+    pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<Network, Version> = {
         let mut hash_map = HashMap::new();
-        hash_map.insert(Network::Mainnet, NetworkUpgrade::Canopy);
-        hash_map.insert(Network::Testnet, NetworkUpgrade::Nu5);
+
+        // TODO: update to Nu5 when there are enough Nu5 mainnet nodes deployed (#4117)
+        hash_map.insert(Mainnet, Version::min_specified_for_upgrade(Mainnet, Canopy));
+
+        // This is the `zcashd` network protocol version:
+        // - after the first NU5 testnet activation, and
+        // - after updating to the second NU5 testnet activation consensus rules,
+        // - but before setting the second NU5 testnet activation height.
+        //
+        // TODO: update to:
+        // Version::min_specified_for_upgrade(Mainnet, Nu5)
+        // when there are enough Nu5 testnet nodes deployed (#4116)
+        hash_map.insert(Testnet, Version(170_040));
+
         hash_map
     };
 

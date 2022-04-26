@@ -22,13 +22,25 @@ pub mod arbitrary;
 #[cfg(test)]
 mod tests;
 
-type Result<T, E = Error> = std::result::Result<T, E>;
+/// The result of an amount operation.
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
 #[derive(Clone, Copy, Serialize, Deserialize)]
 #[serde(try_from = "i64")]
 #[serde(bound = "C: Constraint")]
-pub struct Amount<C = NegativeAllowed>(i64, PhantomData<C>);
+pub struct Amount<C = NegativeAllowed>(
+    /// The inner amount value.
+    i64,
+    /// Used for [`Constraint`] type inference.
+    ///
+    /// # Correctness
+    ///
+    /// This internal Zebra marker type is not consensus-critical.
+    /// And it should be ignored during testing. (And other internal uses.)
+    #[serde(skip)]
+    PhantomData<C>,
+);
 
 impl<C> std::fmt::Debug for Amount<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

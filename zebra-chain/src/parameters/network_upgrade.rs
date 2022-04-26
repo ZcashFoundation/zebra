@@ -6,9 +6,11 @@ use crate::block;
 use crate::parameters::{Network, Network::*};
 
 use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 use std::ops::Bound::*;
 
 use chrono::{DateTime, Duration, Utc};
+use hex::{FromHex, ToHex};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -52,8 +54,13 @@ pub enum NetworkUpgrade {
 ///
 /// This is actually a bijective map, but it is const, so we use a vector, and
 /// do the uniqueness check in the unit tests.
-#[cfg(not(test_fake_activation_heights))]
-pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
+///
+/// # Correctness
+///
+/// Don't use this directly; use NetworkUpgrade::activation_list() so that
+/// we can switch to fake activation heights for some tests.
+#[allow(unused)]
+pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(0), Genesis),
     (block::Height(1), BeforeOverwinter),
     (block::Height(347_500), Overwinter),
@@ -61,11 +68,12 @@ pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(653_600), Blossom),
     (block::Height(903_000), Heartwood),
     (block::Height(1_046_400), Canopy),
-    // TODO: Add Nu5 mainnet activation height
+    // TODO: Add Nu5 mainnet activation height (#4115)
 ];
 
-#[cfg(test_fake_activation_heights)]
-pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
+/// Fake mainnet network upgrade activation heights, used in tests.
+#[allow(unused)]
+const FAKE_MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(0), Genesis),
     (block::Height(5), BeforeOverwinter),
     (block::Height(10), Overwinter),
@@ -80,8 +88,13 @@ pub(crate) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
 ///
 /// This is actually a bijective map, but it is const, so we use a vector, and
 /// do the uniqueness check in the unit tests.
-#[cfg(not(test_fake_activation_heights))]
-pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
+///
+/// # Correctness
+///
+/// Don't use this directly; use NetworkUpgrade::activation_list() so that
+/// we can switch to fake activation heights for some tests.
+#[allow(unused)]
+pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(0), Genesis),
     (block::Height(1), BeforeOverwinter),
     (block::Height(207_500), Overwinter),
@@ -89,11 +102,12 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(584_000), Blossom),
     (block::Height(903_800), Heartwood),
     (block::Height(1_028_500), Canopy),
-    (block::Height(1_599_200), Nu5),
+    (block::Height(1_842_420), Nu5),
 ];
 
-#[cfg(test_fake_activation_heights)]
-pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
+/// Fake testnet network upgrade activation heights, used in tests.
+#[allow(unused)]
+const FAKE_TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(0), Genesis),
     (block::Height(5), BeforeOverwinter),
     (block::Height(10), Overwinter),
@@ -106,12 +120,57 @@ pub(crate) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a
 /// particular network upgrade.
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ConsensusBranchId(u32);
+
+impl ConsensusBranchId {
+    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
+    ///
+    /// Zebra displays consensus branch IDs in big-endian byte-order,
+    /// following the convention set by zcashd.
+    fn bytes_in_display_order(&self) -> [u8; 4] {
+        self.0.to_be_bytes()
+    }
+}
 
 impl From<ConsensusBranchId> for u32 {
     fn from(branch: ConsensusBranchId) -> u32 {
         branch.0
+    }
+}
+
+impl ToHex for &ConsensusBranchId {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
+    }
+}
+
+impl ToHex for ConsensusBranchId {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
+    }
+}
+
+impl FromHex for ConsensusBranchId {
+    type Error = <[u8; 4] as FromHex>::Error;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let branch = <[u8; 4]>::from_hex(hex)?;
+        Ok(ConsensusBranchId(u32::from_be_bytes(branch)))
+    }
+}
+
+impl fmt::Display for ConsensusBranchId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.encode_hex::<String>())
     }
 }
 
@@ -131,7 +190,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Blossom, ConsensusBranchId(0x2bb40e60)),
     (Heartwood, ConsensusBranchId(0xf5b9230b)),
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
-    (Nu5, ConsensusBranchId(0x37519621)),
+    (Nu5, ConsensusBranchId(0xc2d6d0b4)),
 ];
 
 /// The target block spacing before Blossom.
@@ -163,17 +222,48 @@ const TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT: block::Height = block::Height(299
 pub const TESTNET_MAX_TIME_START_HEIGHT: block::Height = block::Height(653_606);
 
 impl NetworkUpgrade {
-    /// Returns a BTreeMap of activation heights and network upgrades for
-    /// `network`.
+    /// Returns a map between activation heights and network upgrades for `network`,
+    /// in ascending height order.
     ///
     /// If the activation height of a future upgrade is not known, that
     /// network upgrade does not appear in the list.
     ///
     /// This is actually a bijective map.
-    pub(crate) fn activation_list(network: Network) -> BTreeMap<block::Height, NetworkUpgrade> {
+    ///
+    /// When the environment variable TEST_FAKE_ACTIVATION_HEIGHTS is set
+    /// and it's a test build, this returns a list of fake activation heights
+    /// used by some tests.
+    pub fn activation_list(network: Network) -> BTreeMap<block::Height, NetworkUpgrade> {
+        let (mainnet_heights, testnet_heights) = {
+            #[cfg(not(feature = "zebra-test"))]
+            {
+                (MAINNET_ACTIVATION_HEIGHTS, TESTNET_ACTIVATION_HEIGHTS)
+            }
+
+            // To prevent accidentally setting this somehow, only check the env var
+            // when being compiled for tests. We can't use cfg(test) since the
+            // test that uses this is in zebra-state, and cfg(test) is not
+            // set for dependencies. However, zebra-state does set the
+            // zebra-test feature of zebra-chain if it's a dev dependency.
+            //
+            // Cargo features are additive, so all test binaries built along with
+            // zebra-state will have this feature enabled. But we are using
+            // Rust Edition 2021 and Cargo resolver version 2, so the "zebra-test"
+            // feature should only be enabled for tests:
+            // https://doc.rust-lang.org/cargo/reference/features.html#resolver-version-2-command-line-flags
+            #[cfg(feature = "zebra-test")]
+            if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() {
+                (
+                    FAKE_MAINNET_ACTIVATION_HEIGHTS,
+                    FAKE_TESTNET_ACTIVATION_HEIGHTS,
+                )
+            } else {
+                (MAINNET_ACTIVATION_HEIGHTS, TESTNET_ACTIVATION_HEIGHTS)
+            }
+        };
         match network {
-            Mainnet => MAINNET_ACTIVATION_HEIGHTS,
-            Testnet => TESTNET_ACTIVATION_HEIGHTS,
+            Mainnet => mainnet_heights,
+            Testnet => testnet_heights,
         }
         .iter()
         .cloned()
@@ -220,7 +310,7 @@ impl NetworkUpgrade {
         NetworkUpgrade::activation_list(network).contains_key(&height)
     }
 
-    /// Returns a BTreeMap of NetworkUpgrades and their ConsensusBranchIds.
+    /// Returns an unordered mapping between NetworkUpgrades and their ConsensusBranchIds.
     ///
     /// Branch ids are the same for mainnet and testnet.
     ///
@@ -367,6 +457,16 @@ impl NetworkUpgrade {
 }
 
 impl ConsensusBranchId {
+    /// The value used by `zcashd` RPCs for missing consensus branch IDs.
+    ///
+    /// # Consensus
+    ///
+    /// This value must only be used in RPCs.
+    ///
+    /// The consensus rules handle missing branch IDs by rejecting blocks and transactions,
+    /// so this substitute value must not be used in consensus-critical code.
+    pub const RPC_MISSING_ID: ConsensusBranchId = ConsensusBranchId(0);
+
     /// Returns the current consensus branch id for `network` and `height`.
     ///
     /// Returns None if the network has no branch id at this height.

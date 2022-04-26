@@ -5,10 +5,10 @@ on:
     paths-ignore:
       - '**/*.rs'
       - '**/*.txt'
+      - '**/*.snap'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - '**/deny.toml'
-      - 'docker/**'
       - '.github/workflows/ci.yml'
 
 jobs:
@@ -22,7 +22,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macOS-latest]
+        # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
+        os: [ubuntu-latest, macos-latest]
         rust: [stable]
 
     steps:
@@ -50,6 +51,14 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
+  install-from-lockfile-no-cache:
+    name: Install zebrad from lockfile without cache on ubuntu-latest
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+
+    steps:
+      - run: 'echo "No build required"'
+
   build:
     name: Build stable on ubuntu-latest
     timeout-minutes: 60
@@ -64,7 +73,7 @@ jobs:
     strategy:
       matrix:
         checks:
-          - bans 
+          - bans
           - sources
 
     # Prevent sudden announcement of a new advisory from failing ci:

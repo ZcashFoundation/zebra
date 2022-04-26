@@ -1,0 +1,69 @@
+---
+source: zebra-state/src/service/finalized_state/zebra_db/block/tests/snapshot.rs
+expression: stored_utxos
+---
+[
+  (OutputLocation(
+    transaction_location: TransactionLocation(
+      height: Height(0),
+      index: TransactionIndex(0),
+    ),
+    output_index: OutputIndex(0),
+  ), None),
+  (OutputLocation(
+    transaction_location: TransactionLocation(
+      height: Height(1),
+      index: TransactionIndex(0),
+    ),
+    output_index: OutputIndex(0),
+  ), Some(Utxo(
+    output: Output(
+      value: Amount(50000),
+      lock_script: Script("21025229e1240a21004cf8338db05679fa34753706e84f6aebba086ba04317fd8f99ac"),
+    ),
+    height: Height(1),
+    from_coinbase: true,
+  ))),
+  (OutputLocation(
+    transaction_location: TransactionLocation(
+      height: Height(1),
+      index: TransactionIndex(0),
+    ),
+    output_index: OutputIndex(1),
+  ), Some(Utxo(
+    output: Output(
+      value: Amount(12500),
+      lock_script: Script("a914ef775f1f997f122a062fff1a2d7443abd1f9c64287"),
+    ),
+    height: Height(1),
+    from_coinbase: true,
+  ))),
+  (OutputLocation(
+    transaction_location: TransactionLocation(
+      height: Height(2),
+      index: TransactionIndex(0),
+    ),
+    output_index: OutputIndex(0),
+  ), Some(Utxo(
+    output: Output(
+      value: Amount(100000),
+      lock_script: Script("2102acce9f6c16986c525fd34759d851ef5b4b85b5019a57bd59747be0ef1ba62523ac"),
+    ),
+    height: Height(2),
+    from_coinbase: true,
+  ))),
+  (OutputLocation(
+    transaction_location: TransactionLocation(
+      height: Height(2),
+      index: TransactionIndex(0),
+    ),
+    output_index: OutputIndex(1),
+  ), Some(Utxo(
+    output: Output(
+      value: Amount(25000),
+      lock_script: Script("a914ef775f1f997f122a062fff1a2d7443abd1f9c64287"),
+    ),
+    height: Height(2),
+    from_coinbase: true,
+  ))),
+]

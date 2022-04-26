@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use zebra_chain::sprout;
 
 use crate::{
-    service::{finalized_state::FinalizedState, non_finalized_state::Chain},
+    service::{finalized_state::ZebraDb, non_finalized_state::Chain},
     PreparedBlock, ValidateContextError,
 };
 
@@ -20,7 +20,7 @@ use crate::{
 /// treestate of any prior `JoinSplit` _within the same transaction_.
 #[tracing::instrument(skip(finalized_state, parent_chain, prepared))]
 pub(crate) fn anchors_refer_to_earlier_treestates(
-    finalized_state: &FinalizedState,
+    finalized_state: &ZebraDb,
     parent_chain: &Chain,
     prepared: &PreparedBlock,
 ) -> Result<(), ValidateContextError> {

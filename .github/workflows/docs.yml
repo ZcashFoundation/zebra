@@ -6,9 +6,15 @@ on:
     branches:
       - main
     paths:
+      # doc source files
       - 'book/**'
       - '**/firebase.json'
       - 'katex-header.html'
+      # rustdoc source files
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
       - '.github/workflows/docs.yml'
 
 jobs:
@@ -17,62 +23,62 @@ jobs:
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout the source code
-      uses: actions/checkout@v2.4.0
-      with:
-        persist-credentials: false
+      - name: Checkout the source code
+        uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
 
-    - name: Install latest beta
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: beta
-        components: rust-docs
-        override: true
+      - name: Install latest beta
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: beta
+          components: rust-docs
+          override: true
 
-    - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v1
 
-    - name: Install mdbook
-      run: |
-        cargo install mdbook
+      - name: Install mdbook
+        run: |
+          cargo install mdbook
 
-    - name: Build Zebra book
-      run: |
-        mdbook build book/
+      - name: Build Zebra book
+        run: |
+          mdbook build book/
 
-    - name: Deploy Zebra book to firebase
-      uses: w9jds/firebase-action@v2.0.0
-      with:
-        args: deploy
-      env:
-        FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-        PROJECT_PATH: book/
-        PROJECT_ID: zebra-book-b535f
+      - name: Deploy Zebra book to firebase
+        uses: w9jds/firebase-action@v2.0.0
+        with:
+          args: deploy
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          PROJECT_PATH: book/
+          PROJECT_ID: zebra-book-b535f
 
-    - name: Build external docs
-      run: |
-        # Exclude zebra-utils, it is not for library or app users
-        cargo doc --no-deps --workspace --exclude zebra-utils
-      env:
-        RUSTDOCFLAGS: "--html-in-header katex-header.html"
+      - name: Build external docs
+        run: |
+          # Exclude zebra-utils, it is not for library or app users
+          cargo doc --no-deps --workspace --exclude zebra-utils
+        env:
+          RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
-    - name: Deploy external docs to firebase
-      uses: w9jds/firebase-action@v2.0.0
-      with:
-        args: deploy
-      env:
-        FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-        PROJECT_ID: zebra-doc-external
+      - name: Deploy external docs to firebase
+        uses: w9jds/firebase-action@v2.0.0
+        with:
+          args: deploy
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          PROJECT_ID: zebra-doc-external
 
-    - name: Build internal docs
-      run: |
-        cargo doc --no-deps --document-private-items
-      env:
-        RUSTDOCFLAGS: "--html-in-header katex-header.html"
+      - name: Build internal docs
+        run: |
+          cargo doc --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
-    - name: Deploy internal docs to firebase
-      uses: w9jds/firebase-action@v2.0.0
-      with:
-        args: deploy
-      env:
-        FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-        PROJECT_ID: zebra-doc-internal-e9fd4
+      - name: Deploy internal docs to firebase
+        uses: w9jds/firebase-action@v2.0.0
+        with:
+          args: deploy
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          PROJECT_ID: zebra-doc-internal-e9fd4

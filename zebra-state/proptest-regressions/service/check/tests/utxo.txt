@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e269485ce65fc50f093f8d979c5afb233709e0c18e56ab419afb065c2e0bf854 # shrinks to output = zebra_chain::transparent::Output, mut prevout_input = zebra_chain::transparent::Input, use_finalized_state = false
+cc 2639971d2f0cad4354fa6a4b00f8d588e04638c33d884f8d31ca6b09e43a31d9 # shrinks to output = zebra_chain::transparent::Output, mut prevout_input = zebra_chain::transparent::Input, use_finalized_state_output = false, mut use_finalized_state_spend = false
+cc 59045504569e389f48e0f8d1b7938e5fdfed84e1ba83af25c18df8300086788c # shrinks to unused_output = zebra_chain::transparent::Output, prevout_input = zebra_chain::transparent::Input
+cc 65bbd1a767ce94e046fbab250fc8b9c8f3acc52bf9d032c9f198347052b62775 # shrinks to output = zebra_chain::transparent::Output, mut prevout_input = zebra_chain::transparent::Input

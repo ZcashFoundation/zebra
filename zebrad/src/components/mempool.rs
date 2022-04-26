@@ -398,6 +398,10 @@ impl Service<Request> for Mempool {
                     let res = storage.transactions_exact(ids).cloned().collect();
                     async move { Ok(Response::Transactions(res)) }.boxed()
                 }
+                Request::TransactionsByMinedId(ids) => {
+                    let res = storage.transactions_same_effects(ids).cloned().collect();
+                    async move { Ok(Response::Transactions(res)) }.boxed()
+                }
                 Request::RejectedTransactionIds(ids) => {
                     let res = storage.rejected_transactions(ids).collect();
                     async move { Ok(Response::RejectedTransactionIds(res)) }.boxed()
@@ -431,6 +435,7 @@ impl Service<Request> for Mempool {
                     // Empty Queries
                     Request::TransactionIds => Response::TransactionIds(Default::default()),
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
+                    Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
                     Request::RejectedTransactionIds(_) => {
                         Response::RejectedTransactionIds(Default::default())
                     }

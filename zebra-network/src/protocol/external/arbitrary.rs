@@ -116,7 +116,7 @@ impl Arbitrary for Version {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        prop_oneof![170_002_u32..=170_015, 0_u32..]
+        prop_oneof![170_002_u32..=170_100, 0_u32..]
             .prop_map(Version)
             .boxed()
     }

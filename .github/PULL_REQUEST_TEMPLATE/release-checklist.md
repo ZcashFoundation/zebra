@@ -16,10 +16,6 @@ To check if any of the top-level crates need version increments, go to the zebra
 - [ ] Increment the crates that have new commits since the last version update
 - [ ] Increment any crates that depend on crates that have changed
 - [ ] Keep a list of the crates that haven't been incremented, to include in the PR
-- [ ] Use the `zebrad` crate version in the `zebra-network` user agent string
-      (currently the constant `USER_AGENT` in `zebra-network/src/constants.rs`)
-- [ ] Use the latest git tag in `README.md`
-- [ ] Use the latest git tag in `book/src/user/install.md`
 
 ### How to Increment Versions
 
@@ -32,10 +28,6 @@ Semantic versions look like: `MAJOR`.`MINOR`.`PATCH[`-`TAG`.`PRE-RELEASE]`
 Pre-Release versions have a `TAG` like "alpha" or "beta". For example: `1.0.0-alpha.0`
 
 1. Increment the `PRE-RELEASE` version for the crate.
-
-Optionally, if a `MINOR` feature pre-release breaks `MAJOR` API compatibility:
-
-2. Increment the `MAJOR` version, and reset all the other versions to zero
 
 #### Unstable Crates
 
@@ -85,18 +77,12 @@ If any Zebra or Tower crates have commit messages that are **not** a version bum
 
 Also check for crates that depend on crates that have changed. They should get a version bump as well.
 
-## Initial Testing
-
-- [ ] After any changes, test that the `cargo install` command in works. Use
-      e.g. `cargo install --locked --path zebrad`.
-
 ## README
 
 As we resolve various outstanding known issues and implement new functionality with each release, we should double check the README for any necessary updates.
 
 We should check and update if necessary:
 
-- [ ] The "Beta Release" section
 - [ ] The "Known Issues" section
 
 to ensure that any items that are resolved in the latest release are no longer listed in the README.
@@ -127,9 +113,11 @@ From "Keep a Changelog":
 * `Fixed` for any bug fixes.
 * `Security` in case of vulnerabilities.
 
-## Create the release PR
+## Create the Release
 
-After you have the version increments and the updated changelog,
+### Create the Release PR
+
+After you have the version increments and the updated changelog:
 
 - [ ] Push the version increments and the updated changelog into a branch
       (name suggestion, example: `v1.0.0-alpha.0-release`)
@@ -137,8 +125,10 @@ After you have the version increments and the updated changelog,
       comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.0-release?expand=1&template=release-checklist.md)).
       - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.
       - [ ] Also add the list of not-bumped crates as a comment (can use the same comment as the previous one).
-- [ ] While the PR is being reviewed, keep track of any PRs that have been merged
-      since you created the PR to update `CHANGELOG.md` and push any updates if necessary
+- [ ] While the PR is being reviewed, turn on [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches) to stop other PRs merging
+
+### Create the Release
+
 - [ ] Once the release PR has been approved and merged, create a new release
       using the draft release as a base, by clicking the Edit icon
       in the [draft release](https://github.com/ZcashFoundation/zebra/releases).
@@ -155,10 +145,11 @@ After you have the version increments and the updated changelog,
 
 - [ ] After tagging the release, test that the exact `cargo install` command in
       `README.md` works (`--git` behaves a bit differently to `--path`)
+- [ ] Turn off [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches) to start merging PRs again
 
 If the build fails after tagging:
 1. fix the build
-2. check if the fixes changed any extra crates, and do the required version increments
+2. increment versions again, following these instructions from the start
 3. update `README.md` with a **new** git tag
 4. update `CHANGELOG.md` with details about the fix
 5. tag a **new** release
