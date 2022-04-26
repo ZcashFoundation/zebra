@@ -8,7 +8,7 @@
 
 use std::{borrow::Borrow, collections::HashSet, io, sync::Arc};
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use futures::{FutureExt, TryFutureExt};
 use hex::{FromHex, ToHex};
 use indexmap::IndexMap;
@@ -748,8 +748,6 @@ where
                 .borrow()
                 .into();
 
-            let time = block.header.time;
-
             let sapling_tree = match sapling_response {
                 zebra_state::ReadResponse::SaplingTree(maybe_tree) => {
                     sapling::tree::SerializedTree::from(maybe_tree)
@@ -767,7 +765,6 @@ where
             Ok(GetTreestate {
                 hash,
                 height,
-                time,
                 sapling_tree,
                 orchard_tree,
             })
@@ -997,14 +994,13 @@ pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
 /// Response to a `z_gettreestate` RPC request.
 ///
 /// Contains the hex-encoded Sapling & Orchard note commitment trees, and their
-/// corresponding [`block::Hash`], [`Height`] and block time.
+/// corresponding [`block::Hash`] and [`Height`].
 #[derive(serde::Serialize)]
 pub struct GetTreestate {
     #[serde(with = "hex")]
     hash: block::Hash,
     #[serde(with = "hex")]
     height: SerializedHeight,
-    time: DateTime<Utc>,
     #[serde(with = "hex")]
     sapling_tree: sapling::tree::SerializedTree,
     #[serde(with = "hex")]
