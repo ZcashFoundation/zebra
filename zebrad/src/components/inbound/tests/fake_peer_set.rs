@@ -49,7 +49,7 @@ use InventoryResponse::*;
 /// Increasing this value causes the tests to take longer to complete, so it can't be too large.
 const MAX_PEER_SET_REQUEST_DELAY: Duration = Duration::from_millis(500);
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mempool_requests_for_transactions() {
     let (
         inbound_service,
@@ -124,7 +124,7 @@ async fn mempool_requests_for_transactions() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     // get a block that has at least one non coinbase transaction
     let block: Arc<Block> =
@@ -208,7 +208,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     // get a block that has at least one non coinbase transaction
     let block: Block = zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
@@ -308,7 +308,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     // Get a block that has at least one non coinbase transaction
     let block: Block = zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
@@ -585,7 +585,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 /// Test that the inbound downloader rejects blocks above the lookahead limit.
 ///
 /// TODO: also test that it rejects blocks behind the tip limit. (Needs ~100 fake blocks.)
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
     // Get services
     let (
