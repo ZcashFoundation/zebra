@@ -17,7 +17,6 @@ on:
 
 jobs:
   build:
-    # TODO: before merging change uses to ZcashFoundation/zebra/.github/workflows/docker-image-build.yml@main
     uses: ./.github/workflows/docker-image-build.yml
     with:
       dockerfile_path: ./docker/zcash-params/Dockerfile

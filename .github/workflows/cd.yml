@@ -24,7 +24,6 @@ env:
 
 jobs:
   build:
-    # TODO: before merging change uses to ZcashFoundation/zebra/.github/workflows/docker-image-build.yml@main
     uses: ./.github/workflows/docker-image-build.yml
     with:
       # TODO validate if CARGO_INCREMENTAL should be added at build time
