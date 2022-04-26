@@ -59,8 +59,8 @@ jobs:
     # only run on Mergify head branches, and on manual dispatch:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
     if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
-    # TODO: before merging change uses to ZcashFoundation/zebra/.github/workflows/docker-zebra-build.yml@main
-    uses: ./.github/workflows/docker-zebra-build.yml
+    # TODO: before merging change uses to ZcashFoundation/zebra/.github/workflows/docker-image-build.yml@main
+    uses: ./.github/workflows/docker-image-build.yml
     with:
       # TODO validate if CARGO_INCREMENTAL should be added at build time
       dockerfile_path: ./docker/Dockerfile
