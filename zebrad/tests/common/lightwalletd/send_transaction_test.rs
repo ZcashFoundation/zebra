@@ -23,19 +23,21 @@ use std::{
 use color_eyre::eyre::{eyre, Result};
 use futures::TryFutureExt;
 use tempfile::TempDir;
-use tokio::fs;
-use tower::{util::BoxService, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 
 use zebra_chain::{
     block, chain_tip::ChainTip, parameters::Network, serialization::ZcashSerialize,
     transaction::Transaction,
 };
-use zebra_state::{ChainTipChange, HashOrHeight, LatestChainTip};
+use zebra_state::HashOrHeight;
 use zebra_test::{args, command::NO_MATCHES_REGEX_ITER, prelude::*};
 
 use crate::{
     common::{
-        config::testdir,
+        cached_state::{
+            copy_state_directory, load_tip_height_from_state_directory,
+            start_state_service_with_cache_dir,
+        },
         launch::ZebradTestDirExt,
         lightwalletd::{
             self, random_known_rpc_port_config,
@@ -46,10 +48,6 @@ use crate::{
     },
     PROCESS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES,
 };
-
-/// Type alias for a boxed state service.
-type BoxStateService =
-    BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>;
 
 /// The maximum time to wait for Zebrad to synchronize up to the chain tip starting from a
 /// partially synchronized state.
@@ -152,21 +150,6 @@ async fn prepare_partial_sync(
     Ok((partial_sync_path, tip_height))
 }
 
-/// Loads the chain tip height from the state stored in a specified directory.
-async fn load_tip_height_from_state_directory(
-    network: Network,
-    state_path: &Path,
-) -> Result<block::Height> {
-    let (_state_service, _read_state_service, latest_chain_tip, _chain_tip_change) =
-        start_state_service(network, state_path).await?;
-
-    let chain_tip_height = latest_chain_tip
-        .best_tip_height()
-        .ok_or_else(|| eyre!("State directory doesn't have a chain tip block"))?;
-
-    Ok(chain_tip_height)
-}
-
 /// Runs a zebrad instance to synchronize the chain to the network tip.
 ///
 /// The zebrad instance is executed on a copy of the partially synchronized chain state. This copy
@@ -204,7 +187,7 @@ async fn load_transactions_from_block_after(
     state_path: &Path,
 ) -> Result<Vec<Arc<Transaction>>> {
     let (_read_write_state_service, mut state, latest_chain_tip, _chain_tip_change) =
-        start_state_service(network, state_path.join("state")).await?;
+        start_state_service_with_cache_dir(network, state_path.join("state")).await?;
 
     let tip_height = latest_chain_tip
         .best_tip_height()
@@ -262,28 +245,6 @@ where
     Ok(block.transactions.to_vec())
 }
 
-/// Starts a state service using the provided `cache_dir` as the directory with the chain state.
-async fn start_state_service(
-    network: Network,
-    cache_dir: impl Into<PathBuf>,
-) -> Result<(
-    BoxStateService,
-    impl Service<
-        zebra_state::ReadRequest,
-        Response = zebra_state::ReadResponse,
-        Error = zebra_state::BoxError,
-    >,
-    LatestChainTip,
-    ChainTipChange,
-)> {
-    let config = zebra_state::Config {
-        cache_dir: cache_dir.into(),
-        ..zebra_state::Config::default()
-    };
-
-    Ok(zebra_state::init(config, network))
-}
-
 /// Spawns a zebrad instance to interact with lightwalletd, but without an internet connection.
 ///
 /// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
@@ -334,58 +295,4 @@ fn prepare_send_transaction_request(
         data: transaction_bytes,
         height: -1,
     }
-}
-
-/// Recursively copy a chain state directory into a new temporary directory.
-async fn copy_state_directory(source: impl AsRef<Path>) -> Result<TempDir> {
-    let destination = testdir()?;
-
-    let mut remaining_directories = vec![PathBuf::from(source.as_ref())];
-
-    while let Some(directory) = remaining_directories.pop() {
-        let sub_directories =
-            copy_directory(&directory, source.as_ref(), destination.as_ref()).await?;
-
-        remaining_directories.extend(sub_directories);
-    }
-
-    Ok(destination)
-}
-
-/// Copy the contents of a directory, and return the sub-directories it contains.
-///
-/// Copies all files from the `directory` into the destination specified by the concatenation of
-/// the `base_destination_path` and `directory` stripped of its `prefix`.
-async fn copy_directory(
-    directory: &Path,
-    prefix: &Path,
-    base_destination_path: &Path,
-) -> Result<Vec<PathBuf>> {
-    let mut sub_directories = Vec::new();
-    let mut entries = fs::read_dir(directory).await?;
-
-    let destination =
-        base_destination_path.join(directory.strip_prefix(prefix).expect("Invalid path prefix"));
-
-    fs::create_dir_all(&destination).await?;
-
-    while let Some(entry) = entries.next_entry().await? {
-        let entry_path = entry.path();
-        let file_type = entry.file_type().await?;
-
-        if file_type.is_file() {
-            let file_name = entry_path.file_name().expect("Missing file name");
-            let destination_path = destination.join(file_name);
-
-            fs::copy(&entry_path, destination_path).await?;
-        } else if file_type.is_dir() {
-            sub_directories.push(entry_path);
-        } else if file_type.is_symlink() {
-            unimplemented!("Symbolic link support is currently not necessary");
-        } else {
-            panic!("Unknown file type");
-        }
-    }
-
-    Ok(sub_directories)
 }
