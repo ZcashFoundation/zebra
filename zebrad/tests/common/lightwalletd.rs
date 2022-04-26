@@ -5,7 +5,7 @@
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
 
-use std::{env, net::SocketAddr, path::Path};
+use std::{env, net::SocketAddr, path::Path, time::Duration};
 
 use zebra_test::{
     command::{Arguments, TestChild, TestDirExt},
@@ -32,6 +32,9 @@ pub mod send_transaction_test;
 /// This environmental variable is used to enable the lightwalletd tests.
 /// But the network tests are *disabled* by their environmental variables.
 const ZEBRA_TEST_LIGHTWALLETD: &str = "ZEBRA_TEST_LIGHTWALLETD";
+
+/// The maximum time that a `lightwalletd` integration test is expected to run.
+pub const LIGHTWALLETD_TEST_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// Should we skip Zebra lightwalletd integration tests?
 #[allow(clippy::print_stderr)]

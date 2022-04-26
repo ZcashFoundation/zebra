@@ -50,10 +50,8 @@ use common::{
     launch::{ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY, LIGHTWALLETD_DELAY},
     lightwalletd::{
         random_known_rpc_port_config,
-        send_transaction_test::{
-            spawn_zebrad_for_rpc_without_initial_peers, LIGHTWALLETD_TEST_TIMEOUT,
-        },
-        zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
+        send_transaction_test::spawn_zebrad_for_rpc_without_initial_peers,
+        zebra_skip_lightwalletd_tests, LightWalletdTestDirExt, LIGHTWALLETD_TEST_TIMEOUT,
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,

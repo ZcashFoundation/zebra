@@ -37,7 +37,9 @@ use crate::{
     common::{
         config::testdir,
         launch::ZebradTestDirExt,
-        lightwalletd::{self, random_known_rpc_port_config, LightWalletdTestDirExt},
+        lightwalletd::{
+            self, random_known_rpc_port_config, LightWalletdTestDirExt, LIGHTWALLETD_TEST_TIMEOUT,
+        },
         sync::{sync_until, MempoolBehavior, SYNC_FINISHED_REGEX},
     },
     LIGHTWALLETD_FAILURE_MESSAGES, LIGHTWALLETD_IGNORE_MESSAGES, PROCESS_FAILURE_MESSAGES,
@@ -66,9 +68,6 @@ const LIGHTWALLETD_DATA_DIR_VAR: &str = "LIGHTWALLETD_DATA_DIR";
 /// lower than what's expected for a full synchronization. However, a value that's too short may
 /// cause the test to fail.
 const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(60 * 60);
-
-/// The maximum time that a `lightwalletd` integration test is expected to run.
-pub const LIGHTWALLETD_TEST_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// The test entry point.
 pub async fn run() -> Result<()> {
