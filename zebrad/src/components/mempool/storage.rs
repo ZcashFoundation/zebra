@@ -455,9 +455,6 @@ impl Storage {
             TransactionDownloadVerifyError::InState |
             // An unknown error in the state service, better do nothing
             TransactionDownloadVerifyError::StateError(_) |
-            // Sync has just started. Mempool shouldn't even be enabled, so will not
-            // happen in practice.
-            TransactionDownloadVerifyError::NoTip |
             // If download failed, do nothing; the crawler will end up trying to
             // download it again.
             TransactionDownloadVerifyError::DownloadFailed(_) |
