@@ -6,7 +6,7 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-use std::{borrow::Borrow, collections::HashSet, io, sync::Arc};
+use std::{collections::HashSet, io, sync::Arc};
 
 use chrono::Utc;
 use futures::{FutureExt, TryFutureExt};
@@ -20,7 +20,7 @@ use tracing::Instrument;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, height::SerializedHeight, Height, SerializedBlock},
+    block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
     orchard,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
@@ -744,9 +744,7 @@ where
             let hash = block.hash();
             let height = block
                 .coinbase_height()
-                .expect("verified blocks have a valid height")
-                .borrow()
-                .into();
+                .expect("verified blocks have a valid height");
 
             let sapling_tree = match sapling_response {
                 zebra_state::ReadResponse::SaplingTree(maybe_tree) => {
@@ -999,8 +997,7 @@ pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
 pub struct GetTreestate {
     #[serde(with = "hex")]
     hash: block::Hash,
-    #[serde(with = "hex")]
-    height: SerializedHeight,
+    height: Height,
     #[serde(with = "hex")]
     sapling_tree: sapling::tree::SerializedTree,
     #[serde(with = "hex")]
