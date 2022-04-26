@@ -375,7 +375,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mempool_cancel_mined() -> Result<(), Report> {
     let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into()
@@ -389,8 +389,6 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
 
     let (mut mempool, _peer_set, mut state_service, _tx_verifier, mut recent_syncs) =
         setup(network, u64::MAX).await;
-
-    time::pause();
 
     // Enable the mempool
     let _ = mempool.enable(&mut recent_syncs).await;
@@ -470,7 +468,7 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> {
     let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into()

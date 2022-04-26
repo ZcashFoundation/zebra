@@ -28,7 +28,7 @@ use zebra_chain::serialization::ZcashDeserialize;
 /// high system load.
 const VERIFY_TIMEOUT_SECONDS: u64 = 10;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn single_item_checkpoint_list_test() -> Result<(), Report> {
     single_item_checkpoint_list().await
 }
@@ -99,7 +99,7 @@ async fn single_item_checkpoint_list() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn multi_item_checkpoint_list_test() -> Result<(), Report> {
     multi_item_checkpoint_list().await
 }
@@ -206,14 +206,14 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn continuous_blockchain_no_restart() -> Result<(), Report> {
     continuous_blockchain(None, Mainnet).await?;
     continuous_blockchain(None, Testnet).await?;
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn continuous_blockchain_restart() -> Result<(), Report> {
     for height in 0..zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.len() {
         continuous_blockchain(Some(block::Height(height.try_into().unwrap())), Mainnet).await?;
@@ -423,7 +423,7 @@ async fn continuous_blockchain(
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn block_higher_than_max_checkpoint_fail_test() -> Result<(), Report> {
     block_higher_than_max_checkpoint_fail().await
 }
@@ -493,7 +493,7 @@ async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn wrong_checkpoint_hash_fail_test() -> Result<(), Report> {
     wrong_checkpoint_hash_fail().await
 }
@@ -661,7 +661,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn checkpoint_drop_cancel_test() -> Result<(), Report> {
     checkpoint_drop_cancel().await
 }
@@ -761,7 +761,7 @@ async fn checkpoint_drop_cancel() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn hard_coded_mainnet_test() -> Result<(), Report> {
     hard_coded_mainnet().await
 }
