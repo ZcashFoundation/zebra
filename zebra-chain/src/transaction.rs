@@ -476,8 +476,9 @@ impl Transaction {
     }
 
     /// Returns `true` if this transaction has valid inputs for a coinbase
-    /// transaction, that is, has a single input and it is a coinbase input.
-    pub fn has_valid_coinbase_transaction_inputs(&self) -> bool {
+    /// transaction, that is, has a single input and it is a coinbase input
+    /// (null prevout).
+    pub fn is_coinbase(&self) -> bool {
         self.inputs().len() == 1
             && matches!(
                 self.inputs().get(0),
@@ -485,20 +486,16 @@ impl Transaction {
             )
     }
 
-    /// Returns `true` if transaction contains any coinbase inputs.
-    pub fn has_any_coinbase_inputs(&self) -> bool {
-        self.inputs()
-            .iter()
-            .any(|input| matches!(input, transparent::Input::Coinbase { .. }))
-    }
-
-    /// Returns `true` if transaction contains any `PrevOut` inputs.
+    /// Returns `true` if this transaction has valid inputs for a non-coinbase
+    /// transaction, that is, does not have any coinbase input (non-null prevouts).
     ///
-    /// `PrevOut` inputs are also known as `transparent` inputs in the spec.
-    pub fn contains_prevout_input(&self) -> bool {
+    /// Note that it's possible for a transaction return false in both
+    /// [`Transaction::is_coinbase`] and [`Transaction::is_valid_non_coinbase`],
+    /// though those transactions will be rejected.
+    pub fn is_valid_non_coinbase(&self) -> bool {
         self.inputs()
             .iter()
-            .any(|input| matches!(input, transparent::Input::PrevOut { .. }))
+            .all(|input| matches!(input, transparent::Input::PrevOut { .. }))
     }
 
     // sprout

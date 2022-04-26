@@ -38,13 +38,13 @@ jobs:
   coverage:
     name: Coverage nightly
     # The large timeout is to accommodate:
-    # - nightly builds (75 minutes, typically 30-50 minutes)
-    # - parameter downloads (40 minutes, but only when the cache expires)
-    timeout-minutes: 115
+    # - nightly builds (75 minutes, typically 30-50 minutes), and
+    # - parameter downloads (an extra 90 minutes, but only when the cache expires)
+    timeout-minutes: 165
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3.0.1
+      - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
 
@@ -98,4 +98,4 @@ jobs:
         run: cargo llvm-cov --lcov --no-run --output-path lcov.info
 
       - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v2.1.0
+        uses: codecov/codecov-action@v3.1.0
