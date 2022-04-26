@@ -44,18 +44,10 @@ use crate::{
             rpc::{connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server},
             LIGHTWALLETD_TEST_TIMEOUT,
         },
-        sync::{sync_until, MempoolBehavior, SYNC_FINISHED_REGEX},
+        sync::perform_full_sync_starting_from,
     },
     PROCESS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES,
 };
-
-/// The maximum time to wait for Zebrad to synchronize up to the chain tip starting from a
-/// partially synchronized state.
-///
-/// The partially synchronized state is expected to be close to the tip, so this timeout can be
-/// lower than what's expected for a full synchronization. However, a value that's too short may
-/// cause the test to fail.
-const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// The test entry point.
 pub async fn run() -> Result<()> {
@@ -148,28 +140,6 @@ async fn prepare_partial_sync(
     let tip_height = load_tip_height_from_state_directory(network, &partial_sync_state_dir).await?;
 
     Ok((partial_sync_path, tip_height))
-}
-
-/// Runs a zebrad instance to synchronize the chain to the network tip.
-///
-/// The zebrad instance is executed on a copy of the partially synchronized chain state. This copy
-/// is returned afterwards, containing the fully synchronized chain state.
-async fn perform_full_sync_starting_from(
-    network: Network,
-    partial_sync_path: &Path,
-) -> Result<TempDir> {
-    let fully_synced_path = copy_state_directory(&partial_sync_path).await?;
-
-    sync_until(
-        block::Height::MAX,
-        network,
-        SYNC_FINISHED_REGEX,
-        FINISH_PARTIAL_SYNC_TIMEOUT,
-        fully_synced_path,
-        MempoolBehavior::ShouldAutomaticallyActivate,
-        true,
-        false,
-    )
 }
 
 /// Loads transactions from a block that's after the specified `height`.
