@@ -20,6 +20,8 @@ pub mod rpc {
     tonic::include_proto!("cash.z.wallet.sdk.rpc");
 }
 
+pub mod send_transaction_test;
+
 /// The name of the env var that enables Zebra lightwalletd integration tests.
 /// These tests need a `lightwalletd` binary in the test machine's path.
 ///
