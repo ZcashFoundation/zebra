@@ -36,7 +36,7 @@ use crate::{
     common::{
         cached_state::{
             copy_state_directory, load_tip_height_from_state_directory,
-            start_state_service_with_cache_dir,
+            start_state_service_with_cache_dir, ZEBRA_CACHED_STATE_DIR_VAR,
         },
         launch::ZebradTestDirExt,
         lightwalletd::{
@@ -53,14 +53,12 @@ use crate::{
 pub async fn run() -> Result<()> {
     zebra_test::init();
 
-    const CACHED_STATE_PATH_VAR: &str = "ZEBRA_CACHED_STATE_PATH";
-
-    let cached_state_path = match env::var_os(CACHED_STATE_PATH_VAR) {
+    let cached_state_path = match env::var_os(ZEBRA_CACHED_STATE_DIR_VAR) {
         Some(argument) => PathBuf::from(argument),
         None => {
             tracing::info!(
                 "skipped send transactions using lightwalletd test, \
-                 set the {CACHED_STATE_PATH_VAR:?} environment variable to run the test",
+                 set the {ZEBRA_CACHED_STATE_DIR_VAR:?} environment variable to run the test",
             );
             return Ok(());
         }
