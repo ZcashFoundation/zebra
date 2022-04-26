@@ -26,7 +26,6 @@ jobs:
   build:
     uses: ./.github/workflows/docker-image-build.yml
     with:
-      # TODO validate if CARGO_INCREMENTAL should be added at build time
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: main
