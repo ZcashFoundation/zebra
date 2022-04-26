@@ -28,7 +28,7 @@ jobs:
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
-      image_name: main
+      image_name: zebrad
       network: Mainnet
       checkpoint_sync: true
       rust_backtrace: '1'
