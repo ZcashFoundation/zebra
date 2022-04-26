@@ -16,10 +16,7 @@ use zebrad::config::ZebradConfig;
 
 use super::{config::default_test_config, launch::ZebradTestDirExt};
 
-pub mod rpc {
-    tonic::include_proto!("cash.z.wallet.sdk.rpc");
-}
-
+pub mod rpc;
 pub mod send_transaction_test;
 
 /// The name of the env var that enables Zebra lightwalletd integration tests.
