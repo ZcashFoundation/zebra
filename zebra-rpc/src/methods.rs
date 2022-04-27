@@ -742,9 +742,13 @@ where
             // assemble the response.
 
             let hash = block.hash();
+
             let height = block
                 .coinbase_height()
                 .expect("verified blocks have a valid height");
+
+            let time = u32::try_from(block.header.time.timestamp())
+                .expect("Timestamps of valid blocks always fit into u32.");
 
             let sapling_tree = match sapling_response {
                 zebra_state::ReadResponse::SaplingTree(maybe_tree) => {
@@ -763,6 +767,7 @@ where
             Ok(GetTreestate {
                 hash,
                 height,
+                time,
                 sapling_tree,
                 orchard_tree,
             })
@@ -992,12 +997,13 @@ pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
 /// Response to a `z_gettreestate` RPC request.
 ///
 /// Contains the hex-encoded Sapling & Orchard note commitment trees, and their
-/// corresponding [`block::Hash`] and [`Height`].
+/// corresponding [`block::Hash`], [`Height`], and block time.
 #[derive(serde::Serialize)]
 pub struct GetTreestate {
     #[serde(with = "hex")]
     hash: block::Hash,
     height: Height,
+    time: u32,
     #[serde(with = "hex")]
     sapling_tree: sapling::tree::SerializedTree,
     #[serde(with = "hex")]
