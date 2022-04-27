@@ -7,6 +7,8 @@
 
 use std::{cmp::max, fmt::Debug};
 
+use serde::{Deserialize, Serialize};
+
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
     block::Height,
@@ -22,8 +24,6 @@ use crate::service::finalized_state::disk_format::{
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-#[cfg(any(test, feature = "proptest-impl"))]
-use serde::{Deserialize, Serialize};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -46,8 +46,7 @@ pub const OUTPUT_LOCATION_DISK_BYTES: usize =
 // Transparent types
 
 /// A transparent output's index in its transaction.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize, Deserialize))]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct OutputIndex(u32);
 
 impl OutputIndex {
