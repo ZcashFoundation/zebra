@@ -562,10 +562,16 @@ where
 
             match response {
                 mempool::Response::TransactionIds(unmined_transaction_ids) => {
-                    Ok(unmined_transaction_ids
+                    let mut tx_ids: Vec<String> = unmined_transaction_ids
                         .iter()
                         .map(|id| id.mined_id().encode_hex())
-                        .collect())
+                        .collect();
+
+                    // Sort returned transaction IDs in numeric/string order.
+                    // (zcashd's sort order appears arbitrary.)
+                    tx_ids.sort();
+
+                    Ok(tx_ids)
                 }
                 _ => unreachable!("unmatched response to a transactionids request"),
             }
