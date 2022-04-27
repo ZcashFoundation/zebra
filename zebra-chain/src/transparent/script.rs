@@ -2,6 +2,8 @@
 
 use std::{fmt, io};
 
+use hex::ToHex;
+
 use crate::serialization::{
     zcash_serialize_bytes, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
@@ -40,11 +42,37 @@ impl Script {
     }
 }
 
+impl fmt::Display for Script {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.encode_hex::<String>())
+    }
+}
+
 impl fmt::Debug for Script {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Script")
             .field(&hex::encode(&self.0))
             .finish()
+    }
+}
+
+impl ToHex for &Script {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.as_raw_bytes().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.as_raw_bytes().encode_hex_upper()
+    }
+}
+
+impl ToHex for Script {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
     }
 }
 

@@ -1,3 +1,5 @@
+//! Check the relationship between various sync timeouts and delays.
+
 use std::{
     convert::TryInto,
     sync::{
@@ -34,15 +36,10 @@ fn ensure_timeouts_consistent() {
         "Sync restart should allow for pending and buffered requests to complete"
     );
 
-    // This constraint avoids spurious failures due to block retries timing out.
     // We multiply by 2, because the Hedge can wait up to BLOCK_DOWNLOAD_TIMEOUT
     // seconds before retrying.
     const BLOCK_DOWNLOAD_HEDGE_TIMEOUT: u64 =
         2 * BLOCK_DOWNLOAD_RETRY_LIMIT as u64 * BLOCK_DOWNLOAD_TIMEOUT.as_secs();
-    assert!(
-        SYNC_RESTART_DELAY.as_secs() > BLOCK_DOWNLOAD_HEDGE_TIMEOUT,
-        "Sync restart should allow for block downloads to time out on every retry"
-    );
 
     // This constraint avoids spurious failures due to block download timeouts
     assert!(

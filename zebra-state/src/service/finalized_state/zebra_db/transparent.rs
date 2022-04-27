@@ -11,10 +11,14 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    ops::RangeInclusive,
+};
 
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
+    block::Height,
     transaction, transparent,
 };
 
@@ -146,7 +150,7 @@ impl ZebraDb {
         let mut unspent_output = AddressUnspentOutput::address_iterator_start(address_location);
 
         loop {
-            // A valid key representing an entry for this address or the next
+            // Seek to a valid entry for this address, or the first entry for the next address
             unspent_output = match self
                 .db
                 .zs_next_key_value_from(&utxo_loc_by_transparent_addr_loc, &unspent_output)
@@ -177,19 +181,32 @@ impl ZebraDb {
         self.db.zs_get(&hash_by_tx_loc, &tx_location)
     }
 
-    /// Returns the [`transaction::Hash`]es that created or spent outputs for a [`transparent::Address`],
-    /// in chain order, if they are in the finalized state.
-    #[allow(dead_code)]
+    /// Returns the transaction IDs that sent or received funds to `address`,
+    /// in the finalized chain `query_height_range`.
+    ///
+    /// If address has no finalized sends or receives,
+    /// or the `query_height_range` is totally outside the finalized block range,
+    /// returns an empty list.
     pub fn address_tx_ids(
         &self,
         address: &transparent::Address,
+        query_height_range: RangeInclusive<Height>,
     ) -> BTreeMap<TransactionLocation, transaction::Hash> {
         let address_location = match self.address_location(address) {
             Some(address_location) => address_location,
             None => return BTreeMap::new(),
         };
 
-        let transaction_locations = self.address_transaction_locations(address_location);
+        // Skip this address if it was first used after the end height.
+        //
+        // The address location is the output location of the first UTXO sent to the address,
+        // and addresses can not spend funds until they receive their first UTXO.
+        if address_location.height() > *query_height_range.end() {
+            return BTreeMap::new();
+        }
+
+        let transaction_locations =
+            self.address_transaction_locations(address_location, query_height_range);
 
         transaction_locations
             .iter()
@@ -205,10 +222,10 @@ impl ZebraDb {
 
     /// Returns the locations of any transactions that sent or received from a [`transparent::Address`],
     /// if they are in the finalized state.
-    #[allow(dead_code)]
     pub fn address_transaction_locations(
         &self,
         address_location: AddressLocation,
+        query_height_range: RangeInclusive<Height>,
     ) -> BTreeSet<AddressTransaction> {
         let tx_loc_by_transparent_addr_loc =
             self.db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
@@ -216,22 +233,31 @@ impl ZebraDb {
         // Manually fetch the entire addresses' transaction locations
         let mut addr_transactions = BTreeSet::new();
 
-        // An invalid key representing the minimum possible transaction
-        let mut transaction_location = AddressTransaction::address_iterator_start(address_location);
+        // A potentially invalid key representing the first UTXO send to the address,
+        // or the query start height.
+        let mut transaction_location = AddressTransaction::address_iterator_start(
+            address_location,
+            *query_height_range.start(),
+        );
 
         loop {
-            // A valid key representing an entry for this address or the next
+            // Seek to a valid entry for this address, or the first entry for the next address
             transaction_location = match self
                 .db
                 .zs_next_key_value_from(&tx_loc_by_transparent_addr_loc, &transaction_location)
             {
-                Some((unspent_output, ())) => unspent_output,
+                Some((transaction_location, ())) => transaction_location,
                 // We're finished with the final address in the column family
                 None => break,
             };
 
             // We found the next address, so we're finished with this address
             if transaction_location.address_location() != address_location {
+                break;
+            }
+
+            // We're past the end height, so we're finished with this query
+            if transaction_location.transaction_location().height > *query_height_range.end() {
                 break;
             }
 
@@ -290,6 +316,38 @@ impl ZebraDb {
         addresses
             .iter()
             .flat_map(|address| self.address_utxos(address))
+            .collect()
+    }
+
+    /// Returns the transaction IDs that sent or received funds to `addresses`,
+    /// in the finalized chain `query_height_range`.
+    ///
+    /// If none of the addresses has finalized sends or receives,
+    /// or the `query_height_range` is totally outside the finalized block range,
+    /// returns an empty list.
+    ///
+    /// # Correctness
+    ///
+    /// Callers should combine the non-finalized transactions for `addresses`
+    /// with the returned transactions.
+    ///
+    /// The transaction IDs will only be correct if the non-finalized chain matches or overlaps with
+    /// the finalized state.
+    ///
+    /// Specifically, a block in the partial chain must be a child block of the finalized tip.
+    /// (But the child block does not have to be the partial chain root.)
+    ///
+    /// This condition does not apply if there is only one address.
+    /// Since address transactions are only appended by blocks, and this query reads them in order,
+    /// it is impossible to get inconsistent transactions for a single address.
+    pub fn partial_finalized_transparent_tx_ids(
+        &self,
+        addresses: &HashSet<transparent::Address>,
+        query_height_range: RangeInclusive<Height>,
+    ) -> BTreeMap<TransactionLocation, transaction::Hash> {
+        addresses
+            .iter()
+            .flat_map(|address| self.address_tx_ids(address, query_height_range.clone()))
             .collect()
     }
 }

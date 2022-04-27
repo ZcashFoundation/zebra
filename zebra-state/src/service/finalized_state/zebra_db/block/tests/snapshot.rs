@@ -45,11 +45,14 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::finalized_state::{
-        disk_format::{
-            block::TransactionIndex, transparent::OutputLocation, FromDisk, TransactionLocation,
+    service::{
+        finalized_state::{
+            disk_format::{
+                block::TransactionIndex, transparent::OutputLocation, FromDisk, TransactionLocation,
+            },
+            FinalizedState,
         },
-        FinalizedState,
+        read::ADDRESS_HEIGHTS_FULL_RANGE,
     },
     Config,
 };
@@ -495,7 +498,9 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
         }
 
         let mut stored_transaction_locations = Vec::new();
-        for transaction_location in state.address_transaction_locations(stored_address_location) {
+        for transaction_location in
+            state.address_transaction_locations(stored_address_location, ADDRESS_HEIGHTS_FULL_RANGE)
+        {
             assert_eq!(
                 transaction_location.address_location(),
                 stored_address_location
