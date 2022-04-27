@@ -273,8 +273,15 @@ where
     {
         let runner = Queue::start();
 
+        let mut app_version = app_version.to_string();
+
+        // Match zcashd's version format, if the version string has anything in it
+        if !app_version.is_empty() && !app_version.starts_with('v') {
+            app_version.insert(0, 'v');
+        }
+
         let rpc_impl = RpcImpl {
-            app_version: app_version.to_string(),
+            app_version,
             mempool: mempool.clone(),
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
