@@ -19,7 +19,6 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
     block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
@@ -438,9 +437,9 @@ where
             })?;
 
             match response {
-                zebra_state::ReadResponse::AddressBalance(balance) => {
-                    Ok(AddressBalance { balance })
-                }
+                zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
+                    balance: u64::from(balance),
+                }),
                 _ => unreachable!("Unexpected response from state service: {response:?}"),
             }
         }
@@ -737,7 +736,7 @@ where
                 let height = utxo_data.2.height().0;
                 let output_index = utxo_data.2.output_index().as_usize();
                 let script = utxo_data.3.lock_script.to_string();
-                let satoshis = i64::from(utxo_data.3.value);
+                let satoshis = u64::from(utxo_data.3.value);
 
                 let entry = GetAddressUtxos {
                     address,
@@ -816,7 +815,7 @@ impl AddressStrings {
 /// The transparent balance of a set of addresses.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
 pub struct AddressBalance {
-    balance: Amount<NonNegative>,
+    balance: u64,
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.
@@ -906,7 +905,7 @@ pub struct GetAddressUtxos {
     #[serde(rename = "outputIndex")]
     output_index: usize,
     script: String,
-    satoshis: i64,
+    satoshis: u64,
 }
 
 impl GetRawTransaction {

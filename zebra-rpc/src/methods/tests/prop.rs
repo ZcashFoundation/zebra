@@ -632,7 +632,7 @@ proptest! {
             // Check that response contains the expected balance
             let received_balance = response?;
 
-            prop_assert_eq!(received_balance, AddressBalance { balance });
+            prop_assert_eq!(received_balance, AddressBalance { balance: balance.into() });
 
             // Check no further requests were made during this test
             mempool.expect_no_requests().await?;
