@@ -4193,9 +4193,9 @@ dependencies = [
 
 [[package]]
 name = "spandoc"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c026ab1a725f8e3ee7ca4480ce5c88a67778815e0cdf5d190021565a2426b5b"
+checksum = "25ed5a886d0234ac48bea41d450e4253cdd0642656249d6454e74c023d0f8821"
 dependencies = [
  "spandoc-attribute",
  "tracing",
