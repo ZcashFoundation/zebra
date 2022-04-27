@@ -42,12 +42,6 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
     && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
-# Optimize builds. In particular, regenerate-stateful-test-disks.yml was reaching the
-# GitHub Actions time limit (6 hours), so we needed to make it faster.
-#
-# TODO: apply this optimisation level to all release builds in .cargo/config.toml
-ENV RUSTFLAGS "-C opt-level=3"
-
 ENV CARGO_HOME /app/.cargo/
 # Build dependencies - this is the caching Docker layer!
 RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json

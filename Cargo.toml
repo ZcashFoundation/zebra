@@ -51,6 +51,18 @@ opt-level = 1
 [profile.release]
 panic = "abort"
 
+# Speed up release builds and sync tests using link-time optimization.
+# Some of Zebra's code is CPU-intensive, and needs extra optimizations for peak performance.
+#
+# TODO:
+# - add "-Clinker-plugin-lto" in .cargo/config.toml to speed up release builds
+#     - add "-Clinker=clang -Clink-arg=-fuse-ld=lld" in .cargo/config.toml
+# - also use LTO on C/C++ code:
+#     - use clang to compile all C/C++ code
+#     - add "-flto=thin" to all C/C++ code builds
+#     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
+lto = "thin"
+
 [patch.crates-io]
 
 # TODO: replace with upstream librustzcash when these changes are merged (#3037)
