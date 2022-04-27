@@ -101,7 +101,7 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 /// This avoids explicit synchronization, but relies on the peer
 /// connector actually setting up channels and these heartbeats in a
 /// specific manner that matches up with this math.
-pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(59 + 20 + 20 + 20);
+pub const MIN_PEER_RECONNECTION_DELAY: Duration = Duration::from_secs(59 + 15 + 15 + 15);
 
 /// Zebra rotates its peer inventory registry every time this interval elapses.
 ///
