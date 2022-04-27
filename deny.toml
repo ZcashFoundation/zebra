@@ -49,7 +49,7 @@ skip-tree = [
     { name = "color-eyre", version = "=0.5.11" },
 
     # wait for structopt upgrade (or upgrade to clap 3)
-    { name = "heck", version = "=0.3.3" }
+    { name = "heck", version = "=0.3.3" },
 
     # wait for bellman to upgrade
     { name = "blake2s_simd", version = "=0.5.11" },
