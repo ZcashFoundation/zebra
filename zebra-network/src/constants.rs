@@ -81,7 +81,7 @@ pub const PEERSET_BUFFER_SIZE: usize = 3;
 
 /// The timeout for sending a message to a remote peer,
 /// and receiving a response from a remote peer.
-pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The timeout for handshakes when connecting to new peers.
 ///
