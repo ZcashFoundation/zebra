@@ -25,4 +25,4 @@ jobs:
       rust_backtrace: full
       rust_lib_backtrace: full
       colorbt_show_hidden: '1'
-      rust_log: debug
+      rust_log: info

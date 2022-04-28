@@ -71,7 +71,7 @@ jobs:
       rust_lib_backtrace: full
       colorbt_show_hidden: '1'
       zebra_skip_ipv6_tests: '1'
-      rust_log: debug
+      rust_log: info
 
   # Test that Zebra can run a full mainnet sync after a PR is approved
   test-full-sync:
