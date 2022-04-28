@@ -1,4 +1,4 @@
-name: Full sync test
+name: Build docker image
 
 on:
   workflow_call:
