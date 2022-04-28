@@ -49,109 +49,31 @@ on:
       # workflow definitions
       - 'docker/**'
       - '.github/workflows/test.yml'
+      - '.github/workflows/docker-image-build.yml'
 
 env:
-  CARGO_INCREMENTAL: '1'
-  ZEBRA_SKIP_IPV6_TESTS: '1'
-  RUST_BACKTRACE: full
-  RUST_LIB_BACKTRACE: full
-  COLORBT_SHOW_HIDDEN: '1'
   NETWORK: Mainnet
   PROJECT_ID: zealous-zebra
+  IMAGE_NAME: zebrad-test
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
-  GCR_BASE: gcr.io/zealous-zebra
   REGION: us-central1
   ZONE: us-central1-a
   MACHINE_TYPE: c2d-standard-4
-  IMAGE_NAME: zebrad-test
 
 jobs:
   build:
-    name: Build images
-    timeout-minutes: 210
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.0.2
-        with:
-          persist-credentials: false
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-        # Automatic tag management and OCI Image Format Specification for labels
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v3.7.0
-        with:
-          # list of Docker images to use as base name for tags
-          images: |
-            ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}
-            ${{ env.GCR_BASE }}/${{ env.GITHUB_REPOSITORY_SLUG_URL }}/${{ env.IMAGE_NAME }}
-          # generate Docker tags based on the following events/attributes
-          tags: |
-            type=schedule
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha
-
-      # Setup Docker Buildx to allow use of docker cache layers from GH
-      - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v1
-
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v0.7.1
-        with:
-          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
-          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
-
-      - name: Login to Google Artifact Registry
-        uses: docker/login-action@v1.14.1
-        with:
-          registry: us-docker.pkg.dev
-          username: oauth2accesstoken
-          password: ${{ steps.auth.outputs.access_token }}
-
-      - name: Login to Google Container Registry
-        uses: docker/login-action@v1.14.1
-        with:
-          registry: gcr.io
-          username: oauth2accesstoken
-          password: ${{ steps.auth.outputs.access_token }}
-
-      # Build and push image to Google Artifact Registry
-      - name: Build & push
-        id: docker_build
-        uses: docker/build-push-action@v2.10.0
-        with:
-          target: tester
-          context: .
-          file: ./docker/Dockerfile
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            NETWORK=${{ github.event.inputs.network || env.NETWORK }}
-            SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
-            RUST_BACKTRACE=${{ env.RUST_BACKTRACE }}
-            RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }}
-            COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }}
-            ZEBRA_SKIP_NETWORK_TESTS="1"
-            CHECKPOINT_SYNC=${{ github.event.inputs.checkpoint_sync || true }}
-            RUST_LOG=debug
-            SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
-          push: true
-          cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache
-          cache-to: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache,mode=max
+    uses: ./.github/workflows/docker-image-build.yml
+    with:
+      dockerfile_path: ./docker/Dockerfile
+      dockerfile_target: tester
+      image_name: zebrad-test
+      network: Mainnet
+      checkpoint_sync: true
+      rust_backtrace: full
+      rust_lib_backtrace: full
+      colorbt_show_hidden: '1'
+      zebra_skip_ipv6_tests: '1'
+      rust_log: info
 
   # Run all the zebra tests, including tests that are ignored by default
   test-all:
@@ -168,7 +90,7 @@ jobs:
       - name: Run all zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace -- --include-ignored
+          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace -- --include-ignored
 
   # This test changes zebra-chain's activation heights,
   # which can recompile all the Zebra crates,
@@ -189,7 +111,7 @@ jobs:
       - name: Run tests with fake activation heights
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib -- with_fake_activation_heights
+          docker run -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib -- with_fake_activation_heights
         env:
           TEST_FAKE_ACTIVATION_HEIGHTS: '1'
 
@@ -208,7 +130,7 @@ jobs:
       - name: Run zebrad large sync tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance sync_large_checkpoints_ -- --ignored
+          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance sync_large_checkpoints_ -- --ignored
 
   test-lightwalletd-integration:
     name: Test integration with lightwalletd
@@ -224,7 +146,7 @@ jobs:
       - name: Run tests with included lightwalletd binary
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS -e ZEBRA_TEST_LIGHTWALLETD --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance -- lightwalletd_integration --nocapture
+          docker run -e ZEBRA_TEST_LIGHTWALLETD --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance -- lightwalletd_integration --nocapture
         env:
           ZEBRA_TEST_LIGHTWALLETD: '1'
 
@@ -311,7 +233,6 @@ jobs:
           --container-arg="--manifest-path" \
           --container-arg="zebrad/Cargo.toml" \
           --container-arg="sync_to_mandatory_checkpoint_${{ env.NETWORK }}" \
-          --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
@@ -480,7 +401,6 @@ jobs:
           --container-arg="--manifest-path" \
           --container-arg="zebrad/Cargo.toml" \
           --container-arg="sync_past_mandatory_checkpoint_${{ env.NETWORK }}" \
-          --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
