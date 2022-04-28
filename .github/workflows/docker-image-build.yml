@@ -39,7 +39,6 @@ on:
 
 jobs:
   build:
-    # this job name is a duplicate, it is shared by every workflow that calls this workflow
     name: Build ${{ inputs.image_name }} images
     timeout-minutes: 210
     runs-on: ubuntu-latest
