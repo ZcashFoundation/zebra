@@ -38,8 +38,8 @@ async fn rpc_getinfo() {
     let get_info = rpc.get_info().expect("We should have a GetInfo struct");
 
     // make sure there is a `build` field in the response,
-    // and that is equal to the provided string.
-    assert_eq!(get_info.build, "RPC test");
+    // and that is equal to the provided string, with an added 'v' version prefix.
+    assert_eq!(get_info.build, "vRPC test");
 
     // make sure there is a `subversion` field,
     // and that is equal to the Zebra user agent.
