@@ -21,17 +21,15 @@
 //! or you have poor network connectivity,
 //! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
 
-use std::{
-    collections::HashSet, convert::TryInto, env, net::SocketAddr, path::PathBuf, time::Duration,
-};
+use std::{collections::HashSet, convert::TryInto, env, path::PathBuf, time::Duration};
 
 use color_eyre::{
-    eyre::{Result, WrapErr},
+    eyre::{eyre, Result, WrapErr},
     Help,
 };
 
 use zebra_chain::{
-    block::Height,
+    block,
     parameters::Network::{self, *},
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
@@ -49,9 +47,13 @@ mod common;
 use common::{
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
     config::{default_test_config, persistent_test_config, testdir},
-    launch::{ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY, LIGHTWALLETD_DELAY},
+    launch::{
+        spawn_zebrad_for_rpc_without_initial_peers, ZebradTestDirExt, BETWEEN_NODES_DELAY,
+        LAUNCH_DELAY, LIGHTWALLETD_DELAY,
+    },
     lightwalletd::{
         random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
+        LIGHTWALLETD_TEST_TIMEOUT,
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
@@ -531,7 +533,7 @@ fn restart_stop_at_height() -> Result<()> {
     Ok(())
 }
 
-fn restart_stop_at_height_for_network(network: Network, height: Height) -> Result<()> {
+fn restart_stop_at_height_for_network(network: Network, height: block::Height) -> Result<()> {
     let reuse_tempdir = sync_until(
         height,
         network,
@@ -566,7 +568,7 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
 #[test]
 fn activate_mempool_mainnet() -> Result<()> {
     sync_until(
-        Height(TINY_CHECKPOINT_TEST_HEIGHT.0 + 1),
+        block::Height(TINY_CHECKPOINT_TEST_HEIGHT.0 + 1),
         Mainnet,
         STOP_AT_HEIGHT_REGEX,
         TINY_CHECKPOINT_TIMEOUT,
@@ -673,7 +675,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
 
     if let Some(timeout_minutes) = timeout_argument {
         sync_until(
-            Height::MAX,
+            block::Height::MAX,
             network,
             SYNC_FINISHED_REGEX,
             Duration::from_secs(60 * timeout_minutes),
@@ -1445,7 +1447,6 @@ where
     // See #1781.
     #[cfg(target_os = "linux")]
     if node2.is_running() {
-        use color_eyre::eyre::eyre;
         return node2
             .kill_on_error::<(), _>(Err(eyre!(
                 "conflicted node2 was still running, but the test expected a panic"
@@ -1497,8 +1498,11 @@ async fn fully_synced_rpc_test() -> Result<()> {
 
     let network = Network::Mainnet;
 
-    let (_zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc_without_initial_peers(network, cached_state_path)?;
+    let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
+        network,
+        cached_state_path,
+        LIGHTWALLETD_TEST_TIMEOUT,
+    )?;
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
@@ -1528,31 +1532,10 @@ async fn fully_synced_rpc_test() -> Result<()> {
     Ok(())
 }
 
-/// Spawns a zebrad instance to interact with lightwalletd, but without an internet connection.
+/// Test sending transactions using a lightwalletd instance connected to a zebrad instance.
 ///
-/// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
-/// providing an initial state to the zebrad instance.
-fn spawn_zebrad_for_rpc_without_initial_peers(
-    network: Network,
-    zebra_directory: PathBuf,
-) -> Result<(TestChild<PathBuf>, SocketAddr)> {
-    let mut config = random_known_rpc_port_config()
-        .expect("Failed to create a config file with a known RPC listener port");
-
-    config.state.ephemeral = false;
-    config.network.initial_mainnet_peers = HashSet::new();
-    config.network.initial_testnet_peers = HashSet::new();
-    config.network.network = network;
-
-    let mut zebrad = zebra_directory
-        .with_config(&mut config)?
-        .spawn_child(args!["start"])?
-        .with_timeout(Duration::from_secs(60 * 60))
-        .bypass_test_capture(true);
-
-    let rpc_address = config.rpc.listen_addr.unwrap();
-
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
-
-    Ok((zebrad, rpc_address))
+/// See [`common::lightwalletd::send_transaction_test`] for more information.
+#[tokio::test]
+async fn sending_transactions_using_lightwalletd() -> Result<()> {
+    common::lightwalletd::send_transaction_test::run().await
 }

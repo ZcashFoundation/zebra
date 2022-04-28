@@ -6,18 +6,26 @@
 //! This file is only for test library code.
 
 use std::{
+    collections::HashSet,
     env,
+    net::SocketAddr,
     path::{Path, PathBuf},
     time::Duration,
 };
 
 use color_eyre::eyre::Result;
 
+use zebra_chain::parameters::Network;
+use zebra_test::{
+    args,
+    command::{Arguments, TestDirExt, NO_MATCHES_REGEX_ITER},
+    prelude::*,
+};
 use zebrad::config::ZebradConfig;
 
-use zebra_test::{
-    command::{Arguments, TestDirExt},
-    prelude::*,
+use crate::{
+    common::lightwalletd::random_known_rpc_port_config, PROCESS_FAILURE_MESSAGES,
+    ZEBRA_FAILURE_MESSAGES,
 };
 
 /// After we launch `zebrad`, wait this long for the command to start up,
@@ -171,6 +179,46 @@ where
 
         Ok(self)
     }
+}
+
+/// Spawns a zebrad instance to interact with lightwalletd, but without an internet connection.
+///
+/// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
+/// providing an initial state to the zebrad instance.
+pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
+    network: Network,
+    zebra_directory: P,
+    timeout: Duration,
+) -> Result<(TestChild<P>, SocketAddr)> {
+    let mut config = random_known_rpc_port_config()
+        .expect("Failed to create a config file with a known RPC listener port");
+
+    config.state.ephemeral = false;
+    config.network.initial_mainnet_peers = HashSet::new();
+    config.network.initial_testnet_peers = HashSet::new();
+    config.network.network = network;
+    config.mempool.debug_enable_at_height = Some(0);
+
+    let mut zebrad = zebra_directory
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?
+        .bypass_test_capture(true)
+        .with_timeout(timeout)
+        .with_failure_regex_iter(
+            // TODO: replace with a function that returns the full list and correct return type
+            ZEBRA_FAILURE_MESSAGES
+                .iter()
+                .chain(PROCESS_FAILURE_MESSAGES)
+                .cloned(),
+            NO_MATCHES_REGEX_ITER.iter().cloned(),
+        );
+
+    let rpc_address = config.rpc.listen_addr.unwrap();
+
+    zebrad.expect_stdout_line_matches("activating mempool")?;
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
+
+    Ok((zebrad, rpc_address))
 }
 
 /// Panics if `$pred` is false, with an error report containing:
