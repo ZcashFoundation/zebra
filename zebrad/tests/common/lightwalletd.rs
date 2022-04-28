@@ -20,7 +20,8 @@ use zebra_test::{
 use zebrad::config::ZebradConfig;
 
 use super::{
-    config::{default_test_config, CACHED_STATE_PATH_VAR},
+    cached_state::ZEBRA_CACHED_STATE_DIR_VAR,
+    config::default_test_config,
     failure_messages::{
         LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES, LIGHTWALLETD_FAILURE_MESSAGES,
         PROCESS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES,
@@ -265,12 +266,12 @@ impl LightwalletdTestType {
 
     /// Returns the Zebra state path for this test, if set.
     pub fn zebrad_state_path(&self) -> Option<PathBuf> {
-        match env::var_os(CACHED_STATE_PATH_VAR) {
+        match env::var_os(ZEBRA_CACHED_STATE_DIR_VAR) {
             Some(path) => Some(path.into()),
             None => {
                 tracing::info!(
                     "skipped {self:?} lightwalletd test, \
-                     set the {CACHED_STATE_PATH_VAR:?} environment variable to run the test",
+                     set the {ZEBRA_CACHED_STATE_DIR_VAR:?} environment variable to run the test",
                 );
 
                 None

@@ -49,7 +49,7 @@ use common::{
     lightwalletd::{
         random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
         LightwalletdTestType::{self, *},
-        LIGHTWALLETD_DATA_DIR_VAR, LIGHTWALLETD_TEST_TIMEOUT,
+        LIGHTWALLETD_DATA_DIR_VAR,
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
@@ -1010,7 +1010,7 @@ fn lightwalletd_integration() -> Result<()> {
 /// If `LIGHTWALLETD_DATA_DIR` is not set, just runs a full sync.
 ///
 /// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD`,
-/// `ZEBRA_CACHED_STATE_PATH`, and `LIGHTWALLETD_DATA_DIR` env vars are set.
+/// `ZEBRA_CACHED_STATE_DIR`, and `LIGHTWALLETD_DATA_DIR` env vars are set.
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
@@ -1022,7 +1022,7 @@ fn lightwalletd_update_sync() -> Result<()> {
 /// Make sure `lightwalletd` can fully sync from genesis using Zebra.
 ///
 /// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` and
-/// `ZEBRA_CACHED_STATE_PATH` env vars are set.
+/// `ZEBRA_CACHED_STATE_DIR` env vars are set.
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
@@ -1038,8 +1038,8 @@ fn lightwalletd_full_sync() -> Result<()> {
 ///
 /// Runs the tests in this order:
 /// - launch lightwalletd with empty states,
-/// - if `ZEBRA_CACHED_STATE_PATH` and `LIGHTWALLETD_DATA_DIR` are set: run a quick update sync,
-/// - if `ZEBRA_CACHED_STATE_PATH` is set: run a full sync.
+/// - if `ZEBRA_CACHED_STATE_DIR` and `LIGHTWALLETD_DATA_DIR` are set: run a quick update sync,
+/// - if `ZEBRA_CACHED_STATE_DIR` is set: run a full sync.
 ///
 /// These tests don't work on Windows, so they are always skipped on that platform.
 #[test]
@@ -1048,13 +1048,13 @@ fn lightwalletd_full_sync() -> Result<()> {
 fn lightwalletd_test_suite() -> Result<()> {
     lightwalletd_integration_test(LaunchWithEmptyState)?;
 
-    // Only runs when ZEBRA_CACHED_STATE_PATH is set.
+    // Only runs when ZEBRA_CACHED_STATE_DIR is set.
     // When manually running the test suite, allow cached state in the full sync test.
     lightwalletd_integration_test(FullSyncFromGenesis {
         allow_lightwalletd_cached_state: true,
     })?;
 
-    // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_PATH are set
+    // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
     lightwalletd_integration_test(UpdateCachedState)?;
 
     Ok(())
@@ -1473,26 +1473,27 @@ where
 async fn fully_synced_rpc_test() -> Result<()> {
     zebra_test::init();
 
-    // TODO: reuse code from https://github.com/ZcashFoundation/zebra/pull/4177/
-    // to get the cached_state_path
-    const CACHED_STATE_PATH_VAR: &str = "ZEBRA_CACHED_STATE_PATH";
-    let cached_state_path = match env::var_os(CACHED_STATE_PATH_VAR) {
-        Some(argument) => PathBuf::from(argument),
-        None => {
-            tracing::info!(
-                "skipped send transactions using lightwalletd test, \
-                 set the {CACHED_STATE_PATH_VAR:?} environment variable to run the test",
-            );
-            return Ok(());
-        }
+    // We're only using cached Zebra state here, so this test type is the most similar
+    let test_type = LightwalletdTestType::FullSyncFromGenesis {
+        allow_lightwalletd_cached_state: false,
     };
+
+    // Handle the Zebra state directory
+    let cached_state_path = test_type.zebrad_state_path();
+
+    if cached_state_path.is_none() {
+        tracing::info!("skipping fully synced zebrad RPC test");
+        return Ok(());
+    };
+
+    tracing::info!("running fully synced zebrad RPC test");
 
     let network = Network::Mainnet;
 
     let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
         network,
-        cached_state_path,
-        LIGHTWALLETD_TEST_TIMEOUT,
+        cached_state_path.unwrap(),
+        test_type.zebrad_timeout(),
     )?;
 
     // Make a getblock test that works only on synced node (high block number).
