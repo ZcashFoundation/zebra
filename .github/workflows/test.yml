@@ -147,7 +147,7 @@ jobs:
             COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }}
             ZEBRA_SKIP_NETWORK_TESTS="1"
             CHECKPOINT_SYNC=${{ github.event.inputs.checkpoint_sync || true }}
-            RUST_LOG=debug
+            RUST_LOG=info
             SENTRY_DSN=${{ secrets.SENTRY_ENDPOINT }}
           push: true
           cache-from: type=registry,ref=${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_REF_SLUG_URL }}-buildcache
