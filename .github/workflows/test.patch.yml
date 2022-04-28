@@ -14,9 +14,12 @@ on:
       - '.github/workflows/test.yml'
       - '.github/workflows/docker-image-build.yml'
 
+env:
+  IMAGE_NAME: zebrad-test
+
 jobs:
   build:
-    name: Build images
+    name: Build ${{ env.IMAGE_NAME }} images
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
