@@ -16,8 +16,8 @@ on:
 
 jobs:
   build:
-    # this job name must match the image name from test.yml
-    name: Build zebrad-test images
+    # this job name is a duplicate shared between test.yml, test-full-sync.yml, and zcash-params.yml
+    name: Build images
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
