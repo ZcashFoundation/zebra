@@ -998,7 +998,7 @@ pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
 ///
 /// Contains the hex-encoded Sapling & Orchard note commitment trees, and their
 /// corresponding [`block::Hash`], [`Height`], and block time.
-#[derive(serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct GetTreestate {
     #[serde(with = "hex")]
     hash: block::Hash,
