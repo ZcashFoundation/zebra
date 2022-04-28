@@ -761,7 +761,19 @@ impl Service<Request> for StateService {
 
                 self.pending_utxos
                     .check_against_ordered(&prepared.new_outputs);
-                let rsp_rx = self.queue_and_commit_non_finalized(prepared);
+
+                // # Performance
+                //
+                // Allow other async tasks to make progress while blocks are being verified
+                // and written to disk. But wait for the blocks to finish committing,
+                // so that `StateService` multi-block queries always observe a consistent state.
+                //
+                // Since each block is spawned into its own task,
+                // there shouldn't be any other code running in the same task,
+                // so we don't need to worry about blocking it:
+                // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html#
+                let rsp_rx =
+                    tokio::task::block_in_place(|| self.queue_and_commit_non_finalized(prepared));
 
                 async move {
                     rsp_rx
@@ -786,7 +798,16 @@ impl Service<Request> for StateService {
                 );
 
                 self.pending_utxos.check_against(&finalized.new_outputs);
-                let rsp_rx = self.queue_and_commit_finalized(finalized);
+
+                // # Performance
+                //
+                // Allow other async tasks to make progress while blocks are being verified
+                // and written to disk. But wait for the blocks to finish committing,
+                // so that `StateService` multi-block queries always observe a consistent state.
+                //
+                // See the note in `CommitBlock` for more details.
+                let rsp_rx =
+                    tokio::task::block_in_place(|| self.queue_and_commit_finalized(finalized));
 
                 async move {
                     rsp_rx
@@ -812,6 +833,7 @@ impl Service<Request> for StateService {
                     "type" => "depth",
                 );
 
+                // TODO: run this simple read request in spawn_blocking if Zebra hangs due to database locks
                 let rsp = Ok(self.best_depth(hash)).map(Response::Depth);
                 async move { rsp }.boxed()
             }
@@ -823,6 +845,7 @@ impl Service<Request> for StateService {
                     "type" => "tip",
                 );
 
+                // TODO: run this simple read request in spawn_blocking if Zebra hangs due to database locks
                 let rsp = Ok(self.best_tip()).map(Response::Tip);
                 async move { rsp }.boxed()
             }
@@ -834,6 +857,7 @@ impl Service<Request> for StateService {
                     "type" => "block_locator",
                 );
 
+                // TODO: run this multi-block read request in spawn_blocking for performance
                 let rsp = Ok(self.block_locator().unwrap_or_default()).map(Response::BlockLocator);
                 async move { rsp }.boxed()
             }
@@ -845,6 +869,7 @@ impl Service<Request> for StateService {
                     "type" => "transaction",
                 );
 
+                // TODO: run this large data read request in spawn_blocking for performance
                 let rsp = Ok(self.best_transaction(hash)).map(Response::Transaction);
                 async move { rsp }.boxed()
             }
@@ -856,6 +881,7 @@ impl Service<Request> for StateService {
                     "type" => "block",
                 );
 
+                // TODO: run this large data read request in spawn_blocking for performance
                 let rsp = Ok(self.best_block(hash_or_height)).map(Response::Block);
                 async move { rsp }.boxed()
             }
@@ -869,6 +895,7 @@ impl Service<Request> for StateService {
 
                 let fut = self.pending_utxos.queue(outpoint);
 
+                // TODO: run this large data read request in spawn_blocking for performance
                 if let Some(utxo) = self.any_utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
                 }
@@ -884,6 +911,7 @@ impl Service<Request> for StateService {
                 );
 
                 const MAX_FIND_BLOCK_HASHES_RESULTS: usize = 500;
+                // TODO: run this multi-block read request in spawn_blocking for performance
                 let res =
                     self.find_best_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
                 async move { Ok(Response::BlockHashes(res)) }.boxed()
@@ -895,6 +923,9 @@ impl Service<Request> for StateService {
                     "service" => "state",
                     "type" => "find_block_headers",
                 );
+
+                // TODO: move this complex read request into a separate method
+                //       run this multi-block & large data read request in spawn_blocking for performance
 
                 const MAX_FIND_BLOCK_HEADERS_RESULTS: usize = 160;
                 // Zcashd will blindly request more block headers as long as it

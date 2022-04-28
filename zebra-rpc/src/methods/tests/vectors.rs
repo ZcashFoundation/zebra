@@ -20,7 +20,7 @@ use zebra_test::mock_service::MockService;
 
 use super::super::*;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getinfo() {
     zebra_test::init();
 
@@ -53,7 +53,7 @@ async fn rpc_getinfo() {
     assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblock() {
     zebra_test::init();
 
@@ -94,7 +94,7 @@ async fn rpc_getblock() {
     assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblock_parse_error() {
     zebra_test::init();
 
@@ -124,7 +124,7 @@ async fn rpc_getblock_parse_error() {
     assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblock_missing_error() {
     zebra_test::init();
 
@@ -176,7 +176,7 @@ async fn rpc_getblock_missing_error() {
     assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getbestblockhash() {
     zebra_test::init();
 
@@ -222,7 +222,7 @@ async fn rpc_getbestblockhash() {
     assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getrawtransaction() {
     zebra_test::init();
 
@@ -307,7 +307,7 @@ async fn rpc_getrawtransaction() {
     assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getaddresstxids_invalid_arguments() {
     zebra_test::init();
 
@@ -395,7 +395,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getaddresstxids_response() {
     zebra_test::init();
 
@@ -486,7 +486,7 @@ async fn rpc_getaddresstxids_response_with(
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getaddressutxos_invalid_arguments() {
     zebra_test::init();
 
@@ -521,7 +521,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
     state.expect_no_requests().await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getaddressutxos_response() {
     zebra_test::init();
 
