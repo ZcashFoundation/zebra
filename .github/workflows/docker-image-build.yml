@@ -38,19 +38,9 @@ on:
         type: string
 
 jobs:
-  # Convert the image name input to a single-item matrix, so it can be used in the build job's name
-  image-name-to-job-name:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - id: set-matrix
-        run: echo "::set-output name=matrix::{\"include\":[{\"image_name\":\"" ${{ inputs.image_name }} "\"}]}"
   build:
-    needs: image-name-to-job-name
-    name: Build ${{ matrix.image_name }} images
-    strategy:
-      matrix: ${{fromJSON(needs.image-name-to-job-name.outputs.matrix)}}
+   # this job name is a duplicate, it is shared by every workflow that calls this workflow
+    name: Build images
     timeout-minutes: 210
     runs-on: ubuntu-latest
     permissions:
