@@ -48,7 +48,7 @@ on:
 env:
   NETWORK: Mainnet
   PROJECT_ID: zealous-zebra
-  IMAGE_NAME: zebrad-test
+  IMAGE_NAME: zebrad-test-full-sync
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
   REGION: us-central1
   ZONE: us-central1-a
@@ -64,7 +64,7 @@ jobs:
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: tester
-      image_name: zebrad-test
+      image_name: zebrad-test-full-sync
       network: Mainnet
       checkpoint_sync: true
       rust_backtrace: full

@@ -39,7 +39,7 @@ on:
 
 jobs:
   build:
-    name: Build images
+    name: Build ${{ inputs.image_name }} images
     timeout-minutes: 210
     runs-on: ubuntu-latest
     permissions:
