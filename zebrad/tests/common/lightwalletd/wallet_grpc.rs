@@ -33,7 +33,7 @@ pub fn spawn_lightwalletd_with_rpc_server(
     let arguments = args!["--grpc-bind-addr": lightwalletd_rpc_address];
 
     let (lightwalletd_failure_messages, lightwalletd_ignore_messages) =
-        test_type.lightwalletd_failure_messages(true);
+        test_type.lightwalletd_failure_messages();
 
     let mut lightwalletd = lightwalletd_dir
         .spawn_lightwalletd_child(test_type.lightwalletd_state_path(), arguments)?
