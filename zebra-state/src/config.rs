@@ -17,7 +17,7 @@ pub struct Config {
     ///
     /// Each state format version and network has a separate state.
     /// These states are stored in `state/vN/mainnet` and `state/vN/testnet` subdirectories,
-    /// underneath the `cache_dir` path.
+    /// underneath the `cache_dir` path, where `N` is the state format version.
     ///
     /// When Zebra's state format changes, it creates a new state subdirectory for that version,
     /// and re-syncs from genesis.
