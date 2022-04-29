@@ -42,6 +42,20 @@ ZCASHD_HEIGHT=$(cat "$ZCASHD_BLOCKCHAIN_INFO" | grep '"blocks"' | cut -d: -f2 | 
 
 echo
 
+if [ "$ZEBRAD_NET" != "$ZCASHD_NET" ]; then
+    echo "WARNING: comparing RPC responses from different networks:"
+    echo "zcashd is on: $ZCASHD_NET"
+    echo "zebrad is on: $ZEBRAD_NET"
+    echo
+fi
+
+if [ "$ZEBRAD_HEIGHT" -ne "$ZCASHD_HEIGHT" ]; then
+    echo "WARNING: comparing RPC responses from different heights:"
+    echo "zcashd is at: $ZCASHD_HEIGHT"
+    echo "zebrad is at: $ZEBRAD_HEIGHT"
+    echo
+fi
+
 ZEBRAD_RESPONSE="$TMP_DIR/zebrad-$ZEBRAD_NET-$ZEBRAD_HEIGHT-$1.json"
 ZCASHD_RESPONSE="$TMP_DIR/zcashd-$ZCASHD_NET-$ZCASHD_HEIGHT-$1.json"
 
