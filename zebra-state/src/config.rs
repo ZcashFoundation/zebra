@@ -15,8 +15,18 @@ pub struct Config {
     /// include private data that cannot be replicated from the network, such as
     /// wallet data.  That data is not handled by `zebra-state`.
     ///
-    /// Each network has a separate state, which is stored in "mainnet/state"
-    /// and "testnet/state" subdirectories.
+    /// Each state format version and network has a separate state.
+    /// These states are stored in `state/vN/mainnet` and `state/vN/mainnet` subdirectories,
+    /// underneath the `cache_dir` path.
+    ///
+    /// When Zebra's state format changes, it creates a new state subdirectory for that version,
+    /// and re-syncs from genesis.
+    ///
+    /// Old state versions are [not automatically deleted](https://github.com/ZcashFoundation/zebra/issues/1213).
+    /// It is ok to manually delete old state versions.
+    ///
+    /// It is also ok to delete the entire cached state directory.
+    /// If you do, Zebra will re-sync from genesis next time it is launched.
     ///
     /// The default directory is platform dependent, based on
     /// [`dirs::cache_dir()`](https://docs.rs/dirs/3.0.1/dirs/fn.cache_dir.html):
