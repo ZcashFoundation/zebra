@@ -16,7 +16,7 @@ pub struct Config {
     /// wallet data.  That data is not handled by `zebra-state`.
     ///
     /// Each state format version and network has a separate state.
-    /// These states are stored in `state/vN/mainnet` and `state/vN/mainnet` subdirectories,
+    /// These states are stored in `state/vN/mainnet` and `state/vN/testnet` subdirectories,
     /// underneath the `cache_dir` path.
     ///
     /// When Zebra's state format changes, it creates a new state subdirectory for that version,
