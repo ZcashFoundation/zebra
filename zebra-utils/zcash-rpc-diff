@@ -26,10 +26,10 @@ fi
 ZEBRAD_RPC_PORT=$1
 shift
 
-TMP_DIR=$(mktemp -d)
+ZCASH_RPC_TMP_DIR=$(mktemp -d)
 
-ZEBRAD_BLOCKCHAIN_INFO="$TMP_DIR/zebrad-check-getblockchaininfo.json"
-ZCASHD_BLOCKCHAIN_INFO="$TMP_DIR/zcashd-check-getblockchaininfo.json"
+ZEBRAD_BLOCKCHAIN_INFO="$ZCASH_RPC_TMP_DIR/zebrad-check-getblockchaininfo.json"
+ZCASHD_BLOCKCHAIN_INFO="$ZCASH_RPC_TMP_DIR/zcashd-check-getblockchaininfo.json"
 
 echo "Checking zebrad network and tip height..."
 $ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getblockchaininfo > "$ZEBRAD_BLOCKCHAIN_INFO"
@@ -59,8 +59,8 @@ if [ "$ZEBRAD_HEIGHT" -ne "$ZCASHD_HEIGHT" ]; then
     echo
 fi
 
-ZEBRAD_RESPONSE="$TMP_DIR/zebrad-$ZEBRAD_NET-$ZEBRAD_HEIGHT-$1.json"
-ZCASHD_RESPONSE="$TMP_DIR/zcashd-$ZCASHD_NET-$ZCASHD_HEIGHT-$1.json"
+ZEBRAD_RESPONSE="$ZCASH_RPC_TMP_DIR/zebrad-$ZEBRAD_NET-$ZEBRAD_HEIGHT-$1.json"
+ZCASHD_RESPONSE="$ZCASH_RPC_TMP_DIR/zcashd-$ZCASHD_NET-$ZCASHD_HEIGHT-$1.json"
 
 echo "Request:"
 echo "$@"
