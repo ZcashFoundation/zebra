@@ -1000,12 +1000,24 @@ pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
 /// corresponding [`block::Hash`], [`Height`], and block time.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct GetTreestate {
+    /// The block hash corresponding to the treestate, hex-encoded.
     #[serde(with = "hex")]
     hash: block::Hash,
+
+    /// The block height corresponding to the treestate, numeric.
     height: Height,
+
+    /// Unix time when the block corresponding to the treestate was mined,
+    /// numeric.
+    ///
+    /// UTC seconds since the Unix 1970-01-01 epoch.
     time: u32,
+
+    /// Sapling incremental note commitment tree, hex-encoded.
     #[serde(with = "hex")]
     sapling_tree: sapling::tree::SerializedTree,
+
+    /// Orchard incremental note commitment tree, hex-encoded.
     #[serde(with = "hex")]
     orchard_tree: orchard::tree::SerializedTree,
 }
