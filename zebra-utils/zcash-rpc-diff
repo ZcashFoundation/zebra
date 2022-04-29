@@ -4,6 +4,9 @@ set -euo pipefail
 
 # Sends a `zcash-cli` command to a Zebra and zcashd instance,
 # and compares the results.
+#
+# Uses the configured `zcash-cli` RPC port,
+# and the `zebrad` port supplied on the command-line.
 
 function usage()
 {
