@@ -19,7 +19,6 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
     block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
     orchard,
@@ -292,8 +291,15 @@ where
     {
         let runner = Queue::start();
 
+        let mut app_version = app_version.to_string();
+
+        // Match zcashd's version format, if the version string has anything in it
+        if !app_version.is_empty() && !app_version.starts_with('v') {
+            app_version.insert(0, 'v');
+        }
+
         let rpc_impl = RpcImpl {
-            app_version: app_version.to_string(),
+            app_version,
             mempool: mempool.clone(),
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
@@ -450,9 +456,9 @@ where
             })?;
 
             match response {
-                zebra_state::ReadResponse::AddressBalance(balance) => {
-                    Ok(AddressBalance { balance })
-                }
+                zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
+                    balance: u64::from(balance),
+                }),
                 _ => unreachable!("Unexpected response from state service: {response:?}"),
             }
         }
@@ -575,10 +581,16 @@ where
 
             match response {
                 mempool::Response::TransactionIds(unmined_transaction_ids) => {
-                    Ok(unmined_transaction_ids
+                    let mut tx_ids: Vec<String> = unmined_transaction_ids
                         .iter()
                         .map(|id| id.mined_id().encode_hex())
-                        .collect())
+                        .collect();
+
+                    // Sort returned transaction IDs in numeric/string order.
+                    // (zcashd's sort order appears arbitrary.)
+                    tx_ids.sort();
+
+                    Ok(tx_ids)
                 }
                 _ => unreachable!("unmatched response to a transactionids request"),
             }
@@ -855,7 +867,7 @@ where
                 let height = utxo_data.2.height().0;
                 let output_index = utxo_data.2.output_index().as_usize();
                 let script = utxo_data.3.lock_script.to_string();
-                let satoshis = i64::from(utxo_data.3.value);
+                let satoshis = u64::from(utxo_data.3.value);
 
                 let entry = GetAddressUtxos {
                     address,
@@ -934,7 +946,7 @@ impl AddressStrings {
 /// The transparent balance of a set of addresses.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
 pub struct AddressBalance {
-    balance: Amount<NonNegative>,
+    balance: u64,
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.
@@ -1052,7 +1064,7 @@ pub struct GetAddressUtxos {
     #[serde(rename = "outputIndex")]
     output_index: usize,
     script: String,
-    satoshis: i64,
+    satoshis: u64,
 }
 
 impl GetRawTransaction {
