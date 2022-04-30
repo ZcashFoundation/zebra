@@ -121,52 +121,24 @@ jobs:
           gcloud compute instances create-with-container "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          --container-image debian:buster \
           --container-restart-policy=never \
-          --container-stdin \
-          --container-tty \
-          --container-env=TEST_FULL_SYNC=1,ZEBRA_FORCE_USE_COLOR=1,FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
           --tags zebrad \
           --zone "${{ env.ZONE }}"
 
-      # TODO: this approach is very messy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
-      # This TODO relates to the following issues:
-      # https://github.com/actions/runner/issues/241
-      # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
-      #
-      # Deploying a zebra container might take more than 30 seconds to completely start, so we're adding a timer at the end
-      # of this step before starting the following ones
-      - name: Get container name from logs
-        run: |
-          INSTANCE_ID=$(gcloud compute instances describe full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
-          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
-
-          CONTAINER_NAME=""
-          while [[ ${CONTAINER_NAME} != *"full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"* ]]; do
-              CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
-              echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
-              sleep 10
-          done
-
-          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
-          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
-          sleep 90
-
       - name: Full sync
         id: full-sync
         run: |
-          for RETRY in 1 2 3 4; do
-              gcloud compute ssh \
-              full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-              --zone ${{ env.ZONE }} \
-              --quiet \
-              --ssh-flag="-o ServerAliveInterval=15" \
-              --command="docker logs --follow ${{ env.CONTAINER_NAME }}" \
-              || echo "ssh disconnected $RETRY times"
-          done
+          gcloud compute ssh \
+          full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "docker run -e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 -it --name full-sync ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
           EXIT_CODE=$(\
           gcloud compute ssh \
@@ -174,7 +146,7 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker wait ${{ env.CONTAINER_NAME }}")
+          --command="docker wait full-sync")
 
           exit ${EXIT_CODE}
 

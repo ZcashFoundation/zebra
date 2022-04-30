@@ -218,65 +218,28 @@ jobs:
           gcloud compute instances create-with-container "regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path='/zebrad-cache',name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint" \
-          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          --create-disk name="${{ env.CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-image debian:buster \
           --container-restart-policy=never \
-          --container-stdin \
-          --container-tty \
-          --container-command="cargo" \
-          --container-arg="test" \
-          --container-arg="--locked" \
-          --container-arg="--release" \
-          --container-arg="--features" \
-          --container-arg="enable-sentry,test_sync_to_mandatory_checkpoint_${{ env.NETWORK }}" \
-          --container-arg="--manifest-path" \
-          --container-arg="zebrad/Cargo.toml" \
-          --container-arg="sync_to_mandatory_checkpoint_${{ env.NETWORK }}" \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
           --tags zebrad \
           --zone "${{ env.ZONE }}"
 
-      # TODO: this approach is very mesy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
-      # This TODO relates to the following issues:
-      # https://github.com/actions/runner/issues/241
-      # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
-      #
-      # Deploying a zebra container might take more than 30 seconds to completely start, so we're adding a timer at the end
-      # of this step before starting the following ones
-      - name: Get container name from logs
-        id: get-container-name
-        if: ${{ steps.create-instance.outcome == 'success' }}
-        run: |
-          INSTANCE_ID=$(gcloud compute instances describe regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
-          echo "Using instance: $INSTANCE_ID"
-
-          CONTAINER_NAME=""
-          while [[ ${CONTAINER_NAME} != *"regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"* ]]; do
-              CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
-              echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
-              sleep 10
-          done
-
-          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
-          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
-          sleep 90
-
       - name: Regenerate stateful disks
-        id: sync-to-checkpoint
+        id: regenerate-disk
         if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
-          for RETRY in 1 2 3 4; do
-              gcloud compute ssh \
-              regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-              --zone ${{ env.ZONE }} \
-              --quiet \
-              --ssh-flag="-o ServerAliveInterval=15" \
-              --command="docker logs --follow ${{ env.CONTAINER_NAME }}" \
-              || echo "ssh disconnected $RETRY times"
-          done
+          gcloud compute ssh \
+          regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "docker run -it --name regenerate-disk ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/${{ env.CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }},target=/zebrad-cache \
+          cargo test --locked --release --features enable-sentry,test_sync_to_mandatory_checkpoint_${{ env.NETWORK }} --manifest-path zebrad/Cargo.toml sync_to_mandatory_checkpoint_${{ env.NETWORK }}"
 
           EXIT_CODE=$(\
           gcloud compute ssh \
@@ -284,12 +247,12 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker wait ${{ env.CONTAINER_NAME }}")
+          --command="docker wait regenerate-disk")
 
           exit ${EXIT_CODE}
 
       - name: Get state version from constants.rs
-        if: ${{ steps.sync-to-checkpoint.outcome == 'success' }}
+        if: ${{ steps.regenerate-disk.outcome == 'success' }}
         run: |
           STATE_VERSION=""
 
@@ -299,7 +262,7 @@ jobs:
           echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
 
       - name: Get sync height from logs
-        if: ${{ steps.sync-to-checkpoint.outcome == 'success' }}
+        if: ${{ steps.regenerate-disk.outcome == 'success' }}
         run: |
           SYNC_HEIGHT=""
 
@@ -315,18 +278,18 @@ jobs:
       # Force the image creation as the disk is still attached even though is not being used by the container
       - name: Create image from state disk
         # Only run if the earlier step succeeds
-        if: ${{ steps.sync-to-checkpoint.outcome == 'success' }}
+        if: ${{ steps.regenerate-disk.outcome == 'success' }}
         run: |
           gcloud compute images create zebrad-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-checkpoint \
           --force \
-          --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint \
+          --source-disk=${{ env.CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }} \
           --source-disk-zone=${{ env.ZONE }} \
           --storage-location=us \
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
 
       - name: Delete test instance
         # Do not delete the instance if the sync timeouts in GitHub
-        if: ${{ steps.sync-to-checkpoint.outcome == 'success' || steps.sync-to-checkpoint.outcome == 'failure' }}
+        if: ${{ steps.regenerate-disk.outcome == 'success' || steps.regenerate-disk.outcome == 'failure' }}
         continue-on-error: true
         run: |
           gcloud compute instances delete "regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
@@ -386,64 +349,29 @@ jobs:
           gcloud compute instances create-with-container "sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk=image=${{ env.CACHED_DISK_NAME }},name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint,size=100GB,type=pd-ssd \
-          --container-mount-disk=mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint \
+          --create-disk=image=${{ env.CACHED_DISK_NAME }},name=${{ env.CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }},size=100GB,type=pd-ssd \
+          --container-image debian:buster \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
-          --container-stdin \
-          --container-tty \
-          --container-command="cargo" \
-          --container-arg="test" \
-          --container-arg="--locked" \
-          --container-arg="--release" \
-          --container-arg="--features" \
-          --container-arg="enable-sentry,test_sync_past_mandatory_checkpoint_${{ env.NETWORK }}" \
-          --container-arg="--manifest-path" \
-          --container-arg="zebrad/Cargo.toml" \
-          --container-arg="sync_past_mandatory_checkpoint_${{ env.NETWORK }}" \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
           --tags zebrad \
           --zone "${{ env.ZONE }}"
 
-      # TODO: this approach is very mesy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
-      # This TODO relates to the following issues:
-      # https://github.com/actions/runner/issues/241
-      # https://www.googlecloudcommunity.com/gc/Infrastructure-Compute-Storage/SSH-into-Compute-Container-not-easily-possible/td-p/170915
-      #
-      # Deploying a zebra container might take more than 30 seconds to completely start, so we're adding a timer at the end
-      # of this step before starting the following ones
-      - name: Get container name from logs
-        id: get-container-name
+      - name: Sync past mandatory checkpoint
+        id: sync-checkpoint
         if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
-          INSTANCE_ID=$(gcloud compute instances describe sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --zone ${{ env.ZONE }} --format='value(id)')
-          echo "Using instance: $INSTANCE_ID"
-
-          CONTAINER_NAME=""
-          while [[ ${CONTAINER_NAME} != *"sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"* ]]; do
-              CONTAINER_NAME=$(gcloud logging read 'log_name=projects/${{ env.PROJECT_ID }}/logs/cos_system AND jsonPayload.MESSAGE:sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}' --format='value(jsonPayload.MESSAGE)' --limit=1 | grep -o '...-sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-....' | tr -d "'.")
-              echo "Using container: ${CONTAINER_NAME} from instance: ${INSTANCE_ID}"
-              sleep 10
-          done
-
-          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
-          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
-          sleep 90
-
-      - name: Sync past mandatory checkpoint
-        id: sync-past-checkpoint
-        run: |
-          for RETRY in 1 2 3 4; do
-              gcloud compute ssh \
-              sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-              --zone ${{ env.ZONE }} \
-              --quiet \
-              --ssh-flag="-o ServerAliveInterval=15" \
-              --command="docker logs --follow ${{ env.CONTAINER_NAME }}" \
-              || echo "ssh disconnected $RETRY times"
-          done
+          gcloud compute ssh \
+          sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "docker run -it --name sync-checkpoint ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/${{ env.CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }},target=/zebrad-cache \
+          cargo test --locked --release --features enable-sentry,test_sync_past_mandatory_checkpoint_${{ env.NETWORK }} --manifest-path zebrad/Cargo.toml sync_past_mandatory_checkpoint_${{ env.NETWORK }}"
 
           EXIT_CODE=$(\
           gcloud compute ssh \
@@ -451,13 +379,13 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker wait ${{ env.CONTAINER_NAME }}")
+          --command="docker wait sync-checkpoint")
 
           exit ${EXIT_CODE}
 
       - name: Delete test instance
         # Do not delete the instance if the sync timeouts in GitHub
-        if: ${{ steps.sync-past-checkpoint.outcome == 'success' || steps.sync-past-checkpoint.outcome == 'failure' }}
+        if: ${{ steps.sync-checkpoint.outcome == 'success' || steps.sync-checkpoint.outcome == 'failure' }}
         continue-on-error: true
         run: |
           gcloud compute instances delete "sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
