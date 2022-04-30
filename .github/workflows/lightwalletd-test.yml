@@ -274,7 +274,7 @@ jobs:
           --container-restart-policy=never \
           --container-stdin \
           --container-tty \
-          --container-env=TEST_LWD_RPC_SYNC=1,ZEBRA_TEST_LIGHTWALLETD=${{ env.ZEBRA_TEST_LIGHTWALLETD }},ZEBRA_FORCE_USE_COLOR=1,ZEBRA_CACHED_STATE_DIR_VAR=${{ env.ZEBRA_CACHED_STATE_DIR_VAR }},LIGHTWALLETD_DATA_DIR_VAR=${{ env.LIGHTWALLETD_DATA_DIR_VAR }} \
+          --container-env=TEST_LWD_TRANSACTIONS=1,ZEBRA_TEST_LIGHTWALLETD=${{ env.ZEBRA_TEST_LIGHTWALLETD }},ZEBRA_FORCE_USE_COLOR=1,ZEBRA_CACHED_STATE_DIR_VAR=${{ env.ZEBRA_CACHED_STATE_DIR_VAR }},LIGHTWALLETD_DATA_DIR_VAR=${{ env.LIGHTWALLETD_DATA_DIR_VAR }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
