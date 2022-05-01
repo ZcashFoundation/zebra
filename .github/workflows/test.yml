@@ -313,7 +313,7 @@ jobs:
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
 
       - name: Delete test instance
-        # If the sync timeouts the cached disk won't be generated, so having the instance fullfilling this tasks is not useful
+        # If the sync timeouts the cached disk won't be generated, so having the instance fulfilling this task is not useful
         if: always()
         continue-on-error: true
         run: |
