@@ -227,6 +227,7 @@ jobs:
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
           --tags zebrad \
           --zone "${{ env.ZONE }}"
+          sleep 30
 
       - name: Regenerate stateful disks
         id: regenerate-disk
@@ -364,6 +365,7 @@ jobs:
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
           --tags zebrad \
           --zone "${{ env.ZONE }}"
+          sleep 30
 
       - name: Sync past mandatory checkpoint
         id: sync-checkpoint
