@@ -1,6 +1,12 @@
-target
-Dockerfile
-.dockerignore
-.git
-.github
-.gitignore
+# Exclude everything:
+#
+*
+
+# Now un-exclude required files and folders:
+#
+!.cargo
+!*.toml
+!*.lock
+!tower-*
+!zebra-*
+!zebrad
