@@ -266,11 +266,15 @@ jobs:
         run: |
           SYNC_HEIGHT=""
 
-          while [[ ${SYNC_HEIGHT} == "" ]]; do
-              SYNC_HEIGHT=$(gcloud logging read --format='value(jsonPayload.MESSAGE)' --order="desc" --limit=1 '(resource.labels.instance_id="${{ env.INSTANCE_ID }}" AND jsonPayload.message=~".+flushing database to disk height.+Height\([0-9]+\).+")' | grep -oE 'Height\([0-9]+\)' | grep -oE '[0-9]+' || [[ $? == 1 ]] )
-              echo "SYNC_HEIGHT: $SYNC_HEIGHT"
-              sleep 10
-          done
+          DOCKER_LOGS=$(\
+          gcloud compute ssh \
+          regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command="docker logs regenerate-disk --tail -n 100")
+
+          SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE 'sync_percent=100.000 % current_height=Height\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
 
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
 
