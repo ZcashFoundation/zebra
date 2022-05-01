@@ -10,3 +10,4 @@
 !tower-*
 !zebra-*
 !zebrad
+!docker/entrypoint.sh
