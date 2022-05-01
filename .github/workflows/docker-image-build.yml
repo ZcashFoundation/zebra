@@ -93,6 +93,7 @@ jobs:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
+          logout: false
 
       - name: Login to Google Container Registry
         uses: docker/login-action@v1.14.1
@@ -100,6 +101,7 @@ jobs:
           registry: gcr.io
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
+          logout: false
 
       # Build and push image to Google Artifact Registry
       - name: Build & push
