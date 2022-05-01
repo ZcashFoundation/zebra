@@ -138,7 +138,7 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
-          "docker run -e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 -it --name full-sync ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
+          "docker run -e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 -t --name full-sync ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
           EXIT_CODE=$(\
           gcloud compute ssh \
