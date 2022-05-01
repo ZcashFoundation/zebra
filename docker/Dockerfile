@@ -78,7 +78,7 @@ FROM builder AS tester
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /lightwalletd /usr/local/bin
 
-RUN cargo test --locked --release --features enable-sentry --workspace --no-run
+RUN cargo test --locked --release --features enable-sentry --no-run
 
 COPY ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
