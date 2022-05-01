@@ -105,16 +105,6 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Check if our destination compute instance exists and delete it
-      - name: Delete existing instance with same SHA
-        run: |
-          INSTANCE=$(gcloud compute instances list --filter=full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
-          if [ -z "${INSTANCE}" ]; then
-            echo "No instance to delete"
-          else
-            gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
-          fi
-
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create GCP compute instance
         run: |
@@ -211,8 +201,13 @@ jobs:
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
 
       - name: Delete test instance
-        # Do not delete the instance if the sync timeouts in GitHub
-        if: ${{ steps.full-sync.outcome == 'success' || steps.full-sync.outcome == 'failure' }}
+        # If the sync timeouts the cached disk won't be generated, so having the instance fullfilling this tasks is not useful
+        if: always()
         continue-on-error: true
         run: |
-          gcloud compute instances delete "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          INSTANCE=$(gcloud compute instances list --filter=full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
+          if [ -z "${INSTANCE}" ]; then
+            echo "No instance to delete"
+          else
+            gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          fi
