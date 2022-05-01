@@ -21,6 +21,7 @@ pub type LightwalletdRpcClient =
 /// Returns the lightwalletd instance and the port number that it is listening for RPC connections.
 pub fn spawn_lightwalletd_with_rpc_server(
     zebrad_rpc_address: SocketAddr,
+    wait_for_blocks: bool,
 ) -> Result<(TestChild<TempDir>, u16)> {
     // We're using cached Zebra state here, so this test type is the most similar
     let test_type = LightwalletdTestType::UpdateCachedState;
@@ -41,8 +42,9 @@ pub fn spawn_lightwalletd_with_rpc_server(
         .with_failure_regex_iter(lightwalletd_failure_messages, lightwalletd_ignore_messages);
 
     lightwalletd.expect_stdout_line_matches("Starting gRPC server")?;
-    lightwalletd.expect_stdout_line_matches("Waiting for block")?;
-
+    if wait_for_blocks {
+        lightwalletd.expect_stdout_line_matches("Waiting for block")?;
+    }
     Ok((lightwalletd, lightwalletd_rpc_port))
 }
 
