@@ -111,6 +111,8 @@ jobs:
           gcloud compute instances create-with-container "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
+          --create-disk name="zebrad-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip",device-name="zebrad-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="/zebrad-cache",name="zebrad-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip" \
           --container-image debian:buster \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
@@ -129,7 +131,9 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
-          "sudo docker run -e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 -t --name full-sync ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
+          "docker run -e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 -t --name full-sync"
+          --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip,target=/zebrad-cache \
+          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
 
           EXIT_CODE=$(\
           gcloud compute ssh \
@@ -171,7 +175,7 @@ jobs:
         run: |
           gcloud compute images create zebrad-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-tip \
           --force \
-          --source-disk=full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --source-disk=zebrad-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip \
           --source-disk-zone=${{ env.ZONE }} \
           --storage-location=us \
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
