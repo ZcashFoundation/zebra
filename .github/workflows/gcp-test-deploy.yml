@@ -25,10 +25,10 @@ on:
         required: true
         type: string
       disk_prefix:
-        required: true
+        required: false
         type: string
       disk_suffix:
-        required: true
+        required: false
         type: string
       needs_constants:
         required: true
@@ -37,18 +37,15 @@ on:
         required: true
         type: boolean
       height_grep_text:
-        required: true
-        type: boolean
-
+        required: false
+        type: string
 
 env:
   NETWORK: Mainnet
-  PROJECT_ID: zealous-zebra
   IMAGE_NAME: zebrad-test
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
-  REGION: us-central1
   ZONE: us-central1-a
-  MACHINE_TYPE: c2d-standard-4
+  MACHINE_TYPE: c2d-standard-16
 
 jobs:
   build:
@@ -277,11 +274,11 @@ jobs:
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
-          --tags zebrad \
+          --tags ${{ inputs.app_name }} \
           --zone "${{ env.ZONE }}"
           sleep 30
 
-      - name: Sync past mandatory checkpoint
+      - name: ${{ inputs.test_name }}
         id: ${{ inputs.test_id }}
         if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
