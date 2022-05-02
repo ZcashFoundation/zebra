@@ -36,6 +36,9 @@ on:
       builds_disks:
         required: true
         type: boolean
+      height_grep_text:
+        required: true
+        type: boolean
 
 
 env:
@@ -64,8 +67,8 @@ jobs:
 
   sync:
     name: ${{ inputs.test_name }}
-    runs-on: ubuntu-latest
     needs: build
+    runs-on: ubuntu-latest
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -116,8 +119,8 @@ jobs:
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk name="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path="${{ inputs.zebra_state_path }}",name="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --create-disk name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="${{ inputs.zebra_state_path }}",name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}" \
           --container-image debian:buster \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
@@ -138,7 +141,7 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "docker run -e ${{ inputs.test_variable }}=1 -t --name ${{ inputs.test_id }} \
-          --mount type=bind,source=/mnt/disks/gce-contaißners-mounts/gce-persistent-disks/${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }},target=${{ inputs.zebra_state_path }} \
+          --mount type=bind,source=/mnt/disks/gce-contaißners-mounts/gce-persistent-disks/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},target=${{ inputs.zebra_state_path }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
 
           EXIT_CODE=$(\
@@ -170,16 +173,16 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker logs ${{ inputs.test_id }} --tail -n 100")
+          --command="docker logs ${{ inputs.test_id }} --tail 20")
 
-          SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE 'sync_percent=100.000 % current_height=Height\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
-
+          SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE '${{ inputs.height_grep_text }}\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
 
   create-cached-state:
     name: ${{ inputs.test_name }}
-    runs-on: ubuntu-latest
     needs: sync
+    if: ${{ inputs.builds_disks }}
+    runs-on: ubuntu-latest
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -205,7 +208,7 @@ jobs:
         run: |
           gcloud compute images create ${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }} \
           --force \
-          --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           --source-disk-zone=${{ env.ZONE }} \
           --storage-location=us \
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
@@ -216,7 +219,7 @@ jobs:
         if: always()
         continue-on-error: true
         run: |
-          INSTANCE=$(gcloud compute instances list --filter=${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
+          INSTANCE=$(gcloud compute instances list --filter=${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }} --format='value(NAME)')
           if [ -z "${INSTANCE}" ]; then
             echo "No instance to delete"
           else
