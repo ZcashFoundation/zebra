@@ -111,6 +111,8 @@ jobs:
           gcloud compute instances create-with-container "full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
+          --create-disk name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-tip",device-name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-tip",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="/zebrad-cache",name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-tip" \
           --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -195,7 +197,7 @@ jobs:
         run: |
           gcloud compute images create zebrad-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-tip \
           --force \
-          --source-disk=full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --source-disk=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-tip \
           --source-disk-zone=${{ env.ZONE }} \
           --storage-location=us \
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
