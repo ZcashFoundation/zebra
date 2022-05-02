@@ -142,8 +142,8 @@ jobs:
           gcloud compute instances create-with-container "lwd-rpc-call-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path="${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}",name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="lwd-rpc-call-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="lwd-rpc-call-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}",name="lwd-rpc-call-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}" \
           --container-image ${{ env.GAR_BASE }}/lightwalletd-test:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -268,10 +268,8 @@ jobs:
           gcloud compute instances create-with-container "lwd-transactions-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path="${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}",name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --create-disk name="lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip",device-name="lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path="${{ env.LIGHTWALLETD_DATA_DIR_VAR }}",name="lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip" \
+          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="lwd-transactions-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="lwd-transactions-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}",name="lwd-transactions-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}" \
           --container-image ${{ env.GAR_BASE }}/lightwalletd-test:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -396,8 +394,8 @@ jobs:
           gcloud compute instances create-with-container "lwd-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path="${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}",name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="lwd-full-sync-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="lwd-full-sync-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}",name="lwd-full-sync-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}" \
           --create-disk name="lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip",device-name="lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip",size=100GB,type=pd-ssd \
           --container-mount-disk mount-path="${{ env.LIGHTWALLETD_DATA_DIR_VAR }}",name="lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip" \
           --container-image ${{ env.GAR_BASE }}/lightwalletd-test:sha-${{ env.GITHUB_SHA_SHORT }} \
@@ -548,10 +546,10 @@ jobs:
           gcloud compute instances create-with-container "lwd-update-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path="${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}",name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --create-disk name="${{ env.LWD_CACHED_DISK_NAME }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ env.LWD_CACHED_DISK_NAME }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path="${{ env.LIGHTWALLETD_DATA_DIR_VAR }}",name="${{ env.LWD_CACHED_DISK_NAME }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="lwd-update-sync-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="lwd-update-sync-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}",name="lwd-update-sync-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --create-disk name="lwd-update-sync-${{ env.LWD_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="lwd-update-sync-${{ env.LWD_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="${{ env.LIGHTWALLETD_DATA_DIR_VAR }}",name="lwd-update-sync-${{ env.LWD_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}" \
           --container-image ${{ env.GAR_BASE }}/lightwalletd-test:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
