@@ -164,9 +164,9 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker logs full-sync --tail -n 100")
+          --command="docker logs full-sync --tail 20")
 
-          SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE 'sync_percent=100.000 % current_height=Height\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
+          SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.000 % current_height=Height\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
 
 
       # Create image from disk

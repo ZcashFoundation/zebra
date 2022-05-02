@@ -263,9 +263,9 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker logs regenerate-disk --tail -n 100")
+          --command="docker logs regenerate-disk --tail 20")
 
-          SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE 'sync_percent=100.000 % current_height=Height\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
+          SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE 'flushing database to disk height=Height\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
 
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
 
