@@ -148,7 +148,7 @@ jobs:
           --container-restart-policy=never \
           --container-stdin \
           --container-tty \
-          --container-env=TEST_LWD_RPC_SYNC=1,ZEBRA_TEST_LIGHTWALLETD=${{ env.ZEBRA_TEST_LIGHTWALLETD }},ZEBRA_FORCE_USE_COLOR=1,ZEBRA_CACHED_STATE_DIR_VAR=${{ env.ZEBRA_CACHED_STATE_DIR_VAR }} \
+          --container-env=TEST_LWD_RPC_CALL=1,ZEBRA_TEST_LIGHTWALLETD=${{ env.ZEBRA_TEST_LIGHTWALLETD }},ZEBRA_FORCE_USE_COLOR=1,ZEBRA_CACHED_STATE_DIR_VAR=${{ env.ZEBRA_CACHED_STATE_DIR_VAR }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
@@ -156,7 +156,6 @@ jobs:
           --zone "${{ env.ZONE }}"
         env:
           ZEBRA_CACHED_STATE_DIR_VAR: '/root/.cache/zebrad-cache'
-          LIGHTWALLETD_DATA_DIR_VAR: '/root/.cache/lightwalletd'
 
       # TODO: this approach is very messy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
       # This TODO relates to the following issues:
@@ -335,4 +334,3 @@ jobs:
         continue-on-error: true
         run: |
           gcloud compute instances delete "lwd-transactions-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
-
