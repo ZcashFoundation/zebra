@@ -179,6 +179,7 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
+    /// A [`GetAddressTxIdsRequest`] struct with the following named fields:
     /// - `addresses`: (json array of string, required) The addresses to get transactions from.
     /// - `start`: (numeric, required) The lower height to start looking for transactions (inclusive).
     /// - `end`: (numeric, required) The top height to stop looking for transactions (inclusive).
@@ -188,12 +189,8 @@ pub trait Rpc {
     /// Only the multi-argument format is used by lightwalletd and this is what we currently support:
     /// https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102
     #[rpc(name = "getaddresstxids")]
-    fn get_address_tx_ids(
-        &self,
-        address_strings: AddressStrings,
-        start: u32,
-        end: u32,
-    ) -> BoxFuture<Result<Vec<String>>>;
+    fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest)
+        -> BoxFuture<Result<Vec<String>>>;
 
     /// Returns all unspent outputs for a list of addresses.
     ///
@@ -665,13 +662,11 @@ where
 
     fn get_address_tx_ids(
         &self,
-        address_strings: AddressStrings,
-        start: u32,
-        end: u32,
+        request: GetAddressTxIdsRequest,
     ) -> BoxFuture<Result<Vec<String>>> {
         let mut state = self.state.clone();
-        let start = Height(start);
-        let end = Height(end);
+        let start = Height(request.start);
+        let end = Height(request.end);
 
         let chain_height = self.latest_chain_tip.best_tip_height().ok_or(Error {
             code: ErrorCode::ServerError(0),
@@ -683,7 +678,10 @@ where
             // height range checks
             check_height_range(start, end, chain_height?)?;
 
-            let valid_addresses = address_strings.valid_addresses()?;
+            let valid_addresses = AddressStrings {
+                addresses: request.addresses,
+            }
+            .valid_addresses()?;
 
             let request = zebra_state::ReadRequest::TransactionIdsByAddresses {
                 addresses: valid_addresses,
@@ -965,6 +963,19 @@ pub struct GetAddressUtxos {
     ///
     /// We put this field last, to match the zcashd order.
     height: Height,
+}
+
+/// A struct to use as parameter of the `getaddresstxids`.
+///
+/// See the notes for the [`Rpc::get_address_tx_ids` method].
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
+pub struct GetAddressTxIdsRequest {
+    // A list of addresses to get transactions from.
+    addresses: Vec<String>,
+    // The height to start looking for transactions.
+    start: u32,
+    // The height to end looking for transactions.
+    end: u32,
 }
 
 impl GetRawTransaction {

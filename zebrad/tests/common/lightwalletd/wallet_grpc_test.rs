@@ -13,7 +13,7 @@
 //! - `GetTransaction`: Covered.
 //! - `SendTransaction`: Not covered and it will never will, it has its own test.
 //!
-//! - `GetTaddressTxids`: Not covered, need #4216 to be fixed first.
+//! - `GetTaddressTxids`: Covered.
 //! - `GetTaddressBalance`: Covered.
 //! - `GetTaddressBalanceStream`: Not covered.
 //!
@@ -42,11 +42,12 @@ use crate::common::{
     lightwalletd::{
         wallet_grpc::{
             connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, AddressList, BlockId,
-            BlockRange, ChainSpec, Empty, GetAddressUtxosArg, TxFilter,
+            BlockRange, ChainSpec, Empty, GetAddressUtxosArg, TransparentAddressBlockFilter,
+            TxFilter,
         },
         zebra_skip_lightwalletd_tests,
         LightwalletdTestType::UpdateCachedState,
-        LIGHTWALLETD_DATA_DIR_VAR, LIGHTWALLETD_TEST_TIMEOUT, ZEBRA_CACHED_STATE_DIR_VAR,
+        LIGHTWALLETD_TEST_TIMEOUT,
     },
 };
 
@@ -66,22 +67,12 @@ pub async fn run() -> Result<()> {
     // Require to have a `ZEBRA_CACHED_STATE_DIR` in place
     let zebrad_state_path = test_type.zebrad_state_path();
     if zebrad_state_path.is_none() {
-        tracing::info!(
-            "skipped {test_type:?} lightwalletd test, \
-             set the {ZEBRA_CACHED_STATE_DIR_VAR:?} environment variable to run the test",
-        );
-
         return Ok(());
     }
 
     // Require to have a `LIGHTWALLETD_DATA_DIR` in place
     let lightwalletd_state_path = test_type.lightwalletd_state_path();
     if lightwalletd_state_path.is_none() {
-        tracing::info!(
-            "skipped {test_type:?} lightwalletd test, \
-             set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
-        );
-
         return Ok(());
     }
 
@@ -172,29 +163,32 @@ pub async fn run() -> Result<()> {
     // Check the height of transactions is 1 as expected
     assert_eq!(transaction.height, 1);
 
-    // TODO: Add after #4216
-    // Currently, this call fails with:
-    // 0: status: Unknown, message: "-32602: Invalid params: invalid length 1, expected a tuple of size 3.", details: [], metadata: MetadataMap { headers: {"content-type": "application/grpc"} }
-
-    /*
     // Call `GetTaddressTxids` with a founders reward address that we know exists and have transactions in the first
     // few blocks of the mainnet
-    let transactions = rpc_client.get_taddress_txids(TransparentAddressBlockFilter {
-        address: "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string(),
-        range: Some(BlockRange {
-            start: Some(BlockId {
-                height: 1,
-                hash: vec![],
-            }),
-            end: Some(BlockId {
-                height: 10,
-                hash: vec![],
+    let mut transactions = rpc_client
+        .get_taddress_txids(TransparentAddressBlockFilter {
+            address: "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string(),
+            range: Some(BlockRange {
+                start: Some(BlockId {
+                    height: 1,
+                    hash: vec![],
+                }),
+                end: Some(BlockId {
+                    height: 10,
+                    hash: vec![],
+                }),
             }),
         })
-    }).await?.into_inner();
+        .await?
+        .into_inner();
 
-    dbg!(transactions);
-    */
+    let mut counter = 0;
+    while let Some(_transaction) = transactions.message().await? {
+        counter += 1;
+    }
+
+    // For the provided address in the first 10 blocks there are 10 transactions in the mainnet
+    assert_eq!(10, counter);
 
     // Call `GetTaddressBalance` with the ZF funding stream address
     let balance = rpc_client
