@@ -29,6 +29,8 @@ case "$1" in
             exec cargo "test" "--locked" "--release" "--features" "enable-sentry" "--test" "acceptance" "--" "--nocapture" "--ignored" "sending_transactions_using_lightwalletd"
         elif [[ "$TEST_LWD_FULL_SYNC" -eq "1" ]]; then
             exec cargo "test" "--locked" "--release" "--features" "enable-sentry" "--test" "acceptance" "--" "--nocapture" "--ignored" "lightwalletd_full_sync"
+        elif [[ "$TEST_LWD_UPDATE_SYNC" -eq "1" ]]; then
+            exec cargo "test" "--locked" "--release" "--features" "enable-sentry" "--test" "acceptance" "--" "--nocapture" "--ignored" "lightwalletd_update_sync"
         else
             exec "$@"
         fi
