@@ -130,11 +130,11 @@ jobs:
       - name: Get disk state name from gcloud
         id: get-disk-name
         run: |
-          GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "Disk: $GCP_STATE_DISK"
-          echo "Description: $(gcloud compute images describe $GCP_STATE_DISK --format='value(DESCRIPTION)')"
+          ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "Disk: $ZEBRA_STATE_DISK"
+          echo "Description: $(gcloud compute images describe $ZEBRA_STATE_DISK --format='value(DESCRIPTION)')"
 
-          echo "CACHED_DISK_NAME=$GCP_STATE_DISK" >> $GITHUB_ENV
+          echo "ZEBRA_CACHED_DISK_NAME=$ZEBRA_STATE_DISK" >> $GITHUB_ENV
 
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create GCP compute instance
@@ -142,21 +142,21 @@ jobs:
           gcloud compute instances create-with-container "lwd-rpc-call-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk=image=${{ env.CACHED_DISK_NAME }},name=lwd-rpc-call-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }},size=100GB,type=pd-ssd \
-          --container-mount-disk=mount-path='${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}',name=lwd-rpc-call-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }} \
+          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}",name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}" \
           --container-image ${{ env.GAR_BASE }}/lightwalletd-test:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
           --container-tty \
-          --container-env=TEST_LWD_RPC_SYNC=1,ZEBRA_TEST_LIGHTWALLETD=${{ env.ZEBRA_TEST_LIGHTWALLETD }},ZEBRA_FORCE_USE_COLOR=1,ZEBRA_CACHED_STATE_DIR_VAR=${{ env.ZEBRA_CACHED_STATE_DIR_VAR }},LIGHTWALLETD_DATA_DIR_VAR=${{ env.LIGHTWALLETD_DATA_DIR_VAR }} \
+          --container-env=TEST_LWD_RPC_SYNC=1,ZEBRA_TEST_LIGHTWALLETD=${{ env.ZEBRA_TEST_LIGHTWALLETD }},ZEBRA_FORCE_USE_COLOR=1,ZEBRA_CACHED_STATE_DIR_VAR=${{ env.ZEBRA_CACHED_STATE_DIR_VAR }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
           --tags zebrad \
           --zone "${{ env.ZONE }}"
         env:
-          ZEBRA_CACHED_STATE_DIR_VAR: '$HOME/.cache/zebra'
-          LIGHTWALLETD_DATA_DIR_VAR: '$HOME/.cache/lightwalletd'
+          ZEBRA_CACHED_STATE_DIR_VAR: '/root/.cache/zebrad-cache'
+          LIGHTWALLETD_DATA_DIR_VAR: '/root/.cache/lightwalletd'
 
       # TODO: this approach is very messy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
       # This TODO relates to the following issues:
@@ -256,11 +256,11 @@ jobs:
       - name: Get disk state name from gcloud
         id: get-disk-name
         run: |
-          GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "Disk: $GCP_STATE_DISK"
-          echo "Description: $(gcloud compute images describe $GCP_STATE_DISK --format='value(DESCRIPTION)')"
+          ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "Disk: $ZEBRA_STATE_DISK"
+          echo "Description: $(gcloud compute images describe $ZEBRA_STATE_DISK --format='value(DESCRIPTION)')"
 
-          echo "CACHED_DISK_NAME=$GCP_STATE_DISK" >> $GITHUB_ENV
+          echo "ZEBRA_CACHED_DISK_NAME=$ZEBRA_STATE_DISK" >> $GITHUB_ENV
 
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create GCP compute instance
@@ -268,8 +268,10 @@ jobs:
           gcloud compute instances create-with-container "lwd-transactions-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk=image=${{ env.CACHED_DISK_NAME }},name=lwd-transactions-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }},size=100GB,type=pd-ssd \
-          --container-mount-disk=mount-path='${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}',name=lwd-transactions-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }} \
+          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}",name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --create-disk name="lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip",device-name="lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="${{ env.LIGHTWALLETD_DATA_DIR_VAR }}",name="lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip" \
           --container-image ${{ env.GAR_BASE }}/lightwalletd-test:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -281,8 +283,7 @@ jobs:
           --tags zebrad \
           --zone "${{ env.ZONE }}"
         env:
-          ZEBRA_CACHED_STATE_DIR_VAR: '$HOME/.cache/zebra'
-          LIGHTWALLETD_DATA_DIR_VAR: '$HOME/.cache/lightwalletd'
+          ZEBRA_CACHED_STATE_DIR_VAR: '/root/.cache/zebra'
 
       # TODO: this approach is very messy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
       # This TODO relates to the following issues:
@@ -383,11 +384,11 @@ jobs:
       - name: Get disk state name from gcloud
         id: get-disk-name
         run: |
-          GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "Disk: $GCP_STATE_DISK"
-          echo "Description: $(gcloud compute images describe $GCP_STATE_DISK --format='value(DESCRIPTION)')"
+          ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "Disk: $ZEBRA_STATE_DISK"
+          echo "Description: $(gcloud compute images describe $ZEBRA_STATE_DISK --format='value(DESCRIPTION)')"
 
-          echo "CACHED_DISK_NAME=$GCP_STATE_DISK" >> $GITHUB_ENV
+          echo "ZEBRA_CACHED_DISK_NAME=$ZEBRA_STATE_DISK" >> $GITHUB_ENV
 
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create GCP compute instance
@@ -395,8 +396,10 @@ jobs:
           gcloud compute instances create-with-container "lwd-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk=image=${{ env.CACHED_DISK_NAME }},name=lwd-full-sync-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }},size=100GB,type=pd-ssd \
-          --container-mount-disk=mount-path='${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}',name=lwd-full-sync-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }} \
+          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}",name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --create-disk name="lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip",device-name="lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="${{ env.LIGHTWALLETD_DATA_DIR_VAR }}",name="lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip" \
           --container-image ${{ env.GAR_BASE }}/lightwalletd-test:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -408,8 +411,8 @@ jobs:
           --tags zebrad \
           --zone "${{ env.ZONE }}"
         env:
-          ZEBRA_CACHED_STATE_DIR_VAR: '$HOME/.cache/zebra'
-          LIGHTWALLETD_DATA_DIR_VAR: '$HOME/.cache/lightwalletd'
+          ZEBRA_CACHED_STATE_DIR_VAR: '/root/.cache/zebra'
+          LIGHTWALLETD_DATA_DIR_VAR: '/root/.cache/lightwalletd'
 
       # TODO: this approach is very messy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
       # This TODO relates to the following issues:
@@ -468,9 +471,9 @@ jobs:
       # Force the image creation as the disk is still attached, even though is not being used by the container
       - name: Create image from state disk
         run: |
-          gcloud compute images create lightwalletd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-tip \
+          gcloud compute images create lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-tip \
           --force \
-          --source-disk=lwd-full-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --source-disk=lwd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-tip \
           --source-disk-zone=${{ env.ZONE }} \
           --storage-location=us \
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
@@ -527,11 +530,17 @@ jobs:
       - name: Get disk state name from gcloud
         id: get-disk-name
         run: |
-          GCP_STATE_DISK=$(gcloud compute images list --filter="name~lightwalletd-cache AND name~-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "Disk: $GCP_STATE_DISK"
-          echo "Description: $(gcloud compute images describe $GCP_STATE_DISK --format='value(DESCRIPTION)')"
+          ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "Disk: $ZEBRA_STATE_DISK"
+          echo "Description: $(gcloud compute images describe $ZEBRA_STATE_DISK --format='value(DESCRIPTION)')"
 
-          echo "CACHED_DISK_NAME=$GCP_STATE_DISK" >> $GITHUB_ENV
+          echo "ZEBRA_CACHED_DISK_NAME=$ZEBRA_STATE_DISK" >> $GITHUB_ENV
+
+          LWD_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache AND name~-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "Disk: $LWD_STATE_DISK"
+          echo "Description: $(gcloud compute images describe $LWD_STATE_DISK --format='value(DESCRIPTION)')"
+
+          echo "LWD_CACHED_DISK_NAME=$LWD_STATE_DISK" >> $GITHUB_ENV
 
       # Creates Compute Engine virtual machine instance w/ disks
       - name: Create GCP compute instance
@@ -539,8 +548,10 @@ jobs:
           gcloud compute instances create-with-container "lwd-update-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk=image=${{ env.CACHED_DISK_NAME }},name=lwd-update-sync-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }},size=100GB,type=pd-ssd \
-          --container-mount-disk=mount-path='${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}',name=lwd-update-sync-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }} \
+          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="${{ env.ZEBRA_CACHED_STATE_DIR_VAR }}",name="${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --create-disk name="${{ env.LWD_CACHED_DISK_NAME }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ env.LWD_CACHED_DISK_NAME }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-mount-disk mount-path="${{ env.LIGHTWALLETD_DATA_DIR_VAR }}",name="${{ env.LWD_CACHED_DISK_NAME }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --container-image ${{ env.GAR_BASE }}/lightwalletd-test:sha-${{ env.GITHUB_SHA_SHORT }} \
           --container-restart-policy=never \
           --container-stdin \
@@ -552,8 +563,8 @@ jobs:
           --tags zebrad \
           --zone "${{ env.ZONE }}"
         env:
-          ZEBRA_CACHED_STATE_DIR_VAR: '$HOME/.cache/zebra'
-          LIGHTWALLETD_DATA_DIR_VAR: '$HOME/.cache/lightwalletd'
+          ZEBRA_CACHED_STATE_DIR_VAR: '/root/.cache/zebra'
+          LIGHTWALLETD_DATA_DIR_VAR: '/root/.cache/lightwalletd'
 
       # TODO: this approach is very messy, but getting the just created container name is very error prone and GCP doesn't have a workaround for this without requiring a TTY
       # This TODO relates to the following issues:
@@ -600,21 +611,3 @@ jobs:
           --command="docker wait ${{ env.CONTAINER_NAME }}")
 
           exit ${EXIT_CODE}
-
-      # Create image from disk
-      # Force the image creation as the disk is still attached, even though is not being used by the container
-      - name: Create image from state disk
-        run: |
-          gcloud compute images create lightwalletd-cache-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-lwd \
-          --force \
-          --source-disk=lwd-update-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --source-disk-zone=${{ env.ZONE }} \
-          --storage-location=us \
-          --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
-
-      - name: Delete test instance
-        # Do not delete the instance if the sync timeouts in GitHub
-        if: ${{ steps.lwd-update-sync-.outcome == 'success' || steps.lwd-update-sync-.outcome == 'failure' }}
-        continue-on-error: true
-        run: |
-          gcloud compute instances delete "lwd-update-sync-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
