@@ -49,26 +49,20 @@ on:
       # workflow definitions
       - 'docker/**'
       - '.github/workflows/test.yml'
+      - '.github/workflows/docker-image-build.yml'
 
 env:
-  CARGO_INCREMENTAL: '1'
-  ZEBRA_SKIP_IPV6_TESTS: '1'
-  RUST_BACKTRACE: full
-  RUST_LIB_BACKTRACE: full
-  COLORBT_SHOW_HIDDEN: '1'
   NETWORK: Mainnet
   PROJECT_ID: zealous-zebra
+  IMAGE_NAME: zebrad-test
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
-  GCR_BASE: gcr.io/zealous-zebra
   REGION: us-central1
   ZONE: us-central1-a
   MACHINE_TYPE: c2d-standard-4
-  IMAGE_NAME: zebrad-test
 
 jobs:
-  build:
-    name: Build images
-    timeout-minutes: 210
+  validate-state:
+    name: Validate local state version vs cached state
     runs-on: ubuntu-latest
     outputs:
       any_changed: ${{ steps.changed-files-specific.outputs.any_changed }}
@@ -79,11 +73,6 @@ jobs:
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
 
       - name: Authenticate to Google Cloud
         id: auth
@@ -118,6 +107,34 @@ jobs:
           echo "GCP_STATE_VERSION: $GCP_STATE_VERSION"
 
           if [[ "$LOCAL_STATE_VERSION" -lt "$GCP_STATE_VERSION" ]]; then echo "Local version is lower than cached version" && exit 1; fi
+
+  build:
+    name: Build images
+    needs: validate-state
+    timeout-minutes: 210
+    runs-on: ubuntu-latest
+    outputs:
+      any_changed: ${{ steps.changed-files-specific.outputs.any_changed }}
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.7.1
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
 
         # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
@@ -196,7 +213,7 @@ jobs:
       - name: Run all zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace -- --include-ignored
+          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace -- --include-ignored
 
   # This test changes zebra-chain's activation heights,
   # which can recompile all the Zebra crates,
@@ -217,7 +234,7 @@ jobs:
       - name: Run tests with fake activation heights
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib -- with_fake_activation_heights
+          docker run -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib -- with_fake_activation_heights
         env:
           TEST_FAKE_ACTIVATION_HEIGHTS: '1'
 
@@ -236,7 +253,7 @@ jobs:
       - name: Run zebrad large sync tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance sync_large_checkpoints_ -- --ignored
+          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance sync_large_checkpoints_ -- --ignored
 
   test-lightwalletd-integration:
     name: Test integration with lightwalletd
@@ -252,14 +269,14 @@ jobs:
       - name: Run tests with included lightwalletd binary
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_SKIP_IPV6_TESTS -e ZEBRA_TEST_LIGHTWALLETD --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance -- lightwalletd_integration --nocapture
+          docker run -e ZEBRA_TEST_LIGHTWALLETD --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance -- lightwalletd_integration --nocapture
         env:
           ZEBRA_TEST_LIGHTWALLETD: '1'
 
   regenerate-stateful-disks:
     name: Regenerate stateful disks
     runs-on: ubuntu-latest
-    needs: build
+    needs: [ build, validate-state]
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -288,21 +305,9 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Check if our destination compute instance exists and delete it
-      - name: Delete existing instance with same SHA
-        id: delete-old-instance
-        if: ${{ needs.build.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true' }}
-        run: |
-          INSTANCE=$(gcloud compute instances list --filter=regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
-          if [ -z "${INSTANCE}" ]; then
-            echo "No instance to delete"
-          else
-            gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
-          fi
-
       - name: Create GCP compute instance
+        if: ${{ (needs.validate-state.outputs.any_changed == 'true' || github.event.inputs.regenerate-disks == 'true' }}
         id: create-instance
-        if: ${{ steps.delete-old-instance.outcome == 'skipped' }}
         run: |
           gcloud compute instances create-with-container "regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
@@ -322,7 +327,6 @@ jobs:
           --container-arg="--manifest-path" \
           --container-arg="zebrad/Cargo.toml" \
           --container-arg="sync_to_mandatory_checkpoint_${{ env.NETWORK }}" \
-          --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
@@ -415,11 +419,17 @@ jobs:
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
 
       - name: Delete test instance
-        # Do not delete the instance if the sync timeouts in GitHub
-        if: ${{ steps.sync-to-checkpoint.outcome == 'success' || steps.sync-to-checkpoint.outcome == 'failure' }}
+        # If the `sync-to-checkpoint` step timeouts (+6 hours) the previous step (creating the image) willl be skipped.
+        # Even if the instance continues running, no image will be created, so it's better to delete it.
+        if: always()
         continue-on-error: true
         run: |
-          gcloud compute instances delete "regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          INSTANCE=$(gcloud compute instances list --filter=regenerate-disk-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
+          if [ -z "${INSTANCE}" ]; then
+            echo "No instance to delete"
+          else
+            gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          fi
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached post-checkpoint state
   test-stateful-sync:
@@ -449,17 +459,6 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Check if our destination compute instance exists and delete it
-      - name: Delete existing instance with same SHA
-        id: delete-old-instance
-        run: |
-          INSTANCE=$(gcloud compute instances list --filter=sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
-          if [ -z "${INSTANCE}" ]; then
-            echo "No instance to delete"
-          else
-            gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
-          fi
-
       # If a triggering file for a rebuild was changed on a PR or we manually triggered a rebuild,
       # use the latest available disk state as the regenerate-stateful-disks job was executed
       #
@@ -467,15 +466,15 @@ jobs:
       # want to ensure the disk are regenerated on PR syncs and push events (to main), and when
       # manually triggered.
       # 
-      # In this scenario we also valida that if a file like constants.rs was changed then a disk
-      # rebuild was triggered and we if this happened on a PR we want to use the cached disk from
+      # In this scenario we also validate if a file like constants.rs was changed and a disk
+      # rebuild was triggered. If this happened on a PR we want to use the cached disk from
       # the PR and not the cached disk from main. Otherwise we move to the next step, which is
       # get-main-disk-name as this was most likely triggered by a push in main, or constanst.rs
       # was not changed, which allows us to use the disk from main, as a disk rebuild did not happened,
       # and if the rebuilt happened then it was triggered on main and we want to use main's reference.
       - name: Get latest state disk name from gcloud
         id: get-latest-disk-name
-        if: ${{ (needs.build.outputs.any_changed == 'true' && github.event_name == 'pull_request') || github.event.inputs.regenerate-disks == 'true' }}
+        if: ${{ (needs.validate-state.outputs.any_changed == 'true' && github.event_name == 'pull_request') || github.event.inputs.regenerate-disks == 'true' }}
         run: |
           GCP_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache-${{ env.GITHUB_REF_SLUG_URL }} AND name~-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "Disk: $GCP_STATE_DISK"
@@ -517,7 +516,6 @@ jobs:
           --container-arg="--manifest-path" \
           --container-arg="zebrad/Cargo.toml" \
           --container-arg="sync_past_mandatory_checkpoint_${{ env.NETWORK }}" \
-          --container-env=ZEBRA_SKIP_IPV6_TESTS=1 \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
@@ -573,8 +571,13 @@ jobs:
           exit ${EXIT_CODE}
 
       - name: Delete test instance
-        # Do not delete the instance if the sync timeouts in GitHub
-        if: ${{ steps.sync-past-checkpoint.outcome == 'success' || steps.sync-past-checkpoint.outcome == 'failure' }}
+        # We don't want to leave a failed instance in GCP using resources
+        if: always()
         continue-on-error: true
         run: |
-          gcloud compute instances delete "sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          INSTANCE=$(gcloud compute instances list --filter=sync-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
+          if [ -z "${INSTANCE}" ]; then
+            echo "No instance to delete"
+          else
+            gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          fi
