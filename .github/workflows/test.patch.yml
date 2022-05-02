@@ -12,6 +12,7 @@ on:
       - '**/Cargo.lock'
       - 'docker/**'
       - '.github/workflows/test.yml'
+      - '.github/workflows/gcp-test-deploy.yml'
       - '.github/workflows/docker-image-build.yml'
 
 jobs:
