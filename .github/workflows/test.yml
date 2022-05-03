@@ -196,4 +196,4 @@ jobs:
       disk_suffix: tip
       saves_to_disk: true
       needs_constants: false
-      height_grep_text: 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.000 % current_height=Height'
+      height_grep_text: 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.* current_height=Height'
