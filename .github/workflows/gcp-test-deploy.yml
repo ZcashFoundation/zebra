@@ -264,7 +264,6 @@ jobs:
           sleep 30
 
       - name: ${{ inputs.test_name }}
-        id: ${{ inputs.test_id }}
         if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           gcloud compute ssh \
