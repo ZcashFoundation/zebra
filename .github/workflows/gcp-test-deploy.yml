@@ -211,12 +211,24 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      - name: Get disk state name from gcloud
+      # Before executing any further steps, validate the local state and remote version are the same,
+      # or at least that the local state version is greater than the available cached state version from main.
+      #
+      # Aftwards, get the disk name to be used on further steps
+      - name: Validate local state version with cached state
         id: get-disk-name
         run: |
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
+          echo "LOCAL_STATE_VERSION: $LOCAL_STATE_VERSION"
+
           ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.disk_prefix }} AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "Disk: $ZEBRA_STATE_DISK"
           echo "Description: $(gcloud compute images describe $ZEBRA_STATE_DISK --format='value(DESCRIPTION)')"
+
+          GCP_STATE_VERSION=$(echo "$ZEBRA_STATE_DISK" | grep -oE "v[0-9]+" | grep -oE "[0-9]+")
+          echo "GCP_STATE_VERSION: $GCP_STATE_VERSION"
+
+          if [[ "$LOCAL_STATE_VERSION" -lt "$GCP_STATE_VERSION" ]]; then echo "Local version is lower than cached version" && exit 1; fi
 
           echo "ZEBRA_CACHED_DISK_NAME=$ZEBRA_STATE_DISK" >> $GITHUB_ENV
 
