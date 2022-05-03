@@ -113,8 +113,6 @@ jobs:
           sleep 30
 
       - name: ${{ inputs.test_name }}
-        id: Test sync
-        if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }} \
@@ -264,7 +262,6 @@ jobs:
           sleep 30
 
       - name: ${{ inputs.test_name }}
-        if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }} \
