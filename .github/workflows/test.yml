@@ -352,7 +352,6 @@ jobs:
 
       - name: Sync past mandatory checkpoint
         id: sync-past-checkpoint
-        if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           gcloud compute ssh \
           sync-past-checkpoint-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
