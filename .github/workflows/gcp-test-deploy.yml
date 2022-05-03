@@ -113,7 +113,7 @@ jobs:
           sleep 30
 
       - name: ${{ inputs.test_name }}
-        id: ${{ inputs.test_id }}
+        id: Test sync
         if: ${{ steps.create-instance.outcome == 'success' }}
         run: |
           gcloud compute ssh \
@@ -160,8 +160,8 @@ jobs:
           SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE '${{ inputs.height_grep_text }}\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
 
-  create-cached-state:
-    name: ${{ inputs.test_name }}
+  build-cached-state:
+    name: Build a cached state
     needs: sync
     if: ${{ inputs.builds_disks }}
     runs-on: ubuntu-latest
@@ -209,10 +209,10 @@ jobs:
           fi
 
   test-cached-state:
-    name: ${{ inputs.test_name }}
+    name: Test generated cached state
     if: ${{ !inputs.builds_disks }}
     runs-on: ubuntu-latest
-    needs: [sync, create-cached-state]
+    needs: [sync, build-cached-state]
     permissions:
       contents: 'read'
       id-token: 'write'
