@@ -1027,9 +1027,11 @@ pub struct GetTreestate {
 
     /// Sapling incremental note commitment tree, hex-encoded.
     #[serde(with = "hex")]
+    #[serde(skip_serializing_if = "sapling::tree::SerializedTree::is_empty")]
     sapling_tree: sapling::tree::SerializedTree,
 
     /// Orchard incremental note commitment tree, hex-encoded.
+    #[serde(skip_serializing_if = "orchard::tree::SerializedTree::is_empty")]
     #[serde(with = "hex")]
     orchard_tree: orchard::tree::SerializedTree,
 }

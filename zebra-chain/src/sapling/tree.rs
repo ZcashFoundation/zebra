@@ -160,7 +160,7 @@ impl ZcashDeserialize for Root {
 ///
 /// Note that it's handled as a byte buffer and not a point coordinate (jubjub::Fq)
 /// because that's how the spec handles the MerkleCRH^Sapling function inputs and outputs.
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq)]
 struct Node([u8; 32]);
 
 impl merkle_tree::Hashable for Node {
@@ -434,13 +434,29 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SerializedTree(Vec<u8>);
 
+impl SerializedTree {
+    /// Returns `true` if there's no tree.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 impl From<&NoteCommitmentTree> for SerializedTree {
     fn from(tree: &NoteCommitmentTree) -> Self {
+        let mut serialized_tree = vec![];
+
+        // Skip the serialization of empty trees.
+        //
+        // Note: This ensures compatibility with `zcashd` in the
+        // `z_gettreestate` RPC.
+        if tree.inner == bridgetree::Frontier::empty() {
+            return Self(serialized_tree);
+        }
+
         // Convert the note commitment tree from
         // [`Frontier`](bridgetree::Frontier) to
         // [`CommitmentTree`](merkle_tree::CommitmentTree).
         let tree = CommitmentTree::from_frontier(&tree.inner);
-        let mut serialized_tree = vec![];
         tree.write(&mut serialized_tree)
             .expect("note commitment tree should be serializable");
         Self(serialized_tree)
@@ -451,7 +467,7 @@ impl From<Option<Arc<NoteCommitmentTree>>> for SerializedTree {
     fn from(maybe_tree: Option<Arc<NoteCommitmentTree>>) -> Self {
         match maybe_tree {
             Some(tree) => tree.as_ref().into(),
-            None => Self(Vec::new()),
+            None => Self(vec![]),
         }
     }
 }
