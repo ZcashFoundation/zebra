@@ -7,7 +7,7 @@ on:
         required: false
         type: string
       app_name:
-        required: true
+        required: false
         type: string
         default: 'zebra'
       test_id:
