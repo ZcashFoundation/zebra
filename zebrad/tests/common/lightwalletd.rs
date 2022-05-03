@@ -266,12 +266,12 @@ impl LightwalletdTestType {
     }
 
     /// Returns the Zebra state path for this test, if set.
-    pub fn zebrad_state_path(&self) -> Option<PathBuf> {
+    pub fn zebrad_state_path(&self, test_name: String) -> Option<PathBuf> {
         match env::var_os(ZEBRA_CACHED_STATE_DIR_VAR) {
             Some(path) => Some(path.into()),
             None => {
                 tracing::info!(
-                    "skipped {self:?} lightwalletd test, \
+                    "skipped {test_name:?} lightwalletd test, \
                      set the {ZEBRA_CACHED_STATE_DIR_VAR:?} environment variable to run the test",
                 );
 
@@ -284,12 +284,12 @@ impl LightwalletdTestType {
     ///
     /// Returns `None` if the test should be skipped,
     /// and `Some(Err(_))` if the config could not be created.
-    pub fn zebrad_config(&self) -> Option<Result<ZebradConfig>> {
+    pub fn zebrad_config(&self, test_name: String) -> Option<Result<ZebradConfig>> {
         if !self.needs_zebra_cached_state() {
             return Some(random_known_rpc_port_config());
         }
 
-        let zebra_state_path = self.zebrad_state_path()?;
+        let zebra_state_path = self.zebrad_state_path(test_name)?;
 
         let mut config = match random_known_rpc_port_config() {
             Ok(config) => config,
@@ -305,12 +305,12 @@ impl LightwalletdTestType {
     }
 
     /// Returns the lightwalletd state path for this test, if set.
-    pub fn lightwalletd_state_path(&self) -> Option<PathBuf> {
+    pub fn lightwalletd_state_path(&self, test_name: String) -> Option<PathBuf> {
         match env::var_os(LIGHTWALLETD_DATA_DIR_VAR) {
             Some(path) => Some(path.into()),
             None => {
                 tracing::info!(
-                    "skipped {self:?} lightwalletd test, \
+                    "skipped {test_name:?} lightwalletd test, \
                      set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
                 );
 

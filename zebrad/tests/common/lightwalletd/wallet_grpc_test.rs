@@ -65,13 +65,13 @@ pub async fn run() -> Result<()> {
     let test_type = UpdateCachedState;
 
     // Require to have a `ZEBRA_CACHED_STATE_DIR` in place
-    let zebrad_state_path = test_type.zebrad_state_path();
+    let zebrad_state_path = test_type.zebrad_state_path("wallet_grpc_test".to_string());
     if zebrad_state_path.is_none() {
         return Ok(());
     }
 
     // Require to have a `LIGHTWALLETD_DATA_DIR` in place
-    let lightwalletd_state_path = test_type.lightwalletd_state_path();
+    let lightwalletd_state_path = test_type.lightwalletd_state_path("wallet_grpc_test".to_string());
     if lightwalletd_state_path.is_none() {
         return Ok(());
     }
@@ -87,8 +87,12 @@ pub async fn run() -> Result<()> {
     )?;
 
     // Launch lightwalletd
-    let (_lightwalletd, lightwalletd_rpc_port) =
-        spawn_lightwalletd_with_rpc_server(zebra_rpc_address, false)?;
+    let (_lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(
+        zebra_rpc_address,
+        lightwalletd_state_path,
+        test_type,
+        false,
+    )?;
 
     // Give lightwalletd a few seconds to open its grpc port before connecting to it
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
