@@ -9,6 +9,7 @@ on:
       app_name:
         required: true
         type: string
+        default: 'zebra'
       test_id:
         required: true
         type: string
@@ -24,9 +25,11 @@ on:
       zebra_state_path:
         required: true
         type: string
+        default: '/zebrad-cache'
       disk_prefix:
         required: false
         type: string
+        default: 'zebrad-cache'
       disk_suffix:
         required: false
         type: string
