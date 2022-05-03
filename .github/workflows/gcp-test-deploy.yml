@@ -121,7 +121,7 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "docker run -e ${{ inputs.test_variable }}=1 -t --name ${{ inputs.test_id }} \
-          --mount type=bind,source=/mnt/disks/gce-contaißners-mounts/gce-persistent-disks/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},target=${{ inputs.zebra_state_path }} \
+          --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},target=${{ inputs.zebra_state_path }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
           EXIT_CODE=$(\
