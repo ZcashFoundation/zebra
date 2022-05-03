@@ -84,7 +84,7 @@ jobs:
       test_id: sync-to-tip
       test_name: Test full sync
       test_description: Test a full sync up to the tip
-      test_variable: '$TEST_FULL_SYNC'
+      test_variable: 'TEST_FULL_SYNC'
       zebra_state_path: '/zebrad-cache'
       disk_prefix: zebrad-cache
       disk_suffix: tip

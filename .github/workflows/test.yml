@@ -160,7 +160,7 @@ jobs:
       test_id: sync-to-checkpoint
       test_name: Rebuild stateful disks
       test_description: Test sync up to mandatory checkpoint
-      test_variable: '$TEST_DISK_REBUILD'
+      test_variable: 'TEST_DISK_REBUILD'
       zebra_state_path: '/zebrad-cache'
       disk_prefix: zebrad-cache
       disk_suffix: checkpoint
@@ -176,7 +176,7 @@ jobs:
       test_id: sync-past-checkpoint
       test_name: Test sync past checkpoint
       test_description: Test full validation sync from a cached state
-      test_variable: '$TEST_CHECKPOINT_SYNC'
+      test_variable: 'TEST_CHECKPOINT_SYNC'
       zebra_state_path: '/zebrad-cache'
       disk_prefix: zebrad-cache
       disk_suffix: checkpoint
