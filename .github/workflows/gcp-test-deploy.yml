@@ -110,7 +110,7 @@ jobs:
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
           --tags ${{ inputs.app_name }} \
           --zone "${{ env.ZONE }}"
-          sleep 30
+          sleep 60
 
       - name: ${{ inputs.test_name }}
         run: |
@@ -259,7 +259,7 @@ jobs:
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
           --tags ${{ inputs.app_name }} \
           --zone "${{ env.ZONE }}"
-          sleep 30
+          sleep 60
 
       - name: ${{ inputs.test_name }}
         run: |
