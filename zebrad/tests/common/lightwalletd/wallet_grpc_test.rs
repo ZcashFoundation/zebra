@@ -99,7 +99,7 @@ pub async fn run() -> Result<()> {
     let (_lightwalletd, lightwalletd_rpc_port) =
         spawn_lightwalletd_with_rpc_server(zebra_rpc_address, false)?;
 
-    // Give the OS a few seconds to open the lightwalletd grpc port before connecting to it
+    // Give lightwalletd a few seconds to open its grpc port before connecting to it
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
     // Connect to the lightwalletd instance
@@ -113,7 +113,7 @@ pub async fn run() -> Result<()> {
         .await?
         .into_inner();
 
-    // As we are using a pretty much syncronized blockchain, we can assume the tip is above current network upgrade
+    // As we are using a pretty much synchronized blockchain, we can assume the tip is above the Canopy network upgrade
     assert!(block_tip.height > Canopy.activation_height(network).unwrap().0 as u64);
 
     // Call `GetBlock` with block 1 height
