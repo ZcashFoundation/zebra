@@ -1,0 +1,181 @@
+name: Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        default: 'Mainnet'
+        description: 'Network to deploy: Mainnet or Testnet'
+        required: true
+      checkpoint_sync:
+        default: 'true'
+        description: 'Configures `zebrad` to use as many checkpoints as possible'
+        required: true
+      regenerate-disks:
+        type: boolean
+        default: false
+        description: 'Just update stateful disks'
+        required: true
+      run-full-sync:
+        type: boolean
+        default: false
+        description: 'Just trigger a full sync'
+        required: true
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
+      - 'docker/**'
+      - '.github/workflows/test-zebra.yml'
+      - '.github/workflows/gcp-test-deploy.yml'
+      - '.github/workflows/docker-image-build.yml'
+
+  push:
+    branches:
+      - main
+    paths:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
+      - 'docker/**'
+      - '.github/workflows/test-zebra.yml'
+      - '.github/workflows/gcp-test-deploy.yml'
+      - '.github/workflows/docker-image-build.yml'
+
+env:
+  # TODO: use the output from ./.github/workflows/docker-image-build.yml
+  IMAGE_NAME: zebrad-test
+  GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
+
+jobs:
+  build:
+    uses: ./.github/workflows/docker-image-build.yml
+    with:
+      dockerfile_path: ./docker/Dockerfile
+      dockerfile_target: tester
+      image_name: zebrad-test
+      # TODO: validate how to use variable/conditional values for Testnet
+      network: Mainnet
+      checkpoint_sync: true
+      rust_backtrace: full
+      rust_lib_backtrace: full
+      colorbt_show_hidden: '1'
+      zebra_skip_ipv6_tests: '1'
+      rust_log: info
+
+  # Run all the zebra tests, including tests that are ignored by default
+  test-all:
+    name: Test all
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
+    steps:
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Run all zebrad tests
+        run: |
+          docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace -- --include-ignored
+
+  # This test changes zebra-chain's activation heights,
+  # which can recompile all the Zebra crates,
+  # so we want its build products to be cached separately.
+  #
+  # Also, we don't want to accidentally use the fake heights in other tests.
+  test-fake-activation-heights:
+    name: Test with fake activation heights
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
+    steps:
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Run tests with fake activation heights
+        run: |
+          docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib -- with_fake_activation_heights
+        env:
+          TEST_FAKE_ACTIVATION_HEIGHTS: '1'
+
+  # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state
+  test-empty-sync:
+    name: Test checkpoint sync from empty state
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
+    steps:
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Run zebrad large sync tests
+        run: |
+          docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance sync_large_checkpoints_ -- --ignored
+
+  regenerate-stateful-disks:
+    needs: build
+    uses: ./.github/workflows/gcp-test-deploy.yml
+    with:
+      test_id: sync-to-checkpoint
+      test_description: Test sync up to mandatory checkpoint
+      test_variables: '-e TEST_DISK_REBUILD=1 -e ZEBRA_FORCE_USE_COLOR=1'
+      disk_suffix: checkpoint
+      saves_to_disk: true
+      needs_constants: true
+      height_grep_text: 'flushing database to disk height=Height'
+
+  # Test that Zebra syncs and fully validates a few thousand blocks from a cached post-checkpoint state
+  test-stateful-sync:
+    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
+    needs: build
+    uses: ./.github/workflows/gcp-test-deploy.yml
+    with:
+      test_id: sync-past-checkpoint
+      test_description: Test full validation sync from a cached state
+      test_variables: '-e TEST_CHECKPOINT_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1'
+      disk_suffix: checkpoint
+      saves_to_disk: false
+      needs_constants: false
+
+  # Test that Zebra can run a full mainnet sync after a PR is approved
+  test-full-sync:
+    # TODO change `github.ref_name == 'main'` to `startsWith(github.head_ref, 'mergify/merge-queue/')`
+    # to only run on Mergify head branches, and on manual dispatch:
+    # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
+    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || github.event.inputs.run-full-sync == 'true' }}
+    needs: build
+    uses: ./.github/workflows/gcp-test-deploy.yml
+    with:
+      test_id: full-sync-to-tip
+      test_description: Test a full sync up to the tip
+      test_variables: '-e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600'
+      disk_suffix: tip
+      saves_to_disk: true
+      needs_constants: false
+      height_grep_text: 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.* current_height=Height'

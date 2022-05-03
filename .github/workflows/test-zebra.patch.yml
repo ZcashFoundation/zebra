@@ -11,7 +11,8 @@ on:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - 'docker/**'
-      - '.github/workflows/test.yml'
+      - '.github/workflows/test-zebra.yml'
+      - '.github/workflows/gcp-test-deploy.yml'
       - '.github/workflows/docker-image-build.yml'
 
 jobs:
