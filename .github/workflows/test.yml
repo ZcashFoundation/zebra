@@ -186,7 +186,7 @@ jobs:
     # TODO change `github.ref_name == 'main'` to `startsWith(github.head_ref, 'mergify/merge-queue/')`
     # to only run on Mergify head branches, and on manual dispatch:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || github.event.inputs.run-full-sync == 'true'  )}}
+    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || github.event.inputs.run-full-sync == 'true' }}
     needs: build
     uses: ./.github/workflows/gcp-test-deploy.yml
     with:
