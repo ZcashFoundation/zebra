@@ -161,7 +161,7 @@ jobs:
       test_description: Test sync up to mandatory checkpoint
       test_variables: '-e TEST_DISK_REBUILD=1 -e ZEBRA_FORCE_USE_COLOR=1'
       disk_suffix: checkpoint
-      saves_disks: true
+      saves_to_disk: true
       needs_constants: true
       height_grep_text: 'flushing database to disk height=Height'
 
@@ -174,7 +174,7 @@ jobs:
       test_description: Test full validation sync from a cached state
       test_variables: '-e TEST_CHECKPOINT_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1'
       disk_suffix: checkpoint
-      saves_disks: false
+      saves_to_disk: false
       needs_constants: false
 
   # Test that Zebra can run a full mainnet sync after a PR is approved
@@ -186,6 +186,6 @@ jobs:
       test_description: Test a full sync up to the tip
       test_variables: '-e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600'
       disk_suffix: tip
-      saves_disks: true
+      saves_to_disk: true
       needs_constants: false
       height_grep_text: 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.000 % current_height=Height'
