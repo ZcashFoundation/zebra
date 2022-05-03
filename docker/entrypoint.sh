@@ -24,9 +24,9 @@ case "$1" in
         elif [[ "$TEST_FULL_SYNC" -eq "1" ]]; then
             exec cargo "test" "--locked" "--release" "--features" "enable-sentry" "--test" "acceptance" "--" "--nocapture" "--ignored" "full_sync_mainnet"
         elif [[ "$TEST_DISK_REBUILD" -eq "1" ]]; then
-            exec cargo "test" "--locked" "--release" "--features" "enable-sentry,test_sync_to_mandatory_checkpoint_${NETWORK}" "--manifest-path" "zebrad/Cargo.toml" "sync_to_mandatory_checkpoint_${NETWORK}"
+            exec cargo "test" "--locked" "--release" "--features" "enable-sentry,test_sync_to_mandatory_checkpoint_${NETWORK,,}" "--manifest-path" "zebrad/Cargo.toml" "sync_to_mandatory_checkpoint_${NETWORK,,}"
         elif [[ "$TEST_CHECKPOINT_SYNC" -eq "1" ]]; then
-            exec cargo "test" "--locked" "--release" "--features" "enable-sentry,test_sync_past_mandatory_checkpoint_${NETWORK}" "--manifest-path" "zebrad/Cargo.toml" "test_sync_past_mandatory_checkpoint_${NETWORK}"
+            exec cargo "test" "--locked" "--release" "--features" "enable-sentry,test_sync_past_mandatory_checkpoint_${NETWORK,,}" "--manifest-path" "zebrad/Cargo.toml" "test_sync_past_mandatory_checkpoint_${NETWORK,,}"
         else
             exec "$@"
         fi
