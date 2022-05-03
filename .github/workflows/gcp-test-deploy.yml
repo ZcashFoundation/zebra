@@ -13,9 +13,6 @@ on:
       test_id:
         required: true
         type: string
-      test_name:
-        required: true
-        type: string
       test_description:
         required: true
         type: string
@@ -52,7 +49,7 @@ env:
 
 jobs:
   sync:
-    name: ${{ inputs.test_name }}
+    name: Run ${{ inputs.test_id }} test
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -115,7 +112,7 @@ jobs:
           --zone "${{ env.ZONE }}"
           sleep 60
 
-      - name: ${{ inputs.test_name }}
+      - name: Run ${{ inputs.test_id }} test
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -241,7 +238,7 @@ jobs:
           --zone "${{ env.ZONE }}"
           sleep 60
 
-      - name: ${{ inputs.test_name }}
+      - name: Run ${{ inputs.test_id }} test
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
