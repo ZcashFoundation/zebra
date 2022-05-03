@@ -131,7 +131,7 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
-          "docker run -e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 -t --name full-sync"
+          "docker run -e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600 -t --name full-sync \
           --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-tip,target=/zebrad-cache \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
