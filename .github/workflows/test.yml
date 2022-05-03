@@ -16,6 +16,12 @@ on:
         default: false
         description: 'Just update stateful disks'
         required: true
+      run-full-sync:
+        type: boolean
+        default: false
+        description: 'Just trigger a full sync'
+        required: true
+
   pull_request:
     branches:
       - main
@@ -55,13 +61,9 @@ on:
       - '.github/workflows/docker-image-build.yml'
 
 env:
-  NETWORK: Mainnet
-  PROJECT_ID: zealous-zebra
+  # TODO: use the output from ./.github/workflows/docker-image-build.yml
   IMAGE_NAME: zebrad-test
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
-  REGION: us-central1
-  ZONE: us-central1-a
-  MACHINE_TYPE: c2d-standard-4
 
 jobs:
   build:
@@ -70,6 +72,7 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: tester
       image_name: zebrad-test
+      # TODO: validate how to use variable/conditional values for Testnet
       network: Mainnet
       checkpoint_sync: true
       rust_backtrace: full
@@ -167,6 +170,7 @@ jobs:
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached post-checkpoint state
   test-stateful-sync:
+    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
     needs: build
     uses: ./.github/workflows/gcp-test-deploy.yml
     with:
@@ -179,6 +183,10 @@ jobs:
 
   # Test that Zebra can run a full mainnet sync after a PR is approved
   test-full-sync:
+    # TODO change `github.ref_name == 'main'` to `startsWith(github.head_ref, 'mergify/merge-queue/')`
+    # to only run on Mergify head branches, and on manual dispatch:
+    # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
+    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || github.event.inputs.run-full-sync == 'true'  )}}
     needs: build
     uses: ./.github/workflows/gcp-test-deploy.yml
     with:
