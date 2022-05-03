@@ -196,16 +196,16 @@ pub async fn run() -> Result<()> {
     dbg!(transactions);
     */
 
-    // Call `GetTaddressBalance` with a founders reward address
+    // Call `GetTaddressBalance` with the ZF funding stream address
     let balance = rpc_client
         .get_taddress_balance(AddressList {
-            addresses: vec!["t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string()],
+            addresses: vec!["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1".to_string()],
         })
         .await?
         .into_inner();
 
-    // Assume this address will always have a balance greater than zero
-    // TODO: This assumption may be too much, think on something better
+    // With ZFND or Major Grants funding stream address, the balance will always be greater than zero,
+    // because new coins are created in each block
     assert!(balance.value_zat > 0);
 
     // TODO: Create call and check for `GetTaddressBalanceStream`
@@ -224,10 +224,10 @@ pub async fn run() -> Result<()> {
     dbg!(tree_state);
     */
 
-    // Call `GetAddressUtxos` for address that we know has utxos
+    // Call `GetAddressUtxos` with the ZF funding stream address that will always have utxos
     let utxos = rpc_client
         .get_address_utxos(GetAddressUtxosArg {
-            addresses: vec!["t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string()],
+            addresses: vec!["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1".to_string()],
             start_height: 1,
             max_entries: 1,
         })
