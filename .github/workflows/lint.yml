@@ -1,4 +1,4 @@
-name: Lint Rust files
+name: Lint
 
 on:
   # we build Rust caches on main, so they can be shared by all branches:
