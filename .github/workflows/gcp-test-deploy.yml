@@ -48,23 +48,8 @@ env:
   MACHINE_TYPE: c2d-standard-16
 
 jobs:
-  build:
-    uses: ./.github/workflows/docker-image-build.yml
-    with:
-      dockerfile_path: ./docker/Dockerfile
-      dockerfile_target: tester
-      image_name: zebrad-test
-      network: Mainnet
-      checkpoint_sync: true
-      rust_backtrace: full
-      rust_lib_backtrace: full
-      colorbt_show_hidden: '1'
-      zebra_skip_ipv6_tests: '1'
-      rust_log: info
-
   sync:
     name: ${{ inputs.test_name }}
-    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -227,7 +212,7 @@ jobs:
     name: ${{ inputs.test_name }}
     if: ${{ !inputs.builds_disks }}
     runs-on: ubuntu-latest
-    needs: [build, sync, create-cached-state]
+    needs: [sync, create-cached-state]
     permissions:
       contents: 'read'
       id-token: 'write'
