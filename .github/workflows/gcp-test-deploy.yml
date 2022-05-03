@@ -192,6 +192,11 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
