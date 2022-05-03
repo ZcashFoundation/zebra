@@ -33,7 +33,7 @@ on:
       needs_constants:
         required: true
         type: boolean
-      builds_disks:
+      saves_disks:
         required: true
         type: boolean
       height_grep_text:
@@ -161,7 +161,7 @@ jobs:
       # Create image from disk that will be used for following tests
       # Force the image creation as the disk is still attached even though is not being used by the container
       - name: Create image from state disk
-        if: ${{ inputs.builds_disks }}
+        if: ${{ inputs.saves_disks }}
         run: |
           gcloud compute images create ${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }} \
           --force \
@@ -183,9 +183,9 @@ jobs:
             gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
           fi
 
-  test-cached-state:
+  test-with-cached-state:
     name: Test generated cached state
-    if: ${{ !inputs.builds_disks }}
+    if: ${{ !inputs.saves_disks }}
     runs-on: ubuntu-latest
     needs: sync
     permissions:

@@ -165,7 +165,7 @@ jobs:
       zebra_state_path: '/zebrad-cache'
       disk_prefix: zebrad-cache
       disk_suffix: checkpoint
-      builds_disks: true
+      saves_disks: true
       needs_constants: true
       height_grep_text: 'flushing database to disk height=Height'
 
@@ -182,7 +182,7 @@ jobs:
       zebra_state_path: '/zebrad-cache'
       disk_prefix: zebrad-cache
       disk_suffix: checkpoint
-      builds_disks: false
+      saves_disks: false
       needs_constants: false
 
   # Test that Zebra can run a full mainnet sync after a PR is approved
@@ -198,6 +198,6 @@ jobs:
       zebra_state_path: '/zebrad-cache'
       disk_prefix: zebrad-cache
       disk_suffix: tip
-      builds_disks: true
+      saves_disks: true
       needs_constants: false
       height_grep_text: 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.000 % current_height=Height'
