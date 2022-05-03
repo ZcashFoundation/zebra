@@ -98,7 +98,7 @@ jobs:
         id: create-instance
         if: (${{ inputs.needs_constants }} && steps.changed-files-specific.outputs.any_changed == 'true' && github.event_name == 'push') || !${{ inputs.needs_constants }}
         run: |
-          gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}" \
+          gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
           --create-disk name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
@@ -115,7 +115,7 @@ jobs:
       - name: ${{ inputs.test_name }}
         run: |
           gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }} \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
@@ -126,7 +126,7 @@ jobs:
 
           EXIT_CODE=$(\
           gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }} \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
@@ -149,7 +149,7 @@ jobs:
 
           DOCKER_LOGS=$(\
           gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }} \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
@@ -176,7 +176,7 @@ jobs:
         if: always()
         continue-on-error: true
         run: |
-          INSTANCE=$(gcloud compute instances list --filter=${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }} --format='value(NAME)')
+          INSTANCE=$(gcloud compute instances list --filter=${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
           if [ -z "${INSTANCE}" ]; then
             echo "No instance to delete"
           else
@@ -224,7 +224,7 @@ jobs:
       - name: Create GCP compute instance
         id: create-instance
         run: |
-          gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}" \
+          gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
           --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
@@ -241,7 +241,7 @@ jobs:
       - name: ${{ inputs.test_name }}
         run: |
           gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }} \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
@@ -252,7 +252,7 @@ jobs:
 
           EXIT_CODE=$(\
           gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }} \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
