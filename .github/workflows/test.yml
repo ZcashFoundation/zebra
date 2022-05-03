@@ -159,7 +159,7 @@ jobs:
     with:
       app_name: zebrad
       test_id: sync-to-checkpoint
-      test_name: Rebuild stateful disks
+      test_name: Test stateful disks rebuild
       test_description: Test sync up to mandatory checkpoint
       test_variables: '-e TEST_DISK_REBUILD=1 -e ZEBRA_FORCE_USE_COLOR=1'
       zebra_state_path: '/zebrad-cache'
