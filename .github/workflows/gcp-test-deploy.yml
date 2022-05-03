@@ -20,7 +20,7 @@ on:
         required: true
         type: string
       zebra_state_path:
-        required: true
+        required: false
         type: string
         default: '/zebrad-cache'
       disk_prefix:
