@@ -154,6 +154,7 @@ jobs:
           ZEBRA_TEST_LIGHTWALLETD: '1'
 
   regenerate-stateful-disks:
+    needs: build
     uses: ./.github/workflows/gcp-test-deploy.yml
     with:
       app_name: zebrad
@@ -170,6 +171,7 @@ jobs:
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached post-checkpoint state
   test-stateful-sync:
+    needs: build
     uses: ./.github/workflows/gcp-test-deploy.yml
     with:
       app_name: zebrad
@@ -183,3 +185,19 @@ jobs:
       builds_disks: false
       needs_constants: false
 
+  # Test that Zebra can run a full mainnet sync after a PR is approved
+  test-full-sync:
+    needs: build
+    uses: ./.github/workflows/gcp-test-deploy.yml
+    with:
+      app_name: zebrad
+      test_id: full-sync-to-tip
+      test_name: Test full sync
+      test_description: Test a full sync up to the tip
+      test_variable: 'TEST_FULL_SYNC'
+      zebra_state_path: '/zebrad-cache'
+      disk_prefix: zebrad-cache
+      disk_suffix: tip
+      builds_disks: true
+      needs_constants: false
+      height_grep_text: 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.000 % current_height=Height'
