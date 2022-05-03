@@ -208,14 +208,14 @@ jobs:
           --boot-disk-type pd-ssd \
           --create-disk name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint",device-name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint",size=100GB,type=pd-ssd \
           --container-mount-disk mount-path="/zebrad-cache",name="zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${{ env.NETWORK }}-checkpoint" \
-          --container-image ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          --container-image debian:buster \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
           --tags zebrad \
           --zone "${{ env.ZONE }}"
-          sleep 30
+          sleep 60
 
       - name: Regenerate stateful disks
         id: sync-to-checkpoint
@@ -348,7 +348,7 @@ jobs:
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
           --tags zebrad \
           --zone "${{ env.ZONE }}"
-          sleep 30
+          sleep 60
 
       - name: Sync past mandatory checkpoint
         id: sync-past-checkpoint
