@@ -18,7 +18,7 @@ on:
       test_description:
         required: true
         type: string
-      test_variable:
+      test_variables:
         required: true
         type: string
       zebra_state_path:
@@ -120,7 +120,7 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
-          "docker run -e ${{ inputs.test_variable }}=1 -t --name ${{ inputs.test_id }} \
+          "docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
           --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},target=${{ inputs.zebra_state_path }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
@@ -246,7 +246,7 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
-          "docker run -e ${{ inputs.test_variable }}=1 -t --name ${{ inputs.test_id }} \
+          "docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
           --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/${{ inputs.test_id }}-${{ env.ZEBRA_CACHED_DISK_NAME }}-${{ env.GITHUB_SHA_SHORT }},target=${{ inputs.zebra_state_path }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
