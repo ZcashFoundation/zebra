@@ -163,6 +163,15 @@ impl ZcashDeserialize for Root {
 #[derive(Clone, Debug, Copy, PartialEq)]
 struct Node([u8; 32]);
 
+/// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
+///
+/// Zebra stores Sapling note commitment trees as [`Frontier`][1]s while the
+/// [`z_gettreestate`][2] RPC requires [`CommitmentTree`][3]s. Implementing
+/// [`merkle_tree::Hashable`] for [`Node`]s allows the conversion.
+///
+/// [1]: bridgetree::Frontier
+/// [2]: https://zcash.github.io/rpc/z_gettreestate.html
+/// [3]: merkle_tree::CommitmentTree
 impl merkle_tree::Hashable for Node {
     fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
         let mut node = [0u8; 32];
