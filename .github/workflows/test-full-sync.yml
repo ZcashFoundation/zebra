@@ -167,7 +167,7 @@ jobs:
           --command="docker logs full-sync --tail 20")
 
           SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.000 % current_height=Height\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
-
+          echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
 
       # Create image from disk
       # Force the image creation as the disk is still attached, even though is not being used by the container
