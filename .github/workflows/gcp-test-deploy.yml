@@ -107,14 +107,13 @@ jobs:
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
           --create-disk name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path="${{ inputs.zebra_state_path }}",name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}" \
           --container-image debian:buster \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
           --tags ${{ inputs.app_name }} \
-          --zone "${{ env.ZONE }}"
+          --zone ${{ env.ZONE }}
           sleep 60
 
       - name: Run ${{ inputs.test_id }} test
@@ -125,7 +124,11 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
-          "docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
+          "\
+          docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
+          ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
+          && \
+          docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.zebra_state_path }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
@@ -237,14 +240,13 @@ jobs:
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
           --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
-          --container-mount-disk mount-path="${{ inputs.zebra_state_path }}",name="${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}" \
           --container-image debian:buster \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
           --tags ${{ inputs.app_name }} \
-          --zone "${{ env.ZONE }}"
+          --zone ${{ env.ZONE }}
           sleep 60
 
       - name: Run ${{ inputs.test_id }} test
@@ -255,7 +257,11 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
-          "docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
+          "\
+          docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
+          ${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
+          && \
+          docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
           --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.zebra_state_path }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
