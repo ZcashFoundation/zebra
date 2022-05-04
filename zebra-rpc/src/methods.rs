@@ -19,16 +19,16 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
     block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::{SerializationError, ZcashDeserialize},
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
-    transparent::Address,
+    transparent::{self, Address},
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
+use zebra_state::OutputIndex;
 
 use crate::queue::Queue;
 
@@ -273,8 +273,15 @@ where
     {
         let runner = Queue::start();
 
+        let mut app_version = app_version.to_string();
+
+        // Match zcashd's version format, if the version string has anything in it
+        if !app_version.is_empty() && !app_version.starts_with('v') {
+            app_version.insert(0, 'v');
+        }
+
         let rpc_impl = RpcImpl {
-            app_version: app_version.to_string(),
+            app_version,
             mempool: mempool.clone(),
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
@@ -404,9 +411,9 @@ where
 
         let response = GetBlockChainInfo {
             chain,
-            blocks: tip_height.0,
-            best_block_hash: GetBestBlockHash(tip_hash),
-            estimated_height: estimated_height.0,
+            blocks: tip_height,
+            best_block_hash: tip_hash,
+            estimated_height,
             upgrades,
             consensus,
         };
@@ -431,9 +438,9 @@ where
             })?;
 
             match response {
-                zebra_state::ReadResponse::AddressBalance(balance) => {
-                    Ok(AddressBalance { balance })
-                }
+                zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
+                    balance: u64::from(balance),
+                }),
                 _ => unreachable!("Unexpected response from state service: {response:?}"),
             }
         }
@@ -556,10 +563,16 @@ where
 
             match response {
                 mempool::Response::TransactionIds(unmined_transaction_ids) => {
-                    Ok(unmined_transaction_ids
+                    let mut tx_ids: Vec<String> = unmined_transaction_ids
                         .iter()
                         .map(|id| id.mined_id().encode_hex())
-                        .collect())
+                        .collect();
+
+                    // Sort returned transaction IDs in numeric/string order.
+                    // (zcashd's sort order appears arbitrary.)
+                    tx_ids.sort();
+
+                    Ok(tx_ids)
                 }
                 _ => unreachable!("unmatched response to a transactionids request"),
             }
@@ -725,20 +738,20 @@ where
             };
 
             for utxo_data in utxos.utxos() {
-                let address = utxo_data.0.to_string();
-                let txid = utxo_data.1.to_string();
-                let height = utxo_data.2.height().0;
-                let output_index = utxo_data.2.output_index().as_usize();
-                let script = utxo_data.3.lock_script.to_string();
-                let satoshis = i64::from(utxo_data.3.value);
+                let address = utxo_data.0;
+                let txid = *utxo_data.1;
+                let height = utxo_data.2.height();
+                let output_index = utxo_data.2.output_index();
+                let script = utxo_data.3.lock_script.clone();
+                let satoshis = u64::from(utxo_data.3.value);
 
                 let entry = GetAddressUtxos {
                     address,
                     txid,
-                    height,
                     output_index,
                     script,
                     satoshis,
+                    height,
                 };
                 response_utxos.push(entry);
             }
@@ -754,7 +767,10 @@ where
 /// See the notes for the [`Rpc::get_info` method].
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetInfo {
+    /// The node version build number
     build: String,
+
+    /// The server sub-version identifier, used as the network protocol user-agent
     subversion: String,
 }
 
@@ -763,31 +779,46 @@ pub struct GetInfo {
 /// See the notes for the [`Rpc::get_blockchain_info` method].
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetBlockChainInfo {
+    /// Current network name as defined in BIP70 (main, test, regtest)
     chain: String,
-    blocks: u32,
-    #[serde(rename = "bestblockhash")]
-    best_block_hash: GetBestBlockHash,
+
+    /// The current number of blocks processed in the server, numeric
+    blocks: Height,
+
+    /// The hash of the currently best block, in big-endian order, hex-encoded
+    #[serde(rename = "bestblockhash", with = "hex")]
+    best_block_hash: block::Hash,
+
+    /// If syncing, the estimated height of the chain, else the current best height, numeric.
+    ///
+    /// In Zebra, this is always the height estimate, so it might be a little inaccurate.
     #[serde(rename = "estimatedheight")]
-    estimated_height: u32,
+    estimated_height: Height,
+
+    /// Status of network upgrades
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
+
+    /// Branch IDs of the current and upcoming consensus rules
     consensus: TipConsensusBranch,
 }
 
-/// A wrapper type with a list of strings of addresses.
+/// A wrapper type with a list of transparent address strings.
 ///
 /// This is used for the input parameter of [`Rpc::get_address_balance`],
 /// [`Rpc::get_address_tx_ids`] and [`Rpc::get_address_utxos`].
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
 pub struct AddressStrings {
+    /// A list of transparent address strings.
     addresses: Vec<String>,
 }
 
 impl AddressStrings {
-    // Creates a new `AddressStrings` given a vector.
+    /// Creates a new `AddressStrings` given a vector.
     #[cfg(test)]
     pub fn new(addresses: Vec<String>) -> AddressStrings {
         AddressStrings { addresses }
     }
+
     /// Given a list of addresses as strings:
     /// - check if provided list have all valid transparent addresses.
     /// - return valid addresses as a set of `Address`.
@@ -809,7 +840,8 @@ impl AddressStrings {
 /// The transparent balance of a set of addresses.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
 pub struct AddressBalance {
-    balance: Amount<NonNegative>,
+    /// The total transparent balance.
+    balance: u64,
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.
@@ -819,19 +851,34 @@ struct ConsensusBranchIdHex(#[serde(with = "hex")] ConsensusBranchId);
 /// Information about [`NetworkUpgrade`] activation.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 struct NetworkUpgradeInfo {
+    /// Name of upgrade, string.
+    ///
+    /// Ignored by lightwalletd, but useful for debugging.
     name: NetworkUpgrade,
+
+    /// Block height of activation, numeric.
     #[serde(rename = "activationheight")]
     activation_height: Height,
+
+    /// Status of upgrade, string.
     status: NetworkUpgradeStatus,
 }
 
 /// The activation status of a [`NetworkUpgrade`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 enum NetworkUpgradeStatus {
+    /// The network upgrade is currently active.
+    ///
+    /// Includes all network upgrades that have previously activated,
+    /// even if they are not the most recent network upgrade.
     #[serde(rename = "active")]
     Active,
+
+    /// The network upgrade does not have an activation height.
     #[serde(rename = "disabled")]
     Disabled,
+
+    /// The network upgrade has an activation height, but we haven't reached it yet.
     #[serde(rename = "pending")]
     Pending,
 }
@@ -841,8 +888,11 @@ enum NetworkUpgradeStatus {
 /// These branch IDs are different when the next block is a network upgrade activation block.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 struct TipConsensusBranch {
+    /// Branch ID used to validate the current chain tip, big-endian, hex-encoded.
     #[serde(rename = "chaintip")]
     chain_tip: ConsensusBranchIdHex,
+
+    /// Branch ID used to validate the next block, big-endian, hex-encoded.
     #[serde(rename = "nextblock")]
     next_block: ConsensusBranchIdHex,
 }
@@ -891,18 +941,34 @@ pub enum GetRawTransaction {
 /// Response to a `getaddressutxos` RPC request.
 ///
 /// See the notes for the [`Rpc::get_address_utxos` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct GetAddressUtxos {
-    address: String,
-    txid: String,
-    height: u32,
+    /// The transparent address, base58check encoded
+    address: transparent::Address,
+
+    /// The output txid, in big-endian order, hex-encoded
+    #[serde(with = "hex")]
+    txid: transaction::Hash,
+
+    /// The transparent output index, numeric
     #[serde(rename = "outputIndex")]
-    output_index: usize,
-    script: String,
-    satoshis: i64,
+    output_index: OutputIndex,
+
+    /// The transparent output script, hex encoded
+    #[serde(with = "hex")]
+    script: transparent::Script,
+
+    /// The amount of zatoshis in the transparent output
+    satoshis: u64,
+
+    /// The block height, numeric.
+    ///
+    /// We put this field last, to match the zcashd order.
+    height: Height,
 }
 
 impl GetRawTransaction {
+    /// Converts `tx` and `height` into a new `GetRawTransaction` in the `verbose` format.
     fn from_transaction(
         tx: Arc<Transaction>,
         height: Option<block::Height>,
@@ -925,7 +991,7 @@ impl GetRawTransaction {
     }
 }
 
-/// Check if provided height range is valid
+/// Check if provided height range is valid for address indexes.
 fn check_height_range(start: Height, end: Height, chain_height: Height) -> Result<()> {
     if start == Height(0) || end == Height(0) {
         return Err(Error::invalid_params(

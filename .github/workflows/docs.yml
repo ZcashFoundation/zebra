@@ -20,7 +20,7 @@ on:
 jobs:
   build:
     name: Build and Deploy Docs (+beta)
-    timeout-minutes: 30
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the source code

@@ -9,12 +9,22 @@ use jsonrpc_http_server::RequestMiddleware;
 ///
 /// This middleware makes the following changes to requests:
 ///
-/// ## JSON RPC 1.0 `jsonrpc` field
+/// ## Remove `jsonrpc` field in JSON RPC 1.0
 ///
 /// Removes "jsonrpc: 1.0" fields from requests,
 /// because the "jsonrpc" field was only added in JSON-RPC 2.0.
 ///
 /// <http://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0>
+///
+/// ## Add missing `content-type` HTTP header
+///
+/// Some RPC clients don't include a `content-type` HTTP header.
+/// But unlike web browsers, [`jsonrpc_http_server`] does not do content sniffing.
+///
+/// If there is no `content-type` header, we assume the content is JSON,
+/// and let the parser error if we are incorrect.
+///
+/// This enables compatibility with `zcash-cli`.
 ///
 /// ## Security
 ///
@@ -27,8 +37,14 @@ pub struct FixHttpRequestMiddleware;
 impl RequestMiddleware for FixHttpRequestMiddleware {
     fn on_request(
         &self,
-        request: hyper::Request<hyper::Body>,
+        mut request: hyper::Request<hyper::Body>,
     ) -> jsonrpc_http_server::RequestMiddlewareAction {
+        tracing::trace!(?request, "original HTTP request");
+
+        // Fix the request headers
+        FixHttpRequestMiddleware::add_missing_content_type_header(request.headers_mut());
+
+        // Fix the request body
         let request = request.map(|body| {
             let body = body.map_ok(|data| {
                 // To simplify data handling, we assume that any search strings won't be split
@@ -53,6 +69,8 @@ impl RequestMiddleware for FixHttpRequestMiddleware {
 
             Body::wrap_stream(body)
         });
+
+        tracing::trace!(?request, "modified HTTP request");
 
         jsonrpc_http_server::RequestMiddlewareAction::Proceed {
             // TODO: disable this security check if we see errors from lightwalletd.
@@ -81,5 +99,13 @@ impl FixHttpRequestMiddleware {
             .replace("\"jsonrpc\": \"1.0\",", "")
             .replace(",\"jsonrpc\":\"1.0\"", "")
             .replace(", \"jsonrpc\": \"1.0\"", "")
+    }
+
+    /// If the `content-type` HTTP header is not present,
+    /// add an `application/json` content type header.
+    pub fn add_missing_content_type_header(headers: &mut hyper::header::HeaderMap) {
+        headers
+            .entry(hyper::header::CONTENT_TYPE)
+            .or_insert(hyper::header::HeaderValue::from_static("application/json"));
     }
 }

@@ -41,14 +41,12 @@ mod magics {
 /// to a Bitcoin address just by removing the "t".)
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(
+    Copy, Clone, Eq, PartialEq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr,
+)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(
-        proptest_derive::Arbitrary,
-        serde_with::SerializeDisplay,
-        serde_with::DeserializeFromStr
-    )
+    derive(proptest_derive::Arbitrary)
 )]
 pub enum Address {
     /// P2SH (Pay to Script Hash) addresses

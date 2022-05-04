@@ -328,10 +328,11 @@ proptest! {
             );
 
             let call_task = tokio::spawn(rpc.get_raw_mempool());
-            let expected_response: Vec<String> = transaction_ids
+            let mut expected_response: Vec<String> = transaction_ids
                 .iter()
                 .map(|id| id.mined_id().encode_hex())
                 .collect();
+            expected_response.sort();
 
             mempool
                 .expect_request(mempool::Request::TransactionIds)
@@ -535,9 +536,9 @@ proptest! {
         match response {
             Ok(info) => {
                 prop_assert_eq!(info.chain, network.bip70_network_name());
-                prop_assert_eq!(info.blocks, block_height.0);
-                prop_assert_eq!(info.best_block_hash.0, block_hash);
-                prop_assert!(info.estimated_height < Height::MAX.0);
+                prop_assert_eq!(info.blocks, block_height);
+                prop_assert_eq!(info.best_block_hash, block_hash);
+                prop_assert!(info.estimated_height < Height::MAX);
 
                 prop_assert_eq!(
                     info.consensus.chain_tip.0,
@@ -632,7 +633,7 @@ proptest! {
             // Check that response contains the expected balance
             let received_balance = response?;
 
-            prop_assert_eq!(received_balance, AddressBalance { balance });
+            prop_assert_eq!(received_balance, AddressBalance { balance: balance.into() });
 
             // Check no further requests were made during this test
             mempool.expect_no_requests().await?;
