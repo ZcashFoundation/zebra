@@ -33,10 +33,6 @@ on:
       needs_zebra_state:
         required: true
         type: boolean
-      needs_lwd_state:
-        required: true
-        type: boolean
-        default: false
       saves_to_disk:
         required: true
         type: boolean
@@ -54,7 +50,7 @@ env:
 jobs:
   test-without-cached-state:
     name: Run ${{ inputs.test_id }} test
-    if: ${{ inputs.!needs_zebra_state && inputs.!needs_lwd_state }}
+    if: ${{ !inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -162,7 +158,7 @@ jobs:
 
   test-with-cached-state:
     name: Test generated cached state
-    if: ${{ inputs.needs_zebra_state && inputs.!needs_lwd_state }}
+    if: ${{ inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
