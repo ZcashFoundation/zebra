@@ -37,7 +37,7 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/zebra.yml'
+      - '.github/workflows/test.yml'
       - '.github/workflows/gcp-test-deploy.yml'
       - '.github/workflows/docker-image-build.yml'
 
@@ -56,7 +56,7 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/zebra.yml'
+      - '.github/workflows/test.yml'
       - '.github/workflows/gcp-test-deploy.yml'
       - '.github/workflows/docker-image-build.yml'
 
