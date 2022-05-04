@@ -11,7 +11,7 @@ publish = false
 structopt = "0.3.26"
 color-eyre = "0.6.0"
 hex = "0.4.3"
-serde_json = "1.0.80"
+serde_json = "1.0.81"
 tracing-error = { version = "0.1.2", features = ["traced-error"] }
 tracing-subscriber = { version = "0.2.25", features = ["tracing-log"] }
 
