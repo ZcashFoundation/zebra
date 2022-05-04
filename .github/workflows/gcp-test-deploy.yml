@@ -180,7 +180,6 @@ jobs:
     name: Test generated cached state
     if: ${{ inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
-    needs: test-without-cached-state
     permissions:
       contents: 'read'
       id-token: 'write'
