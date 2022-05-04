@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Test changed-files
     outputs:
-      modified_files: ${{ steps.changed-files-specific.outputs.modified_files }}
+      modified_files: ${{ steps.changed-files.outputs.modified_files }}
     steps:
       - uses: actions/checkout@v3.0.2
         with:
