@@ -129,16 +129,6 @@ jobs:
           --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},target=${{ inputs.zebra_state_path }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
-          EXIT_CODE=$(\
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker wait ${{ inputs.test_id }}")
-
-          exit ${EXIT_CODE}
-
       - name: Get state version from constants.rs
         run: |
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
@@ -269,16 +259,6 @@ jobs:
           "docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
           --mount type=bind,source=/mnt/disks/gce-containers-mounts/gce-persistent-disks/${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},target=${{ inputs.zebra_state_path }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
-
-          EXIT_CODE=$(\
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker wait ${{ inputs.test_id }}")
-
-          exit ${EXIT_CODE}
 
       - name: Delete test instance
         # We don't want to leave a failed instance in GCP using resources
