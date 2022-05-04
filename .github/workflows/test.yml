@@ -153,7 +153,7 @@ jobs:
       - name: Run tests with empty lightwalletd launch
         run: |
           docker pull ${{ env.GAR_BASE }}/lightwalletd-test:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-test -t ${{ env.GAR_BASE }}/lightwalletd-test:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance -- --nocapture lightwalletd_integration
+          docker run -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-test -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance -- --nocapture lightwalletd_integration
 
   regenerate-stateful-disks:
     needs: build
