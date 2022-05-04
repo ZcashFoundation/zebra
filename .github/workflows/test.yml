@@ -273,7 +273,6 @@ jobs:
       test_description: Test lightwalletd update sync with both states
       test_variables: '-e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR_VAR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR_VAR=/var/cache/lightwalletd'
       needs_zebra_state: true
-      needs_lwd_state: true
       needs_constants: false
       saves_to_disk: false
       disk_prefix: lwd-cache
