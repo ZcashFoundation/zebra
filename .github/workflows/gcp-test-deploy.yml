@@ -157,7 +157,7 @@ jobs:
           fi
 
   test-with-cached-state:
-    name: Test generated cached state
+    name: Run ${{ inputs.test_id }} test
     if: ${{ inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
     permissions:
