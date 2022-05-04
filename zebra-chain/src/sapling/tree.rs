@@ -440,15 +440,8 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
 /// It is likely that the dense format will be used in future RPCs, in which
 /// case the current implementation will have to change and use the format
 /// compatible with [`Frontier`](bridgetree::Frontier) instead.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct SerializedTree(Vec<u8>);
-
-impl SerializedTree {
-    /// Returns `true` if there's no tree.
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
 
 impl From<&NoteCommitmentTree> for SerializedTree {
     fn from(tree: &NoteCommitmentTree) -> Self {
@@ -457,7 +450,9 @@ impl From<&NoteCommitmentTree> for SerializedTree {
         // Skip the serialization of empty trees.
         //
         // Note: This ensures compatibility with `zcashd` in the
-        // `z_gettreestate` RPC.
+        // [`z_gettreestate`][1] RPC.
+        //
+        // [1]: https://zcash.github.io/rpc/z_gettreestate.html
         if tree.inner == bridgetree::Frontier::empty() {
             return Self(serialized_tree);
         }

@@ -696,8 +696,8 @@ where
 
             // Fetch the block referenced by [`hash_or_height`] from the state.
 
-            // TODO: if this RPC is called a lot, just get the block header,
-            // rather than the whole block
+            // TODO: If this RPC is called a lot, just get the block header,
+            // rather than the whole block.
             let block_request = zebra_state::ReadRequest::Block(hash_or_height);
             let block_response = state
                 .ready()
@@ -780,8 +780,16 @@ where
                 hash,
                 height,
                 time,
-                sapling_tree,
-                orchard_tree,
+                sapling: Treestate {
+                    commitments: Commitments {
+                        final_state: sapling_tree,
+                    },
+                },
+                orchard: Treestate {
+                    commitments: Commitments {
+                        final_state: orchard_tree,
+                    },
+                },
             })
         }
         .boxed()
@@ -1025,15 +1033,44 @@ pub struct GetTreestate {
     /// UTC seconds since the Unix 1970-01-01 epoch.
     time: u32,
 
-    /// Sapling incremental note commitment tree, hex-encoded.
-    #[serde(with = "hex")]
-    #[serde(skip_serializing_if = "sapling::tree::SerializedTree::is_empty")]
-    sapling_tree: sapling::tree::SerializedTree,
+    /// A treestate containing a Sapling note commitment tree, hex-encoded.
+    #[serde(skip_serializing_if = "Treestate::is_empty")]
+    sapling: Treestate<sapling::tree::SerializedTree>,
 
-    /// Orchard incremental note commitment tree, hex-encoded.
-    #[serde(skip_serializing_if = "orchard::tree::SerializedTree::is_empty")]
+    /// A treestate containing an Orchard note commitment tree, hex-encoded.
+    #[serde(skip_serializing_if = "Treestate::is_empty")]
+    orchard: Treestate<orchard::tree::SerializedTree>,
+}
+
+/// A treestate that is included in the [`z_gettreestate`][1] RPC response.
+///
+/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+struct Treestate<Tree: AsRef<[u8]>> {
+    /// Contains an Orchard or Sapling serialized note commitment tree,
+    /// hex-encoded.
+    commitments: Commitments<Tree>,
+}
+
+/// A wrapper that contains either an Orchard or Sapling note commitment tree.
+///
+/// Note that in the original [`z_gettreestate`][1] RPC, [`Commitments`] also
+/// contains the field `finalRoot`. Zebra does *not* use this field.
+///
+/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+struct Commitments<Tree: AsRef<[u8]>> {
+    /// Orchard or Sapling serialized note commitment tree, hex-encoded.
     #[serde(with = "hex")]
-    orchard_tree: orchard::tree::SerializedTree,
+    #[serde(rename = "finalState")]
+    final_state: Tree,
+}
+
+impl<Tree: AsRef<[u8]>> Treestate<Tree> {
+    /// Returns `true` if there's no serialized commitment tree.
+    fn is_empty(&self) -> bool {
+        self.commitments.final_state.as_ref().is_empty()
+    }
 }
 
 /// Response to a `getrawtransaction` RPC request.
