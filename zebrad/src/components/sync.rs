@@ -852,9 +852,9 @@ where
 
     /// Return if the sync should be restarted based on the given error
     /// from the block downloader and verifier stream.
-    fn should_restart_sync(e: BlockDownloadVerifyError) -> bool {
+    fn should_restart_sync(e: &BlockDownloadVerifyError) -> bool {
         match e {
-            // Structural matches
+            // Structural matches: downcasts
             BlockDownloadVerifyError::Invalid(VerifyChainError::Checkpoint(
                 VerifyCheckpointError::AlreadyVerified { .. },
             )) => {
@@ -869,6 +869,8 @@ where
                 debug!(error = ?e, "block is already in chain, possibly from a previous sync run, continuing");
                 false
             }
+
+            // Structural matches: direct
             BlockDownloadVerifyError::CancelledDuringDownload
             | BlockDownloadVerifyError::CancelledDuringVerification => {
                 debug!(error = ?e, "block verification was cancelled, continuing");
@@ -879,6 +881,14 @@ where
                     error = ?e,
                     "block height is behind the current state tip, \
                      assuming the syncer will eventually catch up to the state, continuing"
+                );
+                false
+            }
+            BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. } => {
+                debug!(
+                    error = ?e,
+                    "queued duplicate block hash for download, \
+                     assuming the syncer will eventually resolve duplicates, continuing"
                 );
                 false
             }
@@ -894,7 +904,9 @@ where
             BlockDownloadVerifyError::DownloadFailed(ref source)
                 if format!("{:?}", source).contains("NotFound") =>
             {
-                // Covers both NotFoundResponse and NotFoundRegistry errors.
+                // Covers these errors:
+                // - NotFoundResponse
+                // - NotFoundRegistry
                 //
                 // TODO: improve this by checking the type (#2908)
                 //       restart after a certain number of NotFound errors?
@@ -909,13 +921,12 @@ where
                 // become incorrect e.g. after some refactoring, and it is difficult
                 // to write a test to check it. The test below is a best-effort
                 // attempt to catch if that happens and log it.
+                //
                 // TODO: add a proper test and remove this
                 // https://github.com/ZcashFoundation/zebra/issues/2909
                 let err_str = format!("{:?}", e);
                 if err_str.contains("AlreadyVerified")
                     || err_str.contains("AlreadyInChain")
-                    || err_str.contains("Cancelled")
-                    || err_str.contains("BehindTipHeight")
                     || err_str.contains("block is already committed to the state")
                     || err_str.contains("NotFound")
                 {
