@@ -8,7 +8,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use color_eyre::eyre::{eyre, Report};
 use futures::{
     future::TryFutureExt,
     ready,
@@ -63,14 +62,17 @@ impl<Request: Clone> hedge::Policy<Request> for AlwaysHedge {
 #[derive(Error, Debug)]
 #[allow(dead_code)]
 pub enum BlockDownloadVerifyError {
-    #[error("error downloading block")]
-    DownloadFailed(#[source] BoxError),
+    #[error("error from the network service")]
+    NetworkError(#[source] BoxError),
 
     #[error("error from the verifier service")]
     VerifierError(#[source] BoxError),
 
-    #[error("block did not pass consensus validation")]
-    Invalid(#[from] zebra_consensus::chain::VerifyChainError),
+    #[error("duplicate block hash queued for download: {hash:?}")]
+    DuplicateBlockQueuedForDownload { hash: block::Hash },
+
+    #[error("error downloading block")]
+    DownloadFailed(#[source] BoxError),
 
     #[error("downloaded block was too far ahead of the chain tip")]
     AboveLookaheadHeightLimit,
@@ -80,6 +82,9 @@ pub enum BlockDownloadVerifyError {
 
     #[error("downloaded block had an invalid height")]
     InvalidHeight,
+
+    #[error("block did not pass consensus validation")]
+    Invalid(#[from] zebra_consensus::chain::VerifyChainError),
 
     #[error("block download / verification was cancelled during download")]
     CancelledDuringDownload,
@@ -211,10 +216,13 @@ where
     /// only if the network service fails. It returns immediately after queuing
     /// the request.
     #[instrument(level = "debug", skip(self), fields(%hash))]
-    pub async fn download_and_verify(&mut self, hash: block::Hash) -> Result<(), Report> {
+    pub async fn download_and_verify(
+        &mut self,
+        hash: block::Hash,
+    ) -> Result<(), BlockDownloadVerifyError> {
         if self.cancel_handles.contains_key(&hash) {
             metrics::counter!("sync.already.queued.dropped.block.hash.count", 1);
-            return Err(eyre!("duplicate hash queued for download: {:?}", hash));
+            return Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash });
         }
 
         // We construct the block requests sequentially, waiting for the peer
@@ -224,14 +232,12 @@ where
         // if we waited for readiness and did the service call in the spawned
         // tasks, all of the spawned tasks would race each other waiting for the
         // network to become ready.
-        debug!("waiting to request block");
         let block_req = self
             .network
             .ready()
             .await
-            .map_err(|e| eyre!(e))?
+            .map_err(BlockDownloadVerifyError::NetworkError)?
             .call(zn::Request::BlocksByHash(std::iter::once(hash).collect()));
-        debug!("requested block");
 
         // This oneshot is used to signal cancellation to the download task.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
