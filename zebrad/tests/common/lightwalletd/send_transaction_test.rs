@@ -73,7 +73,7 @@ pub async fn run() -> Result<()> {
     )?;
 
     let (_lightwalletd, lightwalletd_rpc_port) =
-        spawn_lightwalletd_with_rpc_server(zebra_rpc_address)?;
+        spawn_lightwalletd_with_rpc_server(zebra_rpc_address, true)?;
 
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
 
