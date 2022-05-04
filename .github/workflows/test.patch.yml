@@ -5,13 +5,38 @@ on:
     branches:
       - main
     paths-ignore:
+      # code and tests
       - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
       - '**/*.txt'
+      # test data snapshots
       - '**/*.snap'
+      # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      # workflow definitions
       - 'docker/**'
-      - '.github/workflows/test.yml'
+      - '.github/workflows/zebra.yml'
+      - '.github/workflows/gcp-test-deploy.yml'
+      - '.github/workflows/docker-image-build.yml'
+
+  push:
+    branches:
+      - main
+    paths-ignore:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
+      - 'docker/**'
+      - '.github/workflows/zebra.yml'
+      - '.github/workflows/gcp-test-deploy.yml'
       - '.github/workflows/docker-image-build.yml'
 
 jobs:
