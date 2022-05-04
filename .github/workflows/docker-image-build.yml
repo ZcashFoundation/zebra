@@ -63,7 +63,7 @@ jobs:
           # list of Docker images to use as base name for tags
           images: |
             us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}
-            ghcr.io/ZcashFoundation/${{ inputs.image_name }}
+            ghcr.io/zcashfoundation/${{ inputs.image_name }}
           # generate Docker tags based on the following events/attributes
           tags: |
             type=schedule
@@ -122,5 +122,5 @@ jobs:
             CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
           push: true
-          cache-from: type=registry,ref=ghcr.io/ZcashFoundation/${{ inputs.image_name }}:cache
-          cache-to: type=registry,ref=ghcr.io/ZcashFoundation/${{ inputs.image_name }}:cache,mode=max
+          cache-from: type=registry,ref=ghcr.io/zcashfoundation/${{ inputs.image_name }}:cache
+          cache-to: type=registry,ref=ghcr.io/zcashfoundation/${{ inputs.image_name }}:cache,mode=max
