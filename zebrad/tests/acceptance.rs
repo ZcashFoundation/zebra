@@ -1006,7 +1006,7 @@ fn lightwalletd_integration() -> Result<()> {
 
 /// Make sure `lightwalletd` can sync from Zebra, in update sync mode.
 ///
-/// If  is set, runs a quick sync, then a full sync.
+/// If `LIGHTWALLETD_DATA_DIR` is set, runs a quick sync, then a full sync.
 /// If `LIGHTWALLETD_DATA_DIR` is not set, just runs a full sync.
 ///
 /// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD`,
@@ -1530,4 +1530,12 @@ async fn fully_synced_rpc_test() -> Result<()> {
 #[tokio::test]
 async fn sending_transactions_using_lightwalletd() -> Result<()> {
     common::lightwalletd::send_transaction_test::run().await
+}
+
+/// Test all the rpc methods a wallet connected to lightwalletd can call.
+///
+/// See [`common::lightwalletd::wallet_grpc_test`] for more information.
+#[tokio::test]
+async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
+    common::lightwalletd::wallet_grpc_test::run().await
 }

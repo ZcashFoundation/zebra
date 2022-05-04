@@ -37,7 +37,7 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/zebra.yml'
+      - '.github/workflows/test.yml'
       - '.github/workflows/gcp-test-deploy.yml'
       - '.github/workflows/docker-image-build.yml'
 
@@ -56,7 +56,7 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/zebra.yml'
+      - '.github/workflows/test.yml'
       - '.github/workflows/gcp-test-deploy.yml'
       - '.github/workflows/docker-image-build.yml'
 
@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Test changed-files
     outputs:
-      modified_files: ${{ steps.changed-files-specific.outputs.modified_files }}
+      modified_files: ${{ steps.changed-files.outputs.modified_files }}
     steps:
       - uses: actions/checkout@v3.0.2
         with:
@@ -224,11 +224,11 @@ jobs:
       app_name: lightwalletd
       test_id: fully-synced-rpc
       test_description: Test lightwalletd RPC with a Zebra tip state
-      test_variables: '-e TEST_LWD_RPC_CALL=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR_VAR=/root/.cache/zebrad-cache'
-      needs_zebra_state: false
+      test_variables: '-e TEST_LWD_RPC_CALL=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR_VAR=/var/cache/zebrad-cache'
+      needs_zebra_state: true
       saves_to_disk: false
-      disk_suffix: checkpoint
-      zebra_state_path: '/root/.cache/zebrad-cache'
+      disk_suffix: tip
+      zebra_state_path: '/var/cache'
 
   # Test sending transactions with lightwalletd using a Zebra tip state
   lightwalletd-transactions-test:
@@ -240,7 +240,7 @@ jobs:
       test_id: lwd-send-transactions
       test_description: Test lightwalletd transactions with a Zebra tip state
       test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR_VAR=/root/.cache/zebrad-cache'
-      needs_zebra_state: false
+      needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: tip
       zebra_state_path: '/root/.cache/zebrad-cache'
