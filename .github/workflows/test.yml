@@ -172,9 +172,9 @@ jobs:
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached post-checkpoint state
   test-stateful-sync:
-    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
     needs: build
     uses: ./.github/workflows/gcp-test-deploy.yml
+    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
     with:
       test_id: sync-past-checkpoint
       test_description: Test full validation sync from a cached state
@@ -186,12 +186,12 @@ jobs:
 
   # Test that Zebra can run a full mainnet sync after a PR is approved
   test-full-sync:
+    needs: build
+    uses: ./.github/workflows/gcp-test-deploy.yml
     # TODO change `github.ref_name == 'main'` to `startsWith(github.head_ref, 'mergify/merge-queue/')`
     # to only run on Mergify head branches, and on manual dispatch:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
     if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || github.event.inputs.run-full-sync == 'true' }}
-    needs: build
-    uses: ./.github/workflows/gcp-test-deploy.yml
     with:
       test_id: full-sync-to-tip
       test_description: Test a full sync up to the tip
