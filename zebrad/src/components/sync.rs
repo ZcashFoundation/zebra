@@ -755,12 +755,23 @@ where
             Self::handle_response(response).map_err(|e| eyre!(e))?;
 
             let response = self.downloads.next().await.expect("downloads is nonempty");
-            let response = Self::handle_block_response(response);
 
             match response {
                 Ok(hash) => trace!(?hash, "verified and committed block to state"),
-                Err(e) => {
-                    warn!(?e, "could not download or verify genesis block, retrying");
+                Err(error) => {
+                    // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
+                    if Self::should_restart_sync(&error) {
+                        warn!(
+                            ?error,
+                            "could not download or verify genesis block, retrying"
+                        );
+                    } else {
+                        info!(
+                            ?error,
+                            "temporary error downloading or verifying genesis block, retrying"
+                        );
+                    }
+
                     tokio::time::sleep(GENESIS_TIMEOUT_RETRY).await;
                 }
             }
