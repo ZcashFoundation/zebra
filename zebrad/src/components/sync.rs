@@ -594,7 +594,8 @@ where
         // so the last peer to respond can't toggle our mempool
         self.recent_syncs.push_obtain_tips_length(new_downloads);
 
-        self.request_blocks(download_set).await?;
+        let response = self.request_blocks(download_set).await;
+        Self::handle_response(response)?;
 
         Ok(())
     }
@@ -731,7 +732,8 @@ where
         // so the last peer to respond can't toggle our mempool
         self.recent_syncs.push_extend_tips_length(new_downloads);
 
-        self.request_blocks(download_set).await?;
+        let response = self.request_blocks(download_set).await;
+        Self::handle_response(response)?;
 
         Ok(())
     }
@@ -748,11 +750,14 @@ where
         // So we just download and verify the genesis block here.
         while !self.state_contains(self.genesis_hash).await? {
             info!("starting genesis block download and verify");
-            self.downloads
-                .download_and_verify(self.genesis_hash)
-                .await
-                .map_err(|e| eyre!(e))?;
-            match self.downloads.next().await.expect("downloads is nonempty") {
+
+            let response = self.downloads.download_and_verify(self.genesis_hash).await;
+            Self::handle_response(response).map_err(|e| eyre!(e))?;
+
+            let response = self.downloads.next().await.expect("downloads is nonempty");
+            let response = Self::handle_block_response(response);
+
+            match response {
                 Ok(hash) => trace!(?hash, "verified and committed block to state"),
                 Err(e) => {
                     warn!(?e, "could not download or verify genesis block, retrying");
@@ -765,7 +770,10 @@ where
     }
 
     /// Queue download and verify tasks for each block that isn't currently known to our node
-    async fn request_blocks(&mut self, hashes: IndexSet<block::Hash>) -> Result<(), Report> {
+    async fn request_blocks(
+        &mut self,
+        hashes: IndexSet<block::Hash>,
+    ) -> Result<(), BlockDownloadVerifyError> {
         debug!(hashes.len = hashes.len(), "requesting blocks");
         for hash in hashes.into_iter() {
             self.downloads.download_and_verify(hash).await?;
@@ -780,16 +788,30 @@ where
     /// expected error occurred, so that the synchronization can continue normally.
     ///
     /// Returns `Err` if an unexpected error occurred, to force the synchronizer to restart.
-    async fn handle_block_response(
-        &mut self,
+    fn handle_block_response(
         response: Result<block::Hash, BlockDownloadVerifyError>,
-    ) -> Result<(), ()> {
+    ) -> Result<(), BlockDownloadVerifyError> {
         match response {
             Ok(hash) => trace!(?hash, "verified and committed block to state"),
-            Err(error) => {
-                if Self::should_restart_sync(error) {
-                    return Err(());
-                }
+            Err(_) => return Self::handle_response(response.map(|_| ())),
+        }
+
+        Ok(())
+    }
+
+    /// Handles a response to a syncer request.
+    ///
+    /// Returns `Ok` if the request was successful, or if an expected error occurred,
+    /// so that the synchronization can continue normally.
+    ///
+    /// Returns `Err` if an unexpected error occurred, to force the synchronizer to restart.
+    fn handle_response(
+        response: Result<(), BlockDownloadVerifyError>,
+    ) -> Result<(), BlockDownloadVerifyError> {
+        if let Err(error) = response {
+            // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
+            if Self::should_restart_sync(&error) {
+                return Err(error);
             }
         }
 
