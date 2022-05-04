@@ -30,9 +30,6 @@ on:
       disk_suffix:
         required: false
         type: string
-      needs_constants:
-        required: true
-        type: boolean
       needs_zebra_state:
         required: true
         type: boolean
@@ -60,26 +57,6 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.0.2
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
-
-      # TODO move the `changed-files-specific` step to the build job for a better dependency tree
-      # Only run this job if the database format version has (likely) changed.
-      #
-      # If we have accidentally changed the format, but not changed the version,
-      # we want to run with the old cached state, so this job fails.
-      #
-      # If we change the state path without changing the version,
-      # this job will take a few hours, because it will do a full rebuild.
-      - name: Get specific changed files
-        id: changed-files-specific
-        uses: tj-actions/changed-files@v19
-        with:
-          files: |
-            zebra-state/**/constants.rs
-
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -101,7 +78,6 @@ jobs:
 
       - name: Create GCP compute instance
         id: create-instance
-        if: (${{ inputs.needs_constants }} && steps.changed-files-specific.outputs.any_changed == 'true' && github.event_name == 'push') || ${{ !inputs.needs_constants }}
         run: |
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \

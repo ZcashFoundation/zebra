@@ -66,6 +66,21 @@ env:
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
 
 jobs:
+  changed-files:
+    runs-on: ubuntu-latest
+    name: Test changed-files
+    outputs:
+      modified_files: ${{ steps.changed-files-specific.outputs.modified_files }}
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v19
+
   build:
     uses: ./.github/workflows/docker-image-build.yml
     with:
@@ -158,14 +173,15 @@ jobs:
           ZEBRA_TEST_LIGHTWALLETD: '1'
 
   regenerate-stateful-disks:
-    needs: build
+    needs: [ build, changed-files]
     uses: ./.github/workflows/gcp-test-deploy.yml
+    # Only run this job if the database format version has (likely) changed.
+    if: ${{ (contains(needs.changed-files.outputs.modified_files, 'zebra-state/src/constants.rs') && github.event_name == 'push') || github.event.inputs.regenerate-disks == 'true' }}
     with:
       test_id: sync-to-checkpoint
       test_description: Test sync up to mandatory checkpoint
       test_variables: '-e TEST_DISK_REBUILD=1 -e ZEBRA_FORCE_USE_COLOR=1'
       needs_zebra_state: false
-      needs_constants: true
       saves_to_disk: true
       disk_suffix: checkpoint
       height_grep_text: 'flushing database to disk height=Height'
@@ -180,7 +196,6 @@ jobs:
       test_description: Test full validation sync from a cached state
       test_variables: '-e TEST_CHECKPOINT_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1'
       needs_zebra_state: true
-      needs_constants: false
       saves_to_disk: false
       disk_suffix: checkpoint
 
@@ -197,7 +212,6 @@ jobs:
       test_description: Test a full sync up to the tip
       test_variables: '-e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600'
       needs_zebra_state: false
-      needs_constants: false
       saves_to_disk: true
       disk_suffix: tip
       height_grep_text: 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.* current_height=Height'
