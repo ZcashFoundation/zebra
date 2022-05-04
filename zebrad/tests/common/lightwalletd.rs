@@ -271,7 +271,7 @@ impl LightwalletdTestType {
             Some(path) => Some(path.into()),
             None => {
                 tracing::info!(
-                    "skipped {test_name:?} lightwalletd test, \
+                    "skipped {test_name:?} {self:?} lightwalletd test, \
                      set the {ZEBRA_CACHED_STATE_DIR_VAR:?} environment variable to run the test",
                 );
 
@@ -310,7 +310,7 @@ impl LightwalletdTestType {
             Some(path) => Some(path.into()),
             None => {
                 tracing::info!(
-                    "skipped {test_name:?} lightwalletd test, \
+                    "skipped {test_name:?} {self:?} lightwalletd test, \
                      set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
                 );
 
