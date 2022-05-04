@@ -66,7 +66,7 @@ pub mod arbitrary;
 #[cfg(test)]
 mod tests;
 
-pub use finalized_state::{OutputLocation, TransactionLocation};
+pub use finalized_state::{OutputIndex, OutputLocation, TransactionLocation};
 
 pub type QueuedBlock = (
     PreparedBlock,
