@@ -155,7 +155,7 @@ impl ZcashDeserialize for Root {
 }
 
 /// A node of the Orchard Incremental Note Commitment Tree.
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct Node(pallas::Base);
 
 /// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
