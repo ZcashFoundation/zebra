@@ -381,7 +381,7 @@ where
     /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
     /// necessary.
     #[instrument(skip(self))]
-    async fn try_to_sync(&mut self) -> Result<(), ()> {
+    async fn try_to_sync(&mut self) -> Result<(), Report> {
         self.prospective_tips = HashSet::new();
 
         info!(
@@ -390,14 +390,14 @@ where
         );
         if let Err(e) = self.obtain_tips().await {
             info!("temporary error obtaining tips: {:#}", e);
-            return Err(());
+            return Err(e);
         }
         self.update_metrics();
 
         while !self.prospective_tips.is_empty() {
             // Check whether any block tasks are currently ready:
             while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
-                self.handle_block_response(rsp).await?;
+                Self::handle_block_response(rsp)?;
             }
             self.update_metrics();
 
@@ -424,7 +424,7 @@ where
 
                 let response = self.downloads.next().await.expect("downloads is nonempty");
 
-                self.handle_block_response(response).await?;
+                Self::handle_block_response(response)?;
                 self.update_metrics();
             }
 
@@ -439,7 +439,7 @@ where
 
             if let Err(e) = self.extend_tips().await {
                 info!("temporary error extending tips: {:#}", e);
-                return Err(());
+                return Err(e);
             }
             self.update_metrics();
         }
