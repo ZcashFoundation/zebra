@@ -54,7 +54,7 @@ env:
 jobs:
   test-without-cached-state:
     name: Run ${{ inputs.test_id }} test
-    if: ${{ inputs.!needs_zebra_state && inputs.!needs_lwd_state }}
+    if: ${{ !inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -162,7 +162,7 @@ jobs:
 
   test-with-cached-state:
     name: Test generated cached state
-    if: ${{ inputs.needs_zebra_state && inputs.!needs_lwd_state }}
+    if: ${{ inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
