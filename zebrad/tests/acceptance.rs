@@ -49,7 +49,6 @@ use common::{
     lightwalletd::{
         random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
         LightwalletdTestType::{self, *},
-        LIGHTWALLETD_DATA_DIR_VAR,
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
@@ -1006,7 +1005,7 @@ fn lightwalletd_integration() -> Result<()> {
 
 /// Make sure `lightwalletd` can sync from Zebra, in update sync mode.
 ///
-/// If  is set, runs a quick sync, then a full sync.
+/// If `LIGHTWALLETD_DATA_DIR` is set, runs a quick sync, then a full sync.
 /// If `LIGHTWALLETD_DATA_DIR` is not set, just runs a full sync.
 ///
 /// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD`,
@@ -1083,7 +1082,9 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
 
     // Write a configuration that has RPC listen_addr set.
     // If the state path env var is set, use it in the config.
-    let config = if let Some(config) = test_type.zebrad_config() {
+    let config = if let Some(config) =
+        test_type.zebrad_config("lightwalletd_integration_test".to_string())
+    {
         config?
     } else {
         return Ok(());
@@ -1093,14 +1094,10 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     // - LaunchWithEmptyState: ignore the state directory
     // - FullSyncFromGenesis: use it if available, timeout if it is already populated
     // - UpdateCachedState: skip the test if it is not available, timeout if it is not populated
-    let lightwalletd_state_path = test_type.lightwalletd_state_path();
+    let lightwalletd_state_path =
+        test_type.lightwalletd_state_path("lightwalletd_integration_test".to_string());
 
     if test_type.needs_lightwalletd_cached_state() && lightwalletd_state_path.is_none() {
-        tracing::info!(
-            "skipped {test_type:?} lightwalletd test, \
-             set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
-        );
-
         return Ok(());
     }
 
@@ -1166,8 +1163,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     }
 
     if test_type.needs_lightwalletd_cached_state() {
-        // TODO: expect `[0-9]{7}` when we're using the tip cached state (#4155)
-        lightwalletd.expect_stdout_line_matches("Found [0-9]{6,7} blocks in cache")?;
+        lightwalletd.expect_stdout_line_matches("Found [0-9]{7} blocks in cache")?;
     } else if !test_type.allow_lightwalletd_cached_state() {
         // Timeout the test if we're somehow accidentally using a cached state in our temp dir
         lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache")?;
@@ -1479,7 +1475,7 @@ async fn fully_synced_rpc_test() -> Result<()> {
     };
 
     // Handle the Zebra state directory
-    let cached_state_path = test_type.zebrad_state_path();
+    let cached_state_path = test_type.zebrad_state_path("fully_synced_rpc_test".to_string());
 
     if cached_state_path.is_none() {
         tracing::info!("skipping fully synced zebrad RPC test");
@@ -1490,11 +1486,8 @@ async fn fully_synced_rpc_test() -> Result<()> {
 
     let network = Network::Mainnet;
 
-    let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
-        network,
-        cached_state_path.unwrap(),
-        test_type.zebrad_timeout(),
-    )?;
+    let (_zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc_without_initial_peers(network, cached_state_path.unwrap(), test_type)?;
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
@@ -1530,4 +1523,12 @@ async fn fully_synced_rpc_test() -> Result<()> {
 #[tokio::test]
 async fn sending_transactions_using_lightwalletd() -> Result<()> {
     common::lightwalletd::send_transaction_test::run().await
+}
+
+/// Test all the rpc methods a wallet connected to lightwalletd can call.
+///
+/// See [`common::lightwalletd::wallet_grpc_test`] for more information.
+#[tokio::test]
+async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
+    common::lightwalletd::wallet_grpc_test::run().await
 }

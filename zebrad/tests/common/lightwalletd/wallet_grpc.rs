@@ -1,6 +1,6 @@
 //! Lightwalletd gRPC interface and utility functions.
 
-use std::{env, net::SocketAddr};
+use std::{env, net::SocketAddr, path::PathBuf};
 
 use tempfile::TempDir;
 
@@ -21,10 +21,10 @@ pub type LightwalletdRpcClient =
 /// Returns the lightwalletd instance and the port number that it is listening for RPC connections.
 pub fn spawn_lightwalletd_with_rpc_server(
     zebrad_rpc_address: SocketAddr,
+    lightwalletd_state_path: Option<PathBuf>,
+    test_type: LightwalletdTestType,
+    wait_for_blocks: bool,
 ) -> Result<(TestChild<TempDir>, u16)> {
-    // We're using cached Zebra state here, so this test type is the most similar
-    let test_type = LightwalletdTestType::UpdateCachedState;
-
     let lightwalletd_dir = testdir()?.with_lightwalletd_config(zebrad_rpc_address)?;
 
     let lightwalletd_rpc_port = random_known_port();
@@ -36,13 +36,14 @@ pub fn spawn_lightwalletd_with_rpc_server(
         test_type.lightwalletd_failure_messages();
 
     let mut lightwalletd = lightwalletd_dir
-        .spawn_lightwalletd_child(test_type.lightwalletd_state_path(), arguments)?
+        .spawn_lightwalletd_child(lightwalletd_state_path, arguments)?
         .with_timeout(test_type.lightwalletd_timeout())
         .with_failure_regex_iter(lightwalletd_failure_messages, lightwalletd_ignore_messages);
 
     lightwalletd.expect_stdout_line_matches("Starting gRPC server")?;
-    lightwalletd.expect_stdout_line_matches("Waiting for block")?;
-
+    if wait_for_blocks {
+        lightwalletd.expect_stdout_line_matches("Waiting for block")?;
+    }
     Ok((lightwalletd, lightwalletd_rpc_port))
 }
 

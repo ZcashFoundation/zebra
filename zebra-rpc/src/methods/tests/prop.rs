@@ -536,9 +536,9 @@ proptest! {
         match response {
             Ok(info) => {
                 prop_assert_eq!(info.chain, network.bip70_network_name());
-                prop_assert_eq!(info.blocks, block_height.0);
-                prop_assert_eq!(info.best_block_hash.0, block_hash);
-                prop_assert!(info.estimated_height < Height::MAX.0);
+                prop_assert_eq!(info.blocks, block_height);
+                prop_assert_eq!(info.best_block_hash, block_hash);
+                prop_assert!(info.estimated_height < Height::MAX);
 
                 prop_assert_eq!(
                     info.consensus.chain_tip.0,
