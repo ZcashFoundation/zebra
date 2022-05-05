@@ -220,6 +220,7 @@ jobs:
   lightwalletd-rpc-test:
     needs: build
     uses: ./.github/workflows/gcp-test-deploy.yml
+    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
     with:
       app_name: lightwalletd
       test_id: fully-synced-rpc
