@@ -1,4 +1,4 @@
-name: Test OS builds
+name: CI OSes
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ on:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - '**/deny.toml'
-      - '.github/workflows/test-os-build.yml'
+      - '.github/workflows/continous-integration-os.yml'
 
 jobs:
   test:

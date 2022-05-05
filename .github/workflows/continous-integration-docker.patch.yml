@@ -1,4 +1,4 @@
-name: CI
+name: CI Docker
 
 on:
   pull_request:
@@ -16,9 +16,9 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/continous-integration.yml'
-      - '.github/workflows/gcp-test-deploy.yml'
-      - '.github/workflows/docker-image-build.yml'
+      - '.github/workflows/continous-integration-docker.yml'
+      - '.github/workflows/deploy-gcp-tests.yml'
+      - '.github/workflows/build-docker-image.yml'
 
   push:
     branches:
@@ -35,9 +35,9 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/continous-integration.yml'
-      - '.github/workflows/gcp-test-deploy.yml'
-      - '.github/workflows/docker-image-build.yml'
+      - '.github/workflows/continous-integration-docker.yml'
+      - '.github/workflows/deploy-gcp-tests.yml'
+      - '.github/workflows/build-docker-image.yml'
 
 jobs:
   build:

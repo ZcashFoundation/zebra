@@ -1,4 +1,4 @@
-name: Test instance deployment
+name: Deploy GCP tests
 
 on:
   workflow_call:
