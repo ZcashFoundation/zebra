@@ -20,7 +20,7 @@ use zebra_test::{
 use zebrad::config::ZebradConfig;
 
 use super::{
-    cached_state::ZEBRA_CACHED_STATE_DIR_VAR,
+    cached_state::ZEBRA_CACHED_STATE_DIR,
     config::default_test_config,
     failure_messages::{
         LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES, LIGHTWALLETD_FAILURE_MESSAGES,
@@ -56,7 +56,7 @@ pub const ZEBRA_TEST_LIGHTWALLETD: &str = "ZEBRA_TEST_LIGHTWALLETD";
 ///
 /// Can also be used to speed up the [`sending_transactions_using_lightwalletd`] test,
 /// by skipping the lightwalletd initial sync.
-pub const LIGHTWALLETD_DATA_DIR_VAR: &str = "LIGHTWALLETD_DATA_DIR";
+pub const LIGHTWALLETD_DATA_DIR: &str = "LIGHTWALLETD_DATA_DIR";
 
 /// Should we skip Zebra lightwalletd integration tests?
 #[allow(clippy::print_stderr)]
@@ -264,12 +264,12 @@ impl LightwalletdTestType {
 
     /// Returns the Zebra state path for this test, if set.
     pub fn zebrad_state_path(&self, test_name: String) -> Option<PathBuf> {
-        match env::var_os(ZEBRA_CACHED_STATE_DIR_VAR) {
+        match env::var_os(ZEBRA_CACHED_STATE_DIR) {
             Some(path) => Some(path.into()),
             None => {
                 tracing::info!(
                     "skipped {test_name:?} {self:?} lightwalletd test, \
-                     set the {ZEBRA_CACHED_STATE_DIR_VAR:?} environment variable to run the test",
+                     set the {ZEBRA_CACHED_STATE_DIR:?} environment variable to run the test",
                 );
 
                 None
@@ -303,12 +303,12 @@ impl LightwalletdTestType {
 
     /// Returns the lightwalletd state path for this test, if set.
     pub fn lightwalletd_state_path(&self, test_name: String) -> Option<PathBuf> {
-        match env::var_os(LIGHTWALLETD_DATA_DIR_VAR) {
+        match env::var_os(LIGHTWALLETD_DATA_DIR) {
             Some(path) => Some(path.into()),
             None => {
                 tracing::info!(
                     "skipped {test_name:?} {self:?} lightwalletd test, \
-                     set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
+                     set the {LIGHTWALLETD_DATA_DIR:?} environment variable to run the test",
                 );
 
                 None
