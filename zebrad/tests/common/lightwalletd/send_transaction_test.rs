@@ -141,8 +141,8 @@ async fn prepare_partial_sync(
     cached_zebra_state: PathBuf,
 ) -> Result<(TempDir, block::Height)> {
     let partial_sync_path = copy_state_directory(cached_zebra_state).await?;
-    let partial_sync_state_dir = partial_sync_path.as_ref().join("state");
-    let tip_height = load_tip_height_from_state_directory(network, &partial_sync_state_dir).await?;
+    let tip_height =
+        load_tip_height_from_state_directory(network, partial_sync_path.as_ref()).await?;
 
     Ok((partial_sync_path, tip_height))
 }
