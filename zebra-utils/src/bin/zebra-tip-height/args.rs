@@ -15,7 +15,7 @@ use zebra_chain::parameters::Network;
 pub struct Args {
     /// Path to Zebra's cached state.
     #[structopt(short, long, parse(from_os_str))]
-    pub cache_dir: PathBuf,
+    pub cache_dir: Option<PathBuf>,
 
     /// The network to obtain the chain tip.
     #[structopt(default_value = "mainnet", short, long)]

@@ -36,10 +36,11 @@ fn main() -> Result<()> {
 
 /// Starts a state service using the `cache_dir` and `network` from the provided [`Args`].
 pub fn load_latest_chain_tip(args: Args) -> LatestChainTip {
-    let config = zebra_state::Config {
-        cache_dir: args.cache_dir,
-        ..zebra_state::Config::default()
-    };
+    let mut config = zebra_state::Config::default();
+
+    if let Some(cache_dir) = args.cache_dir {
+        config.cache_dir = cache_dir;
+    }
 
     let (_state_service, _read_state_service, latest_chain_tip, _chain_tip_change) =
         zebra_state::init(config, args.network);
