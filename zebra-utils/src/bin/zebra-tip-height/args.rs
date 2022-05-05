@@ -3,7 +3,6 @@
 //! For usage please refer to the program help: `zebra-tip-height --help`
 
 #![deny(missing_docs)]
-#![allow(clippy::try_err)]
 
 use std::path::PathBuf;
 
