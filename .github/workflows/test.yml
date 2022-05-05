@@ -227,7 +227,8 @@ jobs:
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: tip
-      zebra_state_path: '/var/cache'
+      root_state_path: '/var/cache'
+      zebra_state_dir: 'zebrad-cache'
 
   lightwalletd-transactions-test:
     needs: build
@@ -241,4 +242,5 @@ jobs:
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: tip
-      zebra_state_path: '/var/cache'
+      root_state_path: '/var/cache'
+      zebra_state_dir: 'zebrad-cache'
