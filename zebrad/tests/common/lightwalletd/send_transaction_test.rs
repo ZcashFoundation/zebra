@@ -36,8 +36,7 @@ use crate::common::{
     lightwalletd::{
         wallet_grpc::{self, connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server},
         zebra_skip_lightwalletd_tests,
-        LightwalletdTestType::UpdateCachedState,
-        LIGHTWALLETD_TEST_TIMEOUT,
+        LightwalletdTestType::*,
     },
     sync::perform_full_sync_starting_from,
 };
@@ -53,7 +52,12 @@ pub async fn run() -> Result<()> {
 
     // We want a zebra state dir and a lightwalletd data dir in place,
     // so `UpdateCachedState` can be used as our test type
-    let test_type = UpdateCachedState;
+    //
+    // But for now, we don't want to require the cached state, because it's not ready yet.
+    // TODO: use `UpdateCachedState`
+    let test_type = FullSyncFromGenesis {
+        allow_lightwalletd_cached_state: true,
+    };
 
     let cached_state_path = test_type.zebrad_state_path("send_transaction_tests".to_string());
     if cached_state_path.is_none() {
@@ -71,11 +75,8 @@ pub async fn run() -> Result<()> {
     let (transactions, partial_sync_path) =
         load_transactions_from_a_future_block(network, cached_state_path.unwrap()).await?;
 
-    let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
-        Network::Mainnet,
-        partial_sync_path,
-        LIGHTWALLETD_TEST_TIMEOUT,
-    )?;
+    let (_zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc_without_initial_peers(Network::Mainnet, partial_sync_path, test_type)?;
 
     let (_lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(
         zebra_rpc_address,
