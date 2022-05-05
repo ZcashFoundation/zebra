@@ -198,7 +198,7 @@ jobs:
   test-stateful-sync:
     needs: build
     uses: ./.github/workflows/gcp-test-deploy.yml
-    if: ${{ github.event.inputs.regenerate-disks != 'true' || github.event.inputs.run-full-sync != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       test_id: sync-past-checkpoint
       test_description: Test full validation sync from a cached state
@@ -232,7 +232,7 @@ jobs:
   lightwalletd-rpc-test:
     needs: build
     uses: ./.github/workflows/gcp-test-deploy.yml
-    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: fully-synced-rpc
@@ -249,7 +249,7 @@ jobs:
   lightwalletd-transactions-test:
     needs: build
     uses: ./.github/workflows/gcp-test-deploy.yml
-    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-send-transactions
