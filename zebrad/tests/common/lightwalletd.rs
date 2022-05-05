@@ -20,7 +20,7 @@ use zebra_test::{
 use zebrad::config::ZebradConfig;
 
 use super::{
-    cached_state::ZEBRA_CACHED_STATE_DIR_VAR,
+    cached_state::ZEBRA_CACHED_STATE_DIR,
     config::default_test_config,
     failure_messages::{
         LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES, LIGHTWALLETD_FAILURE_MESSAGES,
@@ -56,10 +56,7 @@ pub const ZEBRA_TEST_LIGHTWALLETD: &str = "ZEBRA_TEST_LIGHTWALLETD";
 ///
 /// Can also be used to speed up the [`sending_transactions_using_lightwalletd`] test,
 /// by skipping the lightwalletd initial sync.
-pub const LIGHTWALLETD_DATA_DIR_VAR: &str = "LIGHTWALLETD_DATA_DIR";
-
-/// The maximum time that a `lightwalletd` integration test is expected to run.
-pub const LIGHTWALLETD_TEST_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+pub const LIGHTWALLETD_DATA_DIR: &str = "LIGHTWALLETD_DATA_DIR";
 
 /// Should we skip Zebra lightwalletd integration tests?
 #[allow(clippy::print_stderr)]
@@ -266,13 +263,13 @@ impl LightwalletdTestType {
     }
 
     /// Returns the Zebra state path for this test, if set.
-    pub fn zebrad_state_path(&self) -> Option<PathBuf> {
-        match env::var_os(ZEBRA_CACHED_STATE_DIR_VAR) {
+    pub fn zebrad_state_path(&self, test_name: String) -> Option<PathBuf> {
+        match env::var_os(ZEBRA_CACHED_STATE_DIR) {
             Some(path) => Some(path.into()),
             None => {
                 tracing::info!(
-                    "skipped {self:?} lightwalletd test, \
-                     set the {ZEBRA_CACHED_STATE_DIR_VAR:?} environment variable to run the test",
+                    "skipped {test_name:?} {self:?} lightwalletd test, \
+                     set the {ZEBRA_CACHED_STATE_DIR:?} environment variable to run the test",
                 );
 
                 None
@@ -284,12 +281,12 @@ impl LightwalletdTestType {
     ///
     /// Returns `None` if the test should be skipped,
     /// and `Some(Err(_))` if the config could not be created.
-    pub fn zebrad_config(&self) -> Option<Result<ZebradConfig>> {
+    pub fn zebrad_config(&self, test_name: String) -> Option<Result<ZebradConfig>> {
         if !self.needs_zebra_cached_state() {
             return Some(random_known_rpc_port_config());
         }
 
-        let zebra_state_path = self.zebrad_state_path()?;
+        let zebra_state_path = self.zebrad_state_path(test_name)?;
 
         let mut config = match random_known_rpc_port_config() {
             Ok(config) => config,
@@ -305,8 +302,18 @@ impl LightwalletdTestType {
     }
 
     /// Returns the lightwalletd state path for this test, if set.
-    pub fn lightwalletd_state_path(&self) -> Option<PathBuf> {
-        env::var_os(LIGHTWALLETD_DATA_DIR_VAR).map(Into::into)
+    pub fn lightwalletd_state_path(&self, test_name: String) -> Option<PathBuf> {
+        match env::var_os(LIGHTWALLETD_DATA_DIR) {
+            Some(path) => Some(path.into()),
+            None => {
+                tracing::info!(
+                    "skipped {test_name:?} {self:?} lightwalletd test, \
+                     set the {LIGHTWALLETD_DATA_DIR:?} environment variable to run the test",
+                );
+
+                None
+            }
+        }
     }
 
     /// Returns the `zebrad` timeout for this test type.
@@ -368,9 +375,7 @@ impl LightwalletdTestType {
         // lightwalletd state failures
         if self.needs_lightwalletd_cached_state() {
             // Fail if we need a cached lightwalletd state, but it isn't near the tip
-            //
-            // TODO: fail on `[0-9]{1,6}` when we're using the tip cached state (#4155)
-            lightwalletd_failure_messages.push("Found [0-9]{1,5} blocks in cache".to_string());
+            lightwalletd_failure_messages.push("Found [0-9]{1,6} blocks in cache".to_string());
         }
         if !self.allow_lightwalletd_cached_state() {
             // Fail if we need an empty lightwalletd state, but it has blocks
