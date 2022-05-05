@@ -1,15 +1,34 @@
 name: Lint
 
 on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      # production code and test code
+      - '**/*.rs'
+      # hard-coded checkpoints
+      # TODO: skip proptest regressions
+      - '**/*.txt'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions that change the clippy cache
+      - '.cargo/config.toml'
+      - '.github/workflows/*.yml'
   pull_request:
     branches:
       - 'main'
     paths-ignore:
+      # code and tests
       - '**/*.rs'
+      # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      # workflow definitions
       - 'clippy.toml'
       - '.cargo/config.toml'
+      # TODO: we might want to run this in a separate workflow in the future for the `actionlint` job
       - '.github/workflows/*.yml'
 
 jobs:
