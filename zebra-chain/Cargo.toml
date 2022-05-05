@@ -27,7 +27,7 @@ chrono = { version = "0.4.19", features = ["serde"] }
 displaydoc = "0.2.3"
 fpe = "0.5.1"
 futures = "0.3.21"
-group = "0.11.0"
+group = "0.12.0"
 halo2 = { package = "halo2_proofs", version = "=0.1.0-beta.4" }
 hex = "0.4.3"
 incrementalmerkletree = "0.3.0-beta.2"

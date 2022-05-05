@@ -379,8 +379,8 @@ dependencies = [
  "blake2s_simd 0.5.11",
  "byteorder",
  "crossbeam-channel",
- "ff",
- "group",
+ "ff 0.11.0",
+ "group 0.11.0",
  "lazy_static",
  "log",
  "num_cpus",
@@ -575,8 +575,8 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d28daeeded7949f1c7c72693377c98473b00be0aa0023760a84a300e4e7c74b"
 dependencies = [
- "ff",
- "group",
+ "ff 0.11.0",
+ "group 0.11.0",
  "pairing",
  "rand_core 0.6.3",
  "subtle",
@@ -1528,6 +1528,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ff"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df689201f395c6b90dfe87127685f8dbfc083a5e779e613575d8bd7314300c3e"
+dependencies = [
+ "rand_core 0.6.3",
+ "subtle",
+]
+
+[[package]]
 name = "fixedbitset"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1795,7 +1805,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5ac374b108929de78460075f3dc439fa66df9d8fc77e8f12caa5165fcf0c89"
 dependencies = [
  "byteorder",
- "ff",
+ "ff 0.11.0",
+ "rand_core 0.6.3",
+ "subtle",
+]
+
+[[package]]
+name = "group"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7391856def869c1c81063a03457c676fbcd419709c3dfb33d8d319de484b154d"
+dependencies = [
+ "byteorder",
+ "ff 0.12.0",
  "rand_core 0.6.3",
  "subtle",
 ]
@@ -1853,8 +1875,8 @@ checksum = "7524b798b8b3689a198cd87ee1d22fe3ca007a51d35c4093f32d75c0efc30abe"
 dependencies = [
  "arrayvec 0.7.2",
  "bitvec",
- "ff",
- "group",
+ "ff 0.11.0",
+ "group 0.11.0",
  "halo2_proofs",
  "lazy_static",
  "pasta_curves",
@@ -1871,8 +1893,8 @@ checksum = "e0240b05b791cccfd6451b010b19711280e63b87f495bd84df0103f35c9139e7"
 dependencies = [
  "blake2b_simd 1.0.0",
  "bumpalo",
- "ff",
- "group",
+ "ff 0.11.0",
+ "group 0.11.0",
  "pasta_curves",
  "rand_core 0.6.3",
  "rayon",
@@ -2301,8 +2323,8 @@ checksum = "e2e7baec19d4e83f9145d4891178101a604565edff9645770fc979804138b04c"
 dependencies = [
  "bitvec",
  "bls12_381",
- "ff",
- "group",
+ "ff 0.11.0",
+ "group 0.11.0",
  "rand_core 0.6.3",
  "subtle",
 ]
@@ -2880,9 +2902,9 @@ dependencies = [
  "aes",
  "bitvec",
  "blake2b_simd 1.0.0",
- "ff",
+ "ff 0.11.0",
  "fpe",
- "group",
+ "group 0.11.0",
  "halo2_gadgets",
  "halo2_proofs",
  "hex",
@@ -2944,7 +2966,7 @@ version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2e415e349a3006dd7d9482cdab1c980a845bed1377777d768cb693a44540b42"
 dependencies = [
- "group",
+ "group 0.11.0",
 ]
 
 [[package]]
@@ -3013,8 +3035,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82b6fc4f73033f6aa52fdde0c38f1f570e7f2c244f22e441f62a144556891b8c"
 dependencies = [
  "blake2b_simd 1.0.0",
- "ff",
- "group",
+ "ff 0.11.0",
+ "group 0.11.0",
  "lazy_static",
  "rand 0.8.5",
  "static_assertions",
@@ -3619,7 +3641,7 @@ checksum = "5a2efaed2ccc184ca4f82ed083ec0afe700c6254acae3d7732fc50ef79d5cbe9"
 dependencies = [
  "blake2b_simd 1.0.0",
  "byteorder",
- "group",
+ "group 0.11.0",
  "jubjub",
  "pasta_curves",
  "rand_core 0.6.3",
@@ -5954,9 +5976,9 @@ dependencies = [
  "byteorder",
  "chacha20poly1305",
  "equihash 0.1.0 (git+https://github.com/ZcashFoundation/librustzcash.git?rev=c3ff94134b472ba90af665e5454983dc12de1338)",
- "ff",
+ "ff 0.11.0",
  "fpe",
- "group",
+ "group 0.11.0",
  "hex",
  "incrementalmerkletree",
  "jubjub",
@@ -5987,9 +6009,9 @@ dependencies = [
  "byteorder",
  "chacha20poly1305",
  "equihash 0.1.0 (git+https://github.com/zcash/librustzcash.git?rev=d14e7a707ce01cefcbc82651dad48f002185dded)",
- "ff",
+ "ff 0.11.0",
  "fpe",
- "group",
+ "group 0.11.0",
  "hdwallet",
  "hex",
  "incrementalmerkletree",
@@ -6018,8 +6040,8 @@ dependencies = [
  "bls12_381",
  "byteorder",
  "directories",
- "ff",
- "group",
+ "ff 0.11.0",
+ "group 0.11.0",
  "jubjub",
  "lazy_static",
  "minreq",
@@ -6067,7 +6089,7 @@ dependencies = [
  "equihash 0.1.0 (git+https://github.com/zcash/librustzcash.git?rev=d14e7a707ce01cefcbc82651dad48f002185dded)",
  "fpe",
  "futures",
- "group",
+ "group 0.12.0",
  "halo2_proofs",
  "hex",
  "incrementalmerkletree",
