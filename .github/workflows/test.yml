@@ -68,18 +68,21 @@ env:
 jobs:
   changed-files:
     runs-on: ubuntu-latest
-    name: Test changed-files
+    name: Checks changed-files
     outputs:
-      modified_files: ${{ steps.changed-files.outputs.modified_files }}
+      rebuild: ${{ steps.changed-files-rebuild.outputs.any_changed == 'true' }}
     steps:
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Get changed files
-        id: changed-files
+      - name: Disk rebuild files
+        id: changed-files-rebuild
         uses: tj-actions/changed-files@v19
+        with:
+          files: |
+            zebra-state/**/constants.rs
 
   build:
     uses: ./.github/workflows/docker-image-build.yml
@@ -176,7 +179,7 @@ jobs:
     needs: [ build, changed-files]
     uses: ./.github/workflows/gcp-test-deploy.yml
     # Only run this job if the database format version has (likely) changed.
-    if: ${{ (contains(needs.changed-files.outputs.modified_files, 'zebra-state/src/constants.rs') && github.event_name == 'push') || github.event.inputs.regenerate-disks == 'true' }}
+    if: ${{ (needs.changed-files.outputs.rebuild == 'true' && github.event_name == 'push') || github.event.inputs.regenerate-disks == 'true' }}
     with:
       test_id: sync-to-checkpoint
       test_description: Test sync up to mandatory checkpoint
@@ -206,7 +209,7 @@ jobs:
     # TODO change `github.ref_name == 'main'` to `startsWith(github.head_ref, 'mergify/merge-queue/')`
     # to only run on Mergify head branches, and on manual dispatch:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || github.event.inputs.run-full-sync == 'true' }}
+    if: ${{ github.event_name == 'push' || github.event.inputs.run-full-sync == 'true' || github.event.inputs.regenerate-disks != 'true'}}
     with:
       test_id: full-sync-to-tip
       test_description: Test a full sync up to the tip
