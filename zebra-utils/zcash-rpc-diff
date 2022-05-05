@@ -16,7 +16,7 @@ function usage()
 
 # Override the commands used by this script using these environmental variables:
 ZCASH_CLI="${ZCASH_CLI:-zcash-cli}"
-DIFF="${DIFF:-diff --unified --color}"
+DIFF="${DIFF:-diff --unified --color=always}"
 
 if [ $# -lt 2 ]; then
     usage
