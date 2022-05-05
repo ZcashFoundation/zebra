@@ -43,7 +43,7 @@ on:
 env:
   NETWORK: Mainnet
   IMAGE_NAME: zebrad-test
-  GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
+  GAR_BASE: ghcr.io/zcashfoundation
   ZONE: us-central1-a
   MACHINE_TYPE: c2d-standard-16
 
