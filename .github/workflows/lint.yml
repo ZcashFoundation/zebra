@@ -6,44 +6,47 @@ on:
   push:
     branches:
       - main
-    paths:
-      # production code and test code
-      - '**/*.rs'
-      # hard-coded checkpoints
-      # TODO: skip proptest regressions
-      - '**/*.txt'
-      # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      # workflow definitions that change the clippy cache
-      - '.cargo/config.toml'
-      - '.github/workflows/ci.yml'
   pull_request:
     branches:
       - 'main'
-    paths:
-      # code and tests
-      - '**/*.rs'
-      # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      # workflow definitions
-      - 'clippy.toml'
-      - '.cargo/config.toml'
-      # TODO: we might want to run this in a separate workflow in the future for the `actionlint` job
-      - '.github/workflows/*.yml'
-
-env:
-  CARGO_INCREMENTAL: 0
-  RUST_BACKTRACE: full
-  RUST_LIB_BACKTRACE: full
-  COLORBT_SHOW_HIDDEN: '1'
 
 jobs:
+  changed-files:
+    runs-on: ubuntu-latest
+    name: Checks changed-files
+    outputs:
+      rust: ${{ steps.changed-files-rust.outputs.any_changed == 'true' }}
+      workflows: ${{ steps.changed-files-workflows.outputs.any_changed == 'true' }}
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Rust files
+        id: changed-files-rust
+        uses: tj-actions/changed-files@v19
+        with:
+          files: |
+            **/*.rs
+            **/Cargo.toml
+            **/Cargo.lock
+            clippy.toml
+            .cargo/config.toml
+
+      - name: Workflow files
+        id: changed-files-workflows
+        uses: tj-actions/changed-files@v19
+        with:
+          files: |
+            .github/workflows/*.yml
+
   clippy:
     name: Clippy
     timeout-minutes: 30
     runs-on: ubuntu-latest
+    needs: changed-files
+    if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
       - uses: actions/checkout@v3.0.2
@@ -83,6 +86,8 @@ jobs:
     name: Rustfmt
     timeout-minutes: 30
     runs-on: ubuntu-latest
+    needs: changed-files
+    if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
       - uses: actions/checkout@v3.0.2
@@ -104,6 +109,9 @@ jobs:
 
   actionlint:
     runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: changed-files
+    if: ${{ needs.changed-files.outputs.workflows == 'true' }}
     steps:
       - uses: actions/checkout@v3.0.2
       - uses: reviewdog/action-actionlint@v1.24.0
