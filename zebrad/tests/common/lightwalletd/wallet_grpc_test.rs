@@ -47,7 +47,6 @@ use crate::common::{
         },
         zebra_skip_lightwalletd_tests,
         LightwalletdTestType::UpdateCachedState,
-        LIGHTWALLETD_TEST_TIMEOUT,
     },
 };
 
@@ -80,11 +79,8 @@ pub async fn run() -> Result<()> {
     let network = Network::Mainnet;
 
     // Launch zebra using a predefined zebrad state path
-    let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
-        network,
-        zebrad_state_path.unwrap(),
-        LIGHTWALLETD_TEST_TIMEOUT,
-    )?;
+    let (_zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc_without_initial_peers(network, zebrad_state_path.unwrap(), test_type)?;
 
     // Launch lightwalletd
     let (_lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(

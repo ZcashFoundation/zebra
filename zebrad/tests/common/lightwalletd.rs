@@ -58,9 +58,6 @@ pub const ZEBRA_TEST_LIGHTWALLETD: &str = "ZEBRA_TEST_LIGHTWALLETD";
 /// by skipping the lightwalletd initial sync.
 pub const LIGHTWALLETD_DATA_DIR_VAR: &str = "LIGHTWALLETD_DATA_DIR";
 
-/// The maximum time that a `lightwalletd` integration test is expected to run.
-pub const LIGHTWALLETD_TEST_TIMEOUT: Duration = Duration::from_secs(60 * 60);
-
 /// Should we skip Zebra lightwalletd integration tests?
 #[allow(clippy::print_stderr)]
 pub fn zebra_skip_lightwalletd_tests() -> bool {
@@ -378,9 +375,7 @@ impl LightwalletdTestType {
         // lightwalletd state failures
         if self.needs_lightwalletd_cached_state() {
             // Fail if we need a cached lightwalletd state, but it isn't near the tip
-            //
-            // TODO: fail on `[0-9]{1,6}` when we're using the tip cached state (#4155)
-            lightwalletd_failure_messages.push("Found [0-9]{1,5} blocks in cache".to_string());
+            lightwalletd_failure_messages.push("Found [0-9]{1,6} blocks in cache".to_string());
         }
         if !self.allow_lightwalletd_cached_state() {
             // Fail if we need an empty lightwalletd state, but it has blocks

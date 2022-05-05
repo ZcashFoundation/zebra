@@ -1163,8 +1163,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     }
 
     if test_type.needs_lightwalletd_cached_state() {
-        // TODO: expect `[0-9]{7}` when we're using the tip cached state (#4155)
-        lightwalletd.expect_stdout_line_matches("Found [0-9]{6,7} blocks in cache")?;
+        lightwalletd.expect_stdout_line_matches("Found [0-9]{7} blocks in cache")?;
     } else if !test_type.allow_lightwalletd_cached_state() {
         // Timeout the test if we're somehow accidentally using a cached state in our temp dir
         lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache")?;
@@ -1487,11 +1486,8 @@ async fn fully_synced_rpc_test() -> Result<()> {
 
     let network = Network::Mainnet;
 
-    let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
-        network,
-        cached_state_path.unwrap(),
-        test_type.zebrad_timeout(),
-    )?;
+    let (_zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc_without_initial_peers(network, cached_state_path.unwrap(), test_type)?;
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
