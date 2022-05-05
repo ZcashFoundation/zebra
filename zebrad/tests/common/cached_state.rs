@@ -13,7 +13,7 @@ use zebra_state::{ChainTipChange, LatestChainTip};
 use crate::common::config::testdir;
 
 /// Path to a directory containing a cached Zebra state.
-pub const ZEBRA_CACHED_STATE_DIR_VAR: &str = "ZEBRA_CACHED_STATE_DIR";
+pub const ZEBRA_CACHED_STATE_DIR: &str = "ZEBRA_CACHED_STATE_DIR";
 
 /// Type alias for a boxed state service.
 pub type BoxStateService =
