@@ -58,9 +58,6 @@ pub const ZEBRA_TEST_LIGHTWALLETD: &str = "ZEBRA_TEST_LIGHTWALLETD";
 /// by skipping the lightwalletd initial sync.
 pub const LIGHTWALLETD_DATA_DIR_VAR: &str = "LIGHTWALLETD_DATA_DIR";
 
-/// The maximum time that a `lightwalletd` integration test is expected to run.
-pub const LIGHTWALLETD_TEST_TIMEOUT: Duration = Duration::from_secs(60 * 60);
-
 /// Should we skip Zebra lightwalletd integration tests?
 #[allow(clippy::print_stderr)]
 pub fn zebra_skip_lightwalletd_tests() -> bool {

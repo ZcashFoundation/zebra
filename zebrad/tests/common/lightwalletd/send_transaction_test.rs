@@ -36,8 +36,7 @@ use crate::common::{
     lightwalletd::{
         wallet_grpc::{self, connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server},
         zebra_skip_lightwalletd_tests,
-        LightwalletdTestType::UpdateCachedState,
-        LIGHTWALLETD_TEST_TIMEOUT,
+        LightwalletdTestType::*,
     },
     sync::perform_full_sync_starting_from,
 };
@@ -71,11 +70,8 @@ pub async fn run() -> Result<()> {
     let (transactions, partial_sync_path) =
         load_transactions_from_a_future_block(network, cached_state_path.unwrap()).await?;
 
-    let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
-        Network::Mainnet,
-        partial_sync_path,
-        LIGHTWALLETD_TEST_TIMEOUT,
-    )?;
+    let (_zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc_without_initial_peers(Network::Mainnet, partial_sync_path, test_type)?;
 
     let (_lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(
         zebra_rpc_address,
