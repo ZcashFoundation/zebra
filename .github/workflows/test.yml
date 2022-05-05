@@ -216,11 +216,23 @@ jobs:
       disk_suffix: tip
       height_grep_text: 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.* current_height=Height'
 
-  # Test sending transactions with lightwalletd using a Zebra tip state
-  lightwalletd-transactions-test:
-    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
+  lightwalletd-rpc-test:
     needs: build
     uses: ./.github/workflows/gcp-test-deploy.yml
+    with:
+      app_name: lightwalletd
+      test_id: fully-synced-rpc
+      test_description: Test lightwalletd RPC with a Zebra tip state
+      test_variables: '-e TEST_LWD_RPC_CALL=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      needs_zebra_state: true
+      saves_to_disk: false
+      disk_suffix: tip
+      zebra_state_path: '/var/cache'
+
+  lightwalletd-transactions-test:
+    needs: build
+    uses: ./.github/workflows/gcp-test-deploy.yml
+    if: ${{ github.event.inputs.regenerate-disks != 'true' || github.event.inputs.run-full-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-send-transactions
