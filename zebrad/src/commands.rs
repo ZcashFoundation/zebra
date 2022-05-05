@@ -59,12 +59,41 @@ pub enum ZebradCmd {
 impl ZebradCmd {
     /// Returns true if this command is a server command.
     ///
+    /// Servers load extra components, and use the configured tracing filter.
+    ///
     /// For example, `Start` acts as a Zcash node.
     pub(crate) fn is_server(&self) -> bool {
+        // List all the commands, so new commands have to make a choice here
         match self {
-            // List all the commands, so new commands have to make a choice here
+            // Commands that run as a configured server
             CopyState(_) | Start(_) => true,
+
+            // Utility commands that don't use server components
             Download(_) | Generate(_) | Help(_) | TipHeight(_) | Version(_) => false,
+        }
+    }
+
+    /// Returns the default log level for this command, based on the `verbose` command line flag.
+    ///
+    /// Some commands need to be quiet by default.
+    pub(crate) fn default_tracing_filter(&self, verbose: bool) -> &'static str {
+        let only_show_warnings = match self {
+            // Commands that generate quiet output by default.
+            // This output:
+            // - is used by automated tools, or
+            // - needs to be read easily.
+            Generate(_) | TipHeight(_) | Help(_) | Version(_) => true,
+
+            // Commands that generate informative logging output by default.
+            CopyState(_) | Download(_) | Start(_) => false,
+        };
+
+        if only_show_warnings && !verbose {
+            "warn"
+        } else if only_show_warnings || !verbose {
+            "info"
+        } else {
+            "debug"
         }
     }
 }
