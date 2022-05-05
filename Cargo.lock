@@ -6298,7 +6298,6 @@ dependencies = [
  "hex",
  "serde_json",
  "structopt",
- "tower",
  "tracing-error 0.1.2",
  "tracing-subscriber 0.2.25",
  "zebra-chain",
