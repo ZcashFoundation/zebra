@@ -4,12 +4,13 @@ mod copy_state;
 mod download;
 mod generate;
 mod start;
+mod tip_height;
 mod version;
 
 use self::ZebradCmd::*;
 use self::{
     copy_state::CopyStateCmd, download::DownloadCmd, generate::GenerateCmd, start::StartCmd,
-    version::VersionCmd,
+    tip_height::TipHeightCmd, version::VersionCmd,
 };
 
 use crate::config::ZebradConfig;
@@ -46,6 +47,10 @@ pub enum ZebradCmd {
     #[options(help = "start the application")]
     Start(StartCmd),
 
+    /// The `tip-height` subcommand
+    #[options(help = "get the block height of Zebra's persisted chain state")]
+    TipHeight(TipHeightCmd),
+
     /// The `version` subcommand
     #[options(help = "display version information")]
     Version(VersionCmd),
@@ -59,7 +64,7 @@ impl ZebradCmd {
         match self {
             // List all the commands, so new commands have to make a choice here
             CopyState(_) | Start(_) => true,
-            Download(_) | Generate(_) | Help(_) | Version(_) => false,
+            Download(_) | Generate(_) | Help(_) | TipHeight(_) | Version(_) => false,
         }
     }
 }
@@ -72,6 +77,7 @@ impl Runnable for ZebradCmd {
             Generate(cmd) => cmd.run(),
             ZebradCmd::Help(cmd) => cmd.run(),
             Start(cmd) => cmd.run(),
+            TipHeight(cmd) => cmd.run(),
             Version(cmd) => cmd.run(),
         }
     }
