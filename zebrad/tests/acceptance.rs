@@ -716,19 +716,19 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
 /// Sync up to the mandatory checkpoint height on mainnet and stop.
 #[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_to_mandatory_checkpoint_mainnet", test)]
-fn sync_to_mandatory_checkpoint_mainnet() {
+fn sync_to_mandatory_checkpoint_mainnet() -> Result<()> {
     zebra_test::init();
     let network = Mainnet;
-    create_cached_database(network).unwrap();
+    create_cached_database(network)
 }
 
 /// Sync to the mandatory checkpoint height testnet and stop.
 #[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_to_mandatory_checkpoint_testnet", test)]
-fn sync_to_mandatory_checkpoint_testnet() {
+fn sync_to_mandatory_checkpoint_testnet() -> Result<()> {
     zebra_test::init();
     let network = Testnet;
-    create_cached_database(network).unwrap();
+    create_cached_database(network)
 }
 
 /// Test syncing 1200 blocks (3 checkpoints) past the mandatory checkpoint on mainnet.
@@ -738,10 +738,10 @@ fn sync_to_mandatory_checkpoint_testnet() {
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_past_mandatory_checkpoint_mainnet", test)]
-fn sync_past_mandatory_checkpoint_mainnet() {
+fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
     zebra_test::init();
     let network = Mainnet;
-    sync_past_mandatory_checkpoint(network).unwrap();
+    sync_past_mandatory_checkpoint(network)
 }
 
 /// Test syncing 1200 blocks (3 checkpoints) past the mandatory checkpoint on testnet.
@@ -751,10 +751,10 @@ fn sync_past_mandatory_checkpoint_mainnet() {
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_past_mandatory_checkpoint_testnet", test)]
-fn sync_past_mandatory_checkpoint_testnet() {
+fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
     zebra_test::init();
     let network = Testnet;
-    sync_past_mandatory_checkpoint(network).unwrap();
+    sync_past_mandatory_checkpoint(network)
 }
 
 /// Test if `zebrad` can fully sync the chain on mainnet.
@@ -764,9 +764,9 @@ fn sync_past_mandatory_checkpoint_testnet() {
 /// of minutes to wait for synchronization to complete before considering that the test failed.
 #[test]
 #[ignore]
-fn full_sync_mainnet() {
+fn full_sync_mainnet() -> Result<()> {
     // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
-    full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES").expect("unexpected test failure");
+    full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES")
 }
 
 /// Test if `zebrad` can fully sync the chain on testnet.
@@ -776,9 +776,9 @@ fn full_sync_mainnet() {
 /// of minutes to wait for synchronization to complete before considering that the test failed.
 #[test]
 #[ignore]
-fn full_sync_testnet() {
+fn full_sync_testnet() -> Result<()> {
     // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
-    full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES").expect("unexpected test failure");
+    full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES")
 }
 
 #[tokio::test]
