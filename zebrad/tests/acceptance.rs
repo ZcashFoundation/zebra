@@ -21,7 +21,7 @@
 //! or you have poor network connectivity,
 //! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
 
-use std::{collections::HashSet, convert::TryInto, env, path::PathBuf, time::Duration};
+use std::{collections::HashSet, convert::TryInto, env, path::PathBuf};
 
 use color_eyre::{
     eyre::{eyre, Result, WrapErr},
@@ -634,67 +634,6 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
     .map(|_tempdir| ())
 }
 
-/// Test if `zebrad` can fully sync the chain on mainnet.
-///
-/// This test takes a long time to run, so we don't run it by default. This test is only executed
-/// if there is an environment variable named `FULL_SYNC_MAINNET_TIMEOUT_MINUTES` set with the number
-/// of minutes to wait for synchronization to complete before considering that the test failed.
-#[test]
-#[ignore]
-fn full_sync_mainnet() {
-    // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
-    full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES").expect("unexpected test failure");
-}
-
-/// Test if `zebrad` can fully sync the chain on testnet.
-///
-/// This test takes a long time to run, so we don't run it by default. This test is only executed
-/// if there is an environment variable named `FULL_SYNC_TESTNET_TIMEOUT_MINUTES` set with the number
-/// of minutes to wait for synchronization to complete before considering that the test failed.
-#[test]
-#[ignore]
-fn full_sync_testnet() {
-    // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
-    full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES").expect("unexpected test failure");
-}
-
-/// Sync `network` until the chain tip is reached, or a timeout elapses.
-///
-/// The timeout is specified using an environment variable, with the name configured by the
-/// `timeout_argument_name` parameter. The value of the environment variable must the number of
-/// minutes specified as an integer.
-fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
-    let timeout_argument: Option<u64> = env::var(timeout_argument_name)
-        .ok()
-        .and_then(|timeout_string| timeout_string.parse().ok());
-
-    if let Some(timeout_minutes) = timeout_argument {
-        sync_until(
-            block::Height::MAX,
-            network,
-            SYNC_FINISHED_REGEX,
-            Duration::from_secs(60 * timeout_minutes),
-            None,
-            MempoolBehavior::ShouldAutomaticallyActivate,
-            // Use checkpoints to increase full sync performance, and test default Zebra behaviour.
-            // (After the changes to the default config in #2368.)
-            //
-            // TODO: if full validation performance improves, do another test with checkpoint_sync off
-            true,
-            true,
-        )?;
-    } else {
-        tracing::info!(
-            ?network,
-            "skipped full sync test, \
-             set the {:?} environmental variable to run the test",
-            timeout_argument_name,
-        );
-    }
-
-    Ok(())
-}
-
 fn create_cached_database(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height();
     let checkpoint_stop_regex = format!("{}.*CommitFinalized request", STOP_AT_HEIGHT_REGEX);
@@ -702,6 +641,7 @@ fn create_cached_database(network: Network) -> Result<()> {
     create_cached_database_height(
         network,
         height,
+        // We don't need the ZK parameters, we're only using checkpoints
         true,
         // Use checkpoints to increase sync performance while caching the database
         true,
@@ -718,36 +658,77 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     create_cached_database_height(
         network,
         height.unwrap(),
+        // We need the ZK parameters for full validation
         false,
         // Test full validation by turning checkpoints off
         false,
+        // Check that we're doing full validation when we finish the cached sync
         &full_validation_stop_regex,
     )
+}
+
+/// Sync `network` until the chain tip is reached, or a timeout elapses.
+///
+/// The timeout is specified using an environment variable, with the name configured by the
+/// `timeout_argument_name` parameter. The value of the environment variable must the number of
+/// minutes specified as an integer.
+fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
+    let timeout_argument: Option<u64> = env::var(timeout_argument_name)
+        .ok()
+        .and_then(|timeout_string| timeout_string.parse().ok());
+
+    // # TODO
+    //
+    // Replace hard-coded values in create_cached_database_height with:
+    // - the timeout in the environmental variable
+    // - the path from ZEBRA_CACHED_STATE_DIR
+    if let Some(_timeout_minutes) = timeout_argument {
+        create_cached_database_height(
+            network,
+            // Just keep going until we reach the chain tip
+            block::Height::MAX,
+            // We need the ZK parameters for full validation
+            false,
+            // Use the checkpoints to sync quickly, then do full validation until the chain tip
+            true,
+            // Finish when we reach the chain tip
+            SYNC_FINISHED_REGEX,
+        )
+    } else {
+        tracing::info!(
+            ?network,
+            "skipped full sync test, \
+             set the {:?} environmental variable to run the test",
+            timeout_argument_name,
+        );
+
+        Ok(())
+    }
 }
 
 // These tests are ignored because they're too long running to run during our
 // traditional CI, and they depend on persistent state that cannot be made
 // available in github actions or google cloud build. Instead we run these tests
 // directly in a vm we spin up on google compute engine, where we can mount
-// drives populated by the first two tests, snapshot those drives, and then use
-// those to more quickly run the second two tests.
+// drives populated by the sync_to_mandatory_checkpoint tests, snapshot those drives,
+// and then use them to more quickly run the sync_past_mandatory_checkpoint tests.
 
 /// Sync up to the mandatory checkpoint height on mainnet and stop.
 #[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_to_mandatory_checkpoint_mainnet", test)]
-fn sync_to_mandatory_checkpoint_mainnet() {
+fn sync_to_mandatory_checkpoint_mainnet() -> Result<()> {
     zebra_test::init();
     let network = Mainnet;
-    create_cached_database(network).unwrap();
+    create_cached_database(network)
 }
 
 /// Sync to the mandatory checkpoint height testnet and stop.
 #[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_to_mandatory_checkpoint_testnet", test)]
-fn sync_to_mandatory_checkpoint_testnet() {
+fn sync_to_mandatory_checkpoint_testnet() -> Result<()> {
     zebra_test::init();
     let network = Testnet;
-    create_cached_database(network).unwrap();
+    create_cached_database(network)
 }
 
 /// Test syncing 1200 blocks (3 checkpoints) past the mandatory checkpoint on mainnet.
@@ -757,10 +738,10 @@ fn sync_to_mandatory_checkpoint_testnet() {
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_past_mandatory_checkpoint_mainnet", test)]
-fn sync_past_mandatory_checkpoint_mainnet() {
+fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
     zebra_test::init();
     let network = Mainnet;
-    sync_past_mandatory_checkpoint(network).unwrap();
+    sync_past_mandatory_checkpoint(network)
 }
 
 /// Test syncing 1200 blocks (3 checkpoints) past the mandatory checkpoint on testnet.
@@ -770,10 +751,34 @@ fn sync_past_mandatory_checkpoint_mainnet() {
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_past_mandatory_checkpoint_testnet", test)]
-fn sync_past_mandatory_checkpoint_testnet() {
+fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
     zebra_test::init();
     let network = Testnet;
-    sync_past_mandatory_checkpoint(network).unwrap();
+    sync_past_mandatory_checkpoint(network)
+}
+
+/// Test if `zebrad` can fully sync the chain on mainnet.
+///
+/// This test takes a long time to run, so we don't run it by default. This test is only executed
+/// if there is an environment variable named `FULL_SYNC_MAINNET_TIMEOUT_MINUTES` set with the number
+/// of minutes to wait for synchronization to complete before considering that the test failed.
+#[test]
+#[ignore]
+fn full_sync_mainnet() -> Result<()> {
+    // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
+    full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES")
+}
+
+/// Test if `zebrad` can fully sync the chain on testnet.
+///
+/// This test takes a long time to run, so we don't run it by default. This test is only executed
+/// if there is an environment variable named `FULL_SYNC_TESTNET_TIMEOUT_MINUTES` set with the number
+/// of minutes to wait for synchronization to complete before considering that the test failed.
+#[test]
+#[ignore]
+fn full_sync_testnet() -> Result<()> {
+    // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
+    full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES")
 }
 
 #[tokio::test]
