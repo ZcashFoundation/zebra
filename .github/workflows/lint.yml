@@ -17,7 +17,7 @@ on:
       - '**/Cargo.lock'
       # workflow definitions that change the clippy cache
       - '.cargo/config.toml'
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/*.yml'
   pull_request:
     branches:
       - 'main'

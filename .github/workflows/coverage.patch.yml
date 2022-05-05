@@ -1,6 +1,22 @@
 name: Coverage
 
 on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
+      - 'codecov.yml'
+      - '.github/workflows/coverage.yml'
   pull_request:
     paths-ignore:
       - '**/*.rs'
