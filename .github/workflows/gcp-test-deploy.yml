@@ -33,7 +33,6 @@ on:
       needs_zebra_state:
         required: true
         type: boolean
-        default: false
       saves_to_disk:
         required: true
         type: boolean
