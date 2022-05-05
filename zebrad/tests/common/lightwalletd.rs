@@ -378,9 +378,7 @@ impl LightwalletdTestType {
         // lightwalletd state failures
         if self.needs_lightwalletd_cached_state() {
             // Fail if we need a cached lightwalletd state, but it isn't near the tip
-            //
-            // TODO: fail on `[0-9]{1,6}` when we're using the tip cached state (#4155)
-            lightwalletd_failure_messages.push("Found [0-9]{1,5} blocks in cache".to_string());
+            lightwalletd_failure_messages.push("Found [0-9]{1,6} blocks in cache".to_string());
         }
         if !self.allow_lightwalletd_cached_state() {
             // Fail if we need an empty lightwalletd state, but it has blocks

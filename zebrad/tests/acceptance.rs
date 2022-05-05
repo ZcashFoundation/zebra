@@ -1163,8 +1163,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     }
 
     if test_type.needs_lightwalletd_cached_state() {
-        // TODO: expect `[0-9]{7}` when we're using the tip cached state (#4155)
-        lightwalletd.expect_stdout_line_matches("Found [0-9]{6,7} blocks in cache")?;
+        lightwalletd.expect_stdout_line_matches("Found [0-9]{7} blocks in cache")?;
     } else if !test_type.allow_lightwalletd_cached_state() {
         // Timeout the test if we're somehow accidentally using a cached state in our temp dir
         lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache")?;
