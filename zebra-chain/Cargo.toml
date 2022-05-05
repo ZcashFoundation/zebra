@@ -32,7 +32,7 @@ halo2 = { package = "halo2_proofs", version = "=0.1.0-beta.4" }
 hex = "0.4.3"
 incrementalmerkletree = "0.3.0-beta.2"
 itertools = "0.10.3"
-jubjub = "0.8.0"
+jubjub = "0.9.0"
 lazy_static = "1.4.0"
 rand_core = "0.6.3"
 ripemd = "0.1.1"

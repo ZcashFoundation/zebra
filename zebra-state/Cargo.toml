@@ -48,7 +48,7 @@ proptest-derive = "0.3.0"
 # TODO: replace w/ crate version when released: https://github.com/ZcashFoundation/zebra/issues/2083
 # Note: if updating this, also update the workspace Cargo.toml to match.
 halo2 = { package = "halo2_proofs", version = "=0.1.0-beta.4" }
-jubjub = "0.8.0"
+jubjub = "0.9.0"
 
 tokio = { version = "1.18.1", features = ["full"] }
 
