@@ -162,7 +162,7 @@ async fn load_transactions_from_block_after(
     state_path: &Path,
 ) -> Result<Vec<Arc<Transaction>>> {
     let (_read_write_state_service, mut state, latest_chain_tip, _chain_tip_change) =
-        start_state_service_with_cache_dir(network, state_path.join("state")).await?;
+        start_state_service_with_cache_dir(network, state_path).await?;
 
     let tip_height = latest_chain_tip
         .best_tip_height()
