@@ -58,7 +58,7 @@ pub(crate) mod check;
 mod finalized_state;
 mod non_finalized_state;
 mod pending_utxos;
-mod read;
+pub(crate) mod read;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
@@ -66,7 +66,7 @@ pub mod arbitrary;
 #[cfg(test)]
 mod tests;
 
-pub use finalized_state::{OutputLocation, TransactionLocation};
+pub use finalized_state::{OutputIndex, OutputLocation, TransactionLocation};
 
 pub type QueuedBlock = (
     PreparedBlock,
@@ -993,24 +993,67 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // For the get_address_tx_ids RPC.
-            ReadRequest::TransactionsByAddresses(_addresses, _start, _end) => {
+            ReadRequest::TransactionIdsByAddresses {
+                addresses,
+                height_range,
+            } => {
                 metrics::counter!(
                     "state.requests",
                     1,
                     "service" => "read_state",
-                    "type" => "transactions_by_addresses",
+                    "type" => "transaction_ids_by_addresses",
                 );
 
-                let _state = self.clone();
+                let state = self.clone();
 
                 async move {
-                    // TODO: Respond with found transactions
-                    // At least the following pull requests should be merged:
-                    // - #4022
-                    // - #4038
-                    // Do the corresponding update in the context of #3147
-                    let transaction_ids = vec![];
-                    Ok(ReadResponse::TransactionIds(transaction_ids))
+                    let tx_ids = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::transparent_tx_ids(best_chain, &state.db, addresses, height_range)
+                    });
+
+                    tx_ids.map(ReadResponse::AddressesTransactionIds)
+                }
+                .boxed()
+            }
+
+            // For the get_address_balance RPC.
+            ReadRequest::AddressBalance(addresses) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "address_balance",
+                );
+
+                let state = self.clone();
+
+                async move {
+                    let balance = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::transparent_balance(best_chain, &state.db, addresses)
+                    })?;
+
+                    Ok(ReadResponse::AddressBalance(balance))
+                }
+                .boxed()
+            }
+
+            // For the get_address_utxos RPC.
+            ReadRequest::UtxosByAddresses(addresses) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "utxos_by_addresses",
+                );
+
+                let state = self.clone();
+
+                async move {
+                    let utxos = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::transparent_utxos(state.network, best_chain, &state.db, addresses)
+                    });
+
+                    utxos.map(ReadResponse::Utxos)
                 }
                 .boxed()
             }

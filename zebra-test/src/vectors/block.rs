@@ -224,9 +224,6 @@ lazy_static! {
             (1_116_001, BLOCK_TESTNET_1116001_BYTES.as_ref()),
             (1_326_100, BLOCK_TESTNET_1326100_BYTES.as_ref()),
             (1_599_199, BLOCK_TESTNET_1599199_BYTES.as_ref()),
-            // Nu5
-            (1_599_200, BLOCK_TESTNET_1599200_BYTES.as_ref()),
-            (1_599_201, BLOCK_TESTNET_1599201_BYTES.as_ref()),
         ].iter().cloned().collect();
 
     /// Testnet final Sprout roots, indexed by height.
@@ -281,9 +278,6 @@ lazy_static! {
             (1_116_001, SAPLING_FINAL_ROOT_TESTNET_1116001_BYTES.as_ref().try_into().unwrap()),
             (1_326_100, SAPLING_FINAL_ROOT_TESTNET_1326100_BYTES.as_ref().try_into().unwrap()),
             (1_599_199, SAPLING_FINAL_ROOT_TESTNET_1599199_BYTES.as_ref().try_into().unwrap()),
-            // Nu5
-            (1_599_200, SAPLING_FINAL_ROOT_TESTNET_1599200_BYTES.as_ref().try_into().unwrap()),
-            (1_599_201, SAPLING_FINAL_ROOT_TESTNET_1599201_BYTES.as_ref().try_into().unwrap()),
         ].iter().cloned().collect();
 
     // Mainnet
@@ -865,19 +859,7 @@ lazy_static! {
     pub static ref BLOCK_TESTNET_1599199_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-599-199.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_TESTNET_1599200_BYTES: Vec<u8> =
-        <Vec<u8>>::from_hex(include_str!("block-test-1-599-200.txt").trim())
-        .expect("Block bytes are in valid hex representation");
-    pub static ref BLOCK_TESTNET_1599201_BYTES: Vec<u8> =
-        <Vec<u8>>::from_hex(include_str!("block-test-1-599-201.txt").trim())
-        .expect("Block bytes are in valid hex representation");
     pub static ref SAPLING_FINAL_ROOT_TESTNET_1599199_BYTES: [u8; 32] =
-        <[u8; 32]>::from_hex("4de75d10def701ad22ecc17517a3adc8789ea8c214ac5bfc917b8924377e6c89")
-        .expect("final root bytes are in valid hex representation").rev();
-    pub static ref SAPLING_FINAL_ROOT_TESTNET_1599200_BYTES: [u8; 32] =
-        <[u8; 32]>::from_hex("4de75d10def701ad22ecc17517a3adc8789ea8c214ac5bfc917b8924377e6c89")
-        .expect("final root bytes are in valid hex representation").rev();
-    pub static ref SAPLING_FINAL_ROOT_TESTNET_1599201_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("4de75d10def701ad22ecc17517a3adc8789ea8c214ac5bfc917b8924377e6c89")
         .expect("final root bytes are in valid hex representation").rev();
 }

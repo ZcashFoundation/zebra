@@ -1,6 +1,6 @@
 //! Fixed test vectors for RPC methods.
 
-use std::sync::Arc;
+use std::{ops::RangeInclusive, sync::Arc};
 
 use jsonrpc_core::ErrorCode;
 use tower::buffer::Buffer;
@@ -11,6 +11,7 @@ use zebra_chain::{
     parameters::Network::*,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::{UnminedTx, UnminedTxId},
+    transparent,
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::BoxError;
@@ -37,8 +38,8 @@ async fn rpc_getinfo() {
     let get_info = rpc.get_info().expect("We should have a GetInfo struct");
 
     // make sure there is a `build` field in the response,
-    // and that is equal to the provided string.
-    assert_eq!(get_info.build, "RPC test");
+    // and that is equal to the provided string, with an added 'v' version prefix.
+    assert_eq!(get_info.build, "vRPC test");
 
     // make sure there is a `subversion` field,
     // and that is equal to the Zebra user agent.
@@ -336,12 +337,15 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 1;
     let end: u32 = 2;
     let error = rpc
-        .get_address_tx_ids(addresses, start, end)
+        .get_address_tx_ids(AddressStrings::new(addresses), start, end)
         .await
         .unwrap_err();
     assert_eq!(
         error.message,
-        format!("Provided address is not valid: {}", address)
+        format!(
+            "invalid address \"{}\": parse error: t-addr decoding error",
+            address
+        )
     );
 
     // create a valid address
@@ -352,7 +356,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 2;
     let end: u32 = 1;
     let error = rpc
-        .get_address_tx_ids(addresses.clone(), start, end)
+        .get_address_tx_ids(AddressStrings::new(addresses.clone()), start, end)
         .await
         .unwrap_err();
     assert_eq!(
@@ -364,7 +368,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 0;
     let end: u32 = 1;
     let error = rpc
-        .get_address_tx_ids(addresses.clone(), start, end)
+        .get_address_tx_ids(AddressStrings::new(addresses.clone()), start, end)
         .await
         .unwrap_err();
     assert_eq!(
@@ -376,7 +380,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 1;
     let end: u32 = 11;
     let error = rpc
-        .get_address_tx_ids(addresses, start, end)
+        .get_address_tx_ids(AddressStrings::new(addresses), start, end)
         .await
         .unwrap_err();
     assert_eq!(
@@ -393,6 +397,132 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 
 #[tokio::test]
 async fn rpc_getaddresstxids_response() {
+    zebra_test::init();
+
+    for network in [Mainnet, Testnet] {
+        let blocks: Vec<Arc<Block>> = match network {
+            Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
+            Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
+        }
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+        // The first few blocks after genesis send funds to the same founders reward address,
+        // in one output per coinbase transaction.
+        //
+        // Get the coinbase transaction of the first block
+        // (the genesis block coinbase transaction is ignored by the consensus rules).
+        let first_block_first_transaction = &blocks[1].transactions[0];
+
+        // Get the address.
+        let address = first_block_first_transaction.outputs()[1]
+            .address(network)
+            .unwrap();
+
+        if network == Mainnet {
+            // Exhaustively test possible block ranges for mainnet.
+            //
+            // TODO: if it takes too long on slower machines, turn this into a proptest with 10-20 cases
+            for start in 1..=10 {
+                for end in start..=10 {
+                    rpc_getaddresstxids_response_with(network, start..=end, &blocks, &address)
+                        .await;
+                }
+            }
+        } else {
+            // Just test the full range for testnet.
+            rpc_getaddresstxids_response_with(network, 1..=10, &blocks, &address).await;
+        }
+    }
+}
+
+async fn rpc_getaddresstxids_response_with(
+    network: Network,
+    range: RangeInclusive<u32>,
+    blocks: &[Arc<Block>],
+    address: &transparent::Address,
+) {
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.to_owned(), network).await;
+
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        latest_chain_tip,
+        network,
+    );
+
+    // call the method with valid arguments
+    let addresses = vec![address.to_string()];
+    let response = rpc
+        .get_address_tx_ids(AddressStrings::new(addresses), *range.start(), *range.end())
+        .await
+        .expect("arguments are valid so no error can happen here");
+
+    // One founders reward output per coinbase transactions, no other transactions.
+    assert_eq!(response.len(), range.count());
+
+    mempool.expect_no_requests().await;
+
+    // Shut down the queue task, to close the state's file descriptors.
+    // (If we don't, opening ~100 simultaneous states causes process file descriptor limit errors.)
+    //
+    // TODO: abort all the join handles in all the tests, except one?
+    rpc_tx_queue_task_handle.abort();
+
+    // The queue task should not have panicked or exited by itself.
+    // It can still be running, or it can have exited due to the abort.
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(
+        rpc_tx_queue_task_result.is_none()
+            || rpc_tx_queue_task_result
+                .unwrap()
+                .unwrap_err()
+                .is_cancelled()
+    );
+}
+
+#[tokio::test]
+async fn rpc_getaddressutxos_invalid_arguments() {
+    zebra_test::init();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let rpc = RpcImpl::new(
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        NoChainTip,
+        Mainnet,
+    );
+
+    // call the method with an invalid address string
+    let address = "11111111".to_string();
+    let addresses = vec![address.clone()];
+    let error = rpc
+        .0
+        .get_address_utxos(AddressStrings::new(addresses))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        format!(
+            "invalid address \"{}\": parse error: t-addr decoding error",
+            address
+        )
+    );
+
+    mempool.expect_no_requests().await;
+    state.expect_no_requests().await;
+}
+
+#[tokio::test]
+async fn rpc_getaddressutxos_response() {
     zebra_test::init();
 
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
@@ -412,7 +542,7 @@ async fn rpc_getaddresstxids_response() {
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
-    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+    let rpc = RpcImpl::new(
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
@@ -420,22 +550,16 @@ async fn rpc_getaddresstxids_response() {
         Mainnet,
     );
 
-    // call the method with valid arguments
+    // call the method with a valid address
     let addresses = vec![address.to_string()];
-    let start: u32 = 1;
-    let end: u32 = 1;
     let response = rpc
-        .get_address_tx_ids(addresses, start, end)
+        .0
+        .get_address_utxos(AddressStrings::new(addresses))
         .await
-        .expect("arguments are valid so no error can happen here");
+        .expect("address is valid so no error can happen here");
 
-    // TODO: The lenght of the response should be 1
-    // Fix in the context of #3147
-    assert_eq!(response.len(), 0);
+    // there are 10 outputs for provided address
+    assert_eq!(response.len(), 10);
 
     mempool.expect_no_requests().await;
-
-    // The queue task should continue without errors or panics
-    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-    assert!(matches!(rpc_tx_queue_task_result, None));
 }

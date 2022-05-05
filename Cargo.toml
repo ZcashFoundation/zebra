@@ -32,7 +32,10 @@ opt-level = 3
 [profile.dev.package.pasta_curves]
 opt-level = 3
 
-[profile.dev.package.halo2]
+[profile.dev.package.halo2_proofs]
+opt-level = 3
+
+[profile.dev.package.halo2_gadgets]
 opt-level = 3
 
 [profile.dev.package.bls12_381]
@@ -48,33 +51,31 @@ opt-level = 1
 [profile.release]
 panic = "abort"
 
-[patch.crates-io]
+# Speed up release builds and sync tests using link-time optimization.
+# Some of Zebra's code is CPU-intensive, and needs extra optimizations for peak performance.
+#
+# TODO:
+# - add "-Clinker-plugin-lto" in .cargo/config.toml to speed up release builds
+#     - add "-Clinker=clang -Clink-arg=-fuse-ld=lld" in .cargo/config.toml
+# - also use LTO on C/C++ code:
+#     - use clang to compile all C/C++ code
+#     - add "-flto=thin" to all C/C++ code builds
+#     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
+lto = "thin"
 
-# TODO: replace with upstream orchard (#3056)
-orchard = { git = "https://github.com/ZcashFoundation/orchard.git", rev = "568e24cd5f129158375d7ac7d98c89ebff4f982f" }
+[patch.crates-io]
 
 # TODO: replace with upstream librustzcash when these changes are merged (#3037)
 #       remove these after a new librustzcash release (#2982)
 
-# Use the ZcashFoundation fork where possible, to avoid duplicate dependencies
-equihash = { git = "https://github.com/ZcashFoundation/librustzcash.git", tag = "0.5.1-zebra-v1.0.0-beta.4" }
-zcash_note_encryption = { git = "https://github.com/ZcashFoundation/librustzcash.git", tag = "0.5.1-zebra-v1.0.0-beta.4" }
-zcash_primitives = { git = "https://github.com/ZcashFoundation/librustzcash.git", tag = "0.5.1-zebra-v1.0.0-beta.4" }
-zcash_history = { git = "https://github.com/ZcashFoundation/librustzcash.git", tag = "0.5.1-zebra-v1.0.0-beta.4" }
-
-# This zcash_proofs patch doesn't work, maybe because of features?
-#zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", tag = "0.5.1-zebra-v1.0.0-beta.4" }
-
-# These are librustzcash git requirements specified in its workspace Cargo.toml,
-# that we must replicate here
-incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "b7bd6246122a6e9ace8edb51553fbf5228906cbb" }
-
-# Replaced by the ZcashFoundation fork above
-#orchard = { git = "https://github.com/zcash/orchard.git", rev = "2c8241f25b943aa05203eacf9905db117c69bd29" }
-
-
 # These are librustzcash file requirements specified in its workspace Cargo.toml,
 # that we must replace with git requirements
-#
-# Replaced by the ZcashFoundation fork above
-#zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "53d0a51d33a421cb76d3e3124d1e4c1c9036068e" }
+equihash = { git = "https://github.com/zcash/librustzcash.git", rev = "d14e7a707ce01cefcbc82651dad48f002185dded" }
+hdwallet = { git = "https://github.com/nuttycom/hdwallet", rev = "9b4c1bdbe0517e3a7a8f285d6048a37d472ba3bc" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "d14e7a707ce01cefcbc82651dad48f002185dded" }
+zcash_note_encryption = { git = "https://github.com/zcash/librustzcash.git", rev = "d14e7a707ce01cefcbc82651dad48f002185dded" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "d14e7a707ce01cefcbc82651dad48f002185dded" }
+# Currently pointing to `download-sprout-params-new` branch which contains the
+# changes from `download-sprout-params-d14e7a70` rebased on top of d14e7a70 as
+# required by `zcash/Cargo.toml`.
+zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "c3ff94134b472ba90af665e5454983dc12de1338" }

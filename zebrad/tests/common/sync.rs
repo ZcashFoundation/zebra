@@ -5,7 +5,10 @@
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
 
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use color_eyre::eyre::Result;
 use tempfile::TempDir;
@@ -13,9 +16,10 @@ use tempfile::TempDir;
 use zebra_chain::{block::Height, parameters::Network};
 use zebrad::{components::sync, config::ZebradConfig};
 
-use zebra_test::prelude::*;
+use zebra_test::{args, prelude::*};
 
 use super::{
+    cached_state::copy_state_directory,
     config::{persistent_test_config, testdir},
     launch::ZebradTestDirExt,
 };
@@ -49,6 +53,14 @@ pub const TINY_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The maximum amount of time Zebra should take to sync a thousand blocks.
 pub const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// The maximum time to wait for Zebrad to synchronize up to the chain tip starting from a
+/// partially synchronized state.
+///
+/// The partially synchronized state is expected to be close to the tip, so this timeout can be
+/// lower than what's expected for a full synchronization. However, a value that's too short may
+/// cause the test to fail.
+pub const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// The test sync height where we switch to using the default lookahead limit.
 ///
@@ -195,7 +207,7 @@ pub fn sync_until(
         testdir()?.with_config(&mut config)?
     };
 
-    let mut child = tempdir.spawn_child(&["start"])?.with_timeout(timeout);
+    let mut child = tempdir.spawn_child(args!["start"])?.with_timeout(timeout);
 
     let network = format!("network: {},", network);
 
@@ -265,6 +277,28 @@ pub fn sync_until(
     }
 }
 
+/// Runs a zebrad instance to synchronize the chain to the network tip.
+///
+/// The zebrad instance is executed on a copy of the partially synchronized chain state. This copy
+/// is returned afterwards, containing the fully synchronized chain state.
+pub async fn perform_full_sync_starting_from(
+    network: Network,
+    partial_sync_path: &Path,
+) -> Result<TempDir> {
+    let fully_synced_path = copy_state_directory(&partial_sync_path).await?;
+
+    sync_until(
+        Height::MAX,
+        network,
+        SYNC_FINISHED_REGEX,
+        FINISH_PARTIAL_SYNC_TIMEOUT,
+        fully_synced_path,
+        MempoolBehavior::ShouldAutomaticallyActivate,
+        true,
+        false,
+    )
+}
+
 /// Returns a test config for caching Zebra's state up to the mandatory checkpoint.
 pub fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
     let mut config = persistent_test_config()?;
@@ -327,7 +361,7 @@ pub fn create_cached_database_height(
     let dir = PathBuf::from("/zebrad-cache");
     let mut child = dir
         .with_exact_config(&config)?
-        .spawn_child(&["start"])?
+        .spawn_child(args!["start"])?
         .with_timeout(timeout)
         .bypass_test_capture(true);
 

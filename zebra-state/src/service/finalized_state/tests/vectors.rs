@@ -1,7 +1,6 @@
 //! Fixed test vectors for the finalized state.
 
-use halo2::arithmetic::FieldExt;
-use halo2::pasta::pallas;
+use halo2::pasta::{group::ff::PrimeField, pallas};
 use hex::FromHex;
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
@@ -72,7 +71,7 @@ fn orchard_note_commitment_tree_serialization() {
     ];
 
     for (idx, cm_x_bytes) in commitments.iter().enumerate() {
-        let cm_x = pallas::Base::from_bytes(cm_x_bytes).unwrap();
+        let cm_x = pallas::Base::from_repr(*cm_x_bytes).unwrap();
         incremental_tree.append(cm_x).unwrap();
         if idx % 2 == 0 {
             // Cache the root half of the time to make sure it works in both cases

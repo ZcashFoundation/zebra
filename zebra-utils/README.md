@@ -7,6 +7,7 @@ This crate contains tools for zebra maintainers.
 - [zebra-checkpoints](#zebra-checkpoints)
 - [zebrad-hash-lookup](#zebrad-hash-lookup)
 - [zebrad-log-filter](#zebrad-log-filter)
+- [zcash-rpc-diff](#zcash-rpc-diff)
 
 Binaries are easier to use if they are located in your system execution path.
 
@@ -19,20 +20,20 @@ To create checkpoints, you need a synchronized instance of `zcashd`, and the `zc
 `zebra-checkpoints` is a standalone rust binary, you can compile it using:
 
 ```sh
-cargo install --locked --git https://github.com/ZcashFoundation/zebra zebra-utils 
+cargo install --locked --git https://github.com/ZcashFoundation/zebra zebra-utils
 ```
 
 Then update the checkpoints using these commands:
 ```sh
-zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/main-checkpoints.txt | cut -d" " -f1) | tee /dev/stderr >> zebra-consensus/src/checkpoint/main-checkpoints.txt &
-zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/test-checkpoints.txt | cut -d" " -f1) -- -testnet | tee /dev/stderr >> zebra-consensus/src/checkpoint/test-checkpoints.txt &
+zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/main-checkpoints.txt | cut -d" " -f1) | tee --append zebra-consensus/src/checkpoint/main-checkpoints.txt &
+zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/test-checkpoints.txt | cut -d" " -f1) -- -testnet | tee --append zebra-consensus/src/checkpoint/test-checkpoints.txt &
 wait
 ```
 
 You can see all the `zebra-checkpoints` options using:
 
 ```sh
-./target/release/zebra-checkpoints --help
+target/release/zebra-checkpoints --help
 ```
 
 For more details, see the [`zebra-checkpoints` README.](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint/README.md)
@@ -70,3 +71,63 @@ next: 00000001436277884eef900772f0fcec9566becccebaab4713fd665b60fab309
 "))) max_checkpoint_height=Height(419581)
 ...
 ```
+
+### zcash-rpc-diff
+
+This program compares `zebrad` and `zcashd` RPC responses.
+
+Make sure you have zcashd and zebrad installed and synced.
+
+The script:
+1. gets the `zebrad` and `zcashd` tip height and network
+2. sends the RPC request to both of them using `zcash-cli`
+3. compares the responses using `diff`
+4. leaves the full responses in files in a temporary directory, so you can check them in detail
+
+Assuming `zebrad`'s RPC port is 28232, you should be able to run:
+```sh
+$ zebra-utils/zcash-rpc-diff 28232 getinfo
+Checking zebrad network and tip height...
+Checking zcashd network and tip height...
+
+Request:
+getinfo
+
+Querying zebrad main chain at height 1649797...
+Querying zcashd main chain at height 1649797...
+
+Response diff (between zcashd port and port 28232):
+--- /run/user/1000/tmp.g9CJecu2Wo/zebrad-main-1649797-getinfo.json      2022-04-29 14:08:46.766240355 +1000
++++ /run/user/1000/tmp.g9CJecu2Wo/zcashd-main-1649797-getinfo.json      2022-04-29 14:08:46.769240315 +1000
+@@ -1,4 +1,16 @@
+ {
+-  "build": "1.0.0-beta.8+54.ge83e93a",
+-  "subversion": "/Zebra:1.0.0-beta.8/"
++  "version": 4070050,
++  "build": "v4.7.0-gitian",
++  "subversion": "/MagicBean:4.7.0/",
+... more extra zcashd fields ...
+ }
+```
+
+Sometimes zcashd will have extra fields (`+`) or different data (`-` and `+`).
+And sometimes it will have the same data, but in a different order.
+
+The script will warn you if the heights or networks are different,
+then display the results of querying the mismatched node states.
+
+The script accepts any RPC, with any number of arguments.
+If a node doesn't implement an RPC, the script will exit with an error.
+
+#### Configuration
+
+The script uses the configured `zcash-cli` RPC port,
+and the `zebrad` port supplied on the command-line.
+
+It doesn't actually check what kind of node it is talking to,
+so you can compare two `zcashd` or `zebrad` nodes if you want.
+(Just edit the `zcash.conf` file used by `zcash-cli`, or edit the script.)
+
+You can override the binaries the script calls using these environmental variables:
+- `$ZCASH_CLI`
+- `$DIFF`

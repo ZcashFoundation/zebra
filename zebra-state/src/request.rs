@@ -1,6 +1,10 @@
 //! State [`tower::Service`] request types.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::RangeInclusive,
+    sync::Arc,
+};
 
 use zebra_chain::{
     amount::NegativeAllowed,
@@ -435,14 +439,32 @@ pub enum ReadRequest {
     /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
     Transaction(transaction::Hash),
 
-    /// Looks up transactions hashes that were made by provided addresses in a blockchain height range.
+    /// Looks up the balance of a set of transparent addresses.
+    ///
+    /// Returns an [`Amount`] with the total balance of the set of addresses.
+    AddressBalance(HashSet<transparent::Address>),
+
+    /// Looks up transaction hashes that sent or received from addresses,
+    /// in an inclusive blockchain height range.
     ///
     /// Returns
     ///
-    /// * A vector of transaction hashes.
+    /// * A set of transaction hashes.
     /// * An empty vector if no transactions were found for the given arguments.
     ///
-    /// Returned txids are in the order they appear in blocks, which ensures that they are topologically sorted
+    /// Returned txids are in the order they appear in blocks,
+    /// which ensures that they are topologically sorted
     /// (i.e. parent txids will appear before child txids).
-    TransactionsByAddresses(Vec<transparent::Address>, block::Height, block::Height),
+    TransactionIdsByAddresses {
+        /// The requested addresses.
+        addresses: HashSet<transparent::Address>,
+
+        /// The blocks to be queried for transactions.
+        height_range: RangeInclusive<block::Height>,
+    },
+
+    /// Looks up utxos for the provided addresses.
+    ///
+    /// Returns a type with found utxos and transaction information.
+    UtxosByAddresses(HashSet<transparent::Address>),
 }

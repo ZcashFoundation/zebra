@@ -24,31 +24,32 @@
 use std::{collections::HashSet, convert::TryInto, env, path::PathBuf, time::Duration};
 
 use color_eyre::{
-    eyre::{Result, WrapErr},
+    eyre::{eyre, Result, WrapErr},
     Help,
 };
 
 use zebra_chain::{
-    block::Height,
+    block,
     parameters::Network::{self, *},
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::LOCK_FILE_ERROR;
 
-use zebra_test::{
-    command::{ContextFrom, NO_MATCHES_REGEX_ITER},
-    net::random_known_port,
-    prelude::*,
-};
+use zebra_test::{args, command::ContextFrom, net::random_known_port, prelude::*};
 
 mod common;
 
 use common::{
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
     config::{default_test_config, persistent_test_config, testdir},
-    launch::{ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY, LIGHTWALLETD_DELAY},
+    launch::{
+        spawn_zebrad_for_rpc_without_initial_peers, ZebradTestDirExt, BETWEEN_NODES_DELAY,
+        LAUNCH_DELAY,
+    },
     lightwalletd::{
         random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
+        LightwalletdTestType::{self, *},
+        LIGHTWALLETD_DATA_DIR_VAR,
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
@@ -64,7 +65,7 @@ fn generate_no_args() -> Result<()> {
 
     let child = testdir()?
         .with_config(&mut default_test_config()?)?
-        .spawn_child(&["generate"])?;
+        .spawn_child(args!["generate"])?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
@@ -83,17 +84,17 @@ fn generate_args() -> Result<()> {
     let testdir = &testdir;
 
     // unexpected free argument `argument`
-    let child = testdir.spawn_child(&["generate", "argument"])?;
+    let child = testdir.spawn_child(args!["generate", "argument"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = testdir.spawn_child(&["generate", "-f"])?;
+    let child = testdir.spawn_child(args!["generate", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // missing argument to option `-o`
-    let child = testdir.spawn_child(&["generate", "-o"])?;
+    let child = testdir.spawn_child(args!["generate", "-o"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -102,7 +103,7 @@ fn generate_args() -> Result<()> {
 
     // Valid
     let child =
-        testdir.spawn_child(&["generate", "-o", generated_config_path.to_str().unwrap()])?;
+        testdir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
@@ -127,7 +128,7 @@ fn help_no_args() -> Result<()> {
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
-    let child = testdir.spawn_child(&["help"])?;
+    let child = testdir.spawn_child(args!["help"])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -153,12 +154,12 @@ fn help_args() -> Result<()> {
     let testdir = &testdir;
 
     // The subcommand "argument" wasn't recognized.
-    let child = testdir.spawn_child(&["help", "argument"])?;
+    let child = testdir.spawn_child(args!["help", "argument"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // option `-f` does not accept an argument
-    let child = testdir.spawn_child(&["help", "-f"])?;
+    let child = testdir.spawn_child(args!["help", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -172,7 +173,7 @@ fn start_no_args() -> Result<()> {
     // start caches state, so run one of the start tests with persistent state
     let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
 
-    let mut child = testdir.spawn_child(&["-v", "start"])?;
+    let mut child = testdir.spawn_child(args!["-v", "start"])?;
 
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
@@ -200,7 +201,7 @@ fn start_args() -> Result<()> {
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
     let testdir = &testdir;
 
-    let mut child = testdir.spawn_child(&["start"])?;
+    let mut child = testdir.spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
@@ -212,7 +213,7 @@ fn start_args() -> Result<()> {
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = testdir.spawn_child(&["start", "-f"])?;
+    let child = testdir.spawn_child(args!["start", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -226,7 +227,7 @@ fn persistent_mode() -> Result<()> {
     let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
     let testdir = &testdir;
 
-    let mut child = testdir.spawn_child(&["-v", "start"])?;
+    let mut child = testdir.spawn_child(args!["-v", "start"])?;
 
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
@@ -295,7 +296,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     let mut child = run_dir
         .path()
         .with_config(&mut config)?
-        .spawn_child(&["start"])?;
+        .spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
@@ -370,7 +371,7 @@ fn app_no_args() -> Result<()> {
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
-    let child = testdir.spawn_child(&[])?;
+    let child = testdir.spawn_child(args![])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -385,7 +386,7 @@ fn version_no_args() -> Result<()> {
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
-    let child = testdir.spawn_child(&["version"])?;
+    let child = testdir.spawn_child(args!["version"])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -408,12 +409,12 @@ fn version_args() -> Result<()> {
     let testdir = &testdir;
 
     // unexpected free argument `argument`
-    let child = testdir.spawn_child(&["version", "argument"])?;
+    let child = testdir.spawn_child(args!["version", "argument"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
     // unrecognized option `-f`
-    let child = testdir.spawn_child(&["version", "-f"])?;
+    let child = testdir.spawn_child(args!["version", "-f"])?;
     let output = child.wait_with_output()?;
     output.assert_failure()?;
 
@@ -441,7 +442,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
 
     // Generate configuration in temp dir path
     let child =
-        testdir.spawn_child(&["generate", "-o", generated_config_path.to_str().unwrap()])?;
+        testdir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
@@ -453,7 +454,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
     );
 
     // Run command using temp dir and kill it after a few seconds
-    let mut child = testdir.spawn_child(&[command])?;
+    let mut child = testdir.spawn_child(args![command])?;
     std::thread::sleep(LAUNCH_DELAY);
     child.kill()?;
 
@@ -528,7 +529,7 @@ fn restart_stop_at_height() -> Result<()> {
     Ok(())
 }
 
-fn restart_stop_at_height_for_network(network: Network, height: Height) -> Result<()> {
+fn restart_stop_at_height_for_network(network: Network, height: block::Height) -> Result<()> {
     let reuse_tempdir = sync_until(
         height,
         network,
@@ -563,7 +564,7 @@ fn restart_stop_at_height_for_network(network: Network, height: Height) -> Resul
 #[test]
 fn activate_mempool_mainnet() -> Result<()> {
     sync_until(
-        Height(TINY_CHECKPOINT_TEST_HEIGHT.0 + 1),
+        block::Height(TINY_CHECKPOINT_TEST_HEIGHT.0 + 1),
         Mainnet,
         STOP_AT_HEIGHT_REGEX,
         TINY_CHECKPOINT_TIMEOUT,
@@ -670,7 +671,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
 
     if let Some(timeout_minutes) = timeout_argument {
         sync_until(
-            Height::MAX,
+            block::Height::MAX,
             network,
             SYNC_FINISHED_REGEX,
             Duration::from_secs(60 * timeout_minutes),
@@ -792,7 +793,7 @@ async fn metrics_endpoint() -> Result<()> {
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
-    let child = dir.spawn_child(&["start"])?;
+    let child = dir.spawn_child(args!["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
     // Since we're an async function, we have to use a sleep future, not thread sleep.
@@ -848,7 +849,7 @@ async fn tracing_endpoint() -> Result<()> {
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
-    let child = dir.spawn_child(&["start"])?;
+    let child = dir.spawn_child(args!["start"])?;
 
     // Run `zebrad` for a few seconds before testing the endpoint
     // Since we're an async function, we have to use a sleep future, not thread sleep.
@@ -941,7 +942,7 @@ async fn rpc_endpoint() -> Result<()> {
     let url = format!("http://{}", config.rpc.listen_addr.unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
-    let mut child = dir.spawn_child(&["start"])?;
+    let mut child = dir.spawn_child(args!["start"])?;
 
     // Wait until port is open.
     child.expect_stdout_line_matches(
@@ -992,124 +993,7 @@ async fn rpc_endpoint() -> Result<()> {
     Ok(())
 }
 
-/// Failure log messages for any process, from the OS or shell.
-///
-/// These messages show that the child process has failed.
-/// So when we see them in the logs, we make the test fail.
-const PROCESS_FAILURE_MESSAGES: &[&str] = &[
-    // Linux
-    "Aborted",
-    // macOS / BSDs
-    "Abort trap",
-    // TODO: add other OS or C library errors?
-];
-
-/// Failure log messages from Zebra.
-///
-/// These `zebrad` messages show that the `lightwalletd` integration test has failed.
-/// So when we see them in the logs, we make the test fail.
-const ZEBRA_FAILURE_MESSAGES: &[&str] = &[
-    // Rust-specific panics
-    "The application panicked",
-    // RPC port errors
-    "Unable to start RPC server",
-    // TODO: disable if this actually happens during test zebrad shutdown
-    "Stopping RPC endpoint",
-    // Missing RPCs in zebrad logs (this log is from PR #3860)
-    //
-    // TODO: temporarily disable until enough RPCs are implemented, if needed
-    "Received unrecognized RPC request",
-    // RPC argument errors: parsing and data
-    //
-    // These logs are produced by jsonrpc_core inside Zebra,
-    // but it doesn't log them yet.
-    //
-    // TODO: log these errors in Zebra, and check for them in the Zebra logs?
-    "Invalid params",
-    "Method not found",
-];
-
-/// Failure log messages from lightwalletd.
-///
-/// These `lightwalletd` messages show that the `lightwalletd` integration test has failed.
-/// So when we see them in the logs, we make the test fail.
-const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
-    // Go-specific panics
-    "panic:",
-    // Missing RPCs in lightwalletd logs
-    // TODO: temporarily disable until enough RPCs are implemented, if needed
-    "unable to issue RPC call",
-    // RPC response errors: parsing and data
-    //
-    // jsonrpc_core error messages from Zebra,
-    // received by lightwalletd and written to its logs
-    "Invalid params",
-    "Method not found",
-    // Early termination
-    //
-    // TODO: temporarily disable until enough RPCs are implemented, if needed
-    "Lightwalletd died with a Fatal error",
-    // Go json package error messages:
-    "json: cannot unmarshal",
-    "into Go value of type",
-    // lightwalletd custom RPC error messages from:
-    // https://github.com/adityapk00/lightwalletd/blob/master/common/common.go
-    "block requested is newer than latest block",
-    "Cache add failed",
-    "error decoding",
-    "error marshaling",
-    "error parsing JSON",
-    "error reading JSON response",
-    "error with",
-    // We expect these errors when lightwalletd reaches the end of the zebrad cached state
-    // "error requesting block: 0: Block not found",
-    // "error zcashd getblock rpc",
-    "received overlong message",
-    "received unexpected height block",
-    "Reorg exceeded max",
-    "unable to issue RPC call",
-    // Missing fields for each specific RPC
-    //
-    // get_block_chain_info
-    //
-    // invalid sapling height
-    "Got sapling height 0",
-    // missing BIP70 chain name, should be "main" or "test"
-    " chain  ",
-    // missing branchID, should be 8 hex digits
-    " branchID \"",
-    // get_block
-    //
-    // a block error other than "-8: Block not found"
-    "error requesting block",
-    // a missing block with an incorrect error code
-    "Block not found",
-    //
-    // TODO: complete this list for each RPC with fields, if that RPC generates logs
-    // get_info - doesn't generate logs
-    // get_raw_transaction - might not generate logs
-    // z_get_tree_state
-    // get_address_txids
-    // get_address_balance
-    // get_address_utxos
-];
-
-/// Ignored failure logs for lightwalletd.
-/// These regexes override the [`LIGHTWALLETD_FAILURE_MESSAGES`].
-///
-/// These `lightwalletd` messages look like failure messages, but they are actually ok.
-/// So when we see them in the logs, we make the test continue.
-const LIGHTWALLETD_IGNORE_MESSAGES: &[&str] = &[
-    // Exceptions to lightwalletd custom RPC error messages:
-    //
-    // This log matches the "error with" RPC error message,
-    // but we expect Zebra to start with an empty state.
-    //
-    // TODO: this exception should not be used for the cached state tests (#3511)
-    r#"No Chain tip available yet","level":"warning","msg":"error with getblockchaininfo rpc, retrying"#,
-];
-
-/// Launch `zebrad` with an RPC port, and make sure `lightwalletd` works with Zebra.
+/// Make sure `lightwalletd` works with Zebra, when both their states are empty.
 ///
 /// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` env var is set.
 ///
@@ -1117,6 +1001,72 @@ const LIGHTWALLETD_IGNORE_MESSAGES: &[&str] = &[
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_integration() -> Result<()> {
+    lightwalletd_integration_test(LaunchWithEmptyState)
+}
+
+/// Make sure `lightwalletd` can sync from Zebra, in update sync mode.
+///
+/// If `LIGHTWALLETD_DATA_DIR` is set, runs a quick sync, then a full sync.
+/// If `LIGHTWALLETD_DATA_DIR` is not set, just runs a full sync.
+///
+/// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD`,
+/// `ZEBRA_CACHED_STATE_DIR`, and `LIGHTWALLETD_DATA_DIR` env vars are set.
+///
+/// This test doesn't work on Windows, so it is always skipped on that platform.
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn lightwalletd_update_sync() -> Result<()> {
+    lightwalletd_integration_test(UpdateCachedState)
+}
+
+/// Make sure `lightwalletd` can fully sync from genesis using Zebra.
+///
+/// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` and
+/// `ZEBRA_CACHED_STATE_DIR` env vars are set.
+///
+/// This test doesn't work on Windows, so it is always skipped on that platform.
+#[test]
+#[ignore]
+#[cfg(not(target_os = "windows"))]
+fn lightwalletd_full_sync() -> Result<()> {
+    lightwalletd_integration_test(FullSyncFromGenesis {
+        allow_lightwalletd_cached_state: false,
+    })
+}
+
+/// Make sure `lightwalletd` can sync from Zebra, in all available modes.
+///
+/// Runs the tests in this order:
+/// - launch lightwalletd with empty states,
+/// - if `ZEBRA_CACHED_STATE_DIR` and `LIGHTWALLETD_DATA_DIR` are set: run a quick update sync,
+/// - if `ZEBRA_CACHED_STATE_DIR` is set: run a full sync.
+///
+/// These tests don't work on Windows, so they are always skipped on that platform.
+#[test]
+#[ignore]
+#[cfg(not(target_os = "windows"))]
+fn lightwalletd_test_suite() -> Result<()> {
+    lightwalletd_integration_test(LaunchWithEmptyState)?;
+
+    // Only runs when ZEBRA_CACHED_STATE_DIR is set.
+    // When manually running the test suite, allow cached state in the full sync test.
+    lightwalletd_integration_test(FullSyncFromGenesis {
+        allow_lightwalletd_cached_state: true,
+    })?;
+
+    // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
+    lightwalletd_integration_test(UpdateCachedState)?;
+
+    Ok(())
+}
+
+/// Run a lightwalletd integration test with a configuration for `test_type`.
+///
+/// Set `allow_cached_state_for_full_sync` to speed up manual full sync tests.
+///
+/// The random ports in this test can cause [rare port conflicts.](#Note on port conflict)
+#[cfg(not(target_os = "windows"))]
+fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> {
     zebra_test::init();
 
     // Skip the test unless the user specifically asked for it
@@ -1124,29 +1074,62 @@ fn lightwalletd_integration() -> Result<()> {
         return Ok(());
     }
 
-    // Launch zebrad
+    // Get the zebrad and lightwalletd configs
 
-    // Write a configuration that has RPC listen_addr set
-    // [Note on port conflict](#Note on port conflict)
-    let mut config = random_known_rpc_port_config()?;
+    // Handle the Zebra state directory based on the test type:
+    // - LaunchWithEmptyState: ignore the state directory
+    // - FullSyncFromGenesis & UpdateCachedState:
+    //   skip the test if it is not available, timeout if it is not populated
 
-    let zdir = testdir()?.with_config(&mut config)?;
-    let mut zebrad = zdir
-        .spawn_child(&["start"])?
-        .with_timeout(LAUNCH_DELAY)
-        .with_failure_regex_iter(
-            // TODO: replace with a function that returns the full list and correct return type
-            ZEBRA_FAILURE_MESSAGES
-                .iter()
-                .chain(PROCESS_FAILURE_MESSAGES)
-                .cloned(),
-            NO_MATCHES_REGEX_ITER.iter().cloned(),
+    // Write a configuration that has RPC listen_addr set.
+    // If the state path env var is set, use it in the config.
+    let config = if let Some(config) = test_type.zebrad_config() {
+        config?
+    } else {
+        return Ok(());
+    };
+
+    // Handle the lightwalletd state directory based on the test type:
+    // - LaunchWithEmptyState: ignore the state directory
+    // - FullSyncFromGenesis: use it if available, timeout if it is already populated
+    // - UpdateCachedState: skip the test if it is not available, timeout if it is not populated
+    let lightwalletd_state_path = test_type.lightwalletd_state_path();
+
+    if test_type.needs_lightwalletd_cached_state() && lightwalletd_state_path.is_none() {
+        tracing::info!(
+            "skipped {test_type:?} lightwalletd test, \
+             set the {LIGHTWALLETD_DATA_DIR_VAR:?} environment variable to run the test",
         );
 
+        return Ok(());
+    }
+
+    tracing::info!(?test_type, "running lightwalletd & zebrad integration test");
+
+    // Get the lists of process failure logs
+    let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
+
+    let (lightwalletd_failure_messages, lightwalletd_ignore_messages) =
+        test_type.lightwalletd_failure_messages();
+
+    // Launch zebrad
+    let zdir = testdir()?.with_exact_config(&config)?;
+    let mut zebrad = zdir
+        .spawn_child(args!["start"])?
+        .with_timeout(test_type.zebrad_timeout())
+        .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
+
+    if test_type.needs_zebra_cached_state() {
+        zebrad.expect_stdout_line_matches(r"loaded Zebra state cache tip=.*Height\([0-9]{7}\)")?;
+    } else {
+        // Timeout the test if we're somehow accidentally using a cached state
+        zebrad.expect_stdout_line_matches("loaded Zebra state cache tip=None")?;
+    }
+
     // Wait until `zebrad` has opened the RPC endpoint
-    zebrad.expect_stdout_line_matches(
+    zebrad.expect_stdout_line_matches(regex::escape(
         format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
-    )?;
+    ))?;
 
     // Launch lightwalletd
 
@@ -1155,37 +1138,40 @@ fn lightwalletd_integration() -> Result<()> {
     let ldir = ldir.with_lightwalletd_config(config.rpc.listen_addr.unwrap())?;
 
     // Launch the lightwalletd process
-    let result = ldir.spawn_lightwalletd_child(&[]);
-    let (lightwalletd, zebrad) = zebrad.kill_on_error(result)?;
+    let lightwalletd = if test_type == LaunchWithEmptyState {
+        ldir.spawn_lightwalletd_child(None, args![])?
+    } else {
+        ldir.spawn_lightwalletd_child(lightwalletd_state_path, args![])?
+    };
+
     let mut lightwalletd = lightwalletd
-        .with_timeout(LIGHTWALLETD_DELAY)
-        .with_failure_regex_iter(
-            // TODO: replace with a function that returns the full list and correct return type
-            LIGHTWALLETD_FAILURE_MESSAGES
-                .iter()
-                .chain(PROCESS_FAILURE_MESSAGES)
-                .cloned(),
-            // TODO: some exceptions do not apply to the cached state tests (#3511)
-            LIGHTWALLETD_IGNORE_MESSAGES.iter().cloned(),
-        );
+        .with_timeout(test_type.lightwalletd_timeout())
+        .with_failure_regex_iter(lightwalletd_failure_messages, lightwalletd_ignore_messages);
 
     // Wait until `lightwalletd` has launched
-    let result = lightwalletd.expect_stdout_line_matches("Starting gRPC server");
-    let (_, zebrad) = zebrad.kill_on_error(result)?;
+    lightwalletd.expect_stdout_line_matches(regex::escape("Starting gRPC server"))?;
 
     // Check that `lightwalletd` is calling the expected Zebra RPCs
 
     // getblockchaininfo
-    //
-    // TODO: update branchID when we're using cached state (#3511)
-    //       add "Waiting for zcashd height to reach Sapling activation height"
-    let result = lightwalletd.expect_stdout_line_matches(
-        "Got sapling height 419200 block height [0-9]+ chain main branchID 00000000",
-    );
-    let (_, zebrad) = zebrad.kill_on_error(result)?;
+    if test_type.needs_zebra_cached_state() {
+        lightwalletd.expect_stdout_line_matches(
+            "Got sapling height 419200 block height [0-9]{7} chain main branchID e9ff75a6",
+        )?;
+    } else {
+        // Timeout the test if we're somehow accidentally using a cached state in our temp dir
+        lightwalletd.expect_stdout_line_matches(
+            "Got sapling height 419200 block height [0-9]{1,6} chain main branchID 00000000",
+        )?;
+    }
 
-    let result = lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache");
-    let (_, zebrad) = zebrad.kill_on_error(result)?;
+    if test_type.needs_lightwalletd_cached_state() {
+        // TODO: expect `[0-9]{7}` when we're using the tip cached state (#4155)
+        lightwalletd.expect_stdout_line_matches("Found [0-9]{6,7} blocks in cache")?;
+    } else if !test_type.allow_lightwalletd_cached_state() {
+        // Timeout the test if we're somehow accidentally using a cached state in our temp dir
+        lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache")?;
+    }
 
     // getblock with the first Sapling block in Zebra's state
     //
@@ -1194,34 +1180,44 @@ fn lightwalletd_integration() -> Result<()> {
     //
     // The log also depends on what is in Zebra's state:
     //
+    // # Cached Zebra State
+    //
+    // lightwalletd ingests blocks into its cache.
+    //
     // # Empty Zebra State
     //
     // lightwalletd tries to download the Sapling activation block, but it's not in the state.
     //
-    // Until the Sapling activation block has been downloaded, lightwalletd will log Zebra's RPC error:
-    // "error requesting block: 0: Block not found"
-    // We also get a similar log when lightwalletd reaches the end of Zebra's cache.
-    //
-    // # Cached Zebra State
-    //
-    // After the first successful getblock call, lightwalletd will log:
-    // "Block hash changed, clearing mempool clients"
-    // But we can't check for that, because it can come before or after the Ingestor log.
-    //
-    // TODO: expect Ingestor log when we're using cached state (#3511)
-    //       "Ingestor adding block to cache"
-    let result = lightwalletd.expect_stdout_line_matches(regex::escape(
-        "Waiting for zcashd height to reach Sapling activation height (419200)",
-    ));
-    let (_, zebrad) = zebrad.kill_on_error(result)?;
+    // Until the Sapling activation block has been downloaded,
+    // lightwalletd will keep retrying getblock.
+    if test_type.needs_zebra_cached_state() {
+        lightwalletd.expect_stdout_line_matches(regex::escape("Ingestor adding block to cache"))?;
+    } else {
+        lightwalletd.expect_stdout_line_matches(regex::escape(
+            "Waiting for zcashd height to reach Sapling activation height (419200)",
+        ))?;
+    }
 
-    // (next RPC)
-    //
-    // TODO: add extra checks when we add new Zebra RPCs
+    if matches!(test_type, UpdateCachedState | FullSyncFromGenesis { .. }) {
+        // Wait for Zebra to sync its cached state to the chain tip
+        zebrad.expect_stdout_line_matches(regex::escape("sync_percent=100"))?;
+
+        // Wait for lightwalletd to sync to Zebra's tip
+        lightwalletd.expect_stdout_line_matches(regex::escape("Ingestor waiting for block"))?;
+
+        // Check Zebra is still at the tip (also clears and prints Zebra's logs)
+        zebrad.expect_stdout_line_matches(regex::escape("sync_percent=100"))?;
+
+        // lightwalletd doesn't log anything when we've reached the tip.
+        // But when it gets near the tip, it starts using the mempool.
+        lightwalletd.expect_stdout_line_matches(regex::escape(
+            "Block hash changed, clearing mempool clients",
+        ))?;
+        lightwalletd.expect_stdout_line_matches(regex::escape("Adding new mempool txid"))?;
+    }
 
     // Cleanup both processes
-    let result = lightwalletd.kill();
-    let (_, mut zebrad) = zebrad.kill_on_error(result)?;
+    lightwalletd.kill()?;
     zebrad.kill()?;
 
     let lightwalletd_output = lightwalletd.wait_with_output()?.assert_failure()?;
@@ -1378,7 +1374,6 @@ fn zebra_state_conflict() -> Result<()> {
         let mut dir_conflict_full = PathBuf::new();
         dir_conflict_full.push(dir_conflict.path());
         dir_conflict_full.push("state");
-        dir_conflict_full.push("state");
         dir_conflict_full.push(format!(
             "v{}",
             zebra_state::constants::DATABASE_FORMAT_VERSION
@@ -1417,7 +1412,7 @@ where
     U: ZebradTestDirExt,
 {
     // Start the first node
-    let mut node1 = first_dir.spawn_child(&["start"])?;
+    let mut node1 = first_dir.spawn_child(args!["start"])?;
 
     // Wait until node1 has used the conflicting resource.
     node1.expect_stdout_line_matches(first_stdout_regex)?;
@@ -1426,7 +1421,7 @@ where
     std::thread::sleep(BETWEEN_NODES_DELAY);
 
     // Spawn the second node
-    let node2 = second_dir.spawn_child(&["start"]);
+    let node2 = second_dir.spawn_child(args!["start"]);
     let (node2, mut node1) = node1.kill_on_error(node2)?;
 
     // Wait a few seconds and kill first node.
@@ -1443,7 +1438,6 @@ where
     // See #1781.
     #[cfg(target_os = "linux")]
     if node2.is_running() {
-        use color_eyre::eyre::eyre;
         return node2
             .kill_on_error::<(), _>(Err(eyre!(
                 "conflicted node2 was still running, but the test expected a panic"
@@ -1472,4 +1466,76 @@ where
         .context_from(&output1)?;
 
     Ok(())
+}
+
+#[tokio::test]
+#[ignore]
+async fn fully_synced_rpc_test() -> Result<()> {
+    zebra_test::init();
+
+    // We're only using cached Zebra state here, so this test type is the most similar
+    let test_type = LightwalletdTestType::FullSyncFromGenesis {
+        allow_lightwalletd_cached_state: false,
+    };
+
+    // Handle the Zebra state directory
+    let cached_state_path = test_type.zebrad_state_path();
+
+    if cached_state_path.is_none() {
+        tracing::info!("skipping fully synced zebrad RPC test");
+        return Ok(());
+    };
+
+    tracing::info!("running fully synced zebrad RPC test");
+
+    let network = Network::Mainnet;
+
+    let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
+        network,
+        cached_state_path.unwrap(),
+        test_type.zebrad_timeout(),
+    )?;
+
+    // Make a getblock test that works only on synced node (high block number).
+    // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
+    // if desired.
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("http://{}", &zebra_rpc_address.to_string()))
+        // Manually constructed request to avoid encoding it, for simplicity
+        .body(r#"{"jsonrpc": "2.0", "method": "getblock", "params": ["1180900", 0], "id":123 }"#)
+        .header("Content-Type", "application/json")
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    // Simple textual check to avoid fully parsing the response, for simplicity
+    let expected_bytes = zebra_test::vectors::MAINNET_BLOCKS
+        .get(&1_180_900)
+        .expect("test block must exist");
+    let expected_hex = hex::encode(expected_bytes);
+    assert!(
+        res.contains(&expected_hex),
+        "response did not contain the desired block: {}",
+        res
+    );
+
+    Ok(())
+}
+
+/// Test sending transactions using a lightwalletd instance connected to a zebrad instance.
+///
+/// See [`common::lightwalletd::send_transaction_test`] for more information.
+#[tokio::test]
+async fn sending_transactions_using_lightwalletd() -> Result<()> {
+    common::lightwalletd::send_transaction_test::run().await
+}
+
+/// Test all the rpc methods a wallet connected to lightwalletd can call.
+///
+/// See [`common::lightwalletd::wallet_grpc_test`] for more information.
+#[tokio::test]
+async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
+    common::lightwalletd::wallet_grpc_test::run().await
 }

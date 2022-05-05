@@ -24,10 +24,11 @@ use zebra_chain::{
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::{SerializationError, ZcashDeserialize},
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
-    transparent::Address,
+    transparent::{self, Address},
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
+use zebra_state::OutputIndex;
 
 use crate::queue::Queue;
 
@@ -68,6 +69,32 @@ pub trait Rpc {
     /// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L72-L89)
     #[rpc(name = "getblockchaininfo")]
     fn get_blockchain_info(&self) -> Result<GetBlockChainInfo>;
+
+    /// Returns the total balance of a provided `addresses` in an [`AddressBalance`] instance.
+    ///
+    /// zcashd reference: [`getaddressbalance`](https://zcash.github.io/rpc/getaddressbalance.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `address_strings`: (map) A JSON map with a single entry
+    ///   - `addresses`: (array of strings) A list of base-58 encoded addresses.
+    ///
+    /// # Notes
+    ///
+    /// zcashd also accepts a single string parameter instead of an array of strings, but Zebra
+    /// doesn't because lightwalletd always calls this RPC with an array of addresses.
+    ///
+    /// zcashd also returns the total amount of Zatoshis received by the addresses, but Zebra
+    /// doesn't because lightwalletd doesn't use that information.
+    ///
+    /// The RPC documentation says that the returned object has a string `balance` field, but
+    /// zcashd actually [returns an
+    /// integer](https://github.com/zcash/lightwalletd/blob/bdaac63f3ee0dbef62bde04f6817a9f90d483b00/common/common.go#L128-L130).
+    #[rpc(name = "getaddressbalance")]
+    fn get_address_balance(
+        &self,
+        address_strings: AddressStrings,
+    ) -> BoxFuture<Result<AddressBalance>>;
 
     /// Sends the raw bytes of a signed transaction to the local node's mempool, if the transaction is valid.
     /// Returns the [`SentTransactionHash`] for the transaction, as a JSON string.
@@ -163,10 +190,28 @@ pub trait Rpc {
     #[rpc(name = "getaddresstxids")]
     fn get_address_tx_ids(
         &self,
-        addresses: Vec<String>,
+        address_strings: AddressStrings,
         start: u32,
         end: u32,
     ) -> BoxFuture<Result<Vec<String>>>;
+
+    /// Returns all unspent outputs for a list of addresses.
+    ///
+    /// zcashd reference: [`getaddressutxos`](https://zcash.github.io/rpc/getaddressutxos.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `addresses`: (json array of string, required) The addresses to get outputs from.
+    ///
+    /// # Notes
+    ///
+    /// lightwalletd always uses the multi-address request, without chaininfo:
+    /// https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L402
+    #[rpc(name = "getaddressutxos")]
+    fn get_address_utxos(
+        &self,
+        address_strings: AddressStrings,
+    ) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
 }
 
 /// RPC method implementations.
@@ -228,8 +273,15 @@ where
     {
         let runner = Queue::start();
 
+        let mut app_version = app_version.to_string();
+
+        // Match zcashd's version format, if the version string has anything in it
+        if !app_version.is_empty() && !app_version.starts_with('v') {
+            app_version.insert(0, 'v');
+        }
+
         let rpc_impl = RpcImpl {
-            app_version: app_version.to_string(),
+            app_version,
             mempool: mempool.clone(),
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
@@ -359,14 +411,40 @@ where
 
         let response = GetBlockChainInfo {
             chain,
-            blocks: tip_height.0,
-            best_block_hash: GetBestBlockHash(tip_hash),
-            estimated_height: estimated_height.0,
+            blocks: tip_height,
+            best_block_hash: tip_hash,
+            estimated_height,
             upgrades,
             consensus,
         };
 
         Ok(response)
+    }
+
+    fn get_address_balance(
+        &self,
+        address_strings: AddressStrings,
+    ) -> BoxFuture<Result<AddressBalance>> {
+        let state = self.state.clone();
+
+        async move {
+            let valid_addresses = address_strings.valid_addresses()?;
+
+            let request = zebra_state::ReadRequest::AddressBalance(valid_addresses);
+            let response = state.oneshot(request).await.map_err(|error| Error {
+                code: ErrorCode::ServerError(0),
+                message: error.to_string(),
+                data: None,
+            })?;
+
+            match response {
+                zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
+                    balance: u64::from(balance),
+                }),
+                _ => unreachable!("Unexpected response from state service: {response:?}"),
+            }
+        }
+        .boxed()
     }
 
     fn send_raw_transaction(
@@ -485,10 +563,16 @@ where
 
             match response {
                 mempool::Response::TransactionIds(unmined_transaction_ids) => {
-                    Ok(unmined_transaction_ids
+                    let mut tx_ids: Vec<String> = unmined_transaction_ids
                         .iter()
                         .map(|id| id.mined_id().encode_hex())
-                        .collect())
+                        .collect();
+
+                    // Sort returned transaction IDs in numeric/string order.
+                    // (zcashd's sort order appears arbitrary.)
+                    tx_ids.sort();
+
+                    Ok(tx_ids)
                 }
                 _ => unreachable!("unmatched response to a transactionids request"),
             }
@@ -581,12 +665,11 @@ where
 
     fn get_address_tx_ids(
         &self,
-        addresses: Vec<String>,
+        address_strings: AddressStrings,
         start: u32,
         end: u32,
     ) -> BoxFuture<Result<Vec<String>>> {
         let mut state = self.state.clone();
-        let mut response_transactions = vec![];
         let start = Height(start);
         let end = Height(end);
 
@@ -600,17 +683,12 @@ where
             // height range checks
             check_height_range(start, end, chain_height?)?;
 
-            let valid_addresses: Result<Vec<Address>> = addresses
-                .iter()
-                .map(|address| {
-                    address.parse().map_err(|_| {
-                        Error::invalid_params(format!("Provided address is not valid: {}", address))
-                    })
-                })
-                .collect();
+            let valid_addresses = address_strings.valid_addresses()?;
 
-            let request =
-                zebra_state::ReadRequest::TransactionsByAddresses(valid_addresses?, start, end);
+            let request = zebra_state::ReadRequest::TransactionIdsByAddresses {
+                addresses: valid_addresses,
+                height_range: start..=end,
+            };
             let response = state
                 .ready()
                 .and_then(|service| service.call(request))
@@ -621,13 +699,64 @@ where
                     data: None,
                 })?;
 
-            match response {
-                zebra_state::ReadResponse::TransactionIds(hashes) => response_transactions
-                    .append(&mut hashes.iter().map(|h| h.to_string()).collect()),
+            let hashes = match response {
+                zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
+                    hashes.values().map(|tx_id| tx_id.to_string()).collect()
+                }
                 _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
+            };
+
+            Ok(hashes)
+        }
+        .boxed()
+    }
+
+    fn get_address_utxos(
+        &self,
+        address_strings: AddressStrings,
+    ) -> BoxFuture<Result<Vec<GetAddressUtxos>>> {
+        let mut state = self.state.clone();
+        let mut response_utxos = vec![];
+
+        async move {
+            let valid_addresses = address_strings.valid_addresses()?;
+
+            // get utxos data for addresses
+            let request = zebra_state::ReadRequest::UtxosByAddresses(valid_addresses);
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+            let utxos = match response {
+                zebra_state::ReadResponse::Utxos(utxos) => utxos,
+                _ => unreachable!("unmatched response to a UtxosByAddresses request"),
+            };
+
+            for utxo_data in utxos.utxos() {
+                let address = utxo_data.0;
+                let txid = *utxo_data.1;
+                let height = utxo_data.2.height();
+                let output_index = utxo_data.2.output_index();
+                let script = utxo_data.3.lock_script.clone();
+                let satoshis = u64::from(utxo_data.3.value);
+
+                let entry = GetAddressUtxos {
+                    address,
+                    txid,
+                    output_index,
+                    script,
+                    satoshis,
+                    height,
+                };
+                response_utxos.push(entry);
             }
 
-            Ok(response_transactions)
+            Ok(response_utxos)
         }
         .boxed()
     }
@@ -638,7 +767,10 @@ where
 /// See the notes for the [`Rpc::get_info` method].
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetInfo {
+    /// The node version build number
     build: String,
+
+    /// The server sub-version identifier, used as the network protocol user-agent
     subversion: String,
 }
 
@@ -647,14 +779,69 @@ pub struct GetInfo {
 /// See the notes for the [`Rpc::get_blockchain_info` method].
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetBlockChainInfo {
+    /// Current network name as defined in BIP70 (main, test, regtest)
     chain: String,
-    blocks: u32,
-    #[serde(rename = "bestblockhash")]
-    best_block_hash: GetBestBlockHash,
+
+    /// The current number of blocks processed in the server, numeric
+    blocks: Height,
+
+    /// The hash of the currently best block, in big-endian order, hex-encoded
+    #[serde(rename = "bestblockhash", with = "hex")]
+    best_block_hash: block::Hash,
+
+    /// If syncing, the estimated height of the chain, else the current best height, numeric.
+    ///
+    /// In Zebra, this is always the height estimate, so it might be a little inaccurate.
     #[serde(rename = "estimatedheight")]
-    estimated_height: u32,
+    estimated_height: Height,
+
+    /// Status of network upgrades
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
+
+    /// Branch IDs of the current and upcoming consensus rules
     consensus: TipConsensusBranch,
+}
+
+/// A wrapper type with a list of transparent address strings.
+///
+/// This is used for the input parameter of [`Rpc::get_address_balance`],
+/// [`Rpc::get_address_tx_ids`] and [`Rpc::get_address_utxos`].
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+pub struct AddressStrings {
+    /// A list of transparent address strings.
+    addresses: Vec<String>,
+}
+
+impl AddressStrings {
+    /// Creates a new `AddressStrings` given a vector.
+    #[cfg(test)]
+    pub fn new(addresses: Vec<String>) -> AddressStrings {
+        AddressStrings { addresses }
+    }
+
+    /// Given a list of addresses as strings:
+    /// - check if provided list have all valid transparent addresses.
+    /// - return valid addresses as a set of `Address`.
+    pub fn valid_addresses(self) -> Result<HashSet<Address>> {
+        let valid_addresses: HashSet<Address> = self
+            .addresses
+            .into_iter()
+            .map(|address| {
+                address.parse().map_err(|error| {
+                    Error::invalid_params(&format!("invalid address {address:?}: {error}"))
+                })
+            })
+            .collect::<Result<_>>()?;
+
+        Ok(valid_addresses)
+    }
+}
+
+/// The transparent balance of a set of addresses.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
+pub struct AddressBalance {
+    /// The total transparent balance.
+    balance: u64,
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.
@@ -664,19 +851,34 @@ struct ConsensusBranchIdHex(#[serde(with = "hex")] ConsensusBranchId);
 /// Information about [`NetworkUpgrade`] activation.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 struct NetworkUpgradeInfo {
+    /// Name of upgrade, string.
+    ///
+    /// Ignored by lightwalletd, but useful for debugging.
     name: NetworkUpgrade,
+
+    /// Block height of activation, numeric.
     #[serde(rename = "activationheight")]
     activation_height: Height,
+
+    /// Status of upgrade, string.
     status: NetworkUpgradeStatus,
 }
 
 /// The activation status of a [`NetworkUpgrade`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 enum NetworkUpgradeStatus {
+    /// The network upgrade is currently active.
+    ///
+    /// Includes all network upgrades that have previously activated,
+    /// even if they are not the most recent network upgrade.
     #[serde(rename = "active")]
     Active,
+
+    /// The network upgrade does not have an activation height.
     #[serde(rename = "disabled")]
     Disabled,
+
+    /// The network upgrade has an activation height, but we haven't reached it yet.
     #[serde(rename = "pending")]
     Pending,
 }
@@ -686,8 +888,11 @@ enum NetworkUpgradeStatus {
 /// These branch IDs are different when the next block is a network upgrade activation block.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 struct TipConsensusBranch {
+    /// Branch ID used to validate the current chain tip, big-endian, hex-encoded.
     #[serde(rename = "chaintip")]
     chain_tip: ConsensusBranchIdHex,
+
+    /// Branch ID used to validate the next block, big-endian, hex-encoded.
     #[serde(rename = "nextblock")]
     next_block: ConsensusBranchIdHex,
 }
@@ -733,7 +938,37 @@ pub enum GetRawTransaction {
     },
 }
 
+/// Response to a `getaddressutxos` RPC request.
+///
+/// See the notes for the [`Rpc::get_address_utxos` method].
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct GetAddressUtxos {
+    /// The transparent address, base58check encoded
+    address: transparent::Address,
+
+    /// The output txid, in big-endian order, hex-encoded
+    #[serde(with = "hex")]
+    txid: transaction::Hash,
+
+    /// The transparent output index, numeric
+    #[serde(rename = "outputIndex")]
+    output_index: OutputIndex,
+
+    /// The transparent output script, hex encoded
+    #[serde(with = "hex")]
+    script: transparent::Script,
+
+    /// The amount of zatoshis in the transparent output
+    satoshis: u64,
+
+    /// The block height, numeric.
+    ///
+    /// We put this field last, to match the zcashd order.
+    height: Height,
+}
+
 impl GetRawTransaction {
+    /// Converts `tx` and `height` into a new `GetRawTransaction` in the `verbose` format.
     fn from_transaction(
         tx: Arc<Transaction>,
         height: Option<block::Height>,
@@ -756,7 +991,7 @@ impl GetRawTransaction {
     }
 }
 
-/// Check if provided height range is valid
+/// Check if provided height range is valid for address indexes.
 fn check_height_range(start: Height, end: Height, chain_height: Height) -> Result<()> {
     if start == Height(0) || end == Height(0) {
         return Err(Error::invalid_params(

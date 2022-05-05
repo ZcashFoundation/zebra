@@ -68,7 +68,7 @@ pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(653_600), Blossom),
     (block::Height(903_000), Heartwood),
     (block::Height(1_046_400), Canopy),
-    // TODO: Add Nu5 mainnet activation height
+    // TODO: Add Nu5 mainnet activation height (#4115)
 ];
 
 /// Fake mainnet network upgrade activation heights, used in tests.
@@ -102,7 +102,7 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(584_000), Blossom),
     (block::Height(903_800), Heartwood),
     (block::Height(1_028_500), Canopy),
-    (block::Height(1_599_200), Nu5),
+    (block::Height(1_842_420), Nu5),
 ];
 
 /// Fake testnet network upgrade activation heights, used in tests.
@@ -190,7 +190,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Blossom, ConsensusBranchId(0x2bb40e60)),
     (Heartwood, ConsensusBranchId(0xf5b9230b)),
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
-    (Nu5, ConsensusBranchId(0x37519621)),
+    (Nu5, ConsensusBranchId(0xc2d6d0b4)),
 ];
 
 /// The target block spacing before Blossom.

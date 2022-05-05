@@ -2,22 +2,24 @@
 
 use std::{fmt, io};
 
+use hex::ToHex;
+
 use crate::serialization::{
     zcash_serialize_bytes, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
 /// An encoding of a Bitcoin script.
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(proptest_derive::Arbitrary, Serialize, Deserialize)
+    derive(proptest_derive::Arbitrary)
 )]
 pub struct Script(
     /// # Correctness
     ///
     /// Consensus-critical serialization uses [`ZcashSerialize`].
-    /// [`serde`]-based hex serialization must only be used for testing.
-    #[cfg_attr(any(test, feature = "proptest-impl"), serde(with = "hex"))]
+    /// [`serde`]-based hex serialization must only be used for RPCs and testing.
+    #[serde(with = "hex")]
     Vec<u8>,
 );
 
@@ -40,11 +42,37 @@ impl Script {
     }
 }
 
+impl fmt::Display for Script {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.encode_hex::<String>())
+    }
+}
+
 impl fmt::Debug for Script {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Script")
             .field(&hex::encode(&self.0))
             .finish()
+    }
+}
+
+impl ToHex for &Script {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.as_raw_bytes().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.as_raw_bytes().encode_hex_upper()
+    }
+}
+
+impl ToHex for Script {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
     }
 }
 

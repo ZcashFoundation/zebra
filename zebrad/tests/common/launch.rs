@@ -5,13 +5,28 @@
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
 
-use std::{env, path::Path, time::Duration};
+use std::{
+    collections::HashSet,
+    env,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use color_eyre::eyre::Result;
 
+use zebra_chain::parameters::Network;
+use zebra_test::{
+    args,
+    command::{Arguments, TestDirExt, NO_MATCHES_REGEX_ITER},
+    prelude::*,
+};
 use zebrad::config::ZebradConfig;
 
-use zebra_test::{command::TestDirExt, prelude::*};
+use crate::common::{
+    failure_messages::{PROCESS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES},
+    lightwalletd::random_known_rpc_port_config,
+};
 
 /// After we launch `zebrad`, wait this long for the command to start up,
 /// take the actions expected by the tests, and log the expected logs.
@@ -27,9 +42,19 @@ pub const LAUNCH_DELAY: Duration = Duration::from_secs(15);
 /// it is using for its RPCs.
 pub const LIGHTWALLETD_DELAY: Duration = Duration::from_secs(60);
 
-/// The amount of time we wait between launching two
-/// conflicting nodes.
+/// The amount of time we wait between launching two conflicting nodes.
 pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(2);
+
+/// The amount of time we wait for lightwalletd to update to the tip.
+///
+/// The cached tip can be a few days old, and Zebra needs time to activate its mempool.
+pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = Duration::from_secs(10 * 60);
+
+/// The amount of time we wait for lightwalletd to do a full sync to the tip.
+///
+/// `lightwalletd` takes about half an hour to fully sync,
+/// and Zebra needs time to activate its mempool.
+pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = Duration::from_secs(60 * 60);
 
 /// Extension trait for methods on `tempfile::TempDir` for using it as a test
 /// directory for `zebrad`.
@@ -44,7 +69,7 @@ where
     /// child process.
     ///
     /// If there is a config in the test directory, pass it to `zebrad`.
-    fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>>;
+    fn spawn_child(self, args: Arguments) -> Result<TestChild<Self>>;
 
     /// Create a config file and use it for all subsequently spawned `zebrad` processes.
     /// Returns an error if the config already exists.
@@ -89,23 +114,24 @@ impl<T> ZebradTestDirExt for T
 where
     Self: TestDirExt + AsRef<Path> + Sized,
 {
-    fn spawn_child(self, args: &[&str]) -> Result<TestChild<Self>> {
+    fn spawn_child(self, extra_args: Arguments) -> Result<TestChild<Self>> {
         let dir = self.as_ref();
         let default_config_path = dir.join("zebrad.toml");
+        let mut args = Arguments::new();
 
         if default_config_path.exists() {
-            let mut extra_args: Vec<_> = vec![
+            args.set_parameter(
                 "-c",
                 default_config_path
                     .as_path()
                     .to_str()
                     .expect("Path is valid Unicode"),
-            ];
-            extra_args.extend_from_slice(args);
-            self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), &extra_args)
-        } else {
-            self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), args)
+            );
         }
+
+        args.merge_with(extra_args);
+
+        self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), args)
     }
 
     fn with_config(self, config: &mut ZebradConfig) -> Result<Self> {
@@ -138,7 +164,7 @@ where
     fn cache_config_update_helper(self, config: &mut ZebradConfig) -> Result<Self> {
         if !config.state.ephemeral {
             let dir = self.as_ref();
-            let cache_dir = dir.join("state");
+            let cache_dir = PathBuf::from(dir);
             config.state.cache_dir = cache_dir;
         }
 
@@ -163,6 +189,46 @@ where
 
         Ok(self)
     }
+}
+
+/// Spawns a zebrad instance to interact with lightwalletd, but without an internet connection.
+///
+/// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
+/// providing an initial state to the zebrad instance.
+pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
+    network: Network,
+    zebra_directory: P,
+    timeout: Duration,
+) -> Result<(TestChild<P>, SocketAddr)> {
+    let mut config = random_known_rpc_port_config()
+        .expect("Failed to create a config file with a known RPC listener port");
+
+    config.state.ephemeral = false;
+    config.network.initial_mainnet_peers = HashSet::new();
+    config.network.initial_testnet_peers = HashSet::new();
+    config.network.network = network;
+    config.mempool.debug_enable_at_height = Some(0);
+
+    let mut zebrad = zebra_directory
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?
+        .bypass_test_capture(true)
+        .with_timeout(timeout)
+        .with_failure_regex_iter(
+            // TODO: replace with a function that returns the full list and correct return type
+            ZEBRA_FAILURE_MESSAGES
+                .iter()
+                .chain(PROCESS_FAILURE_MESSAGES)
+                .cloned(),
+            NO_MATCHES_REGEX_ITER.iter().cloned(),
+        );
+
+    let rpc_address = config.rpc.listen_addr.unwrap();
+
+    zebrad.expect_stdout_line_matches("activating mempool")?;
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
+
+    Ok((zebrad, rpc_address))
 }
 
 /// Panics if `$pred` is false, with an error report containing:

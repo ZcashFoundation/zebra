@@ -1,7 +1,7 @@
 //! Transaction Queue.
 //!
 //! All transactions that are sent from RPC methods should be added to this queue for retries.
-//! Transactions can fail to be inserted to the mempool inmediatly by different reasons,
+//! Transactions can fail to be inserted to the mempool immediately by different reasons,
 //! like having not mined utxos.
 //!
 //! The [`Queue`] is just an `IndexMap` of transactions with insertion date.
@@ -130,7 +130,7 @@ impl Runner {
         self.tip_height = height;
     }
 
-    /// Retry sending to memempool if needed.
+    /// Retry sending to mempool if needed.
     ///
     /// Creates a loop that will run each time a new block is mined.
     /// In this loop, get the transactions that are in the queue and:
@@ -140,7 +140,7 @@ impl Runner {
     /// - With the transactions left in the queue, retry sending them to the mempool ignoring
     /// the result of this operation.
     ///
-    /// Addtionally, each iteration of the above loop, will receive and insert to the queue
+    /// Additionally, each iteration of the above loop, will receive and insert to the queue
     /// transactions that are pending in the channel.
     pub async fn run<Mempool, State, Tip>(
         mut self,
@@ -311,10 +311,10 @@ impl Runner {
             let gossip = Gossip::Tx(unmined.clone());
             let request = Request::Queue(vec![gossip]);
 
-            // Send to memmpool and ignore any error
+            // Send to mempool and ignore any error
             let _ = mempool.clone().oneshot(request).await;
 
-            // retrurn what we retried but don't delete from the queue,
+            // return what we retried but don't delete from the queue,
             // we might retry again in a next call.
             retried.insert(unmined.id);
         }

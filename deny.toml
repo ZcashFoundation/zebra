@@ -24,7 +24,12 @@ allow = [
 
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    #{ name = "ansi_term", version = "=0.11.0" },
+    #  wait for zcash_proofs fork be merged back into upstream
+    # https://github.com/ZcashFoundation/zebra/issues/3831
+    { name = "equihash", version = "=0.1.0" },
+    { name = "zcash_encoding", version = "=0.0.0" },
+    { name = "zcash_note_encryption", version = "=0.1.0" },
+    { name = "zcash_primitives", version = "=0.5.0" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
@@ -37,20 +42,32 @@ skip-tree = [
     # ticket #3000: tower-fallback dependencies
     { name = "pin-project", version = "=0.4.29" },
 
-    # ticket #3063: redjubjub dependencies
-    { name = "redjubjub", version = "=0.4.0" },
-
     # ticket #3315: ordered-map dependencies that should be dev-dependencies
     { name = "ordered-map", version = "=0.4.2" },
 
     # ticket #2984: owo-colors dependencies
     { name = "color-eyre", version = "=0.5.11" },
 
-    # ticket #2980: inferno and orchard/cryptographic dependencies
-    { name = "orchard", version = "=0.0.0" },
+    # wait for structopt upgrade (or upgrade to clap 3)
+    { name = "heck", version = "=0.3.3" },
 
-    # upgrade orchard from deprecated `bigint` to `uint`: https://github.com/zcash/orchard/issues/219
-    { name = "bigint", version = "=4.4.3" },
+    # wait for bellman to upgrade
+    { name = "blake2s_simd", version = "=0.5.11" },
+
+    # wait for halo2 to upgrade
+    { name = "blake2b_simd", version = "=0.5.11" },
+
+    # wait for zcash_primitives to remove duplicated dependency
+    { name = "block-buffer", version = "=0.9.0" },
+
+    # wait for orchard -> bigint to upgrade
+    { name = "crunchy", version = "=0.1.6" },
+
+    # wait for curve25519-dalek to upgrade
+    { name = "digest", version = "=0.9.0" },
+
+    # Wait for inferno -> num-format to upgrade
+    { name = "arrayvec", version = "=0.4.12" },
 
     # upgrade sentry, metrics-exporter-prometheus, reqwest, hyper,
     # which needs #2953: upgrade tracing to the latest major version
@@ -60,14 +77,8 @@ skip-tree = [
     { name = "tracing-subscriber", version = "=0.1.6" },
 
     # upgrade abscissa and arti
-    { name = "darling", version = "=0.10.2" },
     { name = "darling", version = "=0.12.4" },
-
-    # recent major version bumps
-    # we should re-check these dependencies in February 2022
-
-    # wait for lots of crates in the cryptographic ecosystem to upgrade
-    { name = "rand", version = "=0.7.3" },
+    { name = "darling", version = "=0.13.4" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
@@ -85,8 +96,7 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
-    # ticket #2982: librustzcash and orchard git versions
-    "https://github.com/str4d/redjubjub",
+    "https://github.com/nuttycom/hdwallet",
 ]
 
 [sources.allow-org]
