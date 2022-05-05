@@ -51,7 +51,7 @@ mod tests;
 ///     to download, because a peer sent Zebra a bad list of block hashes. (The
 ///     UTXO verification failure will restart the sync, and re-download the
 ///     chain in the correct order.)
-const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3 * 60);
+const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6 * 60);
 
 /// Asynchronous transaction verification.
 ///
