@@ -22,8 +22,7 @@ type BoxStateService =
 /// Reads the chain tip height from Zebra's state in a cache directory (see [`Args`] for more
 /// information).
 #[allow(clippy::print_stdout)]
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     init_tracing();
 
     color_eyre::install()?;
