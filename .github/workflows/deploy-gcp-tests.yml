@@ -33,7 +33,6 @@ on:
       needs_zebra_state:
         required: true
         type: boolean
-        default: false
       saves_to_disk:
         required: true
         type: boolean
@@ -57,6 +56,10 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
