@@ -13,7 +13,7 @@ FROM chef AS planner
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
-FROM chef AS builder
+FROM chef AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 COPY --from=planner /app/recipe.json recipe.json
 
@@ -71,15 +71,17 @@ ENV CHECKPOINT_SYNC ${CHECKPOINT_SYNC:-true}
 ARG NETWORK
 ENV NETWORK ${NETWORK:-Mainnet}
 
+FROM deps AS builder
 COPY . .
 # Build zebra
 RUN cargo build --locked --release --features enable-sentry --bin zebrad
 
-FROM builder AS tester
+FROM deps AS tester
 # Pre-download Zcash Sprout and Sapling parameters
 # TODO: do not hardcode the user /root/ even though is a safe assumption
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /lightwalletd /usr/local/bin
+COPY . .
 
 RUN cargo test --locked --release --features enable-sentry --workspace --no-run
 
