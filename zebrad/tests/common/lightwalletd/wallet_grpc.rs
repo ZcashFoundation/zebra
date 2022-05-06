@@ -42,7 +42,7 @@ pub fn spawn_lightwalletd_with_rpc_server(
 
     lightwalletd.expect_stdout_line_matches("Starting gRPC server")?;
     if wait_for_blocks {
-        lightwalletd.expect_stdout_line_matches("Waiting for block")?;
+        lightwalletd.expect_stdout_line_matches("[Ww]aiting for block")?;
     }
     Ok((lightwalletd, lightwalletd_rpc_port))
 }

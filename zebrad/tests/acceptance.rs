@@ -1526,6 +1526,7 @@ async fn fully_synced_rpc_test() -> Result<()> {
 ///
 /// See [`common::lightwalletd::send_transaction_test`] for more information.
 #[tokio::test]
+#[ignore]
 async fn sending_transactions_using_lightwalletd() -> Result<()> {
     common::lightwalletd::send_transaction_test::run().await
 }
