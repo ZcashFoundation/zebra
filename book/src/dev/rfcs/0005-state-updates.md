@@ -688,7 +688,7 @@ graph TD;
     OutputLocation ==> OutputIndex;
     AddressLocation -.->|"utxo_loc_by_transparent_addr_loc<br/>(AddressUnspentOutput[16])"| OutputLocation;
 
-    AddressBalance["AddressLocation[16]"];
+    AddressBalance["AddressLocation[8]"];
     Amount["Amount[8]"];
     Height["Height[3]"];
     Address["Address[21]"];
