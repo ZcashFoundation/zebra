@@ -76,7 +76,7 @@ jobs:
       # Setup Docker Buildx to allow use of docker cache layers from GH
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v2
 
       - name: Authenticate to Google Cloud
         id: auth
@@ -87,7 +87,7 @@ jobs:
           token_format: 'access_token'
 
       # - name: Login to Google Artifact Registry
-      #   uses: docker/login-action@v1.14.1
+      #   uses: docker/login-action@v2.0.0
       #   with:
       #     registry: us-docker.pkg.dev
       #     username: oauth2accesstoken
@@ -95,7 +95,7 @@ jobs:
       #     logout: false
 
       - name: Login to Github Package Registry
-        uses: docker/login-action@v1.14.1
+        uses: docker/login-action@v2.0.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -105,7 +105,7 @@ jobs:
       # Build and push image to Google Artifact Registry
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v2.10.0
+        uses: docker/build-push-action@v3.0.0
         with:
           target: ${{ inputs.dockerfile_target }}
           context: .
