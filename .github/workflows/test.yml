@@ -198,7 +198,7 @@ jobs:
   test-stateful-sync:
     needs: build
     uses: ./.github/workflows/gcp-test-deploy.yml
-    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       test_id: sync-past-checkpoint
       test_description: Test full validation sync from a cached state
@@ -228,10 +228,11 @@ jobs:
       disk_suffix: tip
       height_grep_text: 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.* current_height=Height'
 
+  # Test that Zebra can answer a synthetic RPC call, using a cached Zebra tip state
   lightwalletd-rpc-test:
-    if: ${{ github.event.inputs.regenerate-disks != 'true' }}
     needs: build
     uses: ./.github/workflows/gcp-test-deploy.yml
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: fully-synced-rpc
@@ -240,4 +241,22 @@ jobs:
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: tip
-      zebra_state_path: '/var/cache'
+      root_state_path: '/var/cache'
+      zebra_state_dir: 'zebrad-cache'
+
+  # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
+  # TODO: use a cached lightwalletd tip state to speed up the test (#4303)
+  lightwalletd-transactions-test:
+    needs: build
+    uses: ./.github/workflows/gcp-test-deploy.yml
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    with:
+      app_name: lightwalletd
+      test_id: lwd-send-transactions
+      test_description: Test sending transactions via lightwalletd
+      test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lightwalletd-cache'
+      needs_zebra_state: true
+      saves_to_disk: false
+      disk_suffix: tip
+      root_state_path: '/var/cache'
+      zebra_state_dir: 'zebrad-cache'
