@@ -95,10 +95,10 @@ ENTRYPOINT ["/entrypoint.sh"]
 CMD [ "cargo"]
 
 FROM deps AS builder
-COPY . .
 # Build dependencies - this is the caching Docker layer!
 RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
 
+COPY . .
 # Build zebra
 RUN cargo build --locked --release --features enable-sentry --bin zebrad
 
