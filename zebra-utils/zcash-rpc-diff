@@ -147,8 +147,8 @@ if [ "$1" == "getaddressbalance" ]; then
     ZEBRAD_SUM_RESPONSE="$ZCASH_RPC_TMP_DIR/zebrad-$ZEBRAD_NET-$ZEBRAD_HEIGHT-getaddressutxos-sum.txt"
     ZCASHD_SUM_RESPONSE="$ZCASH_RPC_TMP_DIR/zcashd-$ZCASHD_NET-$ZCASHD_HEIGHT-getaddressutxos-sum.txt"
 
-    cat "$ZEBRAD_RESPONSE" | $JQ 'map(.satoshis) | add' > "$ZEBRAD_SUM_RESPONSE"
-    cat "$ZCASHD_RESPONSE" | $JQ 'map(.satoshis) | add' > "$ZCASHD_SUM_RESPONSE"
+    cat "$ZEBRAD_RESPONSE" | $JQ 'map(.satoshis) | add // 0' > "$ZEBRAD_SUM_RESPONSE"
+    cat "$ZCASHD_RESPONSE" | $JQ 'map(.satoshis) | add // 0' > "$ZCASHD_SUM_RESPONSE"
 
     echo
 
