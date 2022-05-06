@@ -44,10 +44,6 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
     && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
-ENV CARGO_HOME /app/.cargo/
-# Build dependencies - this is the caching Docker layer!
-RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
-
 ARG RUST_BACKTRACE
 ENV RUST_BACKTRACE ${RUST_BACKTRACE:-0}
 
@@ -71,19 +67,18 @@ ENV CHECKPOINT_SYNC ${CHECKPOINT_SYNC:-true}
 ARG NETWORK
 ENV NETWORK ${NETWORK:-Mainnet}
 
-FROM deps AS builder
-COPY . .
-# Build zebra
-RUN cargo build --locked --release --features enable-sentry --bin zebrad
+ENV CARGO_HOME /app/.cargo/
 
 FROM deps AS tester
 # Pre-download Zcash Sprout and Sapling parameters
 # TODO: do not hardcode the user /root/ even though is a safe assumption
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /lightwalletd /usr/local/bin
-COPY . .
+# Build dependencies - this is the caching Docker layer!
+RUN cargo chef cook --release --workspace --recipe-path recipe.json
 
-RUN cargo test --locked --release --features enable-sentry --workspace --no-run
+COPY . .
+RUN cargo test --locked --release --workspace --no-run
 
 COPY ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
@@ -98,6 +93,14 @@ ENV RUN_ALL_TESTS ${RUN_ALL_TESTS:-0}
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD [ "cargo"]
+
+FROM deps AS builder
+COPY . .
+# Build dependencies - this is the caching Docker layer!
+RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
+
+# Build zebra
+RUN cargo build --locked --release --features enable-sentry --bin zebrad
 
 # Runner image
 FROM debian:bullseye-slim AS runtime
