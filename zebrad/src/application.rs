@@ -342,14 +342,18 @@ impl Application for ZebradApp {
             .as_ref()
             .expect("config is loaded before register_components");
 
-        let default_filter = if command.verbose { "debug" } else { "info" };
+        let default_filter = command
+            .command
+            .as_ref()
+            .map(|zcmd| zcmd.default_tracing_filter(command.verbose))
+            .unwrap_or("warn");
         let is_server = command
             .command
             .as_ref()
             .map(ZebradCmd::is_server)
             .unwrap_or(false);
 
-        // Ignore the tracing filter for short-lived commands
+        // Ignore the configured tracing filter for short-lived utility commands
         let mut tracing_config = cfg_ref.tracing.clone();
         if is_server {
             // Override the default tracing filter based on the command-line verbosity.
