@@ -598,6 +598,13 @@ a distinct "tree". Keys are sorted using lex order on byte strings, so
 integer values should be stored using big-endian encoding (so that the lex
 order on byte strings is the numeric ordering).
 
+Note that the lex order storage allows creating 1-to-many maps using keys only.
+For example, the `tx_loc_by_transparent_addr_loc` allows mapping each address
+to all transactions related to it, by simply storing each transaction prefixed
+with the address as the key, leaving the value empty. Since rocksdb allows
+listing all keys with a given prefix, it will allow listing all transactions
+related to a given address.
+
 We use the following rocksdb column families:
 
 | Column Family                      | Keys                   | Values                        | Changes |
@@ -659,6 +666,39 @@ Amounts:
 Derived Formats:
 - `*::NoteCommitmentTree`: `bincode` using `serde`
 - `NonEmptyHistoryTree`: `bincode` using `serde`, using `zcash_history`'s `serde` implementation
+
+
+The following figure helps visualizing the address index, which is the most complicated part.
+Numbers in brackets are array sizes; bold arrows are compositions (i.e. `TransactionLocation` is the
+concatenation of `Height` and `TransactionIndex`); dashed arrows are compositions that are also 1-to-many
+maps (i.e. `AddressTransaction` is the concatenation of `AddressLocation` and `TransactionLocation`,
+but also is used to map each `AddressLocation` to multiple `TransactionLocation`s).
+
+```mermaid
+graph TD;
+    Address -->|"balance_by_transparent_addr<br/>"| AddressBalance;
+    AddressBalance ==> Amount;
+    AddressBalance ==> AddressLocation;
+    AddressLocation ==> FirstOutputLocation;
+    AddressLocation -.->|"tx_loc_by_transparent_addr_loc<br/>(AddressTransaction[13])"| TransactionLocation;
+    TransactionLocation ==> Height;
+    TransactionLocation ==> TransactionIndex;
+    OutputLocation -->|utxo_by_out_loc| Output;
+    OutputLocation ==> TransactionLocation;
+    OutputLocation ==> OutputIndex;
+    AddressLocation -.->|"utxo_loc_by_transparent_addr_loc<br/>(AddressUnspentOutput[16])"| OutputLocation;
+
+    AddressBalance["AddressLocation[16]"];
+    Amount["Amount[8]"];
+    Height["Height[3]"];
+    Address["Address[21]"];
+    TransactionIndex["TransactionIndex[2]"];
+    TransactionLocation["TransactionLocation[5]"];
+    OutputIndex["OutputIndex[3]"];
+    OutputLocation["OutputLocation[8]"];
+    FirstOutputLocation["First OutputLocation[8]"];
+    AddressLocation["AddressLocation[8]"];
+```
 
 ### Implementing consensus rules using rocksdb
 [rocksdb-consensus-rules]: #rocksdb-consensus-rules
