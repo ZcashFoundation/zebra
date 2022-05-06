@@ -9,7 +9,7 @@ edition = "2021"
 
 [features]
 default = []
-proptest-impl = ["proptest", "proptest-derive", "zebra-test", "rand", "rand_chacha", "tokio", "hex/serde"]
+proptest-impl = ["proptest", "proptest-derive", "zebra-test", "rand", "rand_chacha", "tokio"]
 bench = ["zebra-test"]
 
 [dependencies]
@@ -29,7 +29,7 @@ fpe = "0.5.1"
 futures = "0.3.21"
 group = "0.11.0"
 halo2 = { package = "halo2_proofs", version = "=0.1.0-beta.4" }
-hex = "0.4.3"
+hex = { version = "0.4.3", features = ["serde"] }
 incrementalmerkletree = "0.3.0-beta.2"
 itertools = "0.10.3"
 jubjub = "0.8.0"
@@ -76,8 +76,6 @@ criterion = { version = "0.3.5", features = ["html_reports"] }
 itertools = "0.10.3"
 spandoc = "0.2.2"
 tracing = "0.1.31"
-
-hex = { version = "0.4.3", features = ["serde"] }
 
 proptest = "0.10.1"
 proptest-derive = "0.3.0"
