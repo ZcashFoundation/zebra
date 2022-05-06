@@ -122,5 +122,7 @@ jobs:
             CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
           push: true
-          cache-from: type=registry,ref=ghcr.io/zcashfoundation/${{ inputs.image_name }}:cache
-          cache-to: type=registry,ref=ghcr.io/zcashfoundation/${{ inputs.image_name }}:cache,mode=max
+          cache-to: type=inline
+          cache-from: type=registry,ref=ghcr.io/zcashfoundation/${{ inputs.image_name }}
+          # cache-from: type=registry,ref=ghcr.io/zcashfoundation/${{ inputs.image_name }}:cache
+          # cache-to: type=registry,ref=ghcr.io/zcashfoundation/${{ inputs.image_name }}:cache,mode=max
