@@ -238,8 +238,17 @@ where
 
     // Retry the finalized UTXO query if it was interrupted by a finalizing block,
     // and the non-finalized chain doesn't overlap the changed heights.
-    for _ in 0..=FINALIZED_ADDRESS_INDEX_RETRIES {
+    for attempt in 0..=FINALIZED_ADDRESS_INDEX_RETRIES {
+        info!(?attempt, "starting address UTXO query");
+
         let (finalized_utxos, finalized_tip_range) = finalized_transparent_utxos(db, &addresses);
+
+        info!(
+            finalized_utxo_count = ?finalized_utxos.len(),
+            ?finalized_tip_range,
+            ?attempt,
+            "finalized address UTXO response",
+        );
 
         // Apply the non-finalized UTXO changes.
         let chain_utxo_changes =
@@ -247,14 +256,33 @@ where
 
         // If the UTXOs are valid, return them, otherwise, retry or return an error.
         match chain_utxo_changes {
-            Ok(chain_utxo_changes) => {
-                let utxos = apply_utxo_changes(finalized_utxos, chain_utxo_changes);
+            Ok((created_chain_utxos, spent_chain_utxos)) => {
+                info!(
+                    chain_utxo_count = ?created_chain_utxos.len(),
+                    chain_utxo_spent = ?spent_chain_utxos.len(),
+                    ?attempt,
+                    "chain address UTXO response",
+                );
+
+                let utxos =
+                    apply_utxo_changes(finalized_utxos, created_chain_utxos, spent_chain_utxos);
                 let tx_ids = lookup_tx_ids_for_utxos(chain, db, &addresses, &utxos);
+
+                info!(
+                    full_utxo_count = ?utxos.len(),
+                    tx_id_count = ?tx_ids.len(),
+                    ?attempt,
+                    "full address UTXO response",
+                );
 
                 return Ok(AddressUtxos::new(network, utxos, tx_ids));
             }
 
-            Err(error) => utxo_error = Some(Err(error)),
+            Err(chain_utxo_error) => {
+                info!(?chain_utxo_error, ?attempt, "chain address UTXO response",);
+
+                utxo_error = Some(Err(chain_utxo_error))
+            }
         }
     }
 
@@ -390,10 +418,8 @@ where
 /// removes the spent UTXOs, and returns the result.
 fn apply_utxo_changes(
     finalized_utxos: BTreeMap<OutputLocation, transparent::Output>,
-    (created_chain_utxos, spent_chain_utxos): (
-        BTreeMap<OutputLocation, transparent::Output>,
-        BTreeSet<OutputLocation>,
-    ),
+    created_chain_utxos: BTreeMap<OutputLocation, transparent::Output>,
+    spent_chain_utxos: BTreeSet<OutputLocation>,
 ) -> BTreeMap<OutputLocation, transparent::Output> {
     // Correctness: combine the created UTXOs, then remove spent UTXOs,
     // to compensate for overlapping finalized and non-finalized blocks.
