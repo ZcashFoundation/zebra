@@ -704,6 +704,7 @@ where
                     hashes
                         .iter()
                         .map(|(tx_loc, tx_id)| {
+                            // TODO: downgrade to debug, because there's nothing the user can do
                             assert!(
                                 *tx_loc > last_tx_location,
                                 "Transactions were not in chain order:\n\
@@ -762,6 +763,7 @@ where
                 let satoshis = u64::from(utxo_data.3.value);
 
                 let output_location = *utxo_data.2;
+                // TODO: downgrade to debug, because there's nothing the user can do
                 assert!(
                     output_location > last_output_location,
                     "UTXOs were not in chain order:\n\
