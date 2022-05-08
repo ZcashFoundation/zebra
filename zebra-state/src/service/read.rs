@@ -235,17 +235,19 @@ where
     C: AsRef<Chain>,
 {
     let mut utxo_error = None;
+    let address_count = addresses.len();
 
     // Retry the finalized UTXO query if it was interrupted by a finalizing block,
     // and the non-finalized chain doesn't overlap the changed heights.
     for attempt in 0..=FINALIZED_ADDRESS_INDEX_RETRIES {
-        info!(?attempt, "starting address UTXO query");
+        info!(?attempt, ?address_count, "starting address UTXO query");
 
         let (finalized_utxos, finalized_tip_range) = finalized_transparent_utxos(db, &addresses);
 
         info!(
             finalized_utxo_count = ?finalized_utxos.len(),
             ?finalized_tip_range,
+            ?address_count,
             ?attempt,
             "finalized address UTXO response",
         );
@@ -260,6 +262,7 @@ where
                 info!(
                     chain_utxo_count = ?created_chain_utxos.len(),
                     chain_utxo_spent = ?spent_chain_utxos.len(),
+                    ?address_count,
                     ?attempt,
                     "chain address UTXO response",
                 );
@@ -271,6 +274,7 @@ where
                 info!(
                     full_utxo_count = ?utxos.len(),
                     tx_id_count = ?tx_ids.len(),
+                    ?address_count,
                     ?attempt,
                     "full address UTXO response",
                 );
@@ -279,7 +283,12 @@ where
             }
 
             Err(chain_utxo_error) => {
-                info!(?chain_utxo_error, ?attempt, "chain address UTXO response",);
+                info!(
+                    ?chain_utxo_error,
+                    ?address_count,
+                    ?attempt,
+                    "chain address UTXO response",
+                );
 
                 utxo_error = Some(Err(chain_utxo_error))
             }
