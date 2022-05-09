@@ -240,11 +240,11 @@ where
     // Retry the finalized UTXO query if it was interrupted by a finalizing block,
     // and the non-finalized chain doesn't overlap the changed heights.
     for attempt in 0..=FINALIZED_ADDRESS_INDEX_RETRIES {
-        info!(?attempt, ?address_count, "starting address UTXO query");
+        debug!(?attempt, ?address_count, "starting address UTXO query");
 
         let (finalized_utxos, finalized_tip_range) = finalized_transparent_utxos(db, &addresses);
 
-        info!(
+        debug!(
             finalized_utxo_count = ?finalized_utxos.len(),
             ?finalized_tip_range,
             ?address_count,
@@ -259,7 +259,7 @@ where
         // If the UTXOs are valid, return them, otherwise, retry or return an error.
         match chain_utxo_changes {
             Ok((created_chain_utxos, spent_chain_utxos)) => {
-                info!(
+                debug!(
                     chain_utxo_count = ?created_chain_utxos.len(),
                     chain_utxo_spent = ?spent_chain_utxos.len(),
                     ?address_count,
@@ -271,7 +271,7 @@ where
                     apply_utxo_changes(finalized_utxos, created_chain_utxos, spent_chain_utxos);
                 let tx_ids = lookup_tx_ids_for_utxos(chain, db, &addresses, &utxos);
 
-                info!(
+                debug!(
                     full_utxo_count = ?utxos.len(),
                     tx_id_count = ?tx_ids.len(),
                     ?address_count,
@@ -283,7 +283,7 @@ where
             }
 
             Err(chain_utxo_error) => {
-                info!(
+                debug!(
                     ?chain_utxo_error,
                     ?address_count,
                     ?attempt,
@@ -364,7 +364,7 @@ where
                 "unexpected non-finalized chain when finalized state is empty"
             );
 
-            info!(
+            debug!(
                 ?finalized_tip_range,
                 ?address_count,
                 "chain address UTXO query: state is empty, no UTXOs available",
@@ -398,7 +398,7 @@ where
 
     if chain.is_none() {
         if finalized_tip_status.is_ok() {
-            info!(
+            debug!(
                 ?finalized_tip_status,
                 ?required_min_non_finalized_root,
                 ?finalized_tip_range,
@@ -411,7 +411,7 @@ where
         } else {
             // We can't compensate for inconsistent database queries,
             // because the non-finalized chain is empty.
-            info!(
+            debug!(
                 ?finalized_tip_status,
                 ?required_min_non_finalized_root,
                 ?finalized_tip_range,
@@ -442,7 +442,7 @@ where
             // If we've already committed this entire chain, ignore its UTXO changes.
             // This is more likely if the non-finalized state is just getting started.
             if finalized_tip_height >= non_finalized_tip {
-                info!(
+                debug!(
                     ?non_finalized_root,
                     ?non_finalized_tip,
                     ?finalized_tip_status,
@@ -460,7 +460,7 @@ where
             // We can't compensate for inconsistent database queries,
             // because the non-finalized chain is below the inconsistent query range.
             if *required_non_finalized_overlap.end() > non_finalized_tip.0 {
-                info!(
+                debug!(
                     ?non_finalized_root,
                     ?non_finalized_tip,
                     ?finalized_tip_status,
