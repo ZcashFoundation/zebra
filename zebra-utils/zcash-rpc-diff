@@ -44,7 +44,7 @@ $ZCASH_CLI getinfo > "$ZCASHD_RELEASE_INFO"
 ZCASHD=$(cat "$ZCASHD_RELEASE_INFO" | grep '"subversion"' | cut -d: -f2 | cut -d/ -f2 | \
              sed 's/MagicBean/zcashd/' | tr 'A-Z' 'a-z')
 
-echo "Connected to $ZEBRAD and $ZCASHD."
+echo "Connected to $ZEBRAD (port $ZEBRAD_RPC_PORT) and $ZCASHD ($ZCASH_CLI zcash.conf port)."
 
 echo
 
@@ -94,8 +94,7 @@ $ZCASH_CLI "$@" > "$ZCASHD_RESPONSE"
 
 echo
 
-echo "Response diff:"
-echo "(between $ZCASHD port and $ZEBRAD port $ZEBRAD_RPC_PORT)"
+echo "Response diff between $ZCASHD and $ZEBRAD:"
 
 $DIFF "$ZEBRAD_RESPONSE" "$ZCASHD_RESPONSE" \
     && ( \
@@ -137,8 +136,7 @@ $ZCASH_CLI "$@" > "$ZCASHD_CHECK_RESPONSE"
 
 echo
 
-echo "Cross-check $1 response diff:"
-echo "(between $ZCASHD port and $ZEBRAD port $ZEBRAD_RPC_PORT)"
+echo "$1 diff between $ZCASHD and $ZEBRAD:"
 
 $DIFF "$ZEBRAD_CHECK_RESPONSE" "$ZCASHD_CHECK_RESPONSE" \
     && ( \
@@ -171,9 +169,8 @@ if [ "$1" == "getaddressbalance" ]; then
 
     echo
 
-    echo "Balance diff:"
-    echo "(between $ZCASHD port and $ZEBRAD port $ZEBRAD_RPC_PORT,"
-    echo "for both getaddressbalance and getaddressutxos)"
+    echo "Balance diff between $ZCASHD and $ZEBRAD:"
+    echo "(for both getaddressbalance and getaddressutxos)"
 
     $DIFF --from-file="$ZEBRAD_NUM_RESPONSE" "$ZCASHD_NUM_RESPONSE" \
           "$ZEBRAD_SUM_RESPONSE" "$ZCASHD_SUM_RESPONSE" \
