@@ -21,10 +21,16 @@ use std::{
 };
 
 use bitvec::prelude::*;
-use incrementalmerkletree::{bridgetree, Frontier};
+
+use incrementalmerkletree::{
+    bridgetree::{self, Leaf},
+    Frontier,
+};
 use lazy_static::lazy_static;
+
 use thiserror::Error;
-use zcash_primitives::merkle_tree::{self, CommitmentTree};
+use zcash_encoding::{Optional, Vector};
+use zcash_primitives::merkle_tree::{self, Hashable};
 
 use super::commitment::pedersen_hashes::pedersen_hash;
 
@@ -447,22 +453,61 @@ impl From<&NoteCommitmentTree> for SerializedTree {
     fn from(tree: &NoteCommitmentTree) -> Self {
         let mut serialized_tree = vec![];
 
-        // Skip the serialization of empty trees.
-        //
-        // Note: This ensures compatibility with `zcashd` in the
-        // [`z_gettreestate`][1] RPC.
-        //
-        // [1]: https://zcash.github.io/rpc/z_gettreestate.html
-        if tree.inner == bridgetree::Frontier::empty() {
-            return Self(serialized_tree);
+        if let Some(frontier) = tree.inner.value() {
+            let (left_leaf, right_leaf) = match frontier.leaf() {
+                Leaf::Left(left_value) => (Some(left_value), None),
+                Leaf::Right(left_value, right_value) => (Some(left_value), Some(right_value)),
+            };
+
+            // Convert the note commitment tree represented as a frontier into the
+            // format compatible with `zcashd`.
+            //
+            // There is a function in `librustzcash` called
+            // `CommitmentTree::from_frontier` that returns a commitment tree in
+            // the sparse format. However, the returned tree always contains
+            // [`MERKLE_DEPTH`] parent nodes, even though some trailing parents
+            // are empty. Such trees are incompatible with `zcashd`, since
+            // `zcashd` returns trees without empty trailing parents. For this
+            // reason, Zebra implements its own conversion between the dense and
+            // sparse formats.
+            let mut ommers_iter = frontier.ommers().iter();
+            let mut position: usize = frontier.position().into();
+            let mut parents = vec![];
+
+            position &= !1;
+
+            for i in 1..MERKLE_DEPTH {
+                let bit_mask = 1 << i;
+
+                if position & bit_mask == 0 {
+                    parents.push(None);
+                } else {
+                    parents.push(ommers_iter.next());
+                    position &= !bit_mask;
+                }
+
+                if position == 0 {
+                    break;
+                }
+            }
+
+            // Serialize the converted note commitment tree.
+            Optional::write(&mut serialized_tree, left_leaf, |tree, leaf| {
+                leaf.write(tree)
+            })
+            .expect("A leaf in a note commitment tree should be serializable");
+
+            Optional::write(&mut serialized_tree, right_leaf, |tree, leaf| {
+                leaf.write(tree)
+            })
+            .expect("A leaf in a note commitment tree should be serializable");
+
+            Vector::write(&mut serialized_tree, &parents, |tree, parent| {
+                Optional::write(tree, *parent, |tree, parent| parent.write(tree))
+            })
+            .expect("Parent nodes in a note commitment tree should be serializable");
         }
 
-        // Convert the note commitment tree from
-        // [`Frontier`](bridgetree::Frontier) to
-        // [`CommitmentTree`](merkle_tree::CommitmentTree).
-        let tree = CommitmentTree::from_frontier(&tree.inner);
-        tree.write(&mut serialized_tree)
-            .expect("note commitment tree should be serializable");
         Self(serialized_tree)
     }
 }

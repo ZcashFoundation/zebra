@@ -54,6 +54,7 @@ orchard = "=0.1.0-beta.3"
 equihash = "0.1.0"
 zcash_note_encryption = "0.1"
 zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "d5c5f04", features = ["transparent-inputs"] }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "d5c5f04" }
 zcash_history = { git = "https://github.com/ZcashFoundation/librustzcash.git", tag = "0.5.1-zebra-v1.0.0-beta.4" }
 
 proptest = { version = "0.10.1", optional = true }

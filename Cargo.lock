@@ -6160,6 +6160,7 @@ dependencies = [
  "tracing",
  "uint",
  "x25519-dalek",
+ "zcash_encoding 0.0.0 (git+https://github.com/zcash/librustzcash.git?rev=d5c5f04)",
  "zcash_history",
  "zcash_note_encryption 0.1.0 (git+https://github.com/zcash/librustzcash.git?rev=d14e7a707ce01cefcbc82651dad48f002185dded)",
  "zcash_primitives 0.5.0 (git+https://github.com/zcash/librustzcash.git?rev=d5c5f04)",
