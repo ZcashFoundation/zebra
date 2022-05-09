@@ -382,66 +382,111 @@ where
     // But we can compensate for deleted UTXOs by applying the overlapping non-finalized UTXO changes.
 
     // Check if the finalized and non-finalized states match or overlap
-    let required_min_chain_root = finalized_tip_range.start().0 + 1;
-    let mut required_chain_overlap = required_min_chain_root..=finalized_tip_range.end().0;
+    let required_min_non_finalized_root = finalized_tip_range.start().0 + 1;
+
+    // Work out if we need to compensate for finalized query results from multiple heights:
+    // - Ok contains the finalized tip height (no need to compensate)
+    // - Err contains the required non-finalized chain overlap
+    let finalized_tip_status = required_min_non_finalized_root..=finalized_tip_range.end().0;
+    let finalized_tip_status = if finalized_tip_status.is_empty() {
+        let finalized_tip_height = *finalized_tip_range.end();
+        Ok(finalized_tip_height)
+    } else {
+        let required_non_finalized_overlap = finalized_tip_status;
+        Err(required_non_finalized_overlap)
+    };
 
     if chain.is_none() {
-        if required_chain_overlap.is_empty() {
+        if finalized_tip_status.is_ok() {
             info!(
-                ?required_min_chain_root,
-                ?required_chain_overlap,
+                ?finalized_tip_status,
+                ?required_min_non_finalized_root,
                 ?finalized_tip_range,
                 ?address_count,
-                "chain address UTXO query: chain is empty, no UTXO changes in chain",
+                "chain address UTXO query: \
+                 finalized chain is consistent, and non-finalized chain is empty",
             );
 
             return Ok(Default::default());
         } else {
             // We can't compensate for inconsistent database queries,
             // because the non-finalized chain is empty.
-            return Err("unable to get UTXOs: state was committing a block, and non-finalized chain is empty".into());
+            info!(
+                ?finalized_tip_status,
+                ?required_min_non_finalized_root,
+                ?finalized_tip_range,
+                ?address_count,
+                "chain address UTXO query: \
+                 finalized tip query was inconsistent, but non-finalized chain is empty",
+            );
+
+            return Err("unable to get UTXOs: \
+                        state was committing a block, and non-finalized chain is empty"
+                .into());
         }
     }
 
     let chain = chain.unwrap();
     let chain = chain.as_ref();
 
-    let chain_root = chain.non_finalized_root_height().0;
-    let chain_tip = chain.non_finalized_tip_height().0;
+    let non_finalized_root = chain.non_finalized_root_height();
+    let non_finalized_tip = chain.non_finalized_tip_height();
 
     assert!(
-        chain_root <= required_min_chain_root,
-        "unexpected chain gap: the best chain is updated after its previous root is finalized"
+        non_finalized_root.0 <= required_min_non_finalized_root,
+        "unexpected chain gap: the best chain is updated after its previous root is finalized",
     );
 
-    // If we've already committed this entire chain, ignore its UTXO changes.
-    // This is more likely if the non-finalized state is just getting started.
-    if chain_tip > *required_chain_overlap.end() {
-        if required_chain_overlap.is_empty() {
-            info!(
-                ?chain_root,
-                ?chain_tip,
-                ?required_min_chain_root,
-                ?required_chain_overlap,
-                ?finalized_tip_range,
-                ?address_count,
-                "chain address UTXO query: entire chain has been finalized, no new UTXO changes in chain",
-            );
+    match finalized_tip_status {
+        Ok(finalized_tip_height) => {
+            // If we've already committed this entire chain, ignore its UTXO changes.
+            // This is more likely if the non-finalized state is just getting started.
+            if finalized_tip_height >= non_finalized_tip {
+                info!(
+                    ?non_finalized_root,
+                    ?non_finalized_tip,
+                    ?finalized_tip_status,
+                    ?finalized_tip_range,
+                    ?address_count,
+                    "chain address UTXO query: \
+                     non-finalized blocks have all been finalized, no new UTXO changes",
+                );
 
-            return Ok(Default::default());
-        } else {
+                return Ok(Default::default());
+            }
+        }
+
+        Err(ref required_non_finalized_overlap) => {
             // We can't compensate for inconsistent database queries,
             // because the non-finalized chain is below the inconsistent query range.
-            return Err("unable to get UTXOs: state was committing a block, and non-finalized chain has been committed".into());
+            if *required_non_finalized_overlap.end() > non_finalized_tip.0 {
+                info!(
+                    ?non_finalized_root,
+                    ?non_finalized_tip,
+                    ?finalized_tip_status,
+                    ?finalized_tip_range,
+                    ?address_count,
+                    "chain address UTXO query: \
+                     finalized tip query was inconsistent, \
+                     and some inconsistent blocks are missing from the non-finalized chain",
+                );
+
+                return Err("unable to get UTXOs: \
+                            state was committing a block, \
+                            that is missing from the non-finalized chain"
+                    .into());
+            }
+
+            // Correctness: some finalized UTXOs might have duplicate creates or spends,
+            // but we've just checked they can be corrected by applying the non-finalized UTXO changes.
+            assert!(
+                required_non_finalized_overlap
+                    .clone()
+                    .all(|height| chain.blocks.contains_key(&Height(height))),
+                "UTXO query inconsistency: chain must contain required overlap blocks",
+            );
         }
     }
-
-    // Correctness: some finalized UTXOs might have duplicate creates or spends,
-    // but we've just checked they can be corrected by applying the non-finalized UTXO changes.
-    assert!(
-        required_chain_overlap.all(|height| chain.blocks.contains_key(&Height(height))),
-        "UTXO query inconsistency: chain must contain required overlap blocks",
-    );
 
     Ok(chain.partial_transparent_utxo_changes(addresses))
 }
