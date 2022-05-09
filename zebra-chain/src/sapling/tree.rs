@@ -484,10 +484,9 @@ impl From<&NoteCommitmentTree> for SerializedTree {
                 } else {
                     parents.push(ommers_iter.next());
                     position &= !bit_mask;
-                }
-
-                if position == 0 {
-                    break;
+                    if position == 0 {
+                        break;
+                    }
                 }
             }
 
