@@ -453,23 +453,22 @@ impl From<&NoteCommitmentTree> for SerializedTree {
     fn from(tree: &NoteCommitmentTree) -> Self {
         let mut serialized_tree = vec![];
 
+        // Convert the note commitment tree represented as a frontier into the
+        // format compatible with `zcashd`.
+        //
+        // There is a function in `librustzcash` called
+        // `CommitmentTree::from_frontier` that returns a commitment tree in the
+        // sparse format. However, the returned tree always contains
+        // [`MERKLE_DEPTH`] parent nodes, even though some trailing parents are
+        // empty. Such trees are incompatible with `zcashd`, since `zcashd`
+        // returns trees without empty trailing parents. For this reason, Zebra
+        // implements its own conversion between the dense and sparse formats.
         if let Some(frontier) = tree.inner.value() {
             let (left_leaf, right_leaf) = match frontier.leaf() {
                 Leaf::Left(left_value) => (Some(left_value), None),
                 Leaf::Right(left_value, right_value) => (Some(left_value), Some(right_value)),
             };
 
-            // Convert the note commitment tree represented as a frontier into the
-            // format compatible with `zcashd`.
-            //
-            // There is a function in `librustzcash` called
-            // `CommitmentTree::from_frontier` that returns a commitment tree in
-            // the sparse format. However, the returned tree always contains
-            // [`MERKLE_DEPTH`] parent nodes, even though some trailing parents
-            // are empty. Such trees are incompatible with `zcashd`, since
-            // `zcashd` returns trees without empty trailing parents. For this
-            // reason, Zebra implements its own conversion between the dense and
-            // sparse formats.
             let mut ommers_iter = frontier.ommers().iter();
             let mut position: usize = frontier.position().into();
             let mut parents = vec![];
@@ -491,6 +490,7 @@ impl From<&NoteCommitmentTree> for SerializedTree {
             }
 
             // Serialize the converted note commitment tree.
+
             Optional::write(&mut serialized_tree, left_leaf, |tree, leaf| {
                 leaf.write(tree)
             })
