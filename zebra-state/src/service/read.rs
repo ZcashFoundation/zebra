@@ -650,6 +650,8 @@ fn chain_transparent_tx_id_changes<C>(
 where
     C: AsRef<Chain>,
 {
+    let address_count = addresses.len();
+
     let finalized_tip_range = match finalized_tip_range {
         Some(finalized_tip_range) => finalized_tip_range,
         None => {
@@ -658,7 +660,12 @@ where
                 "unexpected non-finalized chain when finalized state is empty"
             );
 
-            // Empty chains don't contain any tx IDs.
+            debug!(
+                ?finalized_tip_range,
+                ?address_count,
+                "chain address tx ID query: state is empty, no tx IDs available",
+            );
+
             return Ok(Default::default());
         }
     };
@@ -676,50 +683,116 @@ where
     // and they are queried in chain order.
 
     // Check if the finalized and non-finalized states match or overlap
-    let required_min_chain_root = finalized_tip_range.start().0 + 1;
-    let mut required_chain_overlap = required_min_chain_root..=finalized_tip_range.end().0;
+    let required_min_non_finalized_root = finalized_tip_range.start().0 + 1;
+
+    // Work out if we need to compensate for finalized query results from multiple heights:
+    // - Ok contains the finalized tip height (no need to compensate)
+    // - Err contains the required non-finalized chain overlap
+    let finalized_tip_status = required_min_non_finalized_root..=finalized_tip_range.end().0;
+    let finalized_tip_status = if finalized_tip_status.is_empty() {
+        let finalized_tip_height = *finalized_tip_range.end();
+        Ok(finalized_tip_height)
+    } else {
+        let required_non_finalized_overlap = finalized_tip_status;
+        Err(required_non_finalized_overlap)
+    };
 
     if chain.is_none() {
-        if required_chain_overlap.is_empty() || addresses.len() <= 1 {
-            // The non-finalized chain is empty, and we don't need it.
+        if address_count <= 1 || finalized_tip_status.is_ok() {
+            debug!(
+                ?finalized_tip_status,
+                ?required_min_non_finalized_root,
+                ?finalized_tip_range,
+                ?address_count,
+                "chain address tx ID query: \
+                 finalized chain is consistent, and non-finalized chain is empty",
+            );
+
             return Ok(Default::default());
         } else {
             // We can't compensate for inconsistent database queries,
             // because the non-finalized chain is empty.
-            return Err("unable to get tx IDs: state was committing a block, and non-finalized chain is empty".into());
+            debug!(
+                ?finalized_tip_status,
+                ?required_min_non_finalized_root,
+                ?finalized_tip_range,
+                ?address_count,
+                "chain address tx ID query: \
+                 finalized tip query was inconsistent, but non-finalized chain is empty",
+            );
+
+            return Err("unable to get tx IDs: \
+                        state was committing a block, and non-finalized chain is empty"
+                .into());
         }
     }
 
     let chain = chain.unwrap();
     let chain = chain.as_ref();
 
-    let chain_root = chain.non_finalized_root_height().0;
-    let chain_tip = chain.non_finalized_tip_height().0;
+    let non_finalized_root = chain.non_finalized_root_height();
+    let non_finalized_tip = chain.non_finalized_tip_height();
 
     assert!(
-        chain_root <= required_min_chain_root,
-        "unexpected chain gap: the best chain is updated after its previous root is finalized"
+        non_finalized_root.0 <= required_min_non_finalized_root,
+        "unexpected chain gap: the best chain is updated after its previous root is finalized",
     );
 
-    // If we've already committed this entire chain, ignore its UTXO changes.
-    // This is more likely if the non-finalized state is just getting started.
-    if chain_tip > *required_chain_overlap.end() {
-        if required_chain_overlap.is_empty() || addresses.len() <= 1 {
-            // The non-finalized chain has been committed, and we don't need it.
-            return Ok(Default::default());
-        } else {
+    match finalized_tip_status {
+        Ok(finalized_tip_height) => {
+            // If we've already committed this entire chain, ignore its UTXO changes.
+            // This is more likely if the non-finalized state is just getting started.
+            if finalized_tip_height >= non_finalized_tip {
+                debug!(
+                    ?non_finalized_root,
+                    ?non_finalized_tip,
+                    ?finalized_tip_status,
+                    ?finalized_tip_range,
+                    ?address_count,
+                    "chain address tx ID query: \
+                     non-finalized blocks have all been finalized, no new UTXO changes",
+                );
+
+                return Ok(Default::default());
+            }
+        }
+
+        Err(ref required_non_finalized_overlap) => {
             // We can't compensate for inconsistent database queries,
             // because the non-finalized chain is below the inconsistent query range.
-            return Err("unable to get tx IDs: state was committing a block, and non-finalized chain has been committed".into());
+            if address_count > 1 && *required_non_finalized_overlap.end() > non_finalized_tip.0 {
+                debug!(
+                    ?non_finalized_root,
+                    ?non_finalized_tip,
+                    ?finalized_tip_status,
+                    ?finalized_tip_range,
+                    ?address_count,
+                    "chain address tx ID query: \
+                     finalized tip query was inconsistent, \
+                     some inconsistent blocks are missing from the non-finalized chain, \
+                     and the query has multiple addresses",
+                );
+
+                return Err("unable to get tx IDs: \
+                            state was committing a block, \
+                            that is missing from the non-finalized chain, \
+                            and the query has multiple addresses"
+                    .into());
+            }
+
+            // Correctness: some finalized UTXOs might have duplicate creates or spends,
+            // but we've just checked they can be corrected by applying the non-finalized UTXO changes.
+            assert!(
+                address_count <= 1
+                    || required_non_finalized_overlap
+                        .clone()
+                        .all(|height| chain.blocks.contains_key(&Height(height))),
+                "tx ID query inconsistency: \
+                 chain must contain required overlap blocks \
+                 or query must only have one address",
+            );
         }
     }
-
-    // Correctness: some finalized tx IDs might have come from different blocks for different addresses,
-    // but we've just checked they can be corrected by applying the non-finalized UTXO changes.
-    assert!(
-        required_chain_overlap.all(|height| chain.blocks.contains_key(&Height(height))) || addresses.len() <= 1,
-        "tx ID query inconsistency: chain must contain required overlap blocks if there are multiple addresses",
-    );
 
     Ok(chain.partial_transparent_tx_ids(addresses, query_height_range))
 }
