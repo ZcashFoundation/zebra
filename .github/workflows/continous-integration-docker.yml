@@ -1,4 +1,4 @@
-name: Test
+name: CI Docker
 
 on:
   workflow_dispatch:
@@ -37,9 +37,9 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/test.yml'
-      - '.github/workflows/gcp-test-deploy.yml'
-      - '.github/workflows/docker-image-build.yml'
+      - '.github/workflows/continous-integration-docker.yml'
+      - '.github/workflows/deploy-gcp-tests.yml'
+      - '.github/workflows/build-docker-image.yml'
 
   push:
     branches:
@@ -56,12 +56,12 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/test.yml'
-      - '.github/workflows/gcp-test-deploy.yml'
-      - '.github/workflows/docker-image-build.yml'
+      - '.github/workflows/continous-integration-docker.yml'
+      - '.github/workflows/deploy-gcp-tests.yml'
+      - '.github/workflows/build-docker-image.yml'
 
 env:
-  # TODO: use the output from ./.github/workflows/docker-image-build.yml
+  # TODO: use the output from ./.github/workflows/build-docker-image.yml
   IMAGE_NAME: zebrad-test
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
 
@@ -85,7 +85,7 @@ jobs:
             zebra-state/**/constants.rs
 
   build:
-    uses: ./.github/workflows/docker-image-build.yml
+    uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: tester
@@ -182,7 +182,7 @@ jobs:
   # - on request
   regenerate-stateful-disks:
     needs: [ build, changed-files]
-    uses: ./.github/workflows/gcp-test-deploy.yml
+    uses: ./.github/workflows/deploy-gcp-tests.yml
     # Only run this job if the database format version has (likely) changed.
     if: ${{ (needs.changed-files.outputs.rebuild == 'true' && github.event_name == 'push') || github.event.inputs.regenerate-disks == 'true' }}
     with:
@@ -214,7 +214,7 @@ jobs:
   # - on request
   test-full-sync:
     needs: build
-    uses: ./.github/workflows/gcp-test-deploy.yml
+    uses: ./.github/workflows/deploy-gcp-tests.yml
     # TODO change `github.ref_name == 'main'` to `startsWith(github.head_ref, 'mergify/merge-queue/')`
     # to only run on Mergify head branches, and on manual dispatch:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
