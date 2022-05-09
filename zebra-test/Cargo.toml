@@ -1,6 +1,6 @@
 [package]
 name = "zebra-test"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -24,7 +24,7 @@ futures = "0.3.21"
 color-eyre = "0.5.11"
 owo-colors = "3.4.0"
 spandoc = "0.2.2"
-thiserror = "1.0.30"
+thiserror = "1.0.31"
 tracing-subscriber = "0.2.25"
 tracing-error = "0.1.2"
 tracing = "0.1.31"

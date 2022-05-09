@@ -1,18 +1,43 @@
-name: Test
+name: CI Docker
 
 on:
   pull_request:
     branches:
       - main
     paths-ignore:
+      # code and tests
       - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
       - '**/*.txt'
+      # test data snapshots
       - '**/*.snap'
+      # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      # workflow definitions
       - 'docker/**'
-      - '.github/workflows/test.yml'
-      - '.github/workflows/docker-image-build.yml'
+      - '.github/workflows/continous-integration-docker.yml'
+      - '.github/workflows/deploy-gcp-tests.yml'
+      - '.github/workflows/build-docker-image.yml'
+
+  push:
+    branches:
+      - main
+    paths-ignore:
+      # code and tests
+      - '**/*.rs'
+      # hard-coded checkpoints and proptest regressions
+      - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
+      - 'docker/**'
+      - '.github/workflows/continous-integration-docker.yml'
+      - '.github/workflows/deploy-gcp-tests.yml'
+      - '.github/workflows/build-docker-image.yml'
 
 jobs:
   build:
@@ -61,6 +86,14 @@ jobs:
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached post-checkpoint state
   test-stateful-sync:
     name: Test full validation sync from cached state
+    runs-on: ubuntu-latest
+    needs: [build, regenerate-stateful-disks]
+    steps:
+      - run: 'echo "No build required"'
+
+  # Test that Zebra can run a full mainnet sync after a PR is approved
+  test-full-sync:
+    name: Test a full sync up to the tip
     runs-on: ubuntu-latest
     needs: [build, regenerate-stateful-disks]
     steps:

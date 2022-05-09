@@ -12,7 +12,6 @@
 //! already been seen in a block.
 
 use std::{
-    env,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -31,12 +30,13 @@ use zebra_state::HashOrHeight;
 use crate::common::{
     cached_state::{
         copy_state_directory, load_tip_height_from_state_directory,
-        start_state_service_with_cache_dir, ZEBRA_CACHED_STATE_DIR_VAR,
+        start_state_service_with_cache_dir,
     },
     launch::spawn_zebrad_for_rpc_without_initial_peers,
     lightwalletd::{
         wallet_grpc::{self, connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server},
-        zebra_skip_lightwalletd_tests, LIGHTWALLETD_TEST_TIMEOUT,
+        zebra_skip_lightwalletd_tests,
+        LightwalletdTestType::*,
     },
     sync::perform_full_sync_starting_from,
 };
@@ -50,30 +50,40 @@ pub async fn run() -> Result<()> {
         return Ok(());
     }
 
-    let cached_state_path = match env::var_os(ZEBRA_CACHED_STATE_DIR_VAR) {
-        Some(argument) => PathBuf::from(argument),
-        None => {
-            tracing::info!(
-                "skipped send transactions using lightwalletd test, \
-                 set the {ZEBRA_CACHED_STATE_DIR_VAR:?} environment variable to run the test",
-            );
-            return Ok(());
-        }
+    // We want a zebra state dir and a lightwalletd data dir in place,
+    // so `UpdateCachedState` can be used as our test type
+    //
+    // But for now, we don't want to require the cached state, because it's not ready yet.
+    // TODO: use `UpdateCachedState`
+    let test_type = FullSyncFromGenesis {
+        allow_lightwalletd_cached_state: true,
     };
+
+    let cached_state_path = test_type.zebrad_state_path("send_transaction_tests".to_string());
+    if cached_state_path.is_none() {
+        return Ok(());
+    }
+
+    let lightwalletd_state_path =
+        test_type.lightwalletd_state_path("send_transaction_tests".to_string());
+    if lightwalletd_state_path.is_none() {
+        return Ok(());
+    }
 
     let network = Network::Mainnet;
 
     let (transactions, partial_sync_path) =
-        load_transactions_from_a_future_block(network, cached_state_path).await?;
+        load_transactions_from_a_future_block(network, cached_state_path.unwrap()).await?;
 
-    let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
-        Network::Mainnet,
-        partial_sync_path,
-        LIGHTWALLETD_TEST_TIMEOUT,
+    let (_zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc_without_initial_peers(Network::Mainnet, partial_sync_path, test_type)?;
+
+    let (_lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(
+        zebra_rpc_address,
+        lightwalletd_state_path,
+        test_type,
+        true,
     )?;
-
-    let (_lightwalletd, lightwalletd_rpc_port) =
-        spawn_lightwalletd_with_rpc_server(zebra_rpc_address, true)?;
 
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
 
@@ -131,8 +141,8 @@ async fn prepare_partial_sync(
     cached_zebra_state: PathBuf,
 ) -> Result<(TempDir, block::Height)> {
     let partial_sync_path = copy_state_directory(cached_zebra_state).await?;
-    let partial_sync_state_dir = partial_sync_path.as_ref().join("state");
-    let tip_height = load_tip_height_from_state_directory(network, &partial_sync_state_dir).await?;
+    let tip_height =
+        load_tip_height_from_state_directory(network, partial_sync_path.as_ref()).await?;
 
     Ok((partial_sync_path, tip_height))
 }
@@ -152,7 +162,7 @@ async fn load_transactions_from_block_after(
     state_path: &Path,
 ) -> Result<Vec<Arc<Transaction>>> {
     let (_read_write_state_service, mut state, latest_chain_tip, _chain_tip_change) =
-        start_state_service_with_cache_dir(network, state_path.join("state")).await?;
+        start_state_service_with_cache_dir(network, state_path).await?;
 
     let tip_height = latest_chain_tip
         .best_tip_height()

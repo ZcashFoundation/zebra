@@ -1,0 +1,263 @@
+name: Deploy GCP tests
+
+on:
+  workflow_call:
+    inputs:
+      network:
+        required: false
+        type: string
+      app_name:
+        required: false
+        type: string
+        default: 'zebra'
+      test_id:
+        required: true
+        type: string
+      test_description:
+        required: true
+        type: string
+      test_variables:
+        required: true
+        type: string
+      root_state_path:
+        required: false
+        type: string
+        default: '/zebrad-cache'
+      zebra_state_dir:
+        required: false
+        type: string
+        default: ''
+      disk_prefix:
+        required: false
+        type: string
+        default: 'zebrad-cache'
+      disk_suffix:
+        required: false
+        type: string
+      needs_zebra_state:
+        required: true
+        type: boolean
+      saves_to_disk:
+        required: true
+        type: boolean
+      height_grep_text:
+        required: false
+        type: string
+
+env:
+  NETWORK: Mainnet
+  IMAGE_NAME: zebrad-test
+  GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
+  ZONE: us-central1-a
+  MACHINE_TYPE: c2d-standard-16
+
+jobs:
+  test-without-cached-state:
+    name: Run ${{ inputs.test_id }} test
+    if: ${{ !inputs.needs_zebra_state }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.7.1
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      - name: Create GCP compute instance
+        id: create-instance
+        run: |
+          gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --boot-disk-size 100GB \
+          --boot-disk-type pd-ssd \
+          --create-disk name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-image debian:buster \
+          --container-restart-policy=never \
+          --machine-type ${{ env.MACHINE_TYPE }} \
+          --scopes cloud-platform \
+          --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
+          --tags ${{ inputs.app_name }} \
+          --zone ${{ env.ZONE }}
+          sleep 60
+
+      - name: Run ${{ inputs.test_id }} test
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          sudo mkfs.ext4 /dev/sdb \
+          && \
+          docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
+          ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
+          && \
+          docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
+          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
+
+      - name: Get state version from constants.rs
+        run: |
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
+          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
+
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
+
+      - name: Get sync height from logs
+        run: |
+          SYNC_HEIGHT=""
+
+          DOCKER_LOGS=$(\
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command="docker logs ${{ inputs.test_id }} --tail 20")
+
+          SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE '${{ inputs.height_grep_text }}\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
+          echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
+
+      # Create image from disk that will be used for following tests
+      # Force the image creation as the disk is still attached even though is not being used by the container
+      - name: Create image from state disk
+        if: ${{ inputs.saves_to_disk }}
+        run: |
+          gcloud compute images create ${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }} \
+          --force \
+          --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
+          --source-disk-zone=${{ env.ZONE }} \
+          --storage-location=us \
+          --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
+
+      - name: Delete test instance
+        # If the disk generation step timeouts (+6 hours) the previous step (creating the image) willl be skipped.
+        # Even if the instance continues running, no image will be created, so it's better to delete it.
+        if: always()
+        continue-on-error: true
+        run: |
+          INSTANCE=$(gcloud compute instances list --filter=${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
+          if [ -z "${INSTANCE}" ]; then
+            echo "No instance to delete"
+          else
+            gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          fi
+
+  test-with-cached-state:
+    name: Run ${{ inputs.test_id }} test
+    if: ${{ inputs.needs_zebra_state }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ github.event.inputs.network || env.NETWORK }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.7.1
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Before executing any further steps, validate the local state and remote version are the same,
+      # or at least that the local state version is greater than the available cached state version from main.
+      #
+      # Aftwards, get the disk name to be used on further steps
+      - name: Validate local state version with cached state
+        id: get-disk-name
+        run: |
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
+          echo "LOCAL_STATE_VERSION: $LOCAL_STATE_VERSION"
+
+          ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.disk_prefix }} AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "Disk: $ZEBRA_STATE_DISK"
+          echo "Description: $(gcloud compute images describe $ZEBRA_STATE_DISK --format='value(DESCRIPTION)')"
+
+          GCP_STATE_VERSION=$(echo "$ZEBRA_STATE_DISK" | grep -oE "v[0-9]+" | grep -oE "[0-9]+")
+          echo "GCP_STATE_VERSION: $GCP_STATE_VERSION"
+
+          if [[ "$LOCAL_STATE_VERSION" -lt "$GCP_STATE_VERSION" ]]; then echo "Local version is lower than cached version" && exit 1; fi
+
+          echo "ZEBRA_CACHED_DISK_NAME=$ZEBRA_STATE_DISK" >> $GITHUB_ENV
+
+      # Creates Compute Engine virtual machine instance w/ disks
+      - name: Create GCP compute instance
+        id: create-instance
+        run: |
+          gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --boot-disk-size 100GB \
+          --boot-disk-type pd-ssd \
+          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --container-image debian:buster \
+          --container-restart-policy=never \
+          --machine-type ${{ env.MACHINE_TYPE }} \
+          --scopes cloud-platform \
+          --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
+          --tags ${{ inputs.app_name }} \
+          --zone ${{ env.ZONE }}
+          sleep 60
+
+      - name: Run ${{ inputs.test_id }} test
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
+          ${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
+          && \
+          docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
+          --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
+
+      - name: Delete test instance
+        # We don't want to leave a failed instance in GCP using resources
+        if: always()
+        continue-on-error: true
+        run: |
+          INSTANCE=$(gcloud compute instances list --filter=${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
+          if [ -z "${INSTANCE}" ]; then
+            echo "No instance to delete"
+          else
+            gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
+          fi
