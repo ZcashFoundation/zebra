@@ -536,8 +536,8 @@ impl DiskWriteBatch {
     /// Prepare a database batch indexing the transparent addresses that spent in this transaction.
     ///
     /// Adds the following changes to this batch:
-    /// - delete spent UTXOs, and
-    /// - delete transparent address UTXO index entries,
+    /// - index spending transactions for each spent transparent output
+    ///   (this is different from the transaction that created the output),
     /// without actually writing anything.
     ///
     /// # Errors
