@@ -354,6 +354,8 @@ fn chain_transparent_utxo_changes<C>(
 where
     C: AsRef<Chain>,
 {
+    let address_count = addresses.len();
+
     let finalized_tip_range = match finalized_tip_range {
         Some(finalized_tip_range) => finalized_tip_range,
         None => {
@@ -362,7 +364,12 @@ where
                 "unexpected non-finalized chain when finalized state is empty"
             );
 
-            // Empty chains don't contain any changes.
+            info!(
+                ?finalized_tip_range,
+                ?address_count,
+                "chain address UTXO query: state is empty, no UTXOs available",
+            );
+
             return Ok(Default::default());
         }
     };
@@ -380,7 +387,14 @@ where
 
     if chain.is_none() {
         if required_chain_overlap.is_empty() {
-            // The non-finalized chain is empty, and we don't need it.
+            info!(
+                ?required_min_chain_root,
+                ?required_chain_overlap,
+                ?finalized_tip_range,
+                ?address_count,
+                "chain address UTXO query: chain is empty, no UTXO changes in chain",
+            );
+
             return Ok(Default::default());
         } else {
             // We can't compensate for inconsistent database queries,
@@ -404,7 +418,16 @@ where
     // This is more likely if the non-finalized state is just getting started.
     if chain_tip > *required_chain_overlap.end() {
         if required_chain_overlap.is_empty() {
-            // The non-finalized chain has been committed, and we don't need it.
+            info!(
+                ?chain_root,
+                ?chain_tip,
+                ?required_min_chain_root,
+                ?required_chain_overlap,
+                ?finalized_tip_range,
+                ?address_count,
+                "chain address UTXO query: entire chain has been finalized, no new UTXO changes in chain",
+            );
+
             return Ok(Default::default());
         } else {
             // We can't compensate for inconsistent database queries,
