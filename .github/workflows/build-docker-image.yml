@@ -86,21 +86,21 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # - name: Login to Google Artifact Registry
-      #   uses: docker/login-action@v2.0.0
-      #   with:
-      #     registry: us-docker.pkg.dev
-      #     username: oauth2accesstoken
-      #     password: ${{ steps.auth.outputs.access_token }}
-      #     logout: false
-
-      - name: Login to Github Package Registry
+      - name: Login to Google Artifact Registry
         uses: docker/login-action@v2.0.0
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: us-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
           logout: false
+
+      # - name: Login to Github Package Registry
+      #   uses: docker/login-action@v2.0.0
+      #   with:
+      #     registry: ghcr.io
+      #     username: ${{ github.actor }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
+      #     logout: false
 
       # Build and push image to Google Artifact Registry
       - name: Build & push
