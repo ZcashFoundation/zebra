@@ -4,6 +4,85 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-beta.9](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.9) - 2022-05-06
+
+Zebra's latest beta continues our work on `lightwalletd` RPC methods, and contains some internal CI improvements.
+
+### Added
+
+#### RPCs
+
+- Add a script for comparing zcashd and zebrad RPC responses (#4219)
+- Add Rust tests for lightwalletd sync from Zebra (#4177)
+- Add integration test to send transactions using lightwalletd (#4068)
+- RPC test with fully synced Zebra (#4157)
+- Log unrecognized RPC requests (#3860)
+- Implement the `get_address_tx_ids` RPC method query (#4119)
+- Implement `getaddressbalance` RPC (#4138)
+- Add a query function for transparent UTXOs (#4111)
+
+#### CI
+
+- Add `sending_transactions_using_lightwalletd` test to CI (#4267)
+- Add a `zebrad tip-height` utility command (#4289)
+- Add `fully_synced_rpc_test` test to CI (#4223)
+- Add a reusable workflow for deployable integration tests (#4271)
+- Add wallet grpc tests (#4253)
+- Implement reusable workflows for image building (#4173)
+- Implement `getaddressutxos` RPC method. (#4087)
+
+
+### Changed
+
+- Increase block validation timeouts (#4156)
+- Decrease the peer handshake timeout to 3 seconds, to speed up the initial sync (#4212)
+- Use link-time optimisation in release builds (#4184)
+- Add an extra block retry, to speed up the initial sync (#4185)
+- Update Zebra's block hash checkpoints (#4183)
+- Document coinbase rules, refactor to ease understanding (#4056)
+- Disconnect from testnet peers using the first NU5 testnet rules (#3976)
+
+#### RPCs
+
+- Simplify RPC types and add documentation (#4218)
+
+#### Documentation
+
+- Add transaction index diagram to RFC-0005 (#4330)
+
+#### CI
+
+- Skip tests when doing a manual full sync (#4333)
+- Add cached state version to disk images (#4314)
+- Check specific files for each job when linting (#4311)
+- Use debian for faster mounting and bump readiness time (#4276)
+- Use docker instead of Konlet for GCP deployments in CI (#4252)
+- Create a full sync disk to add the cached state inside (#4266)
+- Increase the Zcash parameter fetch timeout (#4148)
+
+### Fixed
+
+- Fix testnet syncer loop on large Orchard blocks (#4286)
+
+#### RPCs
+
+- Fix some RPC response formats to match `zcashd` (#4217)
+- Make Zebra RPC compatible with the `zcash-cli` RPC client (#4215)
+- Use a structure for parameters of getaddresstxids (#4264)
+
+#### CI
+
+- Only update cached states when needed (#4332)
+- Run sync tests according to the right conditions (#4313)
+- Stop actionlint from failing in main (#4317)
+- Make the full sync tests cache state at `/zebrad-cache` (#4308)
+- Avoid docker cache contamination and invalidation (#4254)
+- Garbage collect instances no matter previous steps status (#4255)
+- Do not delete instances from `main` branch on merge (#4206)
+- Retry after docker log follow ssh failures (#4198)
+- Share GitHub runner caches between branches (#4149)
+
+
 ## [Zebra 1.0.0-beta.8](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.8) - 2022-04-19
 
 Zebra's latest beta completes our work on the NU5 consensus rules. It continues our work on `lightwalletd` RPC methods, and contains some internal CI improvements.
