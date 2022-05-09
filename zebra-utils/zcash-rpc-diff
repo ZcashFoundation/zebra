@@ -36,13 +36,13 @@ echo "Checking first node release info..."
 $ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getinfo > "$ZEBRAD_RELEASE_INFO"
 
 ZEBRAD=$(cat "$ZEBRAD_RELEASE_INFO" | grep '"subversion"' | cut -d: -f2 | cut -d/ -f2 | \
-             sed 's/MagicBean/zcashd/' | tr 'A-Z' 'a-z')
+             tr 'A-Z' 'a-z' | sed 's/magicbean/zcashd/ ; s/zebra$/zebrad/')
 
 echo "Checking second node release info..."
 $ZCASH_CLI getinfo > "$ZCASHD_RELEASE_INFO"
 
 ZCASHD=$(cat "$ZCASHD_RELEASE_INFO" | grep '"subversion"' | cut -d: -f2 | cut -d/ -f2 | \
-             sed 's/MagicBean/zcashd/' | tr 'A-Z' 'a-z')
+             tr 'A-Z' 'a-z' | sed 's/magicbean/zcashd/ ; s/zebra$/zebrad/')
 
 echo "Connected to $ZEBRAD (port $ZEBRAD_RPC_PORT) and $ZCASHD ($ZCASH_CLI zcash.conf port)."
 
