@@ -533,6 +533,56 @@ impl DiskWriteBatch {
         Ok(())
     }
 
+    /// Prepare a database batch indexing the transparent addresses that spent in this transaction.
+    ///
+    /// Adds the following changes to this batch:
+    /// - delete spent UTXOs, and
+    /// - delete transparent address UTXO index entries,
+    /// without actually writing anything.
+    ///
+    /// # Errors
+    ///
+    /// - This method doesn't currently return any errors, but it might in future
+    pub fn prepare_spending_transparent_tx_ids_batch(
+        &mut self,
+        db: &DiskDb,
+        spending_tx_location: TransactionLocation,
+        transaction: &Transaction,
+        spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        address_balances: &HashMap<transparent::Address, AddressBalanceLocation>,
+    ) -> Result<(), BoxError> {
+        let tx_loc_by_transparent_addr_loc =
+            db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
+
+        // Index the transparent addresses that spent in this transaction.
+        //
+        // Coinbase inputs represent new coins, so there are no UTXOs to mark as spent.
+        for spent_outpoint in transaction.inputs().iter().filter_map(Input::outpoint) {
+            let spent_utxo = spent_utxos_by_outpoint
+                .get(&spent_outpoint)
+                .expect("unexpected missing spent output");
+            let sending_address = spent_utxo.output.address(self.network());
+
+            // Fetch the balance, and the link from the address to the AddressLocation, from memory.
+            if let Some(sending_address) = sending_address {
+                let sending_address_location = address_balances
+                    .get(&sending_address)
+                    .expect("spent outputs must already have an address balance")
+                    .address_location();
+
+                // Create a link from the AddressLocation to the spent TransactionLocation in the database.
+                // Unlike the OutputLocation link, this will never be deleted.
+                //
+                // The value is the location of this transaction,
+                // not the transaction the spent output is from.
+                let address_transaction =
+                    AddressTransaction::new(sending_address_location, spending_tx_location);
+                self.zs_insert(&tx_loc_by_transparent_addr_loc, address_transaction, ());
+            }
+        }
+
+        Ok(())
+    }
 
     /// Prepare a database batch containing `finalized.block`'s:
     /// - transparent address balance changes,
