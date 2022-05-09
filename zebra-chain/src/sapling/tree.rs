@@ -166,7 +166,7 @@ impl ZcashDeserialize for Root {
 ///
 /// Note that it's handled as a byte buffer and not a point coordinate (jubjub::Fq)
 /// because that's how the spec handles the MerkleCRH^Sapling function inputs and outputs.
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct Node([u8; 32]);
 
 /// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
