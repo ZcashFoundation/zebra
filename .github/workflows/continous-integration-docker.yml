@@ -88,7 +88,7 @@ jobs:
     uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
-      dockerfile_target: tester
+      dockerfile_target: tests
       image_name: zebrad-test
       # TODO: validate how to use variable/conditional values for Testnet
       network: Mainnet
