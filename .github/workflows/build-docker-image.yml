@@ -114,5 +114,15 @@ jobs:
             CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
           push: true
-          cache-from: type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
-          cache-to: type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
+          # To improve build speeds, for eacrh branch we push an additonal image to the registry,
+          # to be used as the caching layer, using the `max` caching mode.
+          #
+          # We use multiple cache sources to confirm a cache hit, starting from a general cache,
+          # then the cache from main, and lastly a cache scoped per branch.
+          cache-from: |
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:global-cache
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:main-cache
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
+          cache-to: |
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:global-cache,mode=max
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
