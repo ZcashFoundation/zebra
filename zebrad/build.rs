@@ -56,6 +56,7 @@ fn main() {
         }
     }
 
+    #[cfg(feature = "lightwalletd-grpc-tests")]
     tonic_build::configure()
         .build_client(true)
         .build_server(false)

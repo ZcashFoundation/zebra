@@ -34,8 +34,11 @@ use super::{
 
 use LightwalletdTestType::*;
 
+#[cfg(feature = "lightwalletd-grpc-tests")]
 pub mod send_transaction_test;
+#[cfg(feature = "lightwalletd-grpc-tests")]
 pub mod wallet_grpc;
+#[cfg(feature = "lightwalletd-grpc-tests")]
 pub mod wallet_grpc_test;
 
 /// The name of the env var that enables Zebra lightwalletd integration tests.

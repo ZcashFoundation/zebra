@@ -1,4 +1,9 @@
 //! Utility functions for tests that used cached Zebra state.
+//!
+//! Note: we allow dead code in this module, because it is mainly used by the gRPC tests,
+//! which are optional.
+
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 
