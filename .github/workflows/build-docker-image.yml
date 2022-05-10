@@ -58,12 +58,11 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v3.8.0
+        uses: docker/metadata-action@v4.0.1
         with:
           # list of Docker images to use as base name for tags
           images: |
             us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}
-            gcr.io/zealous-zebra/zcashfoundation-zebra/${{ inputs.image_name }}
           # generate Docker tags based on the following events/attributes
           tags: |
             type=schedule
@@ -77,7 +76,7 @@ jobs:
       # Setup Docker Buildx to allow use of docker cache layers from GH
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v2
 
       - name: Authenticate to Google Cloud
         id: auth
@@ -88,17 +87,9 @@ jobs:
           token_format: 'access_token'
 
       - name: Login to Google Artifact Registry
-        uses: docker/login-action@v1.14.1
+        uses: docker/login-action@v2.0.0
         with:
           registry: us-docker.pkg.dev
-          username: oauth2accesstoken
-          password: ${{ steps.auth.outputs.access_token }}
-          logout: false
-
-      - name: Login to Google Container Registry
-        uses: docker/login-action@v1.14.1
-        with:
-          registry: gcr.io
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
           logout: false
@@ -106,7 +97,7 @@ jobs:
       # Build and push image to Google Artifact Registry
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v2.10.0
+        uses: docker/build-push-action@v3.0.0
         with:
           target: ${{ inputs.dockerfile_target }}
           context: .
@@ -123,5 +114,12 @@ jobs:
             CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
           push: true
-          cache-from: type=gha,scope=${{ inputs.image_name }}
-          cache-to: type=gha,mode=max,scope=${{ inputs.image_name }}
+          # To improve build speeds, for eacrh branch we push an additonal image to the registry,
+          # to be used as the caching layer, using the `max` caching mode.
+          #
+          # We use multiple cache sources to confirm a cache hit, starting from the `main` branch cahe,
+          # and if there's no hit, then continue with a cache scoped per branch.
+          cache-from: |
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:main-cache
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
+          cache-to: type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max

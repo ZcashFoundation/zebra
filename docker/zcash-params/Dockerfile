@@ -8,7 +8,7 @@ FROM chef AS planner
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
-FROM chef AS builder
+FROM chef AS release
 COPY --from=planner /app/recipe.json recipe.json
 
 # Install zebra build deps

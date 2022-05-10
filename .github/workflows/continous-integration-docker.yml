@@ -1,4 +1,4 @@
-name: Test
+name: CI Docker
 
 on:
   workflow_dispatch:
@@ -37,9 +37,9 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/test.yml'
-      - '.github/workflows/gcp-test-deploy.yml'
-      - '.github/workflows/docker-image-build.yml'
+      - '.github/workflows/continous-integration-docker.yml'
+      - '.github/workflows/deploy-gcp-tests.yml'
+      - '.github/workflows/build-docker-image.yml'
 
   push:
     branches:
@@ -56,12 +56,12 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - 'docker/**'
-      - '.github/workflows/test.yml'
-      - '.github/workflows/gcp-test-deploy.yml'
-      - '.github/workflows/docker-image-build.yml'
+      - '.github/workflows/continous-integration-docker.yml'
+      - '.github/workflows/deploy-gcp-tests.yml'
+      - '.github/workflows/build-docker-image.yml'
 
 env:
-  # TODO: use the output from ./.github/workflows/docker-image-build.yml
+  # TODO: use the output from ./.github/workflows/build-docker-image.yml
   IMAGE_NAME: zebrad-test
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
 
@@ -85,10 +85,10 @@ jobs:
             zebra-state/**/constants.rs
 
   build:
-    uses: ./.github/workflows/docker-image-build.yml
+    uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
-      dockerfile_target: tester
+      dockerfile_target: tests
       image_name: zebrad-test
       # TODO: validate how to use variable/conditional values for Testnet
       network: Mainnet
@@ -182,7 +182,7 @@ jobs:
   # - on request
   regenerate-stateful-disks:
     needs: [ build, changed-files]
-    uses: ./.github/workflows/gcp-test-deploy.yml
+    uses: ./.github/workflows/deploy-gcp-tests.yml
     # Only run this job if the database format version has (likely) changed.
     if: ${{ (needs.changed-files.outputs.rebuild == 'true' && github.event_name == 'push') || github.event.inputs.regenerate-disks == 'true' }}
     with:
@@ -197,7 +197,7 @@ jobs:
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached mandatory checkpoint disk
   test-stateful-sync:
     needs: build
-    uses: ./.github/workflows/gcp-test-deploy.yml
+    uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       test_id: sync-past-checkpoint
@@ -214,7 +214,7 @@ jobs:
   # - on request
   test-full-sync:
     needs: build
-    uses: ./.github/workflows/gcp-test-deploy.yml
+    uses: ./.github/workflows/deploy-gcp-tests.yml
     # TODO change `github.ref_name == 'main'` to `startsWith(github.head_ref, 'mergify/merge-queue/')`
     # to only run on Mergify head branches, and on manual dispatch:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
@@ -231,7 +231,7 @@ jobs:
   # Test that Zebra can answer a synthetic RPC call, using a cached Zebra tip state
   lightwalletd-rpc-test:
     needs: build
-    uses: ./.github/workflows/gcp-test-deploy.yml
+    uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       app_name: lightwalletd
@@ -244,10 +244,27 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
 
+  # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
+  # TODO: use a cached lightwalletd tip state to speed up the test (#4303)
+  lightwalletd-transactions-test:
+    needs: build
+    uses: ./.github/workflows/deploy-gcp-tests.yml
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    with:
+      app_name: lightwalletd
+      test_id: lwd-send-transactions
+      test_description: Test sending transactions via lightwalletd
+      test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lightwalletd-cache'
+      needs_zebra_state: true
+      saves_to_disk: false
+      disk_suffix: tip
+      root_state_path: '/var/cache'
+      zebra_state_dir: 'zebrad-cache'
+
   # Test full sync of lightwalletd with a Zebra tip state
   lightwalletd-full-sync:
     needs: build
-    uses: ./.github/workflows/gcp-test-deploy.yml
+    uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       app_name: lightwalletd

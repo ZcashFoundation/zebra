@@ -2148,9 +2148,9 @@ dependencies = [
 
 [[package]]
 name = "inferno"
-version = "0.11.2"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89efa0d58cc7d17076d8fcaa4ea2b408a799eaed1682e1d60b8a9e03a061be82"
+checksum = "16d4bde3a7105e59c66a4104cfe9606453af1c7a0eac78cb7d5bc263eb762a70"
 dependencies = [
  "ahash",
  "atty",
@@ -3347,9 +3347,9 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.10.2"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c9e8715f12cd0fed93db938fdca5d5c65694fd662c30ee75a09ab156f445f51"
+checksum = "bc03e116981ff7d8da8e5c220e374587b98d294af7ba7dd7fda761158f00086f"
 dependencies = [
  "bytes",
  "prost-derive",
@@ -4638,9 +4638,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.18.1"
+version = "1.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce653fb475565de9f6fb0614b28bca8df2c430c0cf84bcd9c843f15de5414cc"
+checksum = "4903bf0427cf68dddd5aa6a93220756f8be0c34fcfa9f5e6191e103e15a31395"
 dependencies = [
  "bytes",
  "libc",
@@ -5217,7 +5217,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.23"
+version = "0.2.24"
 dependencies = [
  "color-eyre 0.6.1",
  "ed25519-zebra",
@@ -5237,7 +5237,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.19"
+version = "0.2.20"
 dependencies = [
  "futures-core",
  "pin-project 0.4.29",
@@ -6047,7 +6047,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 dependencies = [
  "aes",
  "bech32",
@@ -6107,7 +6107,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 dependencies = [
  "bellman",
  "blake2b_simd 1.0.0",
@@ -6149,7 +6149,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 dependencies = [
  "arti-client",
  "bitflags",
@@ -6184,14 +6184,14 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 dependencies = [
  "zebra-chain",
 ]
 
 [[package]]
 name = "zebra-rpc"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 dependencies = [
  "chrono",
  "futures",
@@ -6219,7 +6219,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 dependencies = [
  "displaydoc",
  "hex",
@@ -6232,7 +6232,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 dependencies = [
  "bincode",
  "chrono",
@@ -6267,7 +6267,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 dependencies = [
  "color-eyre 0.5.11",
  "futures",
@@ -6292,7 +6292,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 dependencies = [
  "color-eyre 0.6.1",
  "hex",
@@ -6307,7 +6307,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 dependencies = [
  "abscissa_core",
  "atty",
