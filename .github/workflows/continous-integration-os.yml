@@ -110,6 +110,10 @@ jobs:
 
       # Modified from:
       # https://github.com/zcash/librustzcash/blob/c48bb4def2e122289843ddb3cb2984c325c03ca0/.github/workflows/ci.yml#L20-L33
+      #
+      # TODO: split get-params-path and download-params examples into their own crate,
+      #       to speed up compilation
+      #       compile examples in release mode, to speed up downloads
       - name: Fetch path to Zcash parameters
         working-directory: ./zebra-consensus
         shell: bash
