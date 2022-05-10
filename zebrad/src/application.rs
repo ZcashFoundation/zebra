@@ -1,6 +1,6 @@
 //! Zebrad Abscissa Application
 
-use std::{io::Write, process};
+use std::{fmt::Write as _, io::Write as _, process};
 
 use abscissa_core::{
     application::{self, fatal_error, AppCell},
@@ -263,7 +263,8 @@ impl Application for ZebradApp {
         let mut metadata_section = "Metadata:".to_string();
         for (k, v) in panic_metadata {
             builder = builder.add_issue_metadata(k, v.clone());
-            metadata_section.push_str(&format!("\n{}: {}", k, &v));
+            write!(&mut metadata_section, "\n{}: {}", k, &v)
+                .expect("unexpected failure writing to string");
         }
 
         builder = builder

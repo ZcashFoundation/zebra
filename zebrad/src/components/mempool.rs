@@ -371,7 +371,7 @@ impl Service<Request> for Mempool {
 
             // Send transactions that were not rejected nor expired to peers
             if !send_to_peers_ids.is_empty() {
-                let _ = self.transaction_sender.send(send_to_peers_ids)?;
+                self.transaction_sender.send(send_to_peers_ids)?;
             }
         }
 
