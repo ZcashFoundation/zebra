@@ -38,7 +38,7 @@ impl Ed25519Verifier {
 
 pub type Ed25519Item = batch::Item;
 
-impl<'msg> Service<BatchControl<Ed25519Item>> for Ed25519Verifier {
+impl Service<BatchControl<Ed25519Item>> for Ed25519Verifier {
     type Response = ();
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'static>>;
