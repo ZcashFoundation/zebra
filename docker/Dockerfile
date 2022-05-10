@@ -1,18 +1,28 @@
-# This steps implement cargo-chef for docker layer caching
-# We are using four stages:
+# We are using five stages:
 # - chef: installs cargo-chef
 # - planner: computes the recipe file
-# - builder: caches our dependencies and builds the binary
-# - tester: builds and run tests
+# - deps: caches our dependencies and sets the needed variables
+# - tests: builds tests
+# - release: builds release binary
 # - runtime: is our runtime environment
+#
+# This stage implements cargo-chef for docker layer caching
 FROM rust:bullseye as chef
 RUN cargo install cargo-chef --locked
 WORKDIR /app
 
+# Analyze the current project to determine the minimum subset of files 
+# (Cargo.lock and Cargo.toml manifests) required to build it and cache dependencies
+#
+# The recipe.json is the equivalent of the Python requirements.txt file
 FROM chef AS planner
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
+# In this stage we download all system requirements to build the project
+#
+# It also captures all the build arguments to be used as environment variables.
+# We set defaults for the arguments, in case the build does not include this information.
 FROM chef AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 COPY --from=planner /app/recipe.json recipe.json
@@ -29,7 +39,9 @@ RUN apt-get -qq update && \
     ; \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
-# Install google OS Config agent
+# Install google OS Config agent to be able to get information from the VMs being deployed
+# into GCP for integration testing purposes, and as Mainnet nodes
+# TODO: this shouldn't be a harcoded requirement for everyone
 RUN if [ "$(uname -m)" != "aarch64" ]; then \
       apt-get -qq update && \
       apt-get -qq install -y --no-install-recommends \
@@ -44,6 +56,10 @@ RUN if [ "$(uname -m)" != "aarch64" ]; then \
     && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
+# Build arguments and variables set to change how tests are run, tracelog levels,
+# and Network to be used (Mainnet or Testnet)
+#
+# We set defaults to all variables.
 ARG RUST_BACKTRACE
 ENV RUST_BACKTRACE ${RUST_BACKTRACE:-0}
 
@@ -69,12 +85,19 @@ ENV NETWORK ${NETWORK:-Mainnet}
 
 ENV CARGO_HOME /app/.cargo/
 
-FROM deps AS tester
-# Pre-download Zcash Sprout and Sapling parameters
+# In this stage we build tests (without running then)
+#
+# We also download needed dependencies for tests to work, from other images.
+# An entrypoint.sh is only available in this step for easier test handling with variables.
+FROM deps AS tests
 # TODO: do not hardcode the user /root/ even though is a safe assumption
+# Pre-download Zcash Sprout, Sapling parameters and Lightwalletd binary
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /lightwalletd /usr/local/bin
-# Build dependencies - this is the caching Docker layer!
+
+# Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
+# and build it to cache dependencies.
+# This is the caching Docker layer for Rust!
 RUN cargo chef cook --release --workspace --recipe-path recipe.json
 
 COPY . .
@@ -83,34 +106,38 @@ RUN cargo test --locked --release --workspace --no-run
 COPY ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
 
-ARG CHECKPOINT_SYNC=true
-ARG NETWORK=Mainnet
-ARG TEST_FULL_SYNC
-ENV TEST_FULL_SYNC ${TEST_FULL_SYNC:-0}
-
-ARG RUN_ALL_TESTS
-ENV RUN_ALL_TESTS ${RUN_ALL_TESTS:-0}
-
 ENTRYPOINT ["/entrypoint.sh"]
 CMD [ "cargo"]
 
-FROM deps AS builder
-# Build dependencies - this is the caching Docker layer!
+# In this stage we build a release (generate the zebrad binary)
+#
+# This step also adds `cargo chef` as this stage is completely independent from the 
+# `test` stage. This step is a dependency for the `runtime` stage, which uses the resulting
+# zebrad binary from this step.
+FROM deps AS release
 RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
 
 COPY . .
 # Build zebra
 RUN cargo build --locked --release --features enable-sentry --bin zebrad
 
-# Runner image
+# This stage is only used when deploying nodes or when only the resulting zebrad binary is needed
+#
+# To save space, this step starts from scratch using debian, and only adds the resulting
+# binary from the `release` stage, and the Zcash Sprout & Sapling parameters from ZCash
 FROM debian:bullseye-slim AS runtime
-COPY --from=builder /app/target/release/zebrad /usr/local/bin
+COPY --from=release /app/target/release/zebrad /usr/local/bin
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates
 
+ARG CHECKPOINT_SYNC=true
+ARG NETWORK=Mainnet
+
+# Build the `zebrad.toml` before starting the container, using the arguments from build
+# time, or using the default values set just above.
 RUN set -ex; \
   { \
     echo "[consensus]"; \
