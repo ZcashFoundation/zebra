@@ -36,4 +36,6 @@ pub mod commands;
 pub mod components;
 pub mod config;
 pub mod prelude;
+
+#[cfg(feature = "enable-sentry")]
 pub mod sentry;
