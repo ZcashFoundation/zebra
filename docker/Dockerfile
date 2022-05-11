@@ -96,12 +96,13 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-para
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /lightwalletd /usr/local/bin
 
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
-# and build it to cache dependencies.
+# and build it to cache all possible sentry and test dependencies.
+#
 # This is the caching Docker layer for Rust!
-RUN cargo chef cook --release --workspace --recipe-path recipe.json
+RUN cargo chef cook --release --features enable-sentry,lightwalletd-grpc-tests --workspace --recipe-path recipe.json
 
 COPY . .
-RUN cargo test --locked --release --workspace --no-run
+RUN cargo test --locked --release --features lightwalletd-grpc-tests --workspace --no-run
 
 COPY ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
@@ -111,7 +112,7 @@ CMD [ "cargo"]
 
 # In this stage we build a release (generate the zebrad binary)
 #
-# This step also adds `cargo chef` as this stage is completely independent from the 
+# This step also adds `cargo chef` as this stage is completely independent from the
 # `test` stage. This step is a dependency for the `runtime` stage, which uses the resulting
 # zebrad binary from this step.
 FROM deps AS release
