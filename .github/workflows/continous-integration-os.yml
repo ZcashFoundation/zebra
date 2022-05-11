@@ -240,8 +240,10 @@ jobs:
           command: install
           args: --locked --path ./zebrad/ zebrad
 
-  build:
-    name: Build stable on ubuntu-latest
+  # Check that Cargo.lock includes any Cargo.toml changes.
+  # This check makes sure the `cargo-deny` crate dependency checks are accurate.
+  check-cargo-lock:
+    name: Check Cargo.lock is up to date
     timeout-minutes: 60
     runs-on: ubuntu-latest
 
@@ -257,8 +259,7 @@ jobs:
           override: true
 
       - uses: Swatinem/rust-cache@v1
-
-      # This check makes sure the crate dependency check is accurate
+      
       - name: Check Cargo.lock is up to date
         uses: actions-rs/cargo@v1.0.3
         with:
