@@ -88,7 +88,7 @@ jobs:
     uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
-      dockerfile_target: tester
+      dockerfile_target: tests
       image_name: zebrad-test
       # TODO: validate how to use variable/conditional values for Testnet
       network: Mainnet
@@ -115,7 +115,7 @@ jobs:
       - name: Run all zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --workspace -- --include-ignored
+          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --workspace -- --include-ignored
 
   # This test changes zebra-chain's activation heights,
   # which can recompile all the Zebra crates,
@@ -155,7 +155,7 @@ jobs:
       - name: Run zebrad large sync tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance sync_large_checkpoints_ -- --ignored
+          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --test acceptance sync_large_checkpoints_ -- --ignored
 
   # Test launching lightwalletd with an empty lightwalletd and Zebra state
   test-lightwalletd-integration:
@@ -172,7 +172,7 @@ jobs:
       - name: Run tests with empty lightwalletd launch
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features enable-sentry --test acceptance -- lightwalletd_integration --nocapture
+          docker run -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --test acceptance -- lightwalletd_integration --nocapture
         env:
           ZEBRA_TEST_LIGHTWALLETD: '1'
 
@@ -197,7 +197,7 @@ jobs:
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached mandatory checkpoint disk
   test-stateful-sync:
     needs: build
-    uses: ./.github/workflows/gcp-test-deploy.yml
+    uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       test_id: sync-past-checkpoint
@@ -231,7 +231,7 @@ jobs:
   # Test that Zebra can answer a synthetic RPC call, using a cached Zebra tip state
   lightwalletd-rpc-test:
     needs: build
-    uses: ./.github/workflows/gcp-test-deploy.yml
+    uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       app_name: lightwalletd
@@ -248,7 +248,7 @@ jobs:
   # TODO: use a cached lightwalletd tip state to speed up the test (#4303)
   lightwalletd-transactions-test:
     needs: build
-    uses: ./.github/workflows/gcp-test-deploy.yml
+    uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       app_name: lightwalletd

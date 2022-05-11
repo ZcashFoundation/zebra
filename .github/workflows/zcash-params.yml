@@ -20,7 +20,7 @@ jobs:
     uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/zcash-params/Dockerfile
-      dockerfile_target: builder
+      dockerfile_target: release
       image_name: zcash-params
       rust_backtrace: full
       rust_lib_backtrace: full
