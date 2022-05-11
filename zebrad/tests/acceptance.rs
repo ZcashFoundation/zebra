@@ -1525,6 +1525,7 @@ async fn fully_synced_rpc_test() -> Result<()> {
 /// Test sending transactions using a lightwalletd instance connected to a zebrad instance.
 ///
 /// See [`common::lightwalletd::send_transaction_test`] for more information.
+#[cfg(feature = "lightwalletd-grpc-tests")]
 #[tokio::test]
 #[ignore]
 async fn sending_transactions_using_lightwalletd() -> Result<()> {
@@ -1534,7 +1535,9 @@ async fn sending_transactions_using_lightwalletd() -> Result<()> {
 /// Test all the rpc methods a wallet connected to lightwalletd can call.
 ///
 /// See [`common::lightwalletd::wallet_grpc_test`] for more information.
+#[cfg(feature = "lightwalletd-grpc-tests")]
 #[tokio::test]
+#[ignore]
 async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
     common::lightwalletd::wallet_grpc_test::run().await
 }
