@@ -3,7 +3,6 @@ name: zcash-lightwalletd
 on:
   workflow_dispatch:
   
-  # We always want to rebuild the image 
   push:
     branches:
       - 'main'
