@@ -21,3 +21,22 @@ We usually run `zebrad` on systems with:
 
 `zebrad` might build and run fine on smaller and slower systems - we haven't
 tested its exact limits yet.
+
+# Additional Features
+
+## Sentry Production Monitoring
+
+Compile Zebra with `--features enable-sentry` to monitor it using Sentry in production.
+
+## Lightwalletd Test Requirements
+
+To test Zebra's `lightwalletd` RPC methods:
+- compile Zebra with the `--features lightwalletd-grpc-tests`
+- install a `lightwalletd` binary
+  - Zebra's tests currently target [adityapk00/lightwalletd](https://github.com/adityapk00/lightwalletd)
+  - some tests might fail on other lightwalletd versions, due to differences in the logs
+- install the `protoc` Protobuf compiler:
+  - the `protobuf-compiler` or `protobuf` package, or
+  - `cmake` to automatically compile `protoc` in the `zebrad` build script
+- set the required test environmental variables:
+  - TODO: list or link to test environmental variables - [see ticket #4363](https://github.com/ZcashFoundation/zebra/issues/4363)

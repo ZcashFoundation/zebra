@@ -101,6 +101,8 @@ jobs:
 
   # Run all the zebra tests, including tests that are ignored by default.
   # Skips tests that need a cached state disk or a lightwalletd binary.
+  #
+  # (We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.)
   test-all:
     name: Test all
     runs-on: ubuntu-latest
@@ -115,13 +117,17 @@ jobs:
       - name: Run all zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --workspace -- --include-ignored
+          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --workspace -- --include-ignored
 
+  # Run state tests with fake activation heights.
+  #
   # This test changes zebra-chain's activation heights,
   # which can recompile all the Zebra crates,
   # so we want its build products to be cached separately.
   #
   # Also, we don't want to accidentally use the fake heights in other tests.
+  #
+  # (The gRPC feature is a zebrad feature, so it isn't needed here.)
   test-fake-activation-heights:
     name: Test with fake activation heights
     runs-on: ubuntu-latest
@@ -140,7 +146,9 @@ jobs:
         env:
           TEST_FAKE_ACTIVATION_HEIGHTS: '1'
 
-  # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state
+  # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
+  #
+  # (We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.)
   test-empty-sync:
     name: Test checkpoint sync from empty state
     runs-on: ubuntu-latest
@@ -155,9 +163,11 @@ jobs:
       - name: Run zebrad large sync tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --test acceptance sync_large_checkpoints_ -- --ignored
+          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --test acceptance sync_large_checkpoints_ -- --ignored
 
-  # Test launching lightwalletd with an empty lightwalletd and Zebra state
+  # Test launching lightwalletd with an empty lightwalletd and Zebra state.
+  #
+  # (We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.)
   test-lightwalletd-integration:
     name: Test integration with lightwalletd
     runs-on: ubuntu-latest
@@ -172,7 +182,7 @@ jobs:
       - name: Run tests with empty lightwalletd launch
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --test acceptance -- lightwalletd_integration --nocapture
+          docker run -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --test acceptance -- lightwalletd_integration --nocapture
         env:
           ZEBRA_TEST_LIGHTWALLETD: '1'
 
