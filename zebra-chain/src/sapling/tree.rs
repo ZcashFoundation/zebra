@@ -472,29 +472,43 @@ impl From<&NoteCommitmentTree> for SerializedTree {
                 Leaf::Right(left_value, right_value) => (Some(left_value), Some(right_value)),
             };
 
+            // Ommers are siblings of parent nodes along the branch from the
+            // most recent leaf to the root of the tree.
             let mut ommers_iter = frontier.ommers().iter();
+
+            // Set bits in the binary representation of the position indicate
+            // the presence of ommers along the branch from the most recent leaf
+            // node to the root of the tree, except for the lowest bit.
             let mut position: usize = frontier.position().into();
-            let mut parents = vec![];
 
-           // Run through the bits of `position` and push a "ommer" for each bit `1` (or `None` otherwise), 
-           // skipping the lower bit (which indicates the leaf).
-           // In contrast to the zcashd code linked above, we want to skip any trailing `None` parents 
-           // at the top of the tree. To do that, we clear the bits as we go through them and
-           // break early if the remaining bits are all zero (i.e. `position` is zero).
-
-            // Clear the lower bit of the position since we'll skip it
+            // The lowest bit does not indicate the presence of any ommers. We
+            // clear it so that we can test if there are no set bits left in
+            // [`position`].
             position &= !1;
 
+            // Run through the bits of [`position`], and push an ommer for each
+            // set bit, or `None` otherwise. In contrast to the 'zcashd' code
+            // linked above, we want to skip any trailing `None` parents at the
+            // top of the tree. To do that, we clear the bits as we go through
+            // them, and break early if the remaining bits are all zero (i.e.
+            // [`position`] is zero).
+            let mut parents = vec![];
             for i in 1..MERKLE_DEPTH {
+                // Test each bit in [`position`] individually. Don't test the
+                // lowest bit since it doesn't actually indicate the position of
+                // any ommer.
                 let bit_mask = 1 << i;
 
                 if position & bit_mask == 0 {
                     parents.push(None);
                 } else {
                     parents.push(ommers_iter.next());
-                    // Clear the bit we just read
+                    // Clear the set bit so that we can test if there are no set
+                    // bits left.
                     position &= !bit_mask;
-                    // The rest of the bits are all zero; exit early
+                    // If there are no set bits left, exit early so that there
+                    // are no empty trailing parent nodes in the serialized
+                    // tree.
                     if position == 0 {
                         break;
                     }
