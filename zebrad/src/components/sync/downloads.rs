@@ -62,35 +62,69 @@ impl<Request: Clone> hedge::Policy<Request> for AlwaysHedge {
 #[derive(Error, Debug)]
 #[allow(dead_code)]
 pub enum BlockDownloadVerifyError {
-    #[error("error from the network service")]
-    NetworkError(#[source] BoxError),
+    #[error("permanent readiness error from the network service: {error:?}")]
+    NetworkServiceError {
+        #[source]
+        error: BoxError,
+    },
 
-    #[error("error from the verifier service")]
-    VerifierError(#[source] BoxError),
+    #[error("permanent readiness error from the verifier service: {error:?}")]
+    VerifierServiceError {
+        #[source]
+        error: BoxError,
+    },
 
     #[error("duplicate block hash queued for download: {hash:?}")]
     DuplicateBlockQueuedForDownload { hash: block::Hash },
 
-    #[error("error downloading block")]
-    DownloadFailed(#[source] BoxError),
+    #[error("error downloading block: {error:?} {hash:?}")]
+    DownloadFailed {
+        #[source]
+        error: BoxError,
+        hash: block::Hash,
+    },
 
-    #[error("downloaded block was too far ahead of the chain tip")]
-    AboveLookaheadHeightLimit,
+    #[error("downloaded block was too far ahead of the chain tip: {height:?} {hash:?}")]
+    AboveLookaheadHeightLimit {
+        height: block::Height,
+        hash: block::Hash,
+    },
 
-    #[error("downloaded block was too far behind the chain tip")]
-    BehindTipHeightLimit,
+    #[error("downloaded block was too far behind the chain tip: {height:?} {hash:?}")]
+    BehindTipHeightLimit {
+        height: block::Height,
+        hash: block::Hash,
+    },
 
-    #[error("downloaded block had an invalid height")]
-    InvalidHeight,
+    #[error("downloaded block had an invalid height: {hash:?}")]
+    InvalidHeight { hash: block::Hash },
 
-    #[error("block did not pass consensus validation")]
-    Invalid(#[from] zebra_consensus::chain::VerifyChainError),
+    #[error("block failed consensus validation: {error:?} {height:?} {hash:?}")]
+    Invalid {
+        #[source]
+        error: zebra_consensus::chain::VerifyChainError,
+        height: block::Height,
+        hash: block::Hash,
+    },
 
-    #[error("block download / verification was cancelled during download")]
-    CancelledDuringDownload,
+    #[error("block validation request failed: {error:?} {height:?} {hash:?}")]
+    ValidationRequestError {
+        #[source]
+        error: BoxError,
+        height: block::Height,
+        hash: block::Hash,
+    },
 
-    #[error("block download / verification was cancelled during verification")]
-    CancelledDuringVerification,
+    #[error("block download & verification was cancelled during download: {hash:?}")]
+    CancelledDuringDownload { hash: block::Hash },
+
+    #[error(
+        "block download & verification was cancelled during verification: {height:?} {hash:?}"
+    )]
+    CancelledDuringVerification {
+        height: block::Height,
+        hash: block::Hash,
+    },
 }
 
 /// Represents a [`Stream`] of download and verification tasks during chain sync.
@@ -236,7 +270,7 @@ where
             .network
             .ready()
             .await
-            .map_err(BlockDownloadVerifyError::NetworkError)?
+            .map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?
             .call(zn::Request::BlocksByHash(std::iter::once(hash).collect()));
 
         // This oneshot is used to signal cancellation to the download task.
@@ -254,9 +288,9 @@ where
                     _ = &mut cancel_rx => {
                         trace!("task cancelled prior to download completion");
                         metrics::counter!("sync.cancelled.download.count", 1);
-                        return Err(BlockDownloadVerifyError::CancelledDuringDownload)
+                        return Err(BlockDownloadVerifyError::CancelledDuringDownload { hash })
                     }
-                    rsp = block_req => rsp.map_err(BlockDownloadVerifyError::DownloadFailed)?,
+                    rsp = block_req => rsp.map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
                 };
 
                 let block = if let zn::Response::Blocks(blocks) = rsp {
@@ -310,43 +344,8 @@ where
                     })
                     .unwrap_or(block::Height(0));
 
-                if let Some(block_height) = block.coinbase_height() {
-                    if block_height > max_lookahead_height {
-                        info!(
-                            ?hash,
-                            ?block_height,
-                            ?tip_height,
-                            ?max_lookahead_height,
-                            lookahead_limit = ?lookahead_limit,
-                            "synced block height too far ahead of the tip: dropped downloaded block. \
-                            Hint: Try increasing the value of the lookahead_limit field \
-                            in the sync section of the configuration file."
-                        );
-                        metrics::counter!("sync.max.height.limit.dropped.block.count", 1);
-
-                        // This error should be very rare during normal operation.
-                        //
-                        // We need to reset the syncer on this error,
-                        // to allow the verifier and state to catch up,
-                        // or prevent it following a bad chain.
-                        //
-                        // If we don't reset the syncer on this error,
-                        // it will continue downloading blocks from a bad chain,
-                        // (or blocks far ahead of the current state tip).
-                        Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit)?;
-                    } else if block_height < min_accepted_height {
-                        debug!(
-                            ?hash,
-                            ?block_height,
-                            ?tip_height,
-                            ?min_accepted_height,
-                            behind_tip_limit = ?zs::MAX_BLOCK_REORG_HEIGHT,
-                            "synced block height behind the finalized tip: dropped downloaded block"
-                        );
-                        metrics::counter!("gossip.min.height.limit.dropped.block.count", 1);
-
-                        Err(BlockDownloadVerifyError::BehindTipHeightLimit)?;
-                    }
+                let block_height = if let Some(block_height) = block.coinbase_height() {
+                    block_height
                 } else {
                     debug!(
                         ?hash,
@@ -354,13 +353,50 @@ where
                     );
                     metrics::counter!("sync.no.height.dropped.block.count", 1);
 
-                    Err(BlockDownloadVerifyError::InvalidHeight)?;
+                    return Err(BlockDownloadVerifyError::InvalidHeight { hash });
+                };
+
+                if block_height > max_lookahead_height {
+                    info!(
+                        ?hash,
+                        ?block_height,
+                        ?tip_height,
+                        ?max_lookahead_height,
+                        lookahead_limit = ?lookahead_limit,
+                        "synced block height too far ahead of the tip: dropped downloaded block. \
+                         Hint: Try increasing the value of the lookahead_limit field \
+                         in the sync section of the configuration file."
+                    );
+                    metrics::counter!("sync.max.height.limit.dropped.block.count", 1);
+
+                    // This error should be very rare during normal operation.
+                    //
+                    // We need to reset the syncer on this error,
+                    // to allow the verifier and state to catch up,
+                    // or prevent it following a bad chain.
+                    //
+                    // If we don't reset the syncer on this error,
+                    // it will continue downloading blocks from a bad chain,
+                    // (or blocks far ahead of the current state tip).
+                    Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit { height: block_height, hash })?;
+                } else if block_height < min_accepted_height {
+                    debug!(
+                        ?hash,
+                        ?block_height,
+                        ?tip_height,
+                        ?min_accepted_height,
+                        behind_tip_limit = ?zs::MAX_BLOCK_REORG_HEIGHT,
+                        "synced block height behind the finalized tip: dropped downloaded block"
+                    );
+                    metrics::counter!("gossip.min.height.limit.dropped.block.count", 1);
+
+                    Err(BlockDownloadVerifyError::BehindTipHeightLimit { height: block_height, hash })?;
                 }
 
                 let rsp = verifier
                     .ready()
                     .await
-                    .map_err(BlockDownloadVerifyError::VerifierError)?
+                    .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?
                     .call(block);
                 // Prefer the cancel handle if both are ready.
                 let verification = tokio::select! {
@@ -368,7 +404,7 @@ where
                     _ = &mut cancel_rx => {
                         trace!("task cancelled prior to verification");
                         metrics::counter!("sync.cancelled.verify.count", 1);
-                        return Err(BlockDownloadVerifyError::CancelledDuringVerification)
+                        return Err(BlockDownloadVerifyError::CancelledDuringVerification { height: block_height, hash })
                     }
                     verification = rsp => verification,
                 };
@@ -378,8 +414,8 @@ where
 
                 verification.map_err(|err| {
                     match err.downcast::<zebra_consensus::chain::VerifyChainError>() {
-                        Ok(e) => BlockDownloadVerifyError::Invalid(*e),
-                        Err(e) => BlockDownloadVerifyError::VerifierError(e),
+                        Ok(error) => BlockDownloadVerifyError::Invalid { error: *error, height: block_height, hash },
+                        Err(error) => BlockDownloadVerifyError::ValidationRequestError { error, height: block_height, hash },
                     }
                 })
             }
