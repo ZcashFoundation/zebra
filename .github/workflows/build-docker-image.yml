@@ -85,6 +85,10 @@ jobs:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
+          # Some builds might take over an hour, and Google's default lifetime duration for
+          # an access token is 1 hour (3600s). We increase this to 3 hours (10800s)
+          # as some builds take over an hour.
+          access_token_lifetime: 10800s
 
       - name: Login to Google Artifact Registry
         uses: docker/login-action@v2.0.0
