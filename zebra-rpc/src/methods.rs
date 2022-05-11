@@ -28,7 +28,7 @@ use zebra_chain::{
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
-use zebra_state::OutputIndex;
+use zebra_state::{OutputIndex, OutputLocation, TransactionLocation};
 
 use crate::queue::Queue;
 
@@ -699,7 +699,24 @@ where
 
             let hashes = match response {
                 zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
-                    hashes.values().map(|tx_id| tx_id.to_string()).collect()
+                    let mut last_tx_location = TransactionLocation::from_usize(Height(0), 0);
+
+                    hashes
+                        .iter()
+                        .map(|(tx_loc, tx_id)| {
+                            // TODO: downgrade to debug, because there's nothing the user can do
+                            assert!(
+                                *tx_loc > last_tx_location,
+                                "Transactions were not in chain order:\n\
+                                 {tx_loc:?} {tx_id:?} was after:\n\
+                                 {last_tx_location:?}",
+                            );
+
+                            last_tx_location = *tx_loc;
+
+                            tx_id.to_string()
+                        })
+                        .collect()
                 }
                 _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
             };
@@ -735,6 +752,8 @@ where
                 _ => unreachable!("unmatched response to a UtxosByAddresses request"),
             };
 
+            let mut last_output_location = OutputLocation::from_usize(Height(0), 0, 0);
+
             for utxo_data in utxos.utxos() {
                 let address = utxo_data.0;
                 let txid = *utxo_data.1;
@@ -742,6 +761,15 @@ where
                 let output_index = utxo_data.2.output_index();
                 let script = utxo_data.3.lock_script.clone();
                 let satoshis = u64::from(utxo_data.3.value);
+
+                let output_location = *utxo_data.2;
+                // TODO: downgrade to debug, because there's nothing the user can do
+                assert!(
+                    output_location > last_output_location,
+                    "UTXOs were not in chain order:\n\
+                     {output_location:?} {address:?} {txid:?} was after:\n\
+                     {last_output_location:?}",
+                );
 
                 let entry = GetAddressUtxos {
                     address,
@@ -752,6 +780,8 @@ where
                     height,
                 };
                 response_utxos.push(entry);
+
+                last_output_location = output_location;
             }
 
             Ok(response_utxos)
