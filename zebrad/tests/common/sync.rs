@@ -60,6 +60,7 @@ pub const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
 /// The partially synchronized state is expected to be close to the tip, so this timeout can be
 /// lower than what's expected for a full synchronization. However, a value that's too short may
 /// cause the test to fail.
+#[allow(dead_code)]
 pub const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// The test sync height where we switch to using the default lookahead limit.
@@ -84,6 +85,7 @@ pub enum MempoolBehavior {
     ///
     /// [`sync_until`] will kill `zebrad` after it logs mempool activation,
     /// then the `stop_regex`.
+    #[allow(dead_code)]
     ShouldAutomaticallyActivate,
 
     /// The mempool should not become active during the test.
@@ -281,6 +283,7 @@ pub fn sync_until(
 ///
 /// The zebrad instance is executed on a copy of the partially synchronized chain state. This copy
 /// is returned afterwards, containing the fully synchronized chain state.
+#[allow(dead_code)]
 pub async fn perform_full_sync_starting_from(
     network: Network,
     partial_sync_path: &Path,
