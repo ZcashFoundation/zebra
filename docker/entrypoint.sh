@@ -1,6 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
+# show the commands we are executing
 set -x
+# exit if a command fails
+set -e
+# exit if any command in a pipeline fails
+set -o pipefail
 
 case "$1" in
     -- | cargo)
