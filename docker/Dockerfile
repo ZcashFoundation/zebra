@@ -108,6 +108,7 @@ RUN cargo test --locked --release --features lightwalletd-grpc-tests --workspace
 COPY ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
 
+# By default, runs the entrypoint tests specified by the environmental variables (if any are set)
 ENTRYPOINT ["/entrypoint.sh"]
 CMD [ "cargo"]
 
