@@ -476,11 +476,11 @@ impl From<&NoteCommitmentTree> for SerializedTree {
             let mut position: usize = frontier.position().into();
             let mut parents = vec![];
 
-           // Run through the bits of `position` and push a "ommer" for each bit `1` (or `None` otherwise), 
-           // skipping the lower bit (which indicates the leaf).
-           // In contrast to the zcashd code linked above, we want to skip any trailing `None` parents 
-           // at the top of the tree. To do that, we clear the bits as we go through them and
-           // break early if the remaining bits are all zero (i.e. `position` is zero).
+            // Run through the bits of `position` and push a "ommer" for each bit `1` (or `None` otherwise), 
+            // skipping the lower bit (which indicates the leaf).
+            // In contrast to the zcashd code linked above, we want to skip any trailing `None` parents 
+            // at the top of the tree. To do that, we clear the bits as we go through them and
+            // break early if the remaining bits are all zero (i.e. `position` is zero).
 
             // Clear the lower bit of the position since we'll skip it
             position &= !1;
