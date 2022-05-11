@@ -1,3 +1,5 @@
+//! The Abscissa component for Zebra's `tracing` implementation.
+
 use abscissa_core::{Component, FrameworkError, FrameworkErrorKind, Shutdown};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
@@ -48,10 +50,11 @@ impl Tracing {
             None
         };
 
-        let subscriber = builder
-            .finish()
-            .with(ErrorLayer::default())
-            .with(sentry_tracing::layer());
+        let subscriber = builder.finish().with(ErrorLayer::default());
+
+        #[cfg(feature = "enable-sentry")]
+        let subscriber = subscriber.with(sentry_tracing::layer());
+
         match (flamelayer, journaldlayer) {
             (None, None) => subscriber.init(),
             (Some(layer1), None) => subscriber.with(layer1).init(),
