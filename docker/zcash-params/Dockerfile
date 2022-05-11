@@ -23,7 +23,7 @@ RUN apt-get -qq update && \
 
 ENV CARGO_HOME /app/.cargo/
 # Build dependencies - this is the caching Docker layer!
-RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
+RUN cargo chef cook --release --features enable-sentry --package zebrad --recipe-path recipe.json
 
 ARG RUST_BACKTRACE=0
 ENV RUST_BACKTRACE ${RUST_BACKTRACE}
@@ -36,4 +36,4 @@ ENV COLORBT_SHOW_HIDDEN ${COLORBT_SHOW_HIDDEN}
 
 COPY . .
 # Pre-download Zcash Sprout and Sapling parameters
-RUN cargo run --locked --release --features enable-sentry --bin zebrad download
+RUN cargo run --locked --release --features enable-sentry --package zebrad --bin zebrad download
