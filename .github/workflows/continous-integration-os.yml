@@ -133,7 +133,7 @@ jobs:
         uses: actions-rs/cargo@v1.0.3
         with:
           command: test
-          args: --verbose --all
+          args: --verbose --workspace -- --nocapture
 
       # Explicitly run any tests that are usually #[ignored]
 
@@ -144,7 +144,7 @@ jobs:
         with:
           command: test
           # Note: this only runs the zebrad acceptance tests, because re-running all the test binaries is slow on Windows
-          args: --verbose --package zebrad --test acceptance sync_large_checkpoints_ -- --ignored
+          args: --verbose --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
 
   test-fake-activation-heights:
     name: Test ${{ matrix.rust }} zebra-state with fake activation heights on ubuntu-latest
@@ -185,7 +185,7 @@ jobs:
           command: test
           # Note: this only runs the zebra-state crate tests,
           # because re-running all the test binaries can be slow
-          args: --verbose --package zebra-state --lib -- with_fake_activation_heights
+          args: --verbose --package zebra-state --lib -- --nocapture --include-ignored with_fake_activation_heights
 
   build-chain-no-features:
     name: Build ${{ matrix.rust }} zebra-chain w/o features on ubuntu-latest
@@ -217,6 +217,7 @@ jobs:
         working-directory: ./zebra-chain
         run: cargo build --verbose --no-default-features
 
+  # Install Zebra with lockfile dependencies, with no caching and default features
   install-from-lockfile-no-cache:
     name: Install zebrad from lockfile without cache on ubuntu-latest
     timeout-minutes: 60

@@ -117,7 +117,7 @@ jobs:
       - name: Run all zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --workspace -- --include-ignored
+          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --workspace -- --nocapture --include-ignored
 
   # Run state tests with fake activation heights.
   #
@@ -142,7 +142,7 @@ jobs:
       - name: Run tests with fake activation heights
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib -- with_fake_activation_heights
+          docker run -e TEST_FAKE_ACTIVATION_HEIGHTS --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --package zebra-state --lib -- --nocapture --include-ignored with_fake_activation_heights
         env:
           TEST_FAKE_ACTIVATION_HEIGHTS: '1'
 
@@ -163,7 +163,7 @@ jobs:
       - name: Run zebrad large sync tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --test acceptance sync_large_checkpoints_ -- --ignored
+          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
 
   # Test launching lightwalletd with an empty lightwalletd and Zebra state.
   #
@@ -182,7 +182,7 @@ jobs:
       - name: Run tests with empty lightwalletd launch
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --test acceptance -- lightwalletd_integration --nocapture
+          docker run -e ZEBRA_TEST_LIGHTWALLETD --name lightwalletd-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_integration
         env:
           ZEBRA_TEST_LIGHTWALLETD: '1'
 
