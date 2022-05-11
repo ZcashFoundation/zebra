@@ -940,15 +940,6 @@ impl Service<ReadRequest> for ReadStateService {
     #[instrument(name = "read_state", skip(self))]
     fn call(&mut self, req: ReadRequest) -> Self::Future {
         match req {
-            // TODO: implement these new ReadRequests for lightwalletd, as part of these tickets
-
-            // z_get_tree_state (#3156)
-
-            // depends on transparent address indexes (#3150)
-            // get_address_tx_ids (#3147)
-            // get_address_balance (#3157)
-            // get_address_utxos (#3158)
-
             // Used by get_block RPC.
             ReadRequest::Block(hash_or_height) => {
                 metrics::counter!(
@@ -988,6 +979,46 @@ impl Service<ReadRequest> for ReadStateService {
                         });
 
                     Ok(ReadResponse::Transaction(transaction_and_height))
+                }
+                .boxed()
+            }
+
+            ReadRequest::SaplingTree(hash_or_height) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "sapling_tree",
+                );
+
+                let state = self.clone();
+
+                async move {
+                    let sapling_tree = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::sapling_tree(best_chain, &state.db, hash_or_height)
+                    });
+
+                    Ok(ReadResponse::SaplingTree(sapling_tree))
+                }
+                .boxed()
+            }
+
+            ReadRequest::OrchardTree(hash_or_height) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "orchard_tree",
+                );
+
+                let state = self.clone();
+
+                async move {
+                    let orchard_tree = state.best_chain_receiver.with_watch_data(|best_chain| {
+                        read::orchard_tree(best_chain, &state.db, hash_or_height)
+                    });
+
+                    Ok(ReadResponse::OrchardTree(orchard_tree))
                 }
                 .boxed()
             }

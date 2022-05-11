@@ -9,6 +9,7 @@ use std::{
 use zebra_chain::{
     amount::NegativeAllowed,
     block::{self, Block},
+    serialization::SerializationError,
     transaction,
     transparent::{self, utxos_from_ordered_utxos},
     value_balance::{ValueBalance, ValueBalanceError},
@@ -54,6 +55,19 @@ impl From<block::Hash> for HashOrHeight {
 impl From<block::Height> for HashOrHeight {
     fn from(hash: block::Height) -> Self {
         Self::Height(hash)
+    }
+}
+
+impl std::str::FromStr for HashOrHeight {
+    type Err = SerializationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse()
+            .map(Self::Hash)
+            .or_else(|_| s.parse().map(Self::Height))
+            .map_err(|_| {
+                SerializationError::Parse("could not convert the input string to a hash or height")
+            })
     }
 }
 
@@ -444,7 +458,25 @@ pub enum ReadRequest {
     /// Returns an [`Amount`] with the total balance of the set of addresses.
     AddressBalance(HashSet<transparent::Address>),
 
-    /// Looks up transaction hashes that sent or received from addresses,
+    /// Looks up a Sapling note commitment tree either by a hash or height.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::SaplingTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::SaplingTree)
+    ///   if the corresponding block contains a Sapling note commitment tree.
+    /// * [`ReadResponse::SaplingTree(None)`](crate::ReadResponse::SaplingTree) otherwise.
+    SaplingTree(HashOrHeight),
+
+    /// Looks up an Orchard note commitment tree either by a hash or height.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::OrchardTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::OrchardTree)
+    ///   if the corresponding block contains a Sapling note commitment tree.
+    /// * [`ReadResponse::OrchardTree(None)`](crate::ReadResponse::OrchardTree) otherwise.
+    OrchardTree(HashOrHeight),
+
+    /// Looks up transaction hashes that were sent or received from addresses,
     /// in an inclusive blockchain height range.
     ///
     /// Returns
