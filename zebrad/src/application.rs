@@ -1,6 +1,6 @@
 //! Zebrad Abscissa Application
 
-use std::{io::Write, process};
+use std::{fmt::Write as _, io::Write as _, process};
 
 use abscissa_core::{
     application::{self, fatal_error, AppCell},
@@ -263,7 +263,8 @@ impl Application for ZebradApp {
         let mut metadata_section = "Metadata:".to_string();
         for (k, v) in panic_metadata {
             builder = builder.add_issue_metadata(k, v.clone());
-            metadata_section.push_str(&format!("\n{}: {}", k, &v));
+            write!(&mut metadata_section, "\n{}: {}", k, &v)
+                .expect("unexpected failure writing to string");
         }
 
         builder = builder
@@ -342,14 +343,18 @@ impl Application for ZebradApp {
             .as_ref()
             .expect("config is loaded before register_components");
 
-        let default_filter = if command.verbose { "debug" } else { "info" };
+        let default_filter = command
+            .command
+            .as_ref()
+            .map(|zcmd| zcmd.default_tracing_filter(command.verbose))
+            .unwrap_or("warn");
         let is_server = command
             .command
             .as_ref()
             .map(ZebradCmd::is_server)
             .unwrap_or(false);
 
-        // Ignore the tracing filter for short-lived commands
+        // Ignore the configured tracing filter for short-lived utility commands
         let mut tracing_config = cfg_ref.tracing.clone();
         if is_server {
             // Override the default tracing filter based on the command-line verbosity.

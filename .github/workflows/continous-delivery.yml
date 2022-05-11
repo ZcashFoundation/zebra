@@ -24,7 +24,7 @@ env:
 
 jobs:
   build:
-    uses: ./.github/workflows/docker-image-build.yml
+    uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime

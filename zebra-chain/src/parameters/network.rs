@@ -1,4 +1,6 @@
-use std::{convert::From, fmt};
+use std::{convert::From, fmt, str::FromStr};
+
+use thiserror::Error;
 
 use crate::{block::Height, parameters::NetworkUpgrade::Canopy};
 
@@ -117,3 +119,19 @@ impl Default for Network {
         Network::Mainnet
     }
 }
+
+impl FromStr for Network {
+    type Err = InvalidNetworkError;
+
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        match string.to_lowercase().as_str() {
+            "mainnet" => Ok(Network::Mainnet),
+            "testnet" => Ok(Network::Testnet),
+            _ => Err(InvalidNetworkError(string.to_owned())),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Error)]
+#[error("Invalid network: {0}")]
+pub struct InvalidNetworkError(String);

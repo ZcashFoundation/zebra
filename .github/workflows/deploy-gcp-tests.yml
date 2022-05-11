@@ -1,4 +1,4 @@
-name: Test instance deployment
+name: Deploy GCP tests
 
 on:
   workflow_call:
@@ -19,10 +19,14 @@ on:
       test_variables:
         required: true
         type: string
-      zebra_state_path:
+      root_state_path:
         required: false
         type: string
         default: '/zebrad-cache'
+      zebra_state_dir:
+        required: false
+        type: string
+        default: ''
       disk_prefix:
         required: false
         type: string
@@ -110,7 +114,7 @@ jobs:
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           && \
           docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.zebra_state_path }} \
+          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
       - name: Get state version from constants.rs
@@ -243,7 +247,7 @@ jobs:
           ${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           && \
           docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
-          --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.zebra_state_path }} \
+          --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
       - name: Delete test instance
