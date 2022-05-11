@@ -1,0 +1,87 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+assertion_line: 234
+expression: utxos
+---
+[
+  {
+    "address": "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd",
+    "txid": "851bf6fbf7a976327817c738c489d7fa657752445430922d94c983c0b9ed4609",
+    "outputIndex": 1,
+    "script": "a9147d46a730d31f97b1930d3368a967c309bd4d136a87",
+    "satoshis": 12500,
+    "height": 1
+  },
+  {
+    "address": "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd",
+    "txid": "8974d08d1c5f9c860d8b629d582a56659a4a1dcb2b5f98a25a5afcc2a784b0f4",
+    "outputIndex": 1,
+    "script": "a9147d46a730d31f97b1930d3368a967c309bd4d136a87",
+    "satoshis": 25000,
+    "height": 2
+  },
+  {
+    "address": "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd",
+    "txid": "4e3670eae21d0c7225716abacb3a95c203a75d7601594afddb07d175c3babe83",
+    "outputIndex": 1,
+    "script": "a9147d46a730d31f97b1930d3368a967c309bd4d136a87",
+    "satoshis": 37500,
+    "height": 3
+  },
+  {
+    "address": "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd",
+    "txid": "781bb9b0168831054c1ed3afd8bf153f3fc848e102cea86977545c86f6e2446e",
+    "outputIndex": 1,
+    "script": "a9147d46a730d31f97b1930d3368a967c309bd4d136a87",
+    "satoshis": 50000,
+    "height": 4
+  },
+  {
+    "address": "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd",
+    "txid": "9a4adaf3953818eb1634407032db0e00ef2441c49c1364161411d0743ec1a939",
+    "outputIndex": 1,
+    "script": "a9147d46a730d31f97b1930d3368a967c309bd4d136a87",
+    "satoshis": 62500,
+    "height": 5
+  },
+  {
+    "address": "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd",
+    "txid": "1dd2064423542cfee7ca4ec565acb37e1ad217035b6119668352165b20006fe1",
+    "outputIndex": 1,
+    "script": "a9147d46a730d31f97b1930d3368a967c309bd4d136a87",
+    "satoshis": 75000,
+    "height": 6
+  },
+  {
+    "address": "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd",
+    "txid": "26b813b0743f015e6b41519d4ca78ee7b5c76cbac5c8b8ac0ec6b9cf88b8328d",
+    "outputIndex": 1,
+    "script": "a9147d46a730d31f97b1930d3368a967c309bd4d136a87",
+    "satoshis": 87500,
+    "height": 7
+  },
+  {
+    "address": "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd",
+    "txid": "7a772e6fe8e6bbfc34f0a61ba472d9f9dfe3a5539adfdac2f3c6ae659d44de03",
+    "outputIndex": 1,
+    "script": "a9147d46a730d31f97b1930d3368a967c309bd4d136a87",
+    "satoshis": 100000,
+    "height": 8
+  },
+  {
+    "address": "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd",
+    "txid": "ff24ab621bf3e46ad195b47dca7f11fb376f53e23b2e14a6e9b6a1907cc27cdc",
+    "outputIndex": 1,
+    "script": "a9147d46a730d31f97b1930d3368a967c309bd4d136a87",
+    "satoshis": 112500,
+    "height": 9
+  },
+  {
+    "address": "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd",
+    "txid": "5f2702708af1d8727ad3f0da3ba74de14019232499c0324ddce236cf97e32548",
+    "outputIndex": 1,
+    "script": "a9147d46a730d31f97b1930d3368a967c309bd4d136a87",
+    "satoshis": 125000,
+    "height": 10
+  }
+]

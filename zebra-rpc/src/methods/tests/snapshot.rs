@@ -155,10 +155,10 @@ async fn test_rpc_response_data_for_network(network: Network) {
 
 /// Snapshot `getinfo` response, using `cargo insta` and RON serialization.
 fn snapshot_rpc_getinfo(info: GetInfo, network: Network) {
-    let settings = insta::Settings::clone_current();
-    let snap_name = format!("{}_get_info", network_string(network));
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
     settings.bind(|| {
-        insta::assert_json_snapshot!(snap_name, info, {
+        insta::assert_json_snapshot!("get_info", info, {
             ".subversion" => dynamic_redaction(|value, _path| {
                 // assert that the subversion value is user agent
                 assert_eq!(value.as_str().unwrap(), USER_AGENT);
@@ -171,10 +171,10 @@ fn snapshot_rpc_getinfo(info: GetInfo, network: Network) {
 
 /// Snapshot `getblockchaininfo` response, using `cargo insta` and RON serialization.
 fn snapshot_rpc_getblockchaininfo(info: GetBlockChainInfo, network: Network) {
-    let settings = insta::Settings::clone_current();
-    let snap_name = format!("{}_get_blockchain_info", network_string(network));
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
     settings.bind(|| {
-        insta::assert_json_snapshot!(snap_name, info, {
+        insta::assert_json_snapshot!("get_blockchain_info", info, {
             ".estimatedheight" => dynamic_redaction(|value, _path| {
                 // assert that the value looks like a valid height here
                 assert!(u32::try_from(value.as_u64().unwrap()).unwrap() < Height::MAX_AS_U32);
@@ -187,51 +187,51 @@ fn snapshot_rpc_getblockchaininfo(info: GetBlockChainInfo, network: Network) {
 
 /// Snapshot `getaddressbalance` response, using `cargo insta` and RON serialization.
 fn snapshot_rpc_getaddressbalance(address_balance: AddressBalance, network: Network) {
-    let settings = insta::Settings::clone_current();
-    let snap_name = format!("{}_get_address_balance", network_string(network));
-    settings.bind(|| insta::assert_json_snapshot!(snap_name, address_balance));
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+    settings.bind(|| insta::assert_json_snapshot!("get_address_balance", address_balance));
 }
 
 /// Snapshot `getblock` response, using `cargo insta` and RON serialization.
 fn snapshot_rpc_getblock(block: GetBlock, network: Network) {
-    let settings = insta::Settings::clone_current();
-    let snap_name = format!("{}_get_block", network_string(network));
-    settings.bind(|| insta::assert_json_snapshot!(snap_name, block));
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+    settings.bind(|| insta::assert_json_snapshot!("get_block", block));
 }
 
 /// Snapshot `getbestblockhash` response, using `cargo insta` and RON serialization.
 fn snapshot_rpc_getbestblockhash(tip_hash: GetBestBlockHash, network: Network) {
-    let settings = insta::Settings::clone_current();
-    let snap_name = format!("{}_get_best_block_hash", network_string(network));
-    settings.bind(|| insta::assert_json_snapshot!(snap_name, tip_hash));
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+    settings.bind(|| insta::assert_json_snapshot!("get_best_block_hash", tip_hash));
 }
 
 /// Snapshot `getrawmempool` response, using `cargo insta` and RON serialization.
 fn snapshot_rpc_getrawmempool(raw_mempool: Vec<String>, network: Network) {
-    let settings = insta::Settings::clone_current();
-    let snap_name = format!("{}_get_raw_mempool", network_string(network));
-    settings.bind(|| insta::assert_json_snapshot!(snap_name, raw_mempool));
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+    settings.bind(|| insta::assert_json_snapshot!("get_raw_mempool", raw_mempool));
 }
 
 /// Snapshot `getrawtransaction` response, using `cargo insta` and RON serialization.
 fn snapshot_rpc_getrawtransaction(raw_transaction: GetRawTransaction, network: Network) {
-    let settings = insta::Settings::clone_current();
-    let snap_name = format!("{}_get_raw_transaction", network_string(network));
-    settings.bind(|| insta::assert_json_snapshot!(snap_name, raw_transaction));
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+    settings.bind(|| insta::assert_json_snapshot!("get_raw_transaction", raw_transaction));
 }
 
 /// Snapshot `getaddressbalance` response, using `cargo insta` and RON serialization.
 fn snapshot_rpc_getaddresstxids(transactions: Vec<String>, network: Network) {
-    let settings = insta::Settings::clone_current();
-    let snap_name = format!("{}_get_address_tx_ids", network_string(network));
-    settings.bind(|| insta::assert_json_snapshot!(snap_name, transactions));
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+    settings.bind(|| insta::assert_json_snapshot!("get_address_tx_ids", transactions));
 }
 
 /// Snapshot `getaddressutxos` response, using `cargo insta` and RON serialization.
 fn snapshot_rpc_getaddressutxos(utxos: Vec<GetAddressUtxos>, network: Network) {
-    let settings = insta::Settings::clone_current();
-    let snap_name = format!("{}_get_address_utxos", network_string(network));
-    settings.bind(|| insta::assert_json_snapshot!(snap_name, utxos));
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+    settings.bind(|| insta::assert_json_snapshot!("get_address_utxos", utxos));
 }
 
 /// Utility function to convert a `Network` to a lowercase string.
