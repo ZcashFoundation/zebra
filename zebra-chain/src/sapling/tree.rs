@@ -456,13 +456,16 @@ impl From<&NoteCommitmentTree> for SerializedTree {
         // Convert the note commitment tree represented as a frontier into the
         // format compatible with `zcashd`.
         //
-        // There is a function in `librustzcash` called
-        // `CommitmentTree::from_frontier` that returns a commitment tree in the
-        // sparse format. However, the returned tree always contains
-        // [`MERKLE_DEPTH`] parent nodes, even though some trailing parents are
-        // empty. Such trees are incompatible with `zcashd`, since `zcashd`
-        // returns trees without empty trailing parents. For this reason, Zebra
-        // implements its own conversion between the dense and sparse formats.
+        // `librustzcash` has a function [`from_frontier()`][1], which returns a
+        // commitment tree in the sparse format. However, the returned tree
+        // always contains [`MERKLE_DEPTH`] parent nodes, even though some
+        // trailing parents are empty. Such trees are incompatible with Sapling
+        // commitment trees returned by `zcashd` because `zcashd` returns
+        // Sapling commitment trees without empty trailing parents. For this
+        // reason, Zebra implements its own conversion between the dense and
+        // sparse formats for Sapling.
+        //
+        // [1]: <https://github.com/zcash/librustzcash/blob/a63a37a/zcash_primitives/src/merkle_tree.rs#L125>
         if let Some(frontier) = tree.inner.value() {
             let (left_leaf, right_leaf) = match frontier.leaf() {
                 Leaf::Left(left_value) => (Some(left_value), None),
