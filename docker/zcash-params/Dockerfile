@@ -18,8 +18,6 @@ RUN apt-get -qq update && \
     libclang-dev \
     clang \
     ca-certificates \
-    cmake \
-    protobuf-compiler \
     ; \
     rm -rf /var/lib/apt/lists/* /tmp/*
 

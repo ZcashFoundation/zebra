@@ -11,7 +11,7 @@ FROM rust:bullseye as chef
 RUN cargo install cargo-chef --locked
 WORKDIR /app
 
-# Analyze the current project to determine the minimum subset of files 
+# Analyze the current project to determine the minimum subset of files
 # (Cargo.lock and Cargo.toml manifests) required to build it and cache dependencies
 #
 # The recipe.json is the equivalent of the Python requirements.txt file
@@ -34,7 +34,6 @@ RUN apt-get -qq update && \
     libclang-dev \
     clang \
     ca-certificates \
-    cmake \
     protobuf-compiler \
     ; \
     rm -rf /var/lib/apt/lists/* /tmp/*
