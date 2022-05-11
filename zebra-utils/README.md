@@ -83,6 +83,7 @@ The script:
 2. sends the RPC request to both of them using `zcash-cli`
 3. compares the responses using `diff`
 4. leaves the full responses in files in a temporary directory, so you can check them in detail
+5. if possible, compares different RPC methods for consistency
 
 Assuming `zebrad`'s RPC port is 28232, you should be able to run:
 ```sh
@@ -131,3 +132,4 @@ so you can compare two `zcashd` or `zebrad` nodes if you want.
 You can override the binaries the script calls using these environmental variables:
 - `$ZCASH_CLI`
 - `$DIFF`
+- `$JQ`
