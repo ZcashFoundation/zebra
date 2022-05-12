@@ -200,43 +200,30 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Before executing any further steps, validate the local state and remote version are the same,
-      # or at least that the local state version is greater than the available cached state version from main.
+      # Find a cached state disk for the requiring job, matching all of:
+      # - disk cached state (lightwalletd or Zebra cached state)
+      # - disk target height (disk_suffix)
       #
-      # Aftwards, get the disk name to be used on further steps
+      # Validate the local state version is not lower than the
+      # available cached state version from the recently found disk.
+      #
+      # Passes the disk name to subsequent steps using $CACHED_STATE_DISK_NAME env variable.
       - name: Validate local state version with cached state
         id: get-disk-name
         run: |
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
           echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
-          ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache-main AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "Disk: $ZEBRA_STATE_DISK"
-          echo "Description: $(gcloud compute images describe $ZEBRA_STATE_DISK --format='value(DESCRIPTION)')"
+          STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.lwd_state_dir || inputs.zebra_state_dir }} AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "Disk: $STATE_DISK"
+          echo "Description: $(gcloud compute images describe $STATE_DISK --format='value(DESCRIPTION)')"
 
-          GCP_STATE_VERSION=$(echo "$ZEBRA_STATE_DISK" | grep -oE "v[0-9]+" | grep -oE "[0-9]+")
+          GCP_STATE_VERSION=$(echo "$STATE_DISK" | grep -oE "v[0-9]+" | grep -oE "[0-9]+")
           echo "GCP_STATE_VERSION: $GCP_STATE_VERSION"
 
           if [[ "$LOCAL_STATE_VERSION" -lt "$GCP_STATE_VERSION" ]]; then echo "Local version is lower than cached version" && exit 1; fi
 
-          echo "CACHED_STATE_DISK_NAME=$ZEBRA_STATE_DISK" >> $GITHUB_ENV
-
-      - name: Get lightwalletd disk name
-        if: ${{ inputs.lwd_state_dir }} != ''
-        run: |
-          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
-          echo "LOCAL_STATE_VERSION: $LOCAL_STATE_VERSION"
-
-          LWD_STATE_DISK=$(gcloud compute images list --filter="name~lwd-cache AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "Disk: $LWD_STATE_DISK"
-          echo "Description: $(gcloud compute images describe $LWD_STATE_DISK --format='value(DESCRIPTION)')"
-
-          GCP_STATE_VERSION=$(echo "$LWD_STATE_DISK" | grep -oE "v[0-9]+" | grep -oE "[0-9]+")
-          echo "GCP_STATE_VERSION: $GCP_STATE_VERSION"
-
-          if [[ "$LOCAL_STATE_VERSION" -lt "$GCP_STATE_VERSION" ]]; then echo "Local version is lower than cached version" && exit 1; fi
-
-          echo "CACHED_STATE_DISK_NAME=$LWD_STATE_DISK" >> $GITHUB_ENV
+          echo "CACHED_STATE_DISK_NAME=$STATE_DISK" >> $GITHUB_ENV
 
       # Creates Compute Engine virtual machine and attach a cached state disk using the
       # $CACHED_STATE_DISK_NAME variable as the source image to populate the disk cached state
