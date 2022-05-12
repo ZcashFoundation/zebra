@@ -1,3 +1,5 @@
+//! The block header.
+
 use std::usize;
 
 use chrono::{DateTime, Duration, Utc};

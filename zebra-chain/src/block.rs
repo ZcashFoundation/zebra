@@ -67,6 +67,10 @@ impl fmt::Display for Block {
 
 impl Block {
     /// Return the block height reported in the coinbase transaction, if any.
+    ///
+    /// Note
+    ///
+    /// Verified blocks have a valid height.
     pub fn coinbase_height(&self) -> Option<Height> {
         self.transactions
             .get(0)
