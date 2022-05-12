@@ -64,7 +64,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // `getblockchaininfo`
     let get_blockchain_info = rpc
         .get_blockchain_info()
-        .expect("We should have a GetInfo struct");
+        .expect("We should have a GetBlockChainInfo struct");
     snapshot_rpc_getblockchaininfo(get_blockchain_info, &settings);
 
     // get the first transaction of the first block which is not the genesis
@@ -144,14 +144,14 @@ async fn test_rpc_response_data_for_network(network: Network) {
             end: 10,
         })
         .await
-        .expect("We should have an vector of strings");
+        .expect("We should have a vector of strings");
     snapshot_rpc_getaddresstxids(get_address_tx_ids, &settings);
 
     // `getaddressutxos`
     let get_address_utxos = rpc
         .get_address_utxos(AddressStrings { addresses })
         .await
-        .expect("We should have an vector of strings");
+        .expect("We should have a vector of strings");
     snapshot_rpc_getaddressutxos(get_address_utxos, &settings);
 }
 
