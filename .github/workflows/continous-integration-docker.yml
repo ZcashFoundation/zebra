@@ -287,3 +287,4 @@ jobs:
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
+      lwd_state_dir: 'lwd-cache'
