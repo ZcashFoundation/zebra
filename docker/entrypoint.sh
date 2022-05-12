@@ -41,7 +41,7 @@ case "$1" in
         # These tests actually use gRPC.
         elif [[ "$TEST_LWD_TRANSACTIONS" -eq "1" ]]; then
             # Starting at a cached tip, test a gRPC call to lightwalletd, which calls Zebra.
-            exec cargo test --locked --release --features lightwalletd-grpc-tests --test acceptance -- --nocapture --ignored sending_transactions_using_lightwalletd
+            exec cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored sending_transactions_using_lightwalletd
 
         # These command-lines are provided by the caller.
         else
