@@ -20,7 +20,9 @@ use zebra_chain::{
     amount::NonNegative,
     block::{self, Block, Height},
     history_tree::HistoryTree,
+    orchard,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
+    sapling,
     serialization::TrustedPreallocate,
     transaction::{self, Transaction},
     transparent,
@@ -109,6 +111,34 @@ impl ZebraDb {
             header,
             transactions,
         }))
+    }
+
+    /// Returns the Sapling
+    /// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a
+    /// hash or height, if it exists in the finalized `db`.
+    pub fn sapling_tree(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+
+        let sapling_tree_handle = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+
+        self.db.zs_get(&sapling_tree_handle, &height)
+    }
+
+    /// Returns the Orchard
+    /// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
+    /// hash or height, if it exists in the finalized `db`.
+    pub fn orchard_tree(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+
+        let orchard_tree_handle = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+
+        self.db.zs_get(&orchard_tree_handle, &height)
     }
 
     // Read tip block methods
