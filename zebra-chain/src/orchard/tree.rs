@@ -18,6 +18,7 @@ use std::{
     hash::{Hash, Hasher},
     io,
     ops::Deref,
+    sync::Arc,
 };
 
 use bitvec::prelude::*;
@@ -25,6 +26,7 @@ use halo2::pasta::{group::ff::PrimeField, pallas};
 use incrementalmerkletree::{bridgetree, Frontier};
 use lazy_static::lazy_static;
 use thiserror::Error;
+use zcash_primitives::merkle_tree::{self, CommitmentTree};
 
 use super::sinsemilla::*;
 
@@ -153,8 +155,51 @@ impl ZcashDeserialize for Root {
 }
 
 /// A node of the Orchard Incremental Note Commitment Tree.
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct Node(pallas::Base);
+
+/// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
+///
+/// Zebra stores Orchard note commitment trees as [`Frontier`][1]s while the
+/// [`z_gettreestate`][2] RPC requires [`CommitmentTree`][3]s. Implementing
+/// [`merkle_tree::Hashable`] for [`Node`]s allows the conversion.
+///
+/// [1]: bridgetree::Frontier
+/// [2]: https://zcash.github.io/rpc/z_gettreestate.html
+/// [3]: merkle_tree::CommitmentTree
+impl merkle_tree::Hashable for Node {
+    fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
+        let mut repr = [0u8; 32];
+        reader.read_exact(&mut repr)?;
+        let maybe_node = pallas::Base::from_repr(repr).map(Self);
+
+        <Option<_>>::from(maybe_node).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Non-canonical encoding of Pallas base field value.",
+            )
+        })
+    }
+
+    fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.0.to_repr())
+    }
+
+    fn combine(level: usize, a: &Self, b: &Self) -> Self {
+        let level = u8::try_from(level).expect("level must fit into u8");
+        let layer = (MERKLE_DEPTH - 1) as u8 - level;
+        Self(merkle_crh_orchard(layer, a.0, b.0))
+    }
+
+    fn blank() -> Self {
+        Self(NoteCommitmentTree::uncommitted())
+    }
+
+    fn empty_root(level: usize) -> Self {
+        let layer_below: usize = MERKLE_DEPTH - level;
+        Self(EMPTY_ROOTS[layer_below])
+    }
+}
 
 impl incrementalmerkletree::Hashable for Node {
     fn empty_leaf() -> Self {
@@ -370,5 +415,69 @@ impl From<Vec<pallas::Base>> for NoteCommitmentTree {
         }
 
         tree
+    }
+}
+
+/// A serialized Orchard note commitment tree.
+///
+/// The format of the serialized data is compatible with
+/// [`CommitmentTree`](merkle_tree::CommitmentTree) from `librustzcash` and not
+/// with [`Frontier`](bridgetree::Frontier) from the crate
+/// [`incrementalmerkletree`]. Zebra follows the former format in order to stay
+/// consistent with `zcashd` in RPCs. Note that [`NoteCommitmentTree`] itself is
+/// represented as [`Frontier`](bridgetree::Frontier).
+///
+/// The formats are semantically equivalent. The primary difference between them
+/// is that in [`Frontier`](bridgetree::Frontier), the vector of parents is
+/// dense (we know where the gaps are from the position of the leaf in the
+/// overall tree); whereas in [`CommitmentTree`](merkle_tree::CommitmentTree),
+/// the vector of parent hashes is sparse with [`None`] values in the gaps.
+///
+/// The sparse format, used in this implementation, allows representing invalid
+/// commitment trees while the dense format allows representing only valid
+/// commitment trees.
+///
+/// It is likely that the dense format will be used in future RPCs, in which
+/// case the current implementation will have to change and use the format
+/// compatible with [`Frontier`](bridgetree::Frontier) instead.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct SerializedTree(Vec<u8>);
+
+impl From<&NoteCommitmentTree> for SerializedTree {
+    fn from(tree: &NoteCommitmentTree) -> Self {
+        let mut serialized_tree = vec![];
+
+        // Skip the serialization of empty trees.
+        //
+        // Note: This ensures compatibility with `zcashd` in the
+        // [`z_gettreestate`][1] RPC.
+        //
+        // [1]: https://zcash.github.io/rpc/z_gettreestate.html
+        if tree.inner == bridgetree::Frontier::empty() {
+            return Self(serialized_tree);
+        }
+
+        // Convert the note commitment tree from
+        // [`Frontier`](bridgetree::Frontier) to
+        // [`CommitmentTree`](merkle_tree::CommitmentTree).
+        let tree = CommitmentTree::from_frontier(&tree.inner);
+        tree.write(&mut serialized_tree)
+            .expect("note commitment tree should be serializable");
+        Self(serialized_tree)
+    }
+}
+
+impl From<Option<Arc<NoteCommitmentTree>>> for SerializedTree {
+    fn from(maybe_tree: Option<Arc<NoteCommitmentTree>>) -> Self {
+        match maybe_tree {
+            Some(tree) => tree.as_ref().into(),
+            None => Self(Vec::new()),
+        }
+    }
+}
+
+impl AsRef<[u8]> for SerializedTree {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
     }
 }
