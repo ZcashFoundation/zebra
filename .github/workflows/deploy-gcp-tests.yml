@@ -41,6 +41,9 @@ on:
       needs_zebra_state:
         required: true
         type: boolean
+      needs_lwd_state:
+        required: false
+        type: boolean
       saves_to_disk:
         required: true
         type: boolean
@@ -241,11 +244,10 @@ jobs:
       # SSH into the just created VM, and create a Docker container to run the incoming test 
       # from ${{ inputs.test_id }}, then create a docker volume with the recently attached disk.
       # The disk will be mounted in ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }}.
-      #
-      # This step mounts the volume only when a single cached state is needed, in this case
-      # the cached state from Zebra.
       - name: Run ${{ inputs.test_id }} test
-        if: ${{ !inputs.lwd_state_dir }}
+        # This step mounts the volume only when a single cached state is needed, in this case
+        # the cached state from Zebra.
+        if: ${{ inputs.needs_zebra_state && !inputs.needs_lwd_state }}
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -265,11 +267,10 @@ jobs:
       # from ${{ inputs.test_id }}, then create a docker volume with the recently attached disk.
       # The disk will be mounted in ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }},
       # and ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }}
-      #
-      # This step mounts the volume only when both cached states are needed, in this case
-      # the cached state from Zebra and Lightwalletd
       - name: Run ${{ inputs.test_id }} test
-        if: ${{ inputs.lwd_state_dir }}
+        # This step mounts the volume only when both cached states are needed, in this case
+        # the cached state from Zebra and Lightwalletd
+        if: ${{ inputs.needs_zebra_state && inputs.needs_lwd_state }}
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \

@@ -283,12 +283,12 @@ jobs:
       test_description: Test lightwalletd full sync
       test_variables: '-e TEST_LWD_FULL_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
       needs_zebra_state: true
+      needs_lwd_state: false
       saves_to_disk: true
       disk_prefix: lwd-cache
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
-      lwd_state_dir: 'lwd-cache'
 
   # Test update sync of lightwalletd with a lightwalletd and Zebra tip state
   lightwalletd-update-sync:
@@ -301,6 +301,7 @@ jobs:
       test_description: Test lightwalletd update sync with both states
       test_variables: '-e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
       needs_zebra_state: true
+      needs_lwd_state: true
       saves_to_disk: false
       disk_prefix: lwd-cache
       disk_suffix: tip
