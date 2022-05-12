@@ -214,7 +214,7 @@ jobs:
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
           echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
-          STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.lwd_state_dir || inputs.zebra_state_dir }} AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.lwd_state_dir || inputs.zebra_state_dir || inputs.disk_prefix  }} AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "Disk: $STATE_DISK"
           echo "Description: $(gcloud compute images describe $STATE_DISK --format='value(DESCRIPTION)')"
 
