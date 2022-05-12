@@ -245,6 +245,7 @@ jobs:
       # This step mounts the volume only when a single cached state is needed, in this case
       # the cached state from Zebra.
       - name: Run ${{ inputs.test_id }} test
+        if: ${{ !inputs.lwd_state_dir }}
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -258,6 +259,31 @@ jobs:
           && \
           docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
           --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
+
+      # SSH into the just created VM, and create a Docker container to run the incoming test 
+      # from ${{ inputs.test_id }}, then create a docker volume with the recently attached disk.
+      # The disk will be mounted in ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }},
+      # and ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }}
+      #
+      # This step mounts the volume only when both cached states are needed, in this case
+      # the cached state from Zebra and Lightwalletd
+      - name: Run ${{ inputs.test_id }} test
+        if: ${{ inputs.lwd_state_dir }}
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
+          ${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
+          && \
+          docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
+          --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
       # Create an image from disk that will be used for following/other tests
