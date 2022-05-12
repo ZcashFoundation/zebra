@@ -186,7 +186,8 @@ jobs:
         env:
           ZEBRA_TEST_LIGHTWALLETD: '1'
 
-  # Regenerate mandatory checkpoint disks.
+  # Regenerate mandatory checkpoint Zebra cached state disks.
+  #
   # Runs:
   # - on every PR update, but only if Zebra's state version changes in the PR
   # - on request
@@ -205,8 +206,10 @@ jobs:
       height_grep_text: 'flushing database to disk height=Height'
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached mandatory checkpoint disk
+  #
+  # If the state version has changed, waits for the new cached state to be created.
   test-stateful-sync:
-    needs: build
+    needs: [build, regenerate-stateful-disks]
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
@@ -217,7 +220,9 @@ jobs:
       saves_to_disk: false
       disk_suffix: checkpoint
 
-  # Test that Zebra can run a full mainnet sync and regenerate tip disks.
+  # Test that Zebra can run a full mainnet sync,
+  # and regenerate chain tip Zebra cached state disks.
+  #
   # Runs:
   # - after every PR is merged to `main`
   # - on every PR update, but only if Zebra's state version changes in the PR
@@ -239,8 +244,10 @@ jobs:
       height_grep_text: 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.* current_height=Height'
 
   # Test that Zebra can answer a synthetic RPC call, using a cached Zebra tip state
+  #
+  # If the state version has changed, waits for the new cached state to be created.
   lightwalletd-rpc-test:
-    needs: build
+    needs: [build, test-full-sync]
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
@@ -255,8 +262,10 @@ jobs:
       zebra_state_dir: 'zebrad-cache'
 
   # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
+  #
+  # If the state version has changed, waits for the new cached states to be created.
   lightwalletd-transactions-test:
-    needs: build
+    needs: [build, test-full-sync]
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
