@@ -196,21 +196,39 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Before executing any further steps, make sure the branch and cached state versions are the same.
+      # Find a cached state disk for this job, matching all of:
+      # - disk kind (disk_prefix)
+      # - disk target height (disk_suffix)
+      # - state version (from the source code)
       #
-      # If this step fails, there is probably a bug in the calling workflow.
-      # Calling workflows must depend on the cached state rebuild job.
+      # If there are multiple disks:
+      # - prefer images generated from the `main` branch, then any other branch
+      # - prefer newer images to older images
       #
-      # Aftwards, get the disk name to be used on further steps
-      - name: Validate local state version with cached state
+      # Passes the disk name to subsequent steps using an environmental variable.
+      - name: Find cached state disk
         id: get-disk-name
         run: |
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
           echo "LOCAL_STATE_VERSION: $LOCAL_STATE_VERSION"
 
-          ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.disk_prefix }} AND name~v$LOCAL_STATE_VERSION AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          # Try to find an image generated from the main branch
+          ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.disk_prefix }}-main AND name~v$LOCAL_STATE_VERSION AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "main Disk: $ZEBRA_STATE_DISK"
 
-          echo "Disk: $ZEBRA_STATE_DISK"
+          if [[ -z "$ZEBRA_STATE_DISK" ]]; then
+              # Try to find an image generated from any other branch
+              ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.disk_prefix }} AND name~v$LOCAL_STATE_VERSION AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+              echo "Disk: $ZEBRA_STATE_DISK"
+          fi
+
+          if [[ -z "$ZEBRA_STATE_DISK" ]]; then
+              echo "No cached state disk available"
+              echo "Expected ${{ inputs.disk_prefix }} v$LOCAL_STATE_VERSION ${{ inputs.disk_suffix }}"
+              echo "Cached state test jobs must depend on the cached state rebuild job"
+              exit 1
+          fi
+
           echo "Description: $(gcloud compute images describe $ZEBRA_STATE_DISK --format='value(DESCRIPTION)')"
 
           echo "ZEBRA_CACHED_DISK_NAME=$ZEBRA_STATE_DISK" >> $GITHUB_ENV
