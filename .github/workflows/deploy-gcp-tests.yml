@@ -213,12 +213,12 @@ jobs:
           echo "LOCAL_STATE_VERSION: $LOCAL_STATE_VERSION"
 
           # Try to find an image generated from the main branch
-          ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.disk_prefix }}-main AND name~v$LOCAL_STATE_VERSION AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.disk_prefix }}-main- AND name~-v{$LOCAL_STATE_VERSION}- AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "main Disk: $ZEBRA_STATE_DISK"
 
           if [[ -z "$ZEBRA_STATE_DISK" ]]; then
               # Try to find an image generated from any other branch
-              ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.disk_prefix }} AND name~v$LOCAL_STATE_VERSION AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+              ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.disk_prefix }}- AND name~-v{$LOCAL_STATE_VERSION}- AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
               echo "Disk: $ZEBRA_STATE_DISK"
           fi
 
