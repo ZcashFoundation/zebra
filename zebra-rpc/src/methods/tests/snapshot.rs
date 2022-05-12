@@ -54,16 +54,18 @@ async fn test_rpc_response_data_for_network(network: Network) {
     );
 
     // Start snapshots of RPC responses.
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), blocks.len() - 1));
 
     // `getinfo`
     let get_info = rpc.get_info().expect("We should have a GetInfo struct");
-    snapshot_rpc_getinfo(get_info, network);
+    snapshot_rpc_getinfo(get_info, &settings);
 
     // `getblockchaininfo`
     let get_blockchain_info = rpc
         .get_blockchain_info()
         .expect("We should have a GetInfo struct");
-    snapshot_rpc_getblockchaininfo(get_blockchain_info, network);
+    snapshot_rpc_getblockchaininfo(get_blockchain_info, &settings);
 
     // get the first transaction of the first block which is not the genesis
     let first_block_first_transaction = &blocks[1].transactions[0];
@@ -81,20 +83,20 @@ async fn test_rpc_response_data_for_network(network: Network) {
         })
         .await
         .expect("We should have an AddressBalance struct");
-    snapshot_rpc_getaddressbalance(get_address_balance, network);
+    snapshot_rpc_getaddressbalance(get_address_balance, &settings);
 
     // `getblock`
     let get_block = rpc
         .get_block("1".to_string(), 0u8)
         .await
         .expect("We should have a GetBlock struct");
-    snapshot_rpc_getblock(get_block, network);
+    snapshot_rpc_getblock(get_block, &settings);
 
     // `getbestblockhash`
     let get_best_block_hash = rpc
         .get_best_block_hash()
         .expect("We should have a GetBestBlockHash struct");
-    snapshot_rpc_getbestblockhash(get_best_block_hash, network);
+    snapshot_rpc_getbestblockhash(get_best_block_hash, &settings);
 
     // `getrawmempool`
     //
@@ -114,7 +116,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     let (response, _) = futures::join!(get_raw_mempool, mempool_req);
     let get_raw_mempool = response.expect("We should have a GetRawTransaction struct");
 
-    snapshot_rpc_getrawmempool(get_raw_mempool, network);
+    snapshot_rpc_getrawmempool(get_raw_mempool, &settings);
 
     // `getrawtransaction`
     //
@@ -132,7 +134,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     let (response, _) = futures::join!(get_raw_transaction, mempool_req);
     let get_raw_transaction = response.expect("We should have a GetRawTransaction struct");
 
-    snapshot_rpc_getrawtransaction(get_raw_transaction, network);
+    snapshot_rpc_getrawtransaction(get_raw_transaction, &settings);
 
     // `getaddresstxids`
     let get_address_tx_ids = rpc
@@ -143,20 +145,18 @@ async fn test_rpc_response_data_for_network(network: Network) {
         })
         .await
         .expect("We should have an vector of strings");
-    snapshot_rpc_getaddresstxids(get_address_tx_ids, network);
+    snapshot_rpc_getaddresstxids(get_address_tx_ids, &settings);
 
     // `getaddressutxos`
     let get_address_utxos = rpc
         .get_address_utxos(AddressStrings { addresses })
         .await
         .expect("We should have an vector of strings");
-    snapshot_rpc_getaddressutxos(get_address_utxos, network);
+    snapshot_rpc_getaddressutxos(get_address_utxos, &settings);
 }
 
 /// Snapshot `getinfo` response, using `cargo insta` and RON serialization.
-fn snapshot_rpc_getinfo(info: GetInfo, network: Network) {
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
     settings.bind(|| {
         insta::assert_json_snapshot!("get_info", info, {
             ".subversion" => dynamic_redaction(|value, _path| {
@@ -170,9 +170,7 @@ fn snapshot_rpc_getinfo(info: GetInfo, network: Network) {
 }
 
 /// Snapshot `getblockchaininfo` response, using `cargo insta` and RON serialization.
-fn snapshot_rpc_getblockchaininfo(info: GetBlockChainInfo, network: Network) {
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+fn snapshot_rpc_getblockchaininfo(info: GetBlockChainInfo, settings: &insta::Settings) {
     settings.bind(|| {
         insta::assert_json_snapshot!("get_blockchain_info", info, {
             ".estimatedheight" => dynamic_redaction(|value, _path| {
@@ -186,51 +184,37 @@ fn snapshot_rpc_getblockchaininfo(info: GetBlockChainInfo, network: Network) {
 }
 
 /// Snapshot `getaddressbalance` response, using `cargo insta` and RON serialization.
-fn snapshot_rpc_getaddressbalance(address_balance: AddressBalance, network: Network) {
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+fn snapshot_rpc_getaddressbalance(address_balance: AddressBalance, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_balance", address_balance));
 }
 
 /// Snapshot `getblock` response, using `cargo insta` and RON serialization.
-fn snapshot_rpc_getblock(block: GetBlock, network: Network) {
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+fn snapshot_rpc_getblock(block: GetBlock, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_block", block));
 }
 
 /// Snapshot `getbestblockhash` response, using `cargo insta` and RON serialization.
-fn snapshot_rpc_getbestblockhash(tip_hash: GetBestBlockHash, network: Network) {
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+fn snapshot_rpc_getbestblockhash(tip_hash: GetBestBlockHash, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_best_block_hash", tip_hash));
 }
 
 /// Snapshot `getrawmempool` response, using `cargo insta` and RON serialization.
-fn snapshot_rpc_getrawmempool(raw_mempool: Vec<String>, network: Network) {
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+fn snapshot_rpc_getrawmempool(raw_mempool: Vec<String>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_raw_mempool", raw_mempool));
 }
 
 /// Snapshot `getrawtransaction` response, using `cargo insta` and RON serialization.
-fn snapshot_rpc_getrawtransaction(raw_transaction: GetRawTransaction, network: Network) {
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+fn snapshot_rpc_getrawtransaction(raw_transaction: GetRawTransaction, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_raw_transaction", raw_transaction));
 }
 
 /// Snapshot `getaddressbalance` response, using `cargo insta` and RON serialization.
-fn snapshot_rpc_getaddresstxids(transactions: Vec<String>, network: Network) {
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+fn snapshot_rpc_getaddresstxids(transactions: Vec<String>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_tx_ids", transactions));
 }
 
 /// Snapshot `getaddressutxos` response, using `cargo insta` and RON serialization.
-fn snapshot_rpc_getaddressutxos(utxos: Vec<GetAddressUtxos>, network: Network) {
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), "10"));
+fn snapshot_rpc_getaddressutxos(utxos: Vec<GetAddressUtxos>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_utxos", utxos));
 }
 
