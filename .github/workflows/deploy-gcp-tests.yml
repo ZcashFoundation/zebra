@@ -219,17 +219,34 @@ jobs:
 
           if [[ "$LOCAL_STATE_VERSION" -lt "$GCP_STATE_VERSION" ]]; then echo "Local version is lower than cached version" && exit 1; fi
 
-          echo "ZEBRA_CACHED_DISK_NAME=$ZEBRA_STATE_DISK" >> $GITHUB_ENV
+          echo "CACHED_STATE_DISK_NAME=$ZEBRA_STATE_DISK" >> $GITHUB_ENV
+
+      - name: Get lightwalletd disk name
+        if: ${{ inputs.lwd_state_dir }} != ''
+        run: |
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
+          echo "LOCAL_STATE_VERSION: $LOCAL_STATE_VERSION"
+
+          LWD_STATE_DISK=$(gcloud compute images list --filter="name~lwd-cache AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "Disk: $LWD_STATE_DISK"
+          echo "Description: $(gcloud compute images describe $LWD_STATE_DISK --format='value(DESCRIPTION)')"
+
+          GCP_STATE_VERSION=$(echo "$LWD_STATE_DISK" | grep -oE "v[0-9]+" | grep -oE "[0-9]+")
+          echo "GCP_STATE_VERSION: $GCP_STATE_VERSION"
+
+          if [[ "$LOCAL_STATE_VERSION" -lt "$GCP_STATE_VERSION" ]]; then echo "Local version is lower than cached version" && exit 1; fi
+
+          echo "CACHED_STATE_DISK_NAME=$LWD_STATE_DISK" >> $GITHUB_ENV
 
       # Creates Compute Engine virtual machine and attach a cached state disk using the
-      # $ZEBRA_CACHED_DISK_NAME variable as the source image to populate the disk cached state
+      # $CACHED_STATE_DISK_NAME variable as the source image to populate the disk cached state
       - name: Create GCP compute instance
         id: create-instance
         run: |
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 100GB \
           --boot-disk-type pd-ssd \
-          --create-disk image=${{ env.ZEBRA_CACHED_DISK_NAME }},name="${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --create-disk image=${{ env.CACHED_STATE_DISK_NAME }},name="${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
           --container-image debian:buster \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
