@@ -42,7 +42,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+        zebra_state::populated_state(blocks.clone(), network).await;
 
     // Init RPC
     let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
@@ -50,7 +50,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
-        Mainnet,
+        network,
     );
 
     // Start snapshots of RPC responses.
@@ -72,7 +72,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
 
     // build addresses
     let address = &first_block_first_transaction.outputs()[1]
-        .address(Mainnet)
+        .address(network)
         .unwrap();
     let addresses = vec![address.to_string()];
 
