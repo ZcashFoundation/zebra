@@ -217,9 +217,17 @@ jobs:
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
           echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
-          STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.lwd_state_dir || inputs.zebra_state_dir || inputs.disk_prefix  }} AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          if [[ -z "$needs_lwd_state" ]]; then
+              STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.lwd_state_dir || inputs.disk_prefix  }} AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          else
+              STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.zebra_state_dir || inputs.disk_prefix  }} AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          fi
+
           echo "Disk: $STATE_DISK"
           echo "Description: $(gcloud compute images describe $STATE_DISK --format='value(DESCRIPTION)')"
+
+          GCP_STATE_VERSION=$(echo "$STATE_DISK" | grep -oE "v[0-9]+" | grep -oE "[0-9]+")
+          echo "GCP_STATE_VERSION: $GCP_STATE_VERSION"
 
           echo "CACHED_STATE_DISK_NAME=$STATE_DISK" >> $GITHUB_ENV
 
