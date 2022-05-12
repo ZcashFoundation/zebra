@@ -246,7 +246,7 @@ jobs:
       # This step mounts the volume only when a single cached state is needed, in this case
       # the cached state from Zebra.
       - name: Run ${{ inputs.test_id }} test
-        if: ${{ inputs.lwd_state_dir }} == ''
+        if: ${{ !inputs.lwd_state_dir }}
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -270,7 +270,7 @@ jobs:
       # This step mounts the volume only when both cached states are needed, in this case
       # the cached state from Zebra and Lightwalletd
       - name: Run ${{ inputs.test_id }} test
-        if: ${{ inputs.lwd_state_dir }} != ''
+        if: ${{ inputs.lwd_state_dir }}
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
