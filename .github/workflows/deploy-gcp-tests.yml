@@ -27,10 +27,6 @@ on:
         required: false
         type: string
         default: ''
-      lwd_state_dir:
-        required: false
-        type: string
-        default: ''
       disk_prefix:
         required: false
         type: string
@@ -246,8 +242,6 @@ jobs:
       # This step mounts the volume only when a single cached state is needed, in this case
       # the cached state from Zebra.
       - name: Run ${{ inputs.test_id }} test
-        # Validate we only need zebra's cache and not lightwalletd's cache
-        # if: ${{ inputs.zebra_state_dir }} != '' && ${{ inputs.lwd_state_dir }} == ''
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
