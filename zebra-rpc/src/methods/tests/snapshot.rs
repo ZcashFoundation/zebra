@@ -1,14 +1,14 @@
-//! RPC responses
+//! Snapshot tests for Zebra JSON-RPC responses.
+
+use std::sync::Arc;
 
 use insta::dynamic_redaction;
-use std::sync::Arc;
 
 use zebra_chain::{
     block::Block,
     parameters::Network::{Mainnet, Testnet},
     serialization::ZcashDeserializeInto,
 };
-
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::BoxError;
 use zebra_test::mock_service::MockService;
