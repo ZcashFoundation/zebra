@@ -218,11 +218,6 @@ jobs:
           echo "Disk: $STATE_DISK"
           echo "Description: $(gcloud compute images describe $STATE_DISK --format='value(DESCRIPTION)')"
 
-          GCP_STATE_VERSION=$(echo "$STATE_DISK" | grep -oE "v[0-9]+" | grep -oE "[0-9]+")
-          echo "GCP_STATE_VERSION: $GCP_STATE_VERSION"
-
-          if [[ "$LOCAL_STATE_VERSION" -lt "$GCP_STATE_VERSION" ]]; then echo "Local version is lower than cached version" && exit 1; fi
-
           echo "CACHED_STATE_DISK_NAME=$STATE_DISK" >> $GITHUB_ENV
 
       # Creates Compute Engine virtual machine and attach a cached state disk using the
