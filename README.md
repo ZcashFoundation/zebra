@@ -103,7 +103,7 @@ for your platform:
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.8 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.9 zebrad`
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
@@ -203,13 +203,15 @@ So Zebra's state should always be valid, unless your OS or disk hardware is corr
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
+- [Old state versions are not deleted](https://github.com/ZcashFoundation/zebra/issues/1213)
+  - When Zebra changes its state format, it does not delete the old state directory. You can delete old state directories if you need the space.
+- [No Windows support #3801](https://github.com/ZcashFoundation/zebra/issues/3801)
+  - We used to test with Windows Server 2019, but not anymore; see issue for details
 - [In rare cases, Zebra panics on shutdown #1678](https://github.com/ZcashFoundation/zebra/issues/1678)
   - See [#2209](https://github.com/ZcashFoundation/zebra/issues/2209) for an example.
   - These panics can be ignored, unless they happen frequently.
 - [Interrupt handler does not work when a blocking task is running #1351](https://github.com/ZcashFoundation/zebra/issues/1351)
   - Zebra should eventually exit once the task finishes. Or you can forcibly terminate the process.
-- [No Windows support #3801](https://github.com/ZcashFoundation/zebra/issues/3801)
-  - We used to test with Windows Server 2019, but not anymore; see issue for details
 
 ## Future Work
 

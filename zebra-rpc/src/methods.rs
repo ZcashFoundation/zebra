@@ -28,7 +28,7 @@ use zebra_chain::{
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
-use zebra_state::OutputIndex;
+use zebra_state::{OutputIndex, OutputLocation, TransactionLocation};
 
 use crate::queue::Queue;
 
@@ -179,6 +179,7 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
+    /// A [`GetAddressTxIdsRequest`] struct with the following named fields:
     /// - `addresses`: (json array of string, required) The addresses to get transactions from.
     /// - `start`: (numeric, required) The lower height to start looking for transactions (inclusive).
     /// - `end`: (numeric, required) The top height to stop looking for transactions (inclusive).
@@ -188,12 +189,8 @@ pub trait Rpc {
     /// Only the multi-argument format is used by lightwalletd and this is what we currently support:
     /// https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102
     #[rpc(name = "getaddresstxids")]
-    fn get_address_tx_ids(
-        &self,
-        address_strings: AddressStrings,
-        start: u32,
-        end: u32,
-    ) -> BoxFuture<Result<Vec<String>>>;
+    fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest)
+        -> BoxFuture<Result<Vec<String>>>;
 
     /// Returns all unspent outputs for a list of addresses.
     ///
@@ -665,13 +662,11 @@ where
 
     fn get_address_tx_ids(
         &self,
-        address_strings: AddressStrings,
-        start: u32,
-        end: u32,
+        request: GetAddressTxIdsRequest,
     ) -> BoxFuture<Result<Vec<String>>> {
         let mut state = self.state.clone();
-        let start = Height(start);
-        let end = Height(end);
+        let start = Height(request.start);
+        let end = Height(request.end);
 
         let chain_height = self.latest_chain_tip.best_tip_height().ok_or(Error {
             code: ErrorCode::ServerError(0),
@@ -683,7 +678,10 @@ where
             // height range checks
             check_height_range(start, end, chain_height?)?;
 
-            let valid_addresses = address_strings.valid_addresses()?;
+            let valid_addresses = AddressStrings {
+                addresses: request.addresses,
+            }
+            .valid_addresses()?;
 
             let request = zebra_state::ReadRequest::TransactionIdsByAddresses {
                 addresses: valid_addresses,
@@ -701,7 +699,24 @@ where
 
             let hashes = match response {
                 zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
-                    hashes.values().map(|tx_id| tx_id.to_string()).collect()
+                    let mut last_tx_location = TransactionLocation::from_usize(Height(0), 0);
+
+                    hashes
+                        .iter()
+                        .map(|(tx_loc, tx_id)| {
+                            // TODO: downgrade to debug, because there's nothing the user can do
+                            assert!(
+                                *tx_loc > last_tx_location,
+                                "Transactions were not in chain order:\n\
+                                 {tx_loc:?} {tx_id:?} was after:\n\
+                                 {last_tx_location:?}",
+                            );
+
+                            last_tx_location = *tx_loc;
+
+                            tx_id.to_string()
+                        })
+                        .collect()
                 }
                 _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
             };
@@ -737,6 +752,8 @@ where
                 _ => unreachable!("unmatched response to a UtxosByAddresses request"),
             };
 
+            let mut last_output_location = OutputLocation::from_usize(Height(0), 0, 0);
+
             for utxo_data in utxos.utxos() {
                 let address = utxo_data.0;
                 let txid = *utxo_data.1;
@@ -744,6 +761,15 @@ where
                 let output_index = utxo_data.2.output_index();
                 let script = utxo_data.3.lock_script.clone();
                 let satoshis = u64::from(utxo_data.3.value);
+
+                let output_location = *utxo_data.2;
+                // TODO: downgrade to debug, because there's nothing the user can do
+                assert!(
+                    output_location > last_output_location,
+                    "UTXOs were not in chain order:\n\
+                     {output_location:?} {address:?} {txid:?} was after:\n\
+                     {last_output_location:?}",
+                );
 
                 let entry = GetAddressUtxos {
                     address,
@@ -754,6 +780,8 @@ where
                     height,
                 };
                 response_utxos.push(entry);
+
+                last_output_location = output_location;
             }
 
             Ok(response_utxos)
@@ -965,6 +993,19 @@ pub struct GetAddressUtxos {
     ///
     /// We put this field last, to match the zcashd order.
     height: Height,
+}
+
+/// A struct to use as parameter of the `getaddresstxids`.
+///
+/// See the notes for the [`Rpc::get_address_tx_ids` method].
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
+pub struct GetAddressTxIdsRequest {
+    // A list of addresses to get transactions from.
+    addresses: Vec<String>,
+    // The height to start looking for transactions.
+    start: u32,
+    // The height to end looking for transactions.
+    end: u32,
 }
 
 impl GetRawTransaction {

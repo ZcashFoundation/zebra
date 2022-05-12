@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -26,8 +26,8 @@ rlimit = "0.8.3"
 rocksdb = { version = "0.18.0", default_features = false, features = ["lz4"] }
 serde = { version = "1.0.137", features = ["serde_derive"] }
 tempfile = "3.3.0"
-thiserror = "1.0.30"
-tokio = { version = "1.18.1", features = ["sync"] }
+thiserror = "1.0.31"
+tokio = { version = "1.18.2", features = ["sync"] }
 tower = { version = "0.4.12", features = ["buffer", "util"] }
 tracing = "0.1.31"
 
@@ -50,7 +50,7 @@ proptest-derive = "0.3.0"
 halo2 = { package = "halo2_proofs", version = "=0.1.0-beta.4" }
 jubjub = "0.8.0"
 
-tokio = { version = "1.18.1", features = ["full"] }
+tokio = { version = "1.18.2", features = ["full"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }

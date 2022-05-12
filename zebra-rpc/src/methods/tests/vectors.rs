@@ -337,14 +337,18 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 1;
     let end: u32 = 2;
     let error = rpc
-        .get_address_tx_ids(AddressStrings::new(addresses), start, end)
+        .get_address_tx_ids(GetAddressTxIdsRequest {
+            addresses: addresses.clone(),
+            start,
+            end,
+        })
         .await
         .unwrap_err();
     assert_eq!(
         error.message,
         format!(
             "invalid address \"{}\": parse error: t-addr decoding error",
-            address
+            address.clone()
         )
     );
 
@@ -356,7 +360,11 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 2;
     let end: u32 = 1;
     let error = rpc
-        .get_address_tx_ids(AddressStrings::new(addresses.clone()), start, end)
+        .get_address_tx_ids(GetAddressTxIdsRequest {
+            addresses: addresses.clone(),
+            start,
+            end,
+        })
         .await
         .unwrap_err();
     assert_eq!(
@@ -368,7 +376,11 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 0;
     let end: u32 = 1;
     let error = rpc
-        .get_address_tx_ids(AddressStrings::new(addresses.clone()), start, end)
+        .get_address_tx_ids(GetAddressTxIdsRequest {
+            addresses: addresses.clone(),
+            start,
+            end,
+        })
         .await
         .unwrap_err();
     assert_eq!(
@@ -380,7 +392,11 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: u32 = 1;
     let end: u32 = 11;
     let error = rpc
-        .get_address_tx_ids(AddressStrings::new(addresses), start, end)
+        .get_address_tx_ids(GetAddressTxIdsRequest {
+            addresses,
+            start,
+            end,
+        })
         .await
         .unwrap_err();
     assert_eq!(
@@ -459,7 +475,11 @@ async fn rpc_getaddresstxids_response_with(
     // call the method with valid arguments
     let addresses = vec![address.to_string()];
     let response = rpc
-        .get_address_tx_ids(AddressStrings::new(addresses), *range.start(), *range.end())
+        .get_address_tx_ids(GetAddressTxIdsRequest {
+            addresses,
+            start: *range.start(),
+            end: *range.end(),
+        })
         .await
         .expect("arguments are valid so no error can happen here");
 

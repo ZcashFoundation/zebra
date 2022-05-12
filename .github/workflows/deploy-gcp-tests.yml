@@ -1,4 +1,4 @@
-name: Test instance deployment
+name: Deploy GCP tests
 
 on:
   workflow_call:
@@ -19,10 +19,18 @@ on:
       test_variables:
         required: true
         type: string
-      zebra_state_path:
+      root_state_path:
         required: false
         type: string
         default: '/zebrad-cache'
+      zebra_state_dir:
+        required: false
+        type: string
+        default: ''
+      lwd_state_dir:
+        required: false
+        type: string
+        default: ''
       disk_prefix:
         required: false
         type: string
@@ -56,6 +64,10 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -106,7 +118,7 @@ jobs:
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           && \
           docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.zebra_state_path }} \
+          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
       - name: Get state version from constants.rs
@@ -198,7 +210,7 @@ jobs:
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
           echo "LOCAL_STATE_VERSION: $LOCAL_STATE_VERSION"
 
-          ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~${{ inputs.disk_prefix }} AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache-main AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "Disk: $ZEBRA_STATE_DISK"
           echo "Description: $(gcloud compute images describe $ZEBRA_STATE_DISK --format='value(DESCRIPTION)')"
 
@@ -209,7 +221,8 @@ jobs:
 
           echo "ZEBRA_CACHED_DISK_NAME=$ZEBRA_STATE_DISK" >> $GITHUB_ENV
 
-      # Creates Compute Engine virtual machine instance w/ disks
+      # Creates Compute Engine virtual machine and attach a cached state disk using the
+      # $ZEBRA_CACHED_DISK_NAME variable as the source image to populate the disk cached state
       - name: Create GCP compute instance
         id: create-instance
         run: |
@@ -226,7 +239,15 @@ jobs:
           --zone ${{ env.ZONE }}
           sleep 60
 
+      # SSH into the just created VM, and create a Docker container to run the incoming test 
+      # from ${{ inputs.test_id }}, then create a docker volume with the recently attached disk.
+      # The disk will be mounted in ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }}.
+      #
+      # This step mounts the volume only when a single cached state is needed, in this case
+      # the cached state from Zebra.
       - name: Run ${{ inputs.test_id }} test
+        # Validate we only need zebra's cache and not lightwalletd's cache
+        # if: ${{ inputs.zebra_state_dir }} != '' && ${{ inputs.lwd_state_dir }} == ''
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -239,7 +260,7 @@ jobs:
           ${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           && \
           docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
-          --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.zebra_state_path }} \
+          --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
       # Create image from disk that will be used for following tests
@@ -249,7 +270,7 @@ jobs:
         run: |
           gcloud compute images create ${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }} \
           --force \
-          --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
+          --source-disk=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           --source-disk-zone=${{ env.ZONE }} \
           --storage-location=us \
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"

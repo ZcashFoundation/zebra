@@ -18,15 +18,12 @@ use color_eyre::eyre::Result;
 use zebra_chain::parameters::Network;
 use zebra_test::{
     args,
-    command::{Arguments, TestDirExt, NO_MATCHES_REGEX_ITER},
+    command::{Arguments, TestDirExt},
     prelude::*,
 };
 use zebrad::config::ZebradConfig;
 
-use crate::common::{
-    failure_messages::{PROCESS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES},
-    lightwalletd::random_known_rpc_port_config,
-};
+use crate::common::lightwalletd::{random_known_rpc_port_config, LightwalletdTestType};
 
 /// After we launch `zebrad`, wait this long for the command to start up,
 /// take the actions expected by the tests, and log the expected logs.
@@ -54,7 +51,7 @@ pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = Duration::from_secs(10 * 60)
 ///
 /// `lightwalletd` takes about half an hour to fully sync,
 /// and Zebra needs time to activate its mempool.
-pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = Duration::from_secs(60 * 60);
+pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = Duration::from_secs(45 * 60);
 
 /// Extension trait for methods on `tempfile::TempDir` for using it as a test
 /// directory for `zebrad`.
@@ -198,7 +195,7 @@ where
 pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
     network: Network,
     zebra_directory: P,
-    timeout: Duration,
+    test_type: LightwalletdTestType,
 ) -> Result<(TestChild<P>, SocketAddr)> {
     let mut config = random_known_rpc_port_config()
         .expect("Failed to create a config file with a known RPC listener port");
@@ -209,19 +206,14 @@ pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
     config.network.network = network;
     config.mempool.debug_enable_at_height = Some(0);
 
+    let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
+
     let mut zebrad = zebra_directory
         .with_config(&mut config)?
         .spawn_child(args!["start"])?
         .bypass_test_capture(true)
-        .with_timeout(timeout)
-        .with_failure_regex_iter(
-            // TODO: replace with a function that returns the full list and correct return type
-            ZEBRA_FAILURE_MESSAGES
-                .iter()
-                .chain(PROCESS_FAILURE_MESSAGES)
-                .cloned(),
-            NO_MATCHES_REGEX_ITER.iter().cloned(),
-        );
+        .with_timeout(test_type.zebrad_timeout())
+        .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
     let rpc_address = config.rpc.listen_addr.unwrap();
 

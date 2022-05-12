@@ -141,7 +141,7 @@ pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
 ///
 /// If this timeout is set too low, the syncer will sometimes get stuck in a
 /// failure loop.
-pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(180);
+pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(6 * 60);
 
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
@@ -866,28 +866,31 @@ where
     fn should_restart_sync(e: &BlockDownloadVerifyError) -> bool {
         match e {
             // Structural matches: downcasts
-            BlockDownloadVerifyError::Invalid(VerifyChainError::Checkpoint(
-                VerifyCheckpointError::AlreadyVerified { .. },
-            )) => {
+            BlockDownloadVerifyError::Invalid {
+                error: VerifyChainError::Checkpoint(VerifyCheckpointError::AlreadyVerified { .. }),
+                ..
+            } => {
                 debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
                 false
             }
-            BlockDownloadVerifyError::Invalid(VerifyChainError::Block(
-                VerifyBlockError::Block {
-                    source: BlockError::AlreadyInChain(_, _),
-                },
-            )) => {
+            BlockDownloadVerifyError::Invalid {
+                error:
+                    VerifyChainError::Block(VerifyBlockError::Block {
+                        source: BlockError::AlreadyInChain(_, _),
+                    }),
+                ..
+            } => {
                 debug!(error = ?e, "block is already in chain, possibly from a previous sync run, continuing");
                 false
             }
 
             // Structural matches: direct
-            BlockDownloadVerifyError::CancelledDuringDownload
-            | BlockDownloadVerifyError::CancelledDuringVerification => {
+            BlockDownloadVerifyError::CancelledDuringDownload { .. }
+            | BlockDownloadVerifyError::CancelledDuringVerification { .. } => {
                 debug!(error = ?e, "block verification was cancelled, continuing");
                 false
             }
-            BlockDownloadVerifyError::BehindTipHeightLimit => {
+            BlockDownloadVerifyError::BehindTipHeightLimit { .. } => {
                 debug!(
                     error = ?e,
                     "block height is behind the current state tip, \
@@ -905,15 +908,16 @@ where
             }
 
             // String matches
-            BlockDownloadVerifyError::Invalid(VerifyChainError::Block(
-                VerifyBlockError::Commit(ref source),
-            )) if format!("{:?}", source).contains("block is already committed to the state") => {
+            BlockDownloadVerifyError::Invalid {
+                error: VerifyChainError::Block(VerifyBlockError::Commit(ref source)),
+                ..
+            } if format!("{:?}", source).contains("block is already committed to the state") => {
                 // TODO: improve this by checking the type (#2908)
                 debug!(error = ?e, "block is already committed, possibly from a previous sync run, continuing");
                 false
             }
-            BlockDownloadVerifyError::DownloadFailed(ref source)
-                if format!("{:?}", source).contains("NotFound") =>
+            BlockDownloadVerifyError::DownloadFailed { ref error, .. }
+                if format!("{:?}", error).contains("NotFound") =>
             {
                 // Covers these errors:
                 // - NotFoundResponse

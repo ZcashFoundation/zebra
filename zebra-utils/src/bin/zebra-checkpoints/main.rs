@@ -12,21 +12,14 @@ use color_eyre::eyre::{ensure, Result};
 use serde_json::Value;
 use std::process::Stdio;
 use structopt::StructOpt;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use zebra_chain::block;
+use zebra_utils::init_tracing;
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
 mod args;
-
-/// Initialise tracing using its defaults.
-fn init_tracing() {
-    tracing_subscriber::Registry::default()
-        .with(tracing_error::ErrorLayer::default())
-        .init();
-}
 
 /// Return a new `zcash-cli` command, including the `zebra-checkpoints`
 /// passthrough arguments.
