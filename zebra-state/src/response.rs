@@ -5,6 +5,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block},
+    orchard, sapling,
     transaction::{self, Transaction},
     transparent,
 };
@@ -49,13 +50,27 @@ pub enum Response {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// A response to a read-only [`ReadStateService`] [`ReadRequest`].
+/// A response to a read-only [`ReadStateService`](crate::ReadStateService)'s
+/// [`ReadRequest`](crate::ReadRequest).
 pub enum ReadResponse {
-    /// Response to [`ReadRequest::Block`] with the specified block.
+    /// Response to [`ReadRequest::Block`](crate::ReadRequest::Block) with the
+    /// specified block.
     Block(Option<Arc<Block>>),
 
-    /// Response to [`ReadRequest::Transaction`] with the specified transaction.
+    /// Response to
+    /// [`ReadRequest::Transaction`](crate::ReadRequest::Transaction) with the
+    /// specified transaction.
     Transaction(Option<(Arc<Transaction>, block::Height)>),
+
+    /// Response to
+    /// [`ReadRequest::SaplingTree`](crate::ReadRequest::SaplingTree) with the
+    /// specified Sapling note commitment tree.
+    SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),
+
+    /// Response to
+    /// [`ReadRequest::OrchardTree`](crate::ReadRequest::OrchardTree) with the
+    /// specified Orchard note commitment tree.
+    OrchardTree(Option<Arc<orchard::tree::NoteCommitmentTree>>),
 
     /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses.
     AddressBalance(Amount<NonNegative>),

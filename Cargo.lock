@@ -1486,6 +1486,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "equihash"
+version = "0.1.0"
+source = "git+https://github.com/zcash/librustzcash.git?rev=d5c5f04#d5c5f048947d211c2fbef23ce986b329b91d1aa5"
+dependencies = [
+ "blake2b_simd 1.0.0",
+ "byteorder",
+]
+
+[[package]]
 name = "eyre"
 version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5909,6 +5918,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_encoding"
+version = "0.0.0"
+source = "git+https://github.com/zcash/librustzcash.git?rev=d5c5f04#d5c5f048947d211c2fbef23ce986b329b91d1aa5"
+dependencies = [
+ "byteorder",
+ "nonempty",
+]
+
+[[package]]
 name = "zcash_history"
 version = "0.2.0"
 source = "git+https://github.com/ZcashFoundation/librustzcash.git?tag=0.5.1-zebra-v1.0.0-beta.4#80d5b049b8e8127671026320a1c22841035345a4"
@@ -5933,6 +5951,17 @@ dependencies = [
 name = "zcash_note_encryption"
 version = "0.1.0"
 source = "git+https://github.com/zcash/librustzcash.git?rev=d14e7a707ce01cefcbc82651dad48f002185dded#d14e7a707ce01cefcbc82651dad48f002185dded"
+dependencies = [
+ "chacha20",
+ "chacha20poly1305",
+ "rand_core 0.6.3",
+ "subtle",
+]
+
+[[package]]
+name = "zcash_note_encryption"
+version = "0.1.0"
+source = "git+https://github.com/zcash/librustzcash.git?rev=d5c5f04#d5c5f048947d211c2fbef23ce986b329b91d1aa5"
 dependencies = [
  "chacha20",
  "chacha20poly1305",
@@ -6006,6 +6035,42 @@ dependencies = [
  "subtle",
  "zcash_encoding 0.0.0 (git+https://github.com/zcash/librustzcash.git?rev=d14e7a707ce01cefcbc82651dad48f002185dded)",
  "zcash_note_encryption 0.1.0 (git+https://github.com/zcash/librustzcash.git?rev=d14e7a707ce01cefcbc82651dad48f002185dded)",
+]
+
+[[package]]
+name = "zcash_primitives"
+version = "0.5.0"
+source = "git+https://github.com/zcash/librustzcash.git?rev=d5c5f04#d5c5f048947d211c2fbef23ce986b329b91d1aa5"
+dependencies = [
+ "aes",
+ "bip0039",
+ "bitvec",
+ "blake2b_simd 1.0.0",
+ "blake2s_simd 1.0.0",
+ "bls12_381",
+ "bs58",
+ "byteorder",
+ "chacha20poly1305",
+ "equihash 0.1.0 (git+https://github.com/zcash/librustzcash.git?rev=d5c5f04)",
+ "ff",
+ "fpe",
+ "group",
+ "hdwallet",
+ "hex",
+ "incrementalmerkletree",
+ "jubjub",
+ "lazy_static",
+ "memuse",
+ "nonempty",
+ "orchard",
+ "rand 0.8.5",
+ "rand_core 0.6.3",
+ "ripemd",
+ "secp256k1",
+ "sha2",
+ "subtle",
+ "zcash_encoding 0.0.0 (git+https://github.com/zcash/librustzcash.git?rev=d5c5f04)",
+ "zcash_note_encryption 0.1.0 (git+https://github.com/zcash/librustzcash.git?rev=d5c5f04)",
 ]
 
 [[package]]
@@ -6095,9 +6160,10 @@ dependencies = [
  "tracing",
  "uint",
  "x25519-dalek",
+ "zcash_encoding 0.0.0 (git+https://github.com/zcash/librustzcash.git?rev=d5c5f04)",
  "zcash_history",
  "zcash_note_encryption 0.1.0 (git+https://github.com/zcash/librustzcash.git?rev=d14e7a707ce01cefcbc82651dad48f002185dded)",
- "zcash_primitives 0.5.0 (git+https://github.com/zcash/librustzcash.git?rev=d14e7a707ce01cefcbc82651dad48f002185dded)",
+ "zcash_primitives 0.5.0 (git+https://github.com/zcash/librustzcash.git?rev=d5c5f04)",
  "zebra-test",
 ]
 

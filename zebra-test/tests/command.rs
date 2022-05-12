@@ -60,7 +60,7 @@ fn kill_on_timeout_output_continuous_lines() -> Result<()> {
     // Without '-v', hexdump hides duplicate lines. But we want duplicate lines
     // in this test.
     let mut child = tempdir()?
-        .spawn_child_with_command(TEST_CMD, args!["-v", "/dev/zero"])?
+        .spawn_child_with_command(TEST_CMD, args!["-v", "-n", "1024", "/dev/zero"])?
         .with_timeout(Duration::from_secs(2));
 
     // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
@@ -109,14 +109,14 @@ fn finish_before_timeout_output_single_line() -> Result<()> {
 fn kill_on_timeout_continuous_output_no_newlines() -> Result<()> {
     zebra_test::init();
 
-    const TEST_CMD: &str = "cat";
+    const TEST_CMD: &str = "head";
     // Skip the test if the test system does not have the command
     if !is_command_available(TEST_CMD, &["/dev/null"]) {
         return Ok(());
     }
 
     let mut child = tempdir()?
-        .spawn_child_with_command(TEST_CMD, args!["/dev/zero"])?
+        .spawn_child_with_command(TEST_CMD, args!["-c", "1024", "/dev/zero"])?
         .with_timeout(Duration::from_secs(2));
 
     // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.

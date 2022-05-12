@@ -208,7 +208,7 @@ jobs:
         id: get-disk-name
         run: |
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
-          echo "LOCAL_STATE_VERSION: $LOCAL_STATE_VERSION"
+          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
           ZEBRA_STATE_DISK=$(gcloud compute images list --filter="name~zebrad-cache-main AND name~-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "Disk: $ZEBRA_STATE_DISK"
@@ -278,8 +278,14 @@ jobs:
           --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
-      # Create image from disk that will be used for following tests
-      # Force the image creation as the disk is still attached even though is not being used by the container
+      # Create an image from disk that will be used for following/other tests
+      # This image can contain:
+      # - Zebra cached state
+      # - Zebra + lightwalletd cached state
+      # Which cached state is being saved to the disk is defined by ${{ inputs.disk_prefix }}
+      #
+      # Force the image creation (--force) as the disk is still attached even though is not being
+      # used by the container
       - name: Create image from state disk
         if: ${{ inputs.saves_to_disk }}
         run: |
