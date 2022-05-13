@@ -197,9 +197,10 @@ jobs:
           token_format: 'access_token'
 
       # Find a cached state disk for this job, matching all of:
-      # - disk kind (disk_prefix)
-      # - disk target height (disk_suffix)
-      # - state version (from the source code)
+      # - disk kind (disk_prefix) - zebra or lwd
+      # - state version (from the source code) - v{N}
+      # - network (network) - mainnet or testnet
+      # - disk target height kind (disk_suffix) - checkpoint or tip
       #
       # If there are multiple disks:
       # - prefer images generated from the `main` branch, then any other branch
