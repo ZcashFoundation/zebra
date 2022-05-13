@@ -191,7 +191,7 @@ fn snapshot_rpc_getaddressbalance(address_balance: AddressBalance, settings: &in
 
 /// Check `getblock` response, using `cargo insta`, JSON serialization, and block test vectors.
 ///
-/// Does not create a snapshot file.
+/// The snapshot file does not contain any data, but it does enforce the response format.
 fn snapshot_rpc_getblock(block: GetBlock, block_data: &[u8], settings: &insta::Settings) {
     let block_data = hex::encode(block_data);
 
