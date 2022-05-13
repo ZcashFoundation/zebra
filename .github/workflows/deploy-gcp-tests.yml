@@ -238,7 +238,7 @@ jobs:
           #
           # TODO: require ${NETWORK} in the name after PR #4391 merges to main, and runs a full sync
           #       network should replace [a-z]*
-          if [[ -v "$needs_lwd_state" ]]; then DISK_PREFIX="${{ inputs.lwd_state_dir }}" else DISK_PREFIX="${{ inputs.zebra_state_dir || inputs.disk_prefix }}"
+          if [[ -v "$needs_lwd_state" ]]; then DISK_PREFIX="${{ inputs.lwd_state_dir }}" else DISK_PREFIX="${{ inputs.zebra_state_dir || inputs.disk_prefix }}"; fi
           CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "main Disk: $CACHED_DISK_NAME"
 
