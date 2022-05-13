@@ -21,14 +21,16 @@ use tracing::Instrument;
 use zebra_chain::{
     block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
+    orchard,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
+    sapling,
     serialization::{SerializationError, ZcashDeserialize},
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
-use zebra_state::OutputIndex;
+use zebra_state::{OutputIndex, OutputLocation, TransactionLocation};
 
 use crate::queue::Queue;
 
@@ -148,6 +150,23 @@ pub trait Rpc {
     /// zcashd reference: [`getrawmempool`](https://zcash.github.io/rpc/getrawmempool.html)
     #[rpc(name = "getrawmempool")]
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>>;
+
+    /// Returns information about the given block's Sapling & Orchard tree state.
+    ///
+    /// zcashd reference: [`z_gettreestate`](https://zcash.github.io/rpc/z_gettreestate.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `hash | height`: (string, required) The block hash or height.
+    ///
+    /// # Notes
+    ///
+    /// The zcashd doc reference above says that the parameter "`height` can be
+    /// negative where -1 is the last known valid block". On the other hand,
+    /// `lightwalletd` only uses positive heights, so Zebra does not support
+    /// negative heights.
+    #[rpc(name = "z_gettreestate")]
+    fn z_get_treestate(&self, hash_or_height: String) -> BoxFuture<Result<GetTreestate>>;
 
     /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
     ///
@@ -660,6 +679,120 @@ where
         .boxed()
     }
 
+    fn z_get_treestate(&self, hash_or_height: String) -> BoxFuture<Result<GetTreestate>> {
+        let mut state = self.state.clone();
+
+        async move {
+            // Convert the [`hash_or_height`] string into an actual hash or height.
+            let hash_or_height = hash_or_height
+                .parse()
+                .map_err(|error: SerializationError| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            // Fetch the block referenced by [`hash_or_height`] from the state.
+
+            // TODO: If this RPC is called a lot, just get the block header,
+            // rather than the whole block.
+            let block_request = zebra_state::ReadRequest::Block(hash_or_height);
+            let block_response = state
+                .ready()
+                .and_then(|service| service.call(block_request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            // The block hash, height, and time are all required fields in the
+            // RPC response. For this reason, we throw an error early if the
+            // state didn't return the requested block so that we prevent
+            // further state queries.
+            let block = match block_response {
+                zebra_state::ReadResponse::Block(Some(block)) => block,
+                zebra_state::ReadResponse::Block(None) => {
+                    return Err(Error {
+                        code: ErrorCode::ServerError(0),
+                        message: "the requested block was not found".to_string(),
+                        data: None,
+                    })
+                }
+                _ => unreachable!("unmatched response to a block request"),
+            };
+
+            // Fetch the Sapling & Orchard treestates referenced by
+            // [`hash_or_height`] from the state.
+
+            let sapling_request = zebra_state::ReadRequest::SaplingTree(hash_or_height);
+            let sapling_response = state
+                .ready()
+                .and_then(|service| service.call(sapling_request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            let orchard_request = zebra_state::ReadRequest::OrchardTree(hash_or_height);
+            let orchard_response = state
+                .ready()
+                .and_then(|service| service.call(orchard_request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            // We've got all the data we need for the RPC response, so we
+            // assemble the response.
+
+            let hash = block.hash();
+
+            let height = block
+                .coinbase_height()
+                .expect("verified blocks have a valid height");
+
+            let time = u32::try_from(block.header.time.timestamp())
+                .expect("Timestamps of valid blocks always fit into u32.");
+
+            let sapling_tree = match sapling_response {
+                zebra_state::ReadResponse::SaplingTree(maybe_tree) => {
+                    sapling::tree::SerializedTree::from(maybe_tree)
+                }
+                _ => unreachable!("unmatched response to a sapling tree request"),
+            };
+
+            let orchard_tree = match orchard_response {
+                zebra_state::ReadResponse::OrchardTree(maybe_tree) => {
+                    orchard::tree::SerializedTree::from(maybe_tree)
+                }
+                _ => unreachable!("unmatched response to an orchard tree request"),
+            };
+
+            Ok(GetTreestate {
+                hash,
+                height,
+                time,
+                sapling: Treestate {
+                    commitments: Commitments {
+                        final_state: sapling_tree,
+                    },
+                },
+                orchard: Treestate {
+                    commitments: Commitments {
+                        final_state: orchard_tree,
+                    },
+                },
+            })
+        }
+        .boxed()
+    }
+
     fn get_address_tx_ids(
         &self,
         request: GetAddressTxIdsRequest,
@@ -699,7 +832,24 @@ where
 
             let hashes = match response {
                 zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
-                    hashes.values().map(|tx_id| tx_id.to_string()).collect()
+                    let mut last_tx_location = TransactionLocation::from_usize(Height(0), 0);
+
+                    hashes
+                        .iter()
+                        .map(|(tx_loc, tx_id)| {
+                            // TODO: downgrade to debug, because there's nothing the user can do
+                            assert!(
+                                *tx_loc > last_tx_location,
+                                "Transactions were not in chain order:\n\
+                                 {tx_loc:?} {tx_id:?} was after:\n\
+                                 {last_tx_location:?}",
+                            );
+
+                            last_tx_location = *tx_loc;
+
+                            tx_id.to_string()
+                        })
+                        .collect()
                 }
                 _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
             };
@@ -735,6 +885,8 @@ where
                 _ => unreachable!("unmatched response to a UtxosByAddresses request"),
             };
 
+            let mut last_output_location = OutputLocation::from_usize(Height(0), 0, 0);
+
             for utxo_data in utxos.utxos() {
                 let address = utxo_data.0;
                 let txid = *utxo_data.1;
@@ -742,6 +894,15 @@ where
                 let output_index = utxo_data.2.output_index();
                 let script = utxo_data.3.lock_script.clone();
                 let satoshis = u64::from(utxo_data.3.value);
+
+                let output_location = *utxo_data.2;
+                // TODO: downgrade to debug, because there's nothing the user can do
+                assert!(
+                    output_location > last_output_location,
+                    "UTXOs were not in chain order:\n\
+                     {output_location:?} {address:?} {txid:?} was after:\n\
+                     {last_output_location:?}",
+                );
 
                 let entry = GetAddressUtxos {
                     address,
@@ -752,6 +913,8 @@ where
                     height,
                 };
                 response_utxos.push(entry);
+
+                last_output_location = output_location;
             }
 
             Ok(response_utxos)
@@ -916,6 +1079,65 @@ pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
 /// Also see the notes for the [`Rpc::get_best_block_hash` method].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
+
+/// Response to a `z_gettreestate` RPC request.
+///
+/// Contains the hex-encoded Sapling & Orchard note commitment trees, and their
+/// corresponding [`block::Hash`], [`Height`], and block time.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct GetTreestate {
+    /// The block hash corresponding to the treestate, hex-encoded.
+    #[serde(with = "hex")]
+    hash: block::Hash,
+
+    /// The block height corresponding to the treestate, numeric.
+    height: Height,
+
+    /// Unix time when the block corresponding to the treestate was mined,
+    /// numeric.
+    ///
+    /// UTC seconds since the Unix 1970-01-01 epoch.
+    time: u32,
+
+    /// A treestate containing a Sapling note commitment tree, hex-encoded.
+    #[serde(skip_serializing_if = "Treestate::is_empty")]
+    sapling: Treestate<sapling::tree::SerializedTree>,
+
+    /// A treestate containing an Orchard note commitment tree, hex-encoded.
+    #[serde(skip_serializing_if = "Treestate::is_empty")]
+    orchard: Treestate<orchard::tree::SerializedTree>,
+}
+
+/// A treestate that is included in the [`z_gettreestate`][1] RPC response.
+///
+/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+struct Treestate<Tree: AsRef<[u8]>> {
+    /// Contains an Orchard or Sapling serialized note commitment tree,
+    /// hex-encoded.
+    commitments: Commitments<Tree>,
+}
+
+/// A wrapper that contains either an Orchard or Sapling note commitment tree.
+///
+/// Note that in the original [`z_gettreestate`][1] RPC, [`Commitments`] also
+/// contains the field `finalRoot`. Zebra does *not* use this field.
+///
+/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+struct Commitments<Tree: AsRef<[u8]>> {
+    /// Orchard or Sapling serialized note commitment tree, hex-encoded.
+    #[serde(with = "hex")]
+    #[serde(rename = "finalState")]
+    final_state: Tree,
+}
+
+impl<Tree: AsRef<[u8]>> Treestate<Tree> {
+    /// Returns `true` if there's no serialized commitment tree.
+    fn is_empty(&self) -> bool {
+        self.commitments.final_state.as_ref().is_empty()
+    }
+}
 
 /// Response to a `getrawtransaction` RPC request.
 ///

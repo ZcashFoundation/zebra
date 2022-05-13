@@ -40,6 +40,7 @@ jobs:
       - name: Install mdbook
         run: |
           cargo install mdbook
+          cargo install mdbook-mermaid
 
       - name: Build Zebra book
         run: |

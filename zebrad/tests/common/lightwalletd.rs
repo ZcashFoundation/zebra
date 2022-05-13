@@ -34,8 +34,11 @@ use super::{
 
 use LightwalletdTestType::*;
 
+#[cfg(feature = "lightwalletd-grpc-tests")]
 pub mod send_transaction_test;
+#[cfg(feature = "lightwalletd-grpc-tests")]
 pub mod wallet_grpc;
+#[cfg(feature = "lightwalletd-grpc-tests")]
 pub mod wallet_grpc_test;
 
 /// The name of the env var that enables Zebra lightwalletd integration tests.
@@ -318,9 +321,12 @@ impl LightwalletdTestType {
 
     /// Returns the `zebrad` timeout for this test type.
     pub fn zebrad_timeout(&self) -> Duration {
+        // We use the same timeouts as lightwalletd,
+        // because the tests swap between checking zebrad and lightwalletd.
         match self {
             LaunchWithEmptyState => LIGHTWALLETD_DELAY,
-            FullSyncFromGenesis { .. } | UpdateCachedState => LIGHTWALLETD_UPDATE_TIP_DELAY,
+            FullSyncFromGenesis { .. } => LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
+            UpdateCachedState => LIGHTWALLETD_UPDATE_TIP_DELAY,
         }
     }
 
@@ -328,8 +334,8 @@ impl LightwalletdTestType {
     pub fn lightwalletd_timeout(&self) -> Duration {
         match self {
             LaunchWithEmptyState => LIGHTWALLETD_DELAY,
-            UpdateCachedState => LIGHTWALLETD_UPDATE_TIP_DELAY,
             FullSyncFromGenesis { .. } => LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
+            UpdateCachedState => LIGHTWALLETD_UPDATE_TIP_DELAY,
         }
     }
 

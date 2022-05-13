@@ -1,8 +1,11 @@
 //! Shared state reading code.
 //!
-//! Used by [`StateService`] and [`ReadStateService`]
-//! to read from the best [`Chain`] in the [`NonFinalizedState`],
-//! and the database in the [`FinalizedState`].
+//! Used by [`StateService`](crate::StateService) and
+//! [`ReadStateService`](crate::ReadStateService) to read from the best
+//! [`Chain`] in the
+//! [`NonFinalizedState`](crate::service::non_finalized_state::NonFinalizedState),
+//! and the database in the
+//! [`FinalizedState`](crate::service::finalized_state::FinalizedState).
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
@@ -13,7 +16,9 @@ use std::{
 use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
     block::{self, Block, Height},
+    orchard,
     parameters::Network,
+    sapling,
     transaction::{self, Transaction},
     transparent,
 };
@@ -44,8 +49,8 @@ const FINALIZED_ADDRESS_INDEX_RETRIES: usize = 3;
 pub const ADDRESS_HEIGHTS_FULL_RANGE: RangeInclusive<Height> = Height(1)..=Height::MAX;
 
 /// Returns the [`Block`] with [`block::Hash`](zebra_chain::block::Hash) or
-/// [`Height`](zebra_chain::block::Height),
-/// if it exists in the non-finalized `chain` or finalized `db`.
+/// [`Height`](zebra_chain::block::Height), if it exists in the non-finalized
+/// `chain` or finalized `db`.
 pub(crate) fn block<C>(
     chain: Option<C>,
     db: &ZebraDb,
@@ -56,12 +61,13 @@ where
 {
     // # Correctness
     //
-    // The StateService commits blocks to the finalized state before updating the latest chain,
-    // and it can commit additional blocks after we've cloned this `chain` variable.
+    // The StateService commits blocks to the finalized state before updating
+    // the latest chain, and it can commit additional blocks after we've cloned
+    // this `chain` variable.
     //
-    // Since blocks are the same in the finalized and non-finalized state,
-    // we check the most efficient alternative first.
-    // (`chain` is always in memory, but `db` stores blocks on disk, with a memory cache.)
+    // Since blocks are the same in the finalized and non-finalized state, we
+    // check the most efficient alternative first. (`chain` is always in memory,
+    // but `db` stores blocks on disk, with a memory cache.)
     chain
         .as_ref()
         .and_then(|chain| chain.as_ref().block(hash_or_height))
@@ -69,8 +75,8 @@ where
         .or_else(|| db.block(hash_or_height))
 }
 
-/// Returns the [`Transaction`] with [`transaction::Hash`],
-/// if it exists in the non-finalized `chain` or finalized `db`.
+/// Returns the [`Transaction`] with [`transaction::Hash`], if it exists in the
+/// non-finalized `chain` or finalized `db`.
 pub(crate) fn transaction<C>(
     chain: Option<C>,
     db: &ZebraDb,
@@ -81,12 +87,13 @@ where
 {
     // # Correctness
     //
-    // The StateService commits blocks to the finalized state before updating the latest chain,
-    // and it can commit additional blocks after we've cloned this `chain` variable.
+    // The StateService commits blocks to the finalized state before updating
+    // the latest chain, and it can commit additional blocks after we've cloned
+    // this `chain` variable.
     //
     // Since transactions are the same in the finalized and non-finalized state,
-    // we check the most efficient alternative first.
-    // (`chain` is always in memory, but `db` stores transactions on disk, with a memory cache.)
+    // we check the most efficient alternative first. (`chain` is always in
+    // memory, but `db` stores transactions on disk, with a memory cache.)
     chain
         .as_ref()
         .and_then(|chain| {
@@ -96,6 +103,60 @@ where
                 .map(|(tx, height)| (tx.clone(), height))
         })
         .or_else(|| db.transaction(hash))
+}
+
+/// Returns the Sapling
+/// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a
+/// hash or height, if it exists in the non-finalized `chain` or finalized `db`.
+pub(crate) fn sapling_tree<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<Arc<sapling::tree::NoteCommitmentTree>>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // The StateService commits blocks to the finalized state before updating
+    // the latest chain, and it can commit additional blocks after we've cloned
+    // this `chain` variable.
+    //
+    // Since sapling treestates are the same in the finalized and non-finalized
+    // state, we check the most efficient alternative first. (`chain` is always
+    // in memory, but `db` stores blocks on disk, with a memory cache.)
+    chain
+        .as_ref()
+        .and_then(|chain| chain.as_ref().sapling_tree(hash_or_height).cloned())
+        .map(Arc::new)
+        .or_else(|| db.sapling_tree(hash_or_height))
+}
+
+/// Returns the Orchard
+/// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
+/// hash or height, if it exists in the non-finalized `chain` or finalized `db`.
+pub(crate) fn orchard_tree<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<Arc<orchard::tree::NoteCommitmentTree>>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // The StateService commits blocks to the finalized state before updating
+    // the latest chain, and it can commit additional blocks after we've cloned
+    // this `chain` variable.
+    //
+    // Since orchard treestates are the same in the finalized and non-finalized
+    // state, we check the most efficient alternative first. (`chain` is always
+    // in memory, but `db` stores blocks on disk, with a memory cache.)
+    chain
+        .as_ref()
+        .and_then(|chain| chain.as_ref().orchard_tree(hash_or_height).cloned())
+        .map(Arc::new)
+        .or_else(|| db.orchard_tree(hash_or_height))
 }
 
 /// Returns the total transparent balance for the supplied [`transparent::Address`]es.
@@ -235,11 +296,22 @@ where
     C: AsRef<Chain>,
 {
     let mut utxo_error = None;
+    let address_count = addresses.len();
 
     // Retry the finalized UTXO query if it was interrupted by a finalizing block,
     // and the non-finalized chain doesn't overlap the changed heights.
-    for _ in 0..=FINALIZED_ADDRESS_INDEX_RETRIES {
+    for attempt in 0..=FINALIZED_ADDRESS_INDEX_RETRIES {
+        debug!(?attempt, ?address_count, "starting address UTXO query");
+
         let (finalized_utxos, finalized_tip_range) = finalized_transparent_utxos(db, &addresses);
+
+        debug!(
+            finalized_utxo_count = ?finalized_utxos.len(),
+            ?finalized_tip_range,
+            ?address_count,
+            ?attempt,
+            "finalized address UTXO response",
+        );
 
         // Apply the non-finalized UTXO changes.
         let chain_utxo_changes =
@@ -247,14 +319,40 @@ where
 
         // If the UTXOs are valid, return them, otherwise, retry or return an error.
         match chain_utxo_changes {
-            Ok(chain_utxo_changes) => {
-                let utxos = apply_utxo_changes(finalized_utxos, chain_utxo_changes);
+            Ok((created_chain_utxos, spent_chain_utxos)) => {
+                debug!(
+                    chain_utxo_count = ?created_chain_utxos.len(),
+                    chain_utxo_spent = ?spent_chain_utxos.len(),
+                    ?address_count,
+                    ?attempt,
+                    "chain address UTXO response",
+                );
+
+                let utxos =
+                    apply_utxo_changes(finalized_utxos, created_chain_utxos, spent_chain_utxos);
                 let tx_ids = lookup_tx_ids_for_utxos(chain, db, &addresses, &utxos);
+
+                debug!(
+                    full_utxo_count = ?utxos.len(),
+                    tx_id_count = ?tx_ids.len(),
+                    ?address_count,
+                    ?attempt,
+                    "full address UTXO response",
+                );
 
                 return Ok(AddressUtxos::new(network, utxos, tx_ids));
             }
 
-            Err(error) => utxo_error = Some(Err(error)),
+            Err(chain_utxo_error) => {
+                debug!(
+                    ?chain_utxo_error,
+                    ?address_count,
+                    ?attempt,
+                    "chain address UTXO response",
+                );
+
+                utxo_error = Some(Err(chain_utxo_error))
+            }
         }
     }
 
@@ -317,6 +415,8 @@ fn chain_transparent_utxo_changes<C>(
 where
     C: AsRef<Chain>,
 {
+    let address_count = addresses.len();
+
     let finalized_tip_range = match finalized_tip_range {
         Some(finalized_tip_range) => finalized_tip_range,
         None => {
@@ -325,7 +425,12 @@ where
                 "unexpected non-finalized chain when finalized state is empty"
             );
 
-            // Empty chains don't contain any changes.
+            debug!(
+                ?finalized_tip_range,
+                ?address_count,
+                "chain address UTXO query: state is empty, no UTXOs available",
+            );
+
             return Ok(Default::default());
         }
     };
@@ -338,50 +443,111 @@ where
     // But we can compensate for deleted UTXOs by applying the overlapping non-finalized UTXO changes.
 
     // Check if the finalized and non-finalized states match or overlap
-    let required_min_chain_root = finalized_tip_range.start().0 + 1;
-    let mut required_chain_overlap = required_min_chain_root..=finalized_tip_range.end().0;
+    let required_min_non_finalized_root = finalized_tip_range.start().0 + 1;
+
+    // Work out if we need to compensate for finalized query results from multiple heights:
+    // - Ok contains the finalized tip height (no need to compensate)
+    // - Err contains the required non-finalized chain overlap
+    let finalized_tip_status = required_min_non_finalized_root..=finalized_tip_range.end().0;
+    let finalized_tip_status = if finalized_tip_status.is_empty() {
+        let finalized_tip_height = *finalized_tip_range.end();
+        Ok(finalized_tip_height)
+    } else {
+        let required_non_finalized_overlap = finalized_tip_status;
+        Err(required_non_finalized_overlap)
+    };
 
     if chain.is_none() {
-        if required_chain_overlap.is_empty() {
-            // The non-finalized chain is empty, and we don't need it.
+        if finalized_tip_status.is_ok() {
+            debug!(
+                ?finalized_tip_status,
+                ?required_min_non_finalized_root,
+                ?finalized_tip_range,
+                ?address_count,
+                "chain address UTXO query: \
+                 finalized chain is consistent, and non-finalized chain is empty",
+            );
+
             return Ok(Default::default());
         } else {
             // We can't compensate for inconsistent database queries,
             // because the non-finalized chain is empty.
-            return Err("unable to get UTXOs: state was committing a block, and non-finalized chain is empty".into());
+            debug!(
+                ?finalized_tip_status,
+                ?required_min_non_finalized_root,
+                ?finalized_tip_range,
+                ?address_count,
+                "chain address UTXO query: \
+                 finalized tip query was inconsistent, but non-finalized chain is empty",
+            );
+
+            return Err("unable to get UTXOs: \
+                        state was committing a block, and non-finalized chain is empty"
+                .into());
         }
     }
 
     let chain = chain.unwrap();
     let chain = chain.as_ref();
 
-    let chain_root = chain.non_finalized_root_height().0;
-    let chain_tip = chain.non_finalized_tip_height().0;
+    let non_finalized_root = chain.non_finalized_root_height();
+    let non_finalized_tip = chain.non_finalized_tip_height();
 
     assert!(
-        chain_root <= required_min_chain_root,
-        "unexpected chain gap: the best chain is updated after its previous root is finalized"
+        non_finalized_root.0 <= required_min_non_finalized_root,
+        "unexpected chain gap: the best chain is updated after its previous root is finalized",
     );
 
-    // If we've already committed this entire chain, ignore its UTXO changes.
-    // This is more likely if the non-finalized state is just getting started.
-    if chain_tip > *required_chain_overlap.end() {
-        if required_chain_overlap.is_empty() {
-            // The non-finalized chain has been committed, and we don't need it.
-            return Ok(Default::default());
-        } else {
+    match finalized_tip_status {
+        Ok(finalized_tip_height) => {
+            // If we've already committed this entire chain, ignore its UTXO changes.
+            // This is more likely if the non-finalized state is just getting started.
+            if finalized_tip_height >= non_finalized_tip {
+                debug!(
+                    ?non_finalized_root,
+                    ?non_finalized_tip,
+                    ?finalized_tip_status,
+                    ?finalized_tip_range,
+                    ?address_count,
+                    "chain address UTXO query: \
+                     non-finalized blocks have all been finalized, no new UTXO changes",
+                );
+
+                return Ok(Default::default());
+            }
+        }
+
+        Err(ref required_non_finalized_overlap) => {
             // We can't compensate for inconsistent database queries,
             // because the non-finalized chain is below the inconsistent query range.
-            return Err("unable to get UTXOs: state was committing a block, and non-finalized chain has been committed".into());
+            if *required_non_finalized_overlap.end() > non_finalized_tip.0 {
+                debug!(
+                    ?non_finalized_root,
+                    ?non_finalized_tip,
+                    ?finalized_tip_status,
+                    ?finalized_tip_range,
+                    ?address_count,
+                    "chain address UTXO query: \
+                     finalized tip query was inconsistent, \
+                     and some inconsistent blocks are missing from the non-finalized chain",
+                );
+
+                return Err("unable to get UTXOs: \
+                            state was committing a block, \
+                            that is missing from the non-finalized chain"
+                    .into());
+            }
+
+            // Correctness: some finalized UTXOs might have duplicate creates or spends,
+            // but we've just checked they can be corrected by applying the non-finalized UTXO changes.
+            assert!(
+                required_non_finalized_overlap
+                    .clone()
+                    .all(|height| chain.blocks.contains_key(&Height(height))),
+                "UTXO query inconsistency: chain must contain required overlap blocks",
+            );
         }
     }
-
-    // Correctness: some finalized UTXOs might have duplicate creates or spends,
-    // but we've just checked they can be corrected by applying the non-finalized UTXO changes.
-    assert!(
-        required_chain_overlap.all(|height| chain.blocks.contains_key(&Height(height))),
-        "UTXO query inconsistency: chain must contain required overlap blocks",
-    );
 
     Ok(chain.partial_transparent_utxo_changes(addresses))
 }
@@ -390,10 +556,8 @@ where
 /// removes the spent UTXOs, and returns the result.
 fn apply_utxo_changes(
     finalized_utxos: BTreeMap<OutputLocation, transparent::Output>,
-    (created_chain_utxos, spent_chain_utxos): (
-        BTreeMap<OutputLocation, transparent::Output>,
-        BTreeSet<OutputLocation>,
-    ),
+    created_chain_utxos: BTreeMap<OutputLocation, transparent::Output>,
+    spent_chain_utxos: BTreeSet<OutputLocation>,
 ) -> BTreeMap<OutputLocation, transparent::Output> {
     // Correctness: combine the created UTXOs, then remove spent UTXOs,
     // to compensate for overlapping finalized and non-finalized blocks.
@@ -547,6 +711,8 @@ fn chain_transparent_tx_id_changes<C>(
 where
     C: AsRef<Chain>,
 {
+    let address_count = addresses.len();
+
     let finalized_tip_range = match finalized_tip_range {
         Some(finalized_tip_range) => finalized_tip_range,
         None => {
@@ -555,7 +721,12 @@ where
                 "unexpected non-finalized chain when finalized state is empty"
             );
 
-            // Empty chains don't contain any tx IDs.
+            debug!(
+                ?finalized_tip_range,
+                ?address_count,
+                "chain address tx ID query: state is empty, no tx IDs available",
+            );
+
             return Ok(Default::default());
         }
     };
@@ -573,50 +744,116 @@ where
     // and they are queried in chain order.
 
     // Check if the finalized and non-finalized states match or overlap
-    let required_min_chain_root = finalized_tip_range.start().0 + 1;
-    let mut required_chain_overlap = required_min_chain_root..=finalized_tip_range.end().0;
+    let required_min_non_finalized_root = finalized_tip_range.start().0 + 1;
+
+    // Work out if we need to compensate for finalized query results from multiple heights:
+    // - Ok contains the finalized tip height (no need to compensate)
+    // - Err contains the required non-finalized chain overlap
+    let finalized_tip_status = required_min_non_finalized_root..=finalized_tip_range.end().0;
+    let finalized_tip_status = if finalized_tip_status.is_empty() {
+        let finalized_tip_height = *finalized_tip_range.end();
+        Ok(finalized_tip_height)
+    } else {
+        let required_non_finalized_overlap = finalized_tip_status;
+        Err(required_non_finalized_overlap)
+    };
 
     if chain.is_none() {
-        if required_chain_overlap.is_empty() || addresses.len() <= 1 {
-            // The non-finalized chain is empty, and we don't need it.
+        if address_count <= 1 || finalized_tip_status.is_ok() {
+            debug!(
+                ?finalized_tip_status,
+                ?required_min_non_finalized_root,
+                ?finalized_tip_range,
+                ?address_count,
+                "chain address tx ID query: \
+                 finalized chain is consistent, and non-finalized chain is empty",
+            );
+
             return Ok(Default::default());
         } else {
             // We can't compensate for inconsistent database queries,
             // because the non-finalized chain is empty.
-            return Err("unable to get tx IDs: state was committing a block, and non-finalized chain is empty".into());
+            debug!(
+                ?finalized_tip_status,
+                ?required_min_non_finalized_root,
+                ?finalized_tip_range,
+                ?address_count,
+                "chain address tx ID query: \
+                 finalized tip query was inconsistent, but non-finalized chain is empty",
+            );
+
+            return Err("unable to get tx IDs: \
+                        state was committing a block, and non-finalized chain is empty"
+                .into());
         }
     }
 
     let chain = chain.unwrap();
     let chain = chain.as_ref();
 
-    let chain_root = chain.non_finalized_root_height().0;
-    let chain_tip = chain.non_finalized_tip_height().0;
+    let non_finalized_root = chain.non_finalized_root_height();
+    let non_finalized_tip = chain.non_finalized_tip_height();
 
     assert!(
-        chain_root <= required_min_chain_root,
-        "unexpected chain gap: the best chain is updated after its previous root is finalized"
+        non_finalized_root.0 <= required_min_non_finalized_root,
+        "unexpected chain gap: the best chain is updated after its previous root is finalized",
     );
 
-    // If we've already committed this entire chain, ignore its UTXO changes.
-    // This is more likely if the non-finalized state is just getting started.
-    if chain_tip > *required_chain_overlap.end() {
-        if required_chain_overlap.is_empty() || addresses.len() <= 1 {
-            // The non-finalized chain has been committed, and we don't need it.
-            return Ok(Default::default());
-        } else {
+    match finalized_tip_status {
+        Ok(finalized_tip_height) => {
+            // If we've already committed this entire chain, ignore its UTXO changes.
+            // This is more likely if the non-finalized state is just getting started.
+            if finalized_tip_height >= non_finalized_tip {
+                debug!(
+                    ?non_finalized_root,
+                    ?non_finalized_tip,
+                    ?finalized_tip_status,
+                    ?finalized_tip_range,
+                    ?address_count,
+                    "chain address tx ID query: \
+                     non-finalized blocks have all been finalized, no new UTXO changes",
+                );
+
+                return Ok(Default::default());
+            }
+        }
+
+        Err(ref required_non_finalized_overlap) => {
             // We can't compensate for inconsistent database queries,
             // because the non-finalized chain is below the inconsistent query range.
-            return Err("unable to get tx IDs: state was committing a block, and non-finalized chain has been committed".into());
+            if address_count > 1 && *required_non_finalized_overlap.end() > non_finalized_tip.0 {
+                debug!(
+                    ?non_finalized_root,
+                    ?non_finalized_tip,
+                    ?finalized_tip_status,
+                    ?finalized_tip_range,
+                    ?address_count,
+                    "chain address tx ID query: \
+                     finalized tip query was inconsistent, \
+                     some inconsistent blocks are missing from the non-finalized chain, \
+                     and the query has multiple addresses",
+                );
+
+                return Err("unable to get tx IDs: \
+                            state was committing a block, \
+                            that is missing from the non-finalized chain, \
+                            and the query has multiple addresses"
+                    .into());
+            }
+
+            // Correctness: some finalized UTXOs might have duplicate creates or spends,
+            // but we've just checked they can be corrected by applying the non-finalized UTXO changes.
+            assert!(
+                address_count <= 1
+                    || required_non_finalized_overlap
+                        .clone()
+                        .all(|height| chain.blocks.contains_key(&Height(height))),
+                "tx ID query inconsistency: \
+                 chain must contain required overlap blocks \
+                 or query must only have one address",
+            );
         }
     }
-
-    // Correctness: some finalized tx IDs might have come from different blocks for different addresses,
-    // but we've just checked they can be corrected by applying the non-finalized UTXO changes.
-    assert!(
-        required_chain_overlap.all(|height| chain.blocks.contains_key(&Height(height))) || addresses.len() <= 1,
-        "tx ID query inconsistency: chain must contain required overlap blocks if there are multiple addresses",
-    );
 
     Ok(chain.partial_transparent_tx_ids(addresses, query_height_range))
 }

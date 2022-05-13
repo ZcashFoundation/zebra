@@ -13,14 +13,14 @@ on:
       # workflow definitions
       - 'docker/zcash-params/Dockerfile'
       - '.github/workflows/zcash-params.yml'
-      - '.github/workflows/docker-image-build.yml'
+      - '.github/workflows/build-docker-image.yml'
 
 jobs:
   build:
-    uses: ./.github/workflows/docker-image-build.yml
+    uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/zcash-params/Dockerfile
-      dockerfile_target: builder
+      dockerfile_target: release
       image_name: zcash-params
       rust_backtrace: full
       rust_lib_backtrace: full

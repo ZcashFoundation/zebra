@@ -55,7 +55,7 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         setup(network, cost_limit).await;
 
     // Enable the mempool
-    let _ = service.enable(&mut recent_syncs).await;
+    service.enable(&mut recent_syncs).await;
 
     // Insert the genesis block coinbase transaction into the mempool storage.
     let mut inserted_ids = HashSet::new();
@@ -202,7 +202,7 @@ async fn mempool_queue_single() -> Result<(), Report> {
         setup(network, cost_limit).await;
 
     // Enable the mempool
-    let _ = service.enable(&mut recent_syncs).await;
+    service.enable(&mut recent_syncs).await;
 
     // Insert [transactions...] into the mempool storage.
     // This will cause the at least one transaction to be rejected, since
@@ -286,7 +286,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     assert!(!service.is_enabled());
 
     // Enable the mempool
-    let _ = service.enable(&mut recent_syncs).await;
+    service.enable(&mut recent_syncs).await;
 
     assert!(service.is_enabled());
 
@@ -325,7 +325,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     assert_eq!(service.tx_downloads().in_flight(), 1);
 
     // Disable the mempool
-    let _ = service.disable(&mut recent_syncs).await;
+    service.disable(&mut recent_syncs).await;
 
     // Test if mempool is disabled again
     assert!(!service.is_enabled());
@@ -393,7 +393,7 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
     time::pause();
 
     // Enable the mempool
-    let _ = mempool.enable(&mut recent_syncs).await;
+    mempool.enable(&mut recent_syncs).await;
     assert!(mempool.is_enabled());
 
     // Push the genesis block to the state
@@ -486,7 +486,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         setup(network, u64::MAX).await;
 
     // Enable the mempool
-    let _ = mempool.enable(&mut recent_syncs).await;
+    mempool.enable(&mut recent_syncs).await;
     assert!(mempool.is_enabled());
 
     // Push the genesis block to the state
@@ -560,7 +560,7 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     time::pause();
 
     // Enable the mempool
-    let _ = mempool.enable(&mut recent_syncs).await;
+    mempool.enable(&mut recent_syncs).await;
 
     // Push the genesis block to the state, since downloader needs a valid tip.
     let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
@@ -645,7 +645,7 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     time::pause();
 
     // Enable the mempool
-    let _ = mempool.enable(&mut recent_syncs).await;
+    mempool.enable(&mut recent_syncs).await;
 
     // Push the genesis block to the state, since downloader needs a valid tip.
     let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
