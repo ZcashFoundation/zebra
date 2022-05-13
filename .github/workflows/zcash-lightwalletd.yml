@@ -2,6 +2,7 @@ name: zcash-lightwalletd
 
 on:
   workflow_dispatch:
+  
   push:
     branches:
       - 'main'
@@ -14,9 +15,25 @@ on:
       - 'zebrad/tests/acceptance.rs'
       - 'zebrad/src/config.rs'
       - 'zebrad/src/commands/start.rs'
-      # workflow definitions
-      #
-      # unlike the Zebra code, these workflow definitions do change the docker image
+      # these workflow definitions actually change the docker image
+      - 'docker/zcash-lightwalletd/Dockerfile'
+      - '.github/workflows/zcash-lightwalletd.yml'
+
+  # Update the lightwalletd image when each related PR changes
+  #
+  # TODO: after NU5 mainnet activation and wallet orchard features are stable,
+  #       consider just rebuilding the image on `main` merges
+  pull_request:
+    branches:
+      - main
+    paths:
+      # rebuild lightwalletd whenever the related Zebra code changes
+      # (this code isn't actually compiled in this docker image)
+      - 'zebra-rpc/**'
+      - 'zebrad/tests/acceptance.rs'
+      - 'zebrad/src/config.rs'
+      - 'zebrad/src/commands/start.rs'
+      # these workflow definitions actually change the docker image
       - 'docker/zcash-lightwalletd/Dockerfile'
       - '.github/workflows/zcash-lightwalletd.yml'
 
@@ -36,7 +53,11 @@ jobs:
       - uses: actions/checkout@v3.0.2
         with:
           repository: adityapk00/lightwalletd
-          ref: 'master'
+          # Temporarily use an earlier lightwalletd version,
+          # to check if commit e146dbf5c2860e535fdbe2ba5ab20c4744d7c941 contains a mempool refresh deadlock bug.
+          #
+          # TODO: switch back to 'master' after the bug is resolved
+          ref: 'c1bab818a683e4de69cd952317000f9bb2932274'
           persist-credentials: false
 
       - uses: actions/checkout@v3.0.2
