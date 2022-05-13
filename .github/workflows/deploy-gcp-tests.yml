@@ -48,11 +48,11 @@ on:
       needs_zebra_state:
         required: true
         type: boolean
-        description: 'Indicates if a test needs a Zebra cached state to run'
+        description: 'Indicates if a test needs a disk with a Zebra cached state to run'
       needs_lwd_state:
         required: false
         type: boolean
-        description: 'Indicates if a test needs a Lightwalletd cached state to run'
+        description: 'Indicates if a test needs a disk with Lightwalletd cached state to run (which also includes a Zebra cached state)'
       saves_to_disk:
         required: true
         type: boolean
