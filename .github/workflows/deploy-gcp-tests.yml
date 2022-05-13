@@ -233,7 +233,7 @@ jobs:
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
           echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
-          if [[ "${{ inputs.needs_zebra_state }}" == "true" ]]; then
+          if [[ "${{ inputs.needs_lwd_state }}" == "true" ]]; then
               DISK_PREFIX=${{ inputs.lwd_state_dir }}
           else
               DISK_PREFIX=${{ inputs.zebra_state_dir || inputs.disk_prefix }}
