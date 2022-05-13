@@ -20,22 +20,28 @@ on:
       test_variables:
         required: true
         type: string
+      # TODO: find a better name
       root_state_path:
         required: false
         type: string
         default: '/zebrad-cache'
+      # TODO: find a better name
       zebra_state_dir:
         required: false
         type: string
         default: ''
+        description: 'Name of the Zebra cached state directory and input image prefix to search in GCP'
+      # TODO: find a better name
       lwd_state_dir:
         required: false
         type: string
         default: ''
+        description: 'Name of the Lightwalletd cached state directory and input image prefix to search in GCP'
       disk_prefix:
         required: false
         type: string
         default: 'zebrad-cache'
+        description: 'Used to name the image, and for tests that do not use a `zebra_state_dir` to work, but builds a cached state'
       disk_suffix:
         required: false
         type: string
