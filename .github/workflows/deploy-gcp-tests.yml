@@ -249,8 +249,9 @@ jobs:
                   CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${{ inputs.lwd_state_dir || inputs.disk_prefix  }}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
               else
                   CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${{ inputs.zebra_state_dir || inputs.disk_prefix }}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+              fi
+              echo "Disk: $CACHED_DISK_NAME"
           fi
-          echo "Disk: $CACHED_DISK_NAME"
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               echo "No cached state disk available"
