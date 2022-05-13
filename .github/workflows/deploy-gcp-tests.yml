@@ -221,7 +221,8 @@ jobs:
       # - prefer images generated from the `main` branch, then any other branch
       # - prefer newer images to older images
       #
-      # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable.
+      # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable
+      # Passes the state version to subsequent steps using $STATE_VERSION env variable.
       - name: Find cached state disk
         id: get-disk-name
         run: |
@@ -262,6 +263,7 @@ jobs:
 
           echo "Description: $(gcloud compute images describe $CACHED_DISK_NAME --format='value(DESCRIPTION)')"
 
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
           echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> $GITHUB_ENV
 
       # Creates Compute Engine virtual machine and attach a cached state disk using the
