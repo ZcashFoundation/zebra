@@ -207,7 +207,7 @@ jobs:
           token_format: 'access_token'
 
       # Find a cached state disk for this job, matching all of:
-      # - disk kind (disk_prefix) - zebra or lwd
+      # - disk cached state (lwd_state_dir/zebra_state_dir or disk_prefix) - zebrad-cache or lwd-cache
       # - state version (from the source code) - v{N}
       # - network (network) - mainnet or testnet
       # - disk target height kind (disk_suffix) - checkpoint or tip
@@ -216,7 +216,7 @@ jobs:
       # - prefer images generated from the `main` branch, then any other branch
       # - prefer newer images to older images
       #
-      # Passes the disk name to subsequent steps using an environmental variable.
+      # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable.
       - name: Find cached state disk
         id: get-disk-name
         run: |
@@ -252,7 +252,7 @@ jobs:
           echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> $GITHUB_ENV
 
       # Creates Compute Engine virtual machine and attach a cached state disk using the
-      # $ZEBRA_CACHED_DISK_NAME variable as the source image to populate the disk cached state
+      # $CACHED_DISK_NAME variable as the source image to populate the disk cached state
       - name: Create GCP compute instance
         id: create-instance
         run: |
