@@ -6,6 +6,7 @@ on:
       network:
         required: false
         type: string
+        default: Mainnet
       app_name:
         required: false
         type: string
@@ -45,7 +46,6 @@ on:
         type: string
 
 env:
-  NETWORK: Mainnet
   IMAGE_NAME: zebrad-test
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
   ZONE: us-central1-a
@@ -184,7 +184,7 @@ jobs:
 
       - name: Downcase network name for disks
         run: |
-          NETWORK_CAPS=${{ github.event.inputs.network || env.NETWORK }}
+          NETWORK_CAPS=${{ inputs.network }}
           echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
