@@ -48,6 +48,11 @@ on:
       needs_zebra_state:
         required: true
         type: boolean
+        description: 'Indicates if a test needs a disk with a Zebra cached state to run'
+      needs_lwd_state:
+        required: false
+        type: boolean
+        description: 'Indicates if a test needs a disk with Lightwalletd cached state to run (which also includes a Zebra cached state)'
       saves_to_disk:
         required: true
         type: boolean
@@ -212,23 +217,34 @@ jobs:
       # - network (network) - mainnet or testnet
       # - disk target height kind (disk_suffix) - checkpoint or tip
       #
+      # If the test needs a lightwalletd state (needs_lwd_state) set the variable DISK_PREFIX accordingly
+      # - To ${{ inputs.lwd_state_dir }}" if needed
+      # - To ${{ inputs.zebra_state_dir || inputs.disk_prefix }} if not
+      #
       # If there are multiple disks:
       # - prefer images generated from the `main` branch, then any other branch
       # - prefer newer images to older images
       #
-      # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable.
+      # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable
+      # Passes the state version to subsequent steps using $STATE_VERSION env variable
       - name: Find cached state disk
         id: get-disk-name
         run: |
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
           echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
+          if [[ "${{ inputs.needs_lwd_state }}" == "true" ]]; then
+              DISK_PREFIX=${{ inputs.lwd_state_dir }}
+          else
+              DISK_PREFIX=${{ inputs.zebra_state_dir || inputs.disk_prefix }}
+          fi
+
           # Try to find an image generated from the main branch
           # Fields are listed in the "Create image from state disk" step
           #
           # TODO: require ${NETWORK} in the name after PR #4391 merges to main, and runs a full sync
           #       network should replace [a-z]*
-          CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${{ inputs.zebra_state_dir || inputs.disk_prefix }}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "main Disk: $CACHED_DISK_NAME"
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
@@ -236,7 +252,7 @@ jobs:
               #
               # TODO: require ${NETWORK} in the name after PRs #4391 and #4385 merge to main
               #       network should replace [a-z]*
-              CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${{ inputs.zebra_state_dir || inputs.disk_prefix }}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+              CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
               echo "Disk: $CACHED_DISK_NAME"
           fi
 
@@ -249,6 +265,7 @@ jobs:
 
           echo "Description: $(gcloud compute images describe $CACHED_DISK_NAME --format='value(DESCRIPTION)')"
 
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
           echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> $GITHUB_ENV
 
       # Creates Compute Engine virtual machine and attach a cached state disk using the
@@ -284,7 +301,9 @@ jobs:
       # $ZEBRA_CACHED_STATE_DIR. The inputs like ${{ inputs.zebra_state_dir }} are only used
       # to match that variable paths.
       - name: Run ${{ inputs.test_id }} test
-        if: ${{ !inputs.lwd_state_dir }}
+        # This step mounts the volume only when a single cached state is needed, in this case
+        # the cached state from Zebra.
+        if: ${{ inputs.needs_zebra_state && !inputs.needs_lwd_state }}
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -325,7 +344,9 @@ jobs:
       # will only respect the values from $ZEBRA_CACHED_STATE_DIR and $LIGHTWALLETD_DATA_DIR,
       # the inputs like ${{ inputs.lwd_state_dir }} are only used to match those variables paths.
       - name: Run ${{ inputs.test_id }} test
-        if: ${{ inputs.lwd_state_dir }}
+        # This step mounts the volume only when both cached states are needed, in this case
+        # the cached state from Zebra and Lightwalletd
+        if: ${{ inputs.needs_zebra_state && inputs.needs_lwd_state }}
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
