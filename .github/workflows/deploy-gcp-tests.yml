@@ -276,6 +276,17 @@ jobs:
       # SSH into the just created VM, and create a Docker container to run the incoming test 
       # from ${{ inputs.test_id }}, then create a docker volume with the recently attached disk.
       # The disk will be mounted in ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }}.
+      #
+      # The disk mounted in the VM is located at /dev/sdb, we mount this disk to the docker
+      # container in one path:
+      # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
+      #
+      # This path must match the variable used by the tests in Rust, which are also set in
+      # `continous-integration-docker.yml` to be able to run this tests.
+      #
+      # Although we're mounting the disk root, Zebra will only respect the values from 
+      # $ZEBRA_CACHED_STATE_DIR the inputs like ${{ inputs.zebra_state_dir }} are only used
+      # to match that variable paths.
       - name: Run ${{ inputs.test_id }} test
         # This step mounts the volume only when a single cached state is needed, in this case
         # the cached state from Zebra.
@@ -299,6 +310,22 @@ jobs:
       # from ${{ inputs.test_id }}, then create a docker volume with the recently attached disk.
       # The disk will be mounted in ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }},
       # and ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }}
+      #
+      # In this step we're using the same disk for simplicity, as mounting multiple disks to the
+      # VM and to the cointainer might require more steps in this workflow, and additional
+      # considerations.
+      #
+      # The disk mounted in the VM is located at /dev/sdb, we mount this disk to the docker
+      # container in two different paths:
+      # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
+      # - /var/cache/lwd-cache -> ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} -> $LIGHTWALLETD_DATA_DIR
+      #
+      # This paths must match the variables used by the tests in Rust, which are also set in
+      # `continous-integration-docker.yml` to be able to run this tests.
+      #
+      # Although we're mounting the disk root to both directories, Zebra and Lightwalletd
+      # will only respect the values from $ZEBRA_CACHED_STATE_DIR and $LIGHTWALLETD_DATA_DIR,
+      # the inputs like ${{ inputs.lwd_state_dir }} are only used to match those variables paths.
       - name: Run ${{ inputs.test_id }} test
         # This step mounts the volume only when both cached states are needed, in this case
         # the cached state from Zebra and Lightwalletd
