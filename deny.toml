@@ -51,9 +51,6 @@ skip-tree = [
     # wait for structopt upgrade (or upgrade to clap 3)
     { name = "heck", version = "=0.3.3" },
 
-    # wait for bellman to upgrade
-    { name = "blake2s_simd", version = "=0.5.11" },
-
     # wait for halo2 to upgrade
     { name = "blake2b_simd", version = "=0.5.11" },
 
@@ -63,9 +60,6 @@ skip-tree = [
 
     # wait for insta to remove duplicated dependencies
     { name = "sha-1", version = "=0.8.2" },
-
-    # wait for orchard -> bigint to upgrade
-    { name = "crunchy", version = "=0.1.6" },
 
     # wait for curve25519-dalek to upgrade
     { name = "digest", version = "=0.9.0" },
