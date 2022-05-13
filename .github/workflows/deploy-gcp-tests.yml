@@ -306,7 +306,7 @@ jobs:
       # and ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }}
       #
       # In this step we're using the same disk for simplicity, as mounting multiple disks to the
-      # VM and to the cointainer might require more steps in this workflow, and additional
+      # VM and to the container might require more steps in this workflow, and additional
       # considerations.
       #
       # The disk mounted in the VM is located at /dev/sdb, we mount the root `/` of this disk to the docker
