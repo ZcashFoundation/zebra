@@ -222,7 +222,7 @@ jobs:
       # - prefer newer images to older images
       #
       # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable
-      # Passes the state version to subsequent steps using $STATE_VERSION env variable.
+      # Passes the state version to subsequent steps using $STATE_VERSION env variable
       - name: Find cached state disk
         id: get-disk-name
         run: |
@@ -235,9 +235,9 @@ jobs:
           # TODO: require ${NETWORK} in the name after PR #4391 merges to main, and runs a full sync
           #       network should replace [a-z]*
           if [[ -z "$needs_lwd_state" ]]; then
-              CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${{ inputs.lwd_state_dir || inputs.disk_prefix  }}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          else
               CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${{ inputs.zebra_state_dir || inputs.disk_prefix }}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          else
+              CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${{ inputs.lwd_state_dir }}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           fi
           echo "main Disk: $CACHED_DISK_NAME"
 
@@ -247,9 +247,9 @@ jobs:
               # TODO: require ${NETWORK} in the name after PRs #4391 and #4385 merge to main
               #       network should replace [a-z]*
               if [[ -z "$needs_lwd_state" ]]; then
-                  CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${{ inputs.lwd_state_dir || inputs.disk_prefix  }}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-              else
                   CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${{ inputs.zebra_state_dir || inputs.disk_prefix }}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+              else
+                  CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${{ inputs.lwd_state_dir }}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
               fi
               echo "Disk: $CACHED_DISK_NAME"
           fi
