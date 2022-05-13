@@ -229,7 +229,7 @@ jobs:
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               echo "No cached state disk available"
-              echo "Expected ${{ inputs.disk_prefix }}-(branch)-(commit)-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
+              echo "Expected ${{ inputs.disk_prefix }}-(branch)-[0-9a-f]+-v${LOCAL_STATE_VERSION}-(${NETWORK})?-${{ inputs.disk_suffix }}"
               echo "Cached state test jobs must depend on the cached state rebuild job"
               exit 1
           fi
