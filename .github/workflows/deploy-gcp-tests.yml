@@ -225,7 +225,7 @@ jobs:
 
           if [[ -z "$ZEBRA_STATE_DISK" ]]; then
               echo "No cached state disk available"
-              echo "Expected ${{ inputs.disk_prefix }} v$LOCAL_STATE_VERSION ${{ inputs.disk_suffix }}"
+              echo "Expected ${{ inputs.disk_prefix }}-(branch)-(commit)-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
               echo "Cached state test jobs must depend on the cached state rebuild job"
               exit 1
           fi
