@@ -156,7 +156,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     snapshot_rpc_getaddressutxos(get_address_utxos, &settings);
 }
 
-/// Snapshot `getinfo` response, using `cargo insta` and RON serialization.
+/// Snapshot `getinfo` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
     settings.bind(|| {
         insta::assert_json_snapshot!("get_info", info, {
@@ -170,7 +170,7 @@ fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
     });
 }
 
-/// Snapshot `getblockchaininfo` response, using `cargo insta` and RON serialization.
+/// Snapshot `getblockchaininfo` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblockchaininfo(info: GetBlockChainInfo, settings: &insta::Settings) {
     settings.bind(|| {
         insta::assert_json_snapshot!("get_blockchain_info", info, {
@@ -184,7 +184,7 @@ fn snapshot_rpc_getblockchaininfo(info: GetBlockChainInfo, settings: &insta::Set
     });
 }
 
-/// Snapshot `getaddressbalance` response, using `cargo insta` and RON serialization.
+/// Snapshot `getaddressbalance` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getaddressbalance(address_balance: AddressBalance, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_balance", address_balance));
 }
@@ -205,27 +205,27 @@ fn snapshot_rpc_getblock(block: GetBlock, block_data: &[u8], settings: &insta::S
     );
 }
 
-/// Snapshot `getbestblockhash` response, using `cargo insta` and RON serialization.
+/// Snapshot `getbestblockhash` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getbestblockhash(tip_hash: GetBestBlockHash, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_best_block_hash", tip_hash));
 }
 
-/// Snapshot `getrawmempool` response, using `cargo insta` and RON serialization.
+/// Snapshot `getrawmempool` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getrawmempool(raw_mempool: Vec<String>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_raw_mempool", raw_mempool));
 }
 
-/// Snapshot `getrawtransaction` response, using `cargo insta` and RON serialization.
+/// Snapshot `getrawtransaction` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getrawtransaction(raw_transaction: GetRawTransaction, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_raw_transaction", raw_transaction));
 }
 
-/// Snapshot `getaddressbalance` response, using `cargo insta` and RON serialization.
+/// Snapshot `getaddressbalance` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getaddresstxids(transactions: Vec<String>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_tx_ids", transactions));
 }
 
-/// Snapshot `getaddressutxos` response, using `cargo insta` and RON serialization.
+/// Snapshot `getaddressutxos` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getaddressutxos(utxos: Vec<GetAddressUtxos>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_utxos", utxos));
 }
