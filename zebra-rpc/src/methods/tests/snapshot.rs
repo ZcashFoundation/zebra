@@ -29,12 +29,12 @@ async fn test_rpc_response_data() {
 
 async fn test_rpc_response_data_for_network(network: Network) {
     // Create a continuous chain of mainnet and testnet blocks from genesis
-    let blocks = match network {
+    let block_data = match network {
         Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
         Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
     };
 
-    let blocks: Vec<Arc<Block>> = blocks
+    let blocks: Vec<Arc<Block>> = block_data
         .iter()
         .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
@@ -86,11 +86,12 @@ async fn test_rpc_response_data_for_network(network: Network) {
     snapshot_rpc_getaddressbalance(get_address_balance, &settings);
 
     // `getblock`
+    const BLOCK_HEIGHT: u32 = 1;
     let get_block = rpc
-        .get_block("1".to_string(), 0u8)
+        .get_block(BLOCK_HEIGHT.to_string(), 0u8)
         .await
         .expect("We should have a GetBlock struct");
-    snapshot_rpc_getblock(get_block, &settings);
+    snapshot_rpc_getblock(get_block, block_data.get(&BLOCK_HEIGHT).unwrap(), &settings);
 
     // `getbestblockhash`
     let get_best_block_hash = rpc
@@ -188,9 +189,20 @@ fn snapshot_rpc_getaddressbalance(address_balance: AddressBalance, settings: &in
     settings.bind(|| insta::assert_json_snapshot!("get_address_balance", address_balance));
 }
 
-/// Snapshot `getblock` response, using `cargo insta` and RON serialization.
-fn snapshot_rpc_getblock(block: GetBlock, settings: &insta::Settings) {
-    settings.bind(|| insta::assert_json_snapshot!("get_block", block));
+/// Check `getblock` response, using `cargo insta`, JSON serialization, and block test vectors.
+///
+/// Does not create a snapshot file.
+fn snapshot_rpc_getblock(block: GetBlock, block_data: &[u8], settings: &insta::Settings) {
+    let block_data = hex::encode(block_data);
+
+    settings.bind(||
+                  insta::assert_json_snapshot!("get_block", block, { "." => insta::dynamic_redaction(move |value, _path| {
+                      // assert that the block data matches, without creating a 1.5 kB snapshot file
+                      assert_eq!(value.as_str().unwrap(), block_data);
+
+                      "[block_data]"
+                  }),})
+    );
 }
 
 /// Snapshot `getbestblockhash` response, using `cargo insta` and RON serialization.
