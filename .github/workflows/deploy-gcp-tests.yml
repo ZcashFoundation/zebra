@@ -217,6 +217,10 @@ jobs:
       # - network (network) - mainnet or testnet
       # - disk target height kind (disk_suffix) - checkpoint or tip
       #
+      # If the test needs a lightwalletd state (needs_lwd_state) set the variable DISK_PREFIX accordingly
+      # - To ${{ inputs.lwd_state_dir }}" if needed
+      # - To ${{ inputs.zebra_state_dir || inputs.disk_prefix }} if not
+      #
       # If there are multiple disks:
       # - prefer images generated from the `main` branch, then any other branch
       # - prefer newer images to older images
