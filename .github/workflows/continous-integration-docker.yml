@@ -192,7 +192,7 @@ jobs:
   # - on every PR update, but only if Zebra's state version changes in the PR
   # - on request
   regenerate-stateful-disks:
-    needs: [ build, changed-files]
+    needs: [build, changed-files]
     uses: ./.github/workflows/deploy-gcp-tests.yml
     # Only run this job if the database format version has (likely) changed.
     if: ${{ (needs.changed-files.outputs.rebuild == 'true' && github.event_name == 'push') || github.event.inputs.regenerate-disks == 'true' }}
@@ -229,10 +229,11 @@ jobs:
   # - on every PR update, but only if Zebra's state version changes in the PR
   # - on request
   test-full-sync:
-    needs: build
+    needs: [build, changed-files]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    # TODO change `github.ref_name == 'main'` to `startsWith(github.head_ref, 'mergify/merge-queue/')`
-    # to only run on Mergify head branches, and on manual dispatch:
+    # TODO:
+    # to also run on Mergify head branches,
+    # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
     if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || (needs.changed-files.outputs.rebuild == 'true' && github.event_name == 'push') || github.event.inputs.run-full-sync == 'true' }}
     with:
