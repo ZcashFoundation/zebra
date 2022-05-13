@@ -255,7 +255,6 @@ jobs:
       zebra_state_dir: 'zebrad-cache'
 
   # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
-  # TODO: use a cached lightwalletd tip state to speed up the test (#4303)
   lightwalletd-transactions-test:
     needs: build
     uses: ./.github/workflows/deploy-gcp-tests.yml
@@ -266,10 +265,12 @@ jobs:
       test_description: Test sending transactions via lightwalletd
       test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
       needs_zebra_state: true
+      needs_lwd_state: true
       saves_to_disk: false
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
+      lwd_state_dir: 'lwd-cache'
 
   # Test full sync of lightwalletd with a Zebra tip state
   lightwalletd-full-sync:
