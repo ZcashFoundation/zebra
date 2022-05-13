@@ -267,7 +267,7 @@ jobs:
       # from ${{ inputs.test_id }}, then create a docker volume with the recently attached disk.
       # The disk will be mounted in ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }}.
       #
-      # The disk mounted in the VM is located at /dev/sdb, we mount this disk to the docker
+      # The disk mounted in the VM is located at /dev/sdb, we mount the root `/` of this disk to the docker
       # container in one path:
       # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
       #
@@ -275,7 +275,7 @@ jobs:
       # `continous-integration-docker.yml` to be able to run this tests.
       #
       # Although we're mounting the disk root, Zebra will only respect the values from 
-      # $ZEBRA_CACHED_STATE_DIR the inputs like ${{ inputs.zebra_state_dir }} are only used
+      # $ZEBRA_CACHED_STATE_DIR. The inputs like ${{ inputs.zebra_state_dir }} are only used
       # to match that variable paths.
       - name: Run ${{ inputs.test_id }} test
         if: ${{ !inputs.lwd_state_dir }}
@@ -303,10 +303,14 @@ jobs:
       # VM and to the cointainer might require more steps in this workflow, and additional
       # considerations.
       #
-      # The disk mounted in the VM is located at /dev/sdb, we mount this disk to the docker
+      # The disk mounted in the VM is located at /dev/sdb, we mount the root `/` of this disk to the docker
       # container in two different paths:
       # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
       # - /var/cache/lwd-cache -> ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} -> $LIGHTWALLETD_DATA_DIR
+      #
+      # This doesn't cause any path conflicts, because Zebra and lightwalletd create different
+      # subdirectories for their data. (But Zebra, lightwalletd, and the test harness must not
+      # delete the whole cache directory.)
       #
       # This paths must match the variables used by the tests in Rust, which are also set in
       # `continous-integration-docker.yml` to be able to run this tests.
