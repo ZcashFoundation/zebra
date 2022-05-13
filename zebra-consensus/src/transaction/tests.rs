@@ -1064,6 +1064,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     *new_transaction.expiry_height_mut() = new_expiry_height;
 
     let result = verifier
+        .clone()
         .oneshot(Request::Block {
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
@@ -1079,6 +1080,29 @@ async fn v5_coinbase_transaction_expiry_height() {
             block_height,
             transaction_hash: new_transaction.hash(),
         })
+    );
+
+    // Test with matching heights again, but using a very high value
+    // that is greater than the limit for non-coinbase transactions,
+    // to ensure the limit is not being enforced for coinbase transactions.
+    let new_expiry_height = Height::MAX;
+    let mut new_transaction = transaction.clone();
+
+    *new_transaction.expiry_height_mut() = new_expiry_height;
+
+    let result = verifier
+        .clone()
+        .oneshot(Request::Block {
+            transaction: Arc::new(new_transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            height: new_expiry_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result.expect("unexpected error response").tx_id(),
+        new_transaction.unmined_id()
     );
 }
 
