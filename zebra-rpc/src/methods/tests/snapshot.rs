@@ -195,14 +195,16 @@ fn snapshot_rpc_getaddressbalance(address_balance: AddressBalance, settings: &in
 fn snapshot_rpc_getblock(block: GetBlock, block_data: &[u8], settings: &insta::Settings) {
     let block_data = hex::encode(block_data);
 
-    settings.bind(||
-                  insta::assert_json_snapshot!("get_block", block, { "." => insta::dynamic_redaction(move |value, _path| {
-                      // assert that the block data matches, without creating a 1.5 kB snapshot file
-                      assert_eq!(value.as_str().unwrap(), block_data);
-
-                      "[BlockData]"
-                  }),})
-    );
+    settings.bind(|| {
+        insta::assert_json_snapshot!("get_block", block, {
+            "." => dynamic_redaction(move |value, _path| {
+                // assert that the block data matches, without creating a 1.5 kB snapshot file
+                assert_eq!(value.as_str().unwrap(), block_data);
+                // replace with:
+                "[BlockData]"
+            }),
+        })
+    });
 }
 
 /// Snapshot `getbestblockhash` response, using `cargo insta` and JSON serialization.
