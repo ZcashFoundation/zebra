@@ -41,9 +41,9 @@ use crate::common::{
     launch::spawn_zebrad_for_rpc_without_initial_peers,
     lightwalletd::{
         wallet_grpc::{
-            connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, AddressList, BlockId,
-            BlockRange, ChainSpec, Empty, GetAddressUtxosArg, TransparentAddressBlockFilter,
-            TxFilter,
+            connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Address, AddressList,
+            BlockId, BlockRange, ChainSpec, Empty, GetAddressUtxosArg,
+            TransparentAddressBlockFilter, TxFilter,
         },
         zebra_skip_lightwalletd_tests,
         LightwalletdTestType::UpdateCachedState,
@@ -202,7 +202,48 @@ pub async fn run() -> Result<()> {
     // because new coins are created in each block
     assert!(balance.value_zat > 0);
 
-    // TODO: Create call and check for `GetTaddressBalanceStream`
+    // Call `GetTaddressBalanceStream` with the ZF funding stream address as a stream argument
+    let zf_stream_address = Address {
+        address: "t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1".to_string(),
+    };
+
+    let balance_zf = rpc_client
+        .get_taddress_balance_stream(tokio_stream::iter(vec![zf_stream_address.clone()]))
+        .await?
+        .into_inner();
+
+    // With ZFND funding stream address, the balance will always be greater than zero,
+    // because new coins are created in each block
+    assert!(balance_zf.value_zat > 0);
+
+    // Call `GetTaddressBalanceStream` with the MG funding stream address as a stream argument
+    let mg_stream_address = Address {
+        address: "t3XyYW8yBFRuMnfvm5KLGFbEVz25kckZXym".to_string(),
+    };
+
+    let balance_mg = rpc_client
+        .get_taddress_balance_stream(tokio_stream::iter(vec![mg_stream_address.clone()]))
+        .await?
+        .into_inner();
+
+    // With Major Grants funding stream address, the balance will always be greater than zero,
+    // because new coins are created in each block
+    assert!(balance_mg.value_zat > 0);
+
+    // Call `GetTaddressBalanceStream` with both, the ZFND and the MG funding stream addresses as a stream argument
+    let balance_both = rpc_client
+        .get_taddress_balance_stream(tokio_stream::iter(vec![
+            zf_stream_address,
+            mg_stream_address,
+        ]))
+        .await?
+        .into_inner();
+
+    // The result is the sum of the values in both addresses
+    assert_eq!(
+        balance_both.value_zat,
+        balance_zf.value_zat + balance_mg.value_zat
+    );
 
     // TODO: Create call and checks for `GetMempoolTx` and `GetMempoolTxStream`?
 
