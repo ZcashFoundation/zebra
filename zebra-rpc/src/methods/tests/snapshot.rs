@@ -200,7 +200,7 @@ fn snapshot_rpc_getblock(block: GetBlock, block_data: &[u8], settings: &insta::S
                       // assert that the block data matches, without creating a 1.5 kB snapshot file
                       assert_eq!(value.as_str().unwrap(), block_data);
 
-                      "[block_data]"
+                      "[BlockData]"
                   }),})
     );
 }
