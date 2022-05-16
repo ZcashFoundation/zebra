@@ -16,9 +16,6 @@ use zebra_test::mock_service::MockService;
 use super::super::*;
 
 /// Snapshot test for RPC methods responses.
-///
-/// TODO:
-/// - Add a `z_gettreestate` test when #3990 is merged.
 #[tokio::test]
 async fn test_rpc_response_data() {
     zebra_test::init();
@@ -119,6 +116,13 @@ async fn test_rpc_response_data_for_network(network: Network) {
 
     snapshot_rpc_getrawmempool(get_raw_mempool, &settings);
 
+    // `z_gettreestate`
+    let tree_state = rpc
+        .z_get_treestate(BLOCK_HEIGHT.to_string())
+        .await
+        .expect("We should have a GetTreestate struct");
+    snapshot_rpc_z_gettreestate(tree_state, &settings);
+
     // `getrawtransaction`
     //
     // - similar to `getrawmempool` described above, a mempool request will be made to get the requested
@@ -215,6 +219,11 @@ fn snapshot_rpc_getbestblockhash(tip_hash: GetBestBlockHash, settings: &insta::S
 /// Snapshot `getrawmempool` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getrawmempool(raw_mempool: Vec<String>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_raw_mempool", raw_mempool));
+}
+
+/// Snapshot `z_gettreestate` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_z_gettreestate(tree_state: GetTreestate, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("z_get_treestate", tree_state));
 }
 
 /// Snapshot `getrawtransaction` response, using `cargo insta` and JSON serialization.
