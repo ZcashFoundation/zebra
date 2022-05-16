@@ -40,7 +40,7 @@ RUN apt-get -qq update && \
 
 # Install google OS Config agent to be able to get information from the VMs being deployed
 # into GCP for integration testing purposes, and as Mainnet nodes
-# TODO: this shouldn't be a harcoded requirement for everyone
+# TODO: this shouldn't be a hardcoded requirement for everyone
 RUN if [ "$(uname -m)" != "aarch64" ]; then \
       apt-get -qq update && \
       apt-get -qq install -y --no-install-recommends \

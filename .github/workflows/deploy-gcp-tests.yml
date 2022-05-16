@@ -167,7 +167,7 @@ jobs:
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
 
       - name: Delete test instance
-        # If the disk generation step timeouts (+6 hours) the previous step (creating the image) willl be skipped.
+        # If the disk generation step timeouts (+6 hours) the previous step (creating the image) will be skipped.
         # Even if the instance continues running, no image will be created, so it's better to delete it.
         if: always()
         continue-on-error: true
