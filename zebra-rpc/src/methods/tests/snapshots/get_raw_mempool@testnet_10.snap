@@ -1,0 +1,6 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+assertion_line: 213
+expression: raw_mempool
+---
+[]
