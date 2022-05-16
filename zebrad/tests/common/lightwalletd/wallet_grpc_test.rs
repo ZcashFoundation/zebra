@@ -15,7 +15,7 @@
 //!
 //! - `GetTaddressTxids`: Covered.
 //! - `GetTaddressBalance`: Covered.
-//! - `GetTaddressBalanceStream`: Not covered.
+//! - `GetTaddressBalanceStream`: Covered.
 //!
 //! - `GetMempoolTx`: Not covered.
 //! - `GetMempoolStream`: Not covered.
@@ -23,7 +23,7 @@
 //! - `GetTreeState`: Not covered, Need #3990
 //!
 //! - `GetAddressUtxos` -= Covered.
-//! - `GetAddressUtxosStream`: Not covered.
+//! - `GetAddressUtxosStream`: Covered.
 //!
 //! - `GetLightdInfo`: Covered.
 //! - `Ping`: Not covered and it will never will, ping is only used for testing purposes.
@@ -272,7 +272,23 @@ pub async fn run() -> Result<()> {
     // As we requested one entry we should get a response of length 1
     assert_eq!(utxos.address_utxos.len(), 1);
 
-    // TODO: Create call and check for `GetAddressUtxosStream`
+    // Call `GetAddressUtxosStream` with the ZF funding stream address that will always have utxos
+    let mut utxos_zf = rpc_client
+        .get_address_utxos_stream(GetAddressUtxosArg {
+            addresses: vec!["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1".to_string()],
+            start_height: 1,
+            max_entries: 2,
+        })
+        .await?
+        .into_inner();
+
+    let mut counter = 0;
+    while let Some(_utxos) = utxos_zf.message().await? {
+        counter += 1;
+    }
+    // As we are in a "in sync" chain we know there are more than 2 utxos for this address
+    // but we will receive the max of 2 from the stream response because we used a limit of 2 `max_entries`.
+    assert_eq!(2, counter);
 
     // Call `GetLightdInfo`
     let lightd_info = rpc_client.get_lightd_info(Empty {}).await?.into_inner();
