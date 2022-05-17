@@ -3798,7 +3798,8 @@ dependencies = [
 [[package]]
 name = "redjubjub"
 version = "0.5.0"
-source = "git+https://github.com/ZcashFoundation/redjubjub.git?rev=c285d1d381a86d6ae66f3b78b8db278526d76dd8#c285d1d381a86d6ae66f3b78b8db278526d76dd8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6039ff156887caf92df308cbaccdc058c9d3155a913da046add6e48c4cdbd91d"
 dependencies = [
  "blake2b_simd 1.0.0",
  "byteorder",
