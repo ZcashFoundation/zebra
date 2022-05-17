@@ -79,7 +79,7 @@ jobs:
 
       - name: Disk rebuild files
         id: changed-files-rebuild
-        uses: tj-actions/changed-files@v19
+        uses: tj-actions/changed-files@v20
         with:
           files: |
             zebra-state/**/constants.rs
