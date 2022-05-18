@@ -305,9 +305,9 @@ jobs:
 
   # Test full sync of lightwalletd with a Zebra tip state
   lightwalletd-full-sync:
-    needs: build
+    needs: test-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-full-sync
@@ -347,7 +347,7 @@ jobs:
   lightwalletd-update-sync:
     needs: [ test-full-sync, lightwalletd-full-sync ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-update-sync
