@@ -20,24 +20,39 @@ on:
       test_variables:
         required: true
         type: string
+      # TODO: find a better name
       root_state_path:
         required: false
         type: string
         default: '/zebrad-cache'
+      # TODO: find a better name
       zebra_state_dir:
         required: false
         type: string
         default: ''
+        description: 'Name of the Zebra cached state directory and input image prefix to search in GCP'
+      # TODO: find a better name
+      lwd_state_dir:
+        required: false
+        type: string
+        default: ''
+        description: 'Name of the Lightwalletd cached state directory and input image prefix to search in GCP'
       disk_prefix:
         required: false
         type: string
         default: 'zebrad-cache'
+        description: 'Used to name the image, and for tests that do not use a `zebra_state_dir` to work, but builds a cached state'
       disk_suffix:
         required: false
         type: string
       needs_zebra_state:
         required: true
         type: boolean
+        description: 'Indicates if a test needs a disk with a Zebra cached state to run'
+      needs_lwd_state:
+        required: false
+        type: boolean
+        description: 'Indicates if a test needs a disk with Lightwalletd cached state to run (which also includes a Zebra cached state)'
       saves_to_disk:
         required: true
         type: boolean
@@ -152,7 +167,7 @@ jobs:
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
 
       - name: Delete test instance
-        # If the disk generation step timeouts (+6 hours) the previous step (creating the image) willl be skipped.
+        # If the disk generation step timeouts (+6 hours) the previous step (creating the image) will be skipped.
         # Even if the instance continues running, no image will be created, so it's better to delete it.
         if: always()
         continue-on-error: true
@@ -211,7 +226,7 @@ jobs:
         id: get-disk-name
         run: |
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
-          echo "LOCAL_STATE_VERSION: $LOCAL_STATE_VERSION"
+          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
           # Try to find an image generated from the main branch
           # Fields are listed in the "Create image from state disk" step
@@ -235,7 +250,13 @@ jobs:
 
           echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> $GITHUB_ENV
 
-      # Creates Compute Engine virtual machine instance w/ disks
+          echo "Description: $(gcloud compute images describe $CACHED_DISK_NAME --format='value(DESCRIPTION)')"
+
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
+          echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> $GITHUB_ENV
+
+      # Creates Compute Engine virtual machine and attach a cached state disk using the
+      # $CACHED_DISK_NAME variable as the source image to populate the disk cached state
       - name: Create GCP compute instance
         id: create-instance
         run: |
@@ -252,7 +273,24 @@ jobs:
           --zone ${{ env.ZONE }}
           sleep 60
 
+      # SSH into the just created VM, and create a Docker container to run the incoming test 
+      # from ${{ inputs.test_id }}, then create a docker volume with the recently attached disk.
+      # The disk will be mounted in ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }}.
+      #
+      # The disk mounted in the VM is located at /dev/sdb, we mount the root `/` of this disk to the docker
+      # container in one path:
+      # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
+      #
+      # This path must match the variable used by the tests in Rust, which are also set in
+      # `continous-integration-docker.yml` to be able to run this tests.
+      #
+      # Although we're mounting the disk root, Zebra will only respect the values from 
+      # $ZEBRA_CACHED_STATE_DIR. The inputs like ${{ inputs.zebra_state_dir }} are only used
+      # to match that variable paths.
       - name: Run ${{ inputs.test_id }} test
+        # This step mounts the volume only when a single cached state is needed, in this case
+        # the cached state from Zebra.
+        if: ${{ inputs.needs_zebra_state && !inputs.needs_lwd_state }}
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -267,6 +305,68 @@ jobs:
           docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
           --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
+
+      # SSH into the just created VM, and create a Docker container to run the incoming test 
+      # from ${{ inputs.test_id }}, then create a docker volume with the recently attached disk.
+      # The disk will be mounted in ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }},
+      # and ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }}
+      #
+      # In this step we're using the same disk for simplicity, as mounting multiple disks to the
+      # VM and to the container might require more steps in this workflow, and additional
+      # considerations.
+      #
+      # The disk mounted in the VM is located at /dev/sdb, we mount the root `/` of this disk to the docker
+      # container in two different paths:
+      # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
+      # - /var/cache/lwd-cache -> ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} -> $LIGHTWALLETD_DATA_DIR
+      #
+      # This doesn't cause any path conflicts, because Zebra and lightwalletd create different
+      # subdirectories for their data. (But Zebra, lightwalletd, and the test harness must not
+      # delete the whole cache directory.)
+      #
+      # This paths must match the variables used by the tests in Rust, which are also set in
+      # `continous-integration-docker.yml` to be able to run this tests.
+      #
+      # Although we're mounting the disk root to both directories, Zebra and Lightwalletd
+      # will only respect the values from $ZEBRA_CACHED_STATE_DIR and $LIGHTWALLETD_DATA_DIR,
+      # the inputs like ${{ inputs.lwd_state_dir }} are only used to match those variables paths.
+      - name: Run ${{ inputs.test_id }} test
+        # This step mounts the volume only when both cached states are needed, in this case
+        # the cached state from Zebra and Lightwalletd
+        if: ${{ inputs.needs_zebra_state && inputs.needs_lwd_state }}
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
+          ${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
+          && \
+          docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
+          --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+          --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
+          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
+
+      # Create an image from disk that will be used for following/other tests
+      # This image can contain:
+      # - Zebra cached state
+      # - Zebra + lightwalletd cached state
+      # Which cached state is being saved to the disk is defined by ${{ inputs.disk_prefix }}
+      #
+      # Force the image creation (--force) as the disk is still attached even though is not being
+      # used by the container
+      - name: Create image from state disk
+        if: ${{ inputs.saves_to_disk }}
+        run: |
+          gcloud compute images create ${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }} \
+          --force \
+          --source-disk=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
+          --source-disk-zone=${{ env.ZONE }} \
+          --storage-location=us \
+          --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
 
       - name: Delete test instance
         # We don't want to leave a failed instance in GCP using resources

@@ -57,8 +57,12 @@ skip-tree = [
     # wait for halo2 to upgrade
     { name = "blake2b_simd", version = "=0.5.11" },
 
-    # wait for zcash_primitives to remove duplicated dependency
+    # wait for zcash_primitives to remove duplicated dependencies
+    { name = "block-buffer", version = "=0.7.3" },
     { name = "block-buffer", version = "=0.9.0" },
+
+    # wait for insta to remove duplicated dependencies
+    { name = "sha-1", version = "=0.8.2" },
 
     # wait for orchard -> bigint to upgrade
     { name = "crunchy", version = "=0.1.6" },

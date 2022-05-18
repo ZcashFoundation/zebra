@@ -1,0 +1,6 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+assertion_line: 206
+expression: tip_hash
+---
+"00074c46a4aa8172df8ae2ad1848a2e084e1b6989b7d9e6132adc938bf835b36"

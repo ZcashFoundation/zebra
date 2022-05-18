@@ -37,6 +37,9 @@ case "$1" in
         elif [[ "$TEST_LWD_FULL_SYNC" -eq "1" ]]; then
             # Starting at a cached Zebra tip, run a lightwalletd sync to tip.
             exec cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_full_sync
+        elif [[ "$TEST_LWD_UPDATE_SYNC" -eq "1" ]]; then
+            # Starting with a cached Zebra and lightwalletd tip, run a quick update sync.
+            exec cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_update_sync
 
         # These tests actually use gRPC.
         elif [[ "$TEST_LWD_TRANSACTIONS" -eq "1" ]]; then
