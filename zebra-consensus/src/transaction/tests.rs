@@ -279,9 +279,6 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
 }
 
 #[tokio::test]
-// TODO: Remove `should_panic` once the NU5 activation height for mainnet has been
-// defined.
-#[should_panic]
 async fn v5_transaction_is_accepted_after_nu5_activation_mainnet() {
     v5_transaction_is_accepted_after_nu5_activation_for_network(Network::Mainnet).await
 }
@@ -571,7 +568,15 @@ async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
         service_fn(|_| async { unreachable!("State service should not be called") });
     let verifier = Verifier::new(Network::Mainnet, state_service);
 
-    let block_height = block::Height::MAX;
+    // Use an arbitrary pre-NU5 block height.
+    // It can't be NU5-onward because the expiry height limit is not enforced
+    // for coinbase transactions (it needs to match the block height instead),
+    // which is what is used in this test.
+    let block_height = (NetworkUpgrade::Nu5
+        .activation_height(Network::Mainnet)
+        .expect("NU5 height must be set")
+        - 1)
+    .expect("will not underflow");
 
     let (input, output) = mock_coinbase_transparent_output(block_height);
 
@@ -1059,6 +1064,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     *new_transaction.expiry_height_mut() = new_expiry_height;
 
     let result = verifier
+        .clone()
         .oneshot(Request::Block {
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
@@ -1074,6 +1080,29 @@ async fn v5_coinbase_transaction_expiry_height() {
             block_height,
             transaction_hash: new_transaction.hash(),
         })
+    );
+
+    // Test with matching heights again, but using a very high value
+    // that is greater than the limit for non-coinbase transactions,
+    // to ensure the limit is not being enforced for coinbase transactions.
+    let new_expiry_height = Height::MAX;
+    let mut new_transaction = transaction.clone();
+
+    *new_transaction.expiry_height_mut() = new_expiry_height;
+
+    let result = verifier
+        .clone()
+        .oneshot(Request::Block {
+            transaction: Arc::new(new_transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            height: new_expiry_height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result.expect("unexpected error response").tx_id(),
+        new_transaction.unmined_id()
     );
 }
 
@@ -1164,52 +1193,6 @@ async fn v5_transaction_with_exceeding_expiry_height() {
         Err(TransactionError::MaximumExpiryHeight {
             expiry_height,
             is_coinbase: false,
-            block_height,
-            transaction_hash: transaction.hash(),
-        })
-    );
-}
-
-/// Tests if a coinbase V5 transaction with an expiry height exceeding the
-/// maximum is rejected.
-#[tokio::test]
-async fn v5_coinbase_transaction_with_exceeding_expiry_height() {
-    let state_service =
-        service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(Network::Mainnet, state_service);
-
-    let block_height = block::Height::MAX;
-
-    let (input, output) = mock_coinbase_transparent_output(block_height);
-
-    // This expiry height exceeds the maximum defined by the specification.
-    let expiry_height = block::Height(500_000_000);
-
-    // Create a coinbase V4 tx.
-    let transaction = Transaction::V5 {
-        inputs: vec![input],
-        outputs: vec![output],
-        lock_time: LockTime::unlocked(),
-        expiry_height,
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-        network_upgrade: NetworkUpgrade::Nu5,
-    };
-
-    let result = verifier
-        .oneshot(Request::Block {
-            transaction: Arc::new(transaction.clone()),
-            known_utxos: Arc::new(HashMap::new()),
-            height: block_height,
-            time: chrono::MAX_DATETIME,
-        })
-        .await;
-
-    assert_eq!(
-        result,
-        Err(TransactionError::MaximumExpiryHeight {
-            expiry_height,
-            is_coinbase: true,
             block_height,
             transaction_hash: transaction.hash(),
         })
