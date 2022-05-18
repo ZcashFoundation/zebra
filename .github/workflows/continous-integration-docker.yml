@@ -262,18 +262,15 @@ jobs:
   #
   # Runs:
   # - after every PR is merged to `main`
-  # - on every PR update, but only if Zebra's state version changes in the PR
-  # - on request
+  # - on every PR update, but only if there's no available disk matching the actual state version from constants.rs
+  # - on request, using workflow_dispatch with run-full-sync
+  # Note: the output from get-available-disks should match with the caller workflow inputs
   test-full-sync:
     needs: [ build, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
     # to also run on Mergify head branches,
     # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    # Only run this job if there's no available disk matching the actual state version from constants.rs,
-    # or if we manually execute a workflow_dispatch using run-full-sync.
-    #
-    # Note: the output from get-available-disks should match with the caller workflow inputs
     if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) && github.event_name == 'push') || github.event.inputs.run-full-sync == 'true' }}
     with:
       test_id: full-sync-to-tip
@@ -285,6 +282,10 @@ jobs:
       height_grep_text: 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.* current_height=Height'
 
   # Test that Zebra can answer a synthetic RPC call, using a cached Zebra tip state
+  #
+  # Runs:
+  # - after every PR is merged to `main`
+  # - on every PR update
   #
   # If the state version has changed, waits for the new cached state to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
@@ -304,6 +305,13 @@ jobs:
       zebra_state_dir: 'zebrad-cache'
 
   # Test full sync of lightwalletd with a Zebra tip state
+  #
+  # Runs:
+  # - after every PR is merged to `main`
+  # - on every PR update
+  #
+  # If the state version has changed, waits for the new cached state to be created.
+  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-full-sync:
     needs: test-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
@@ -323,6 +331,10 @@ jobs:
       lwd_state_dir: 'lwd-cache'
 
   # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
+  #
+  # Runs:
+  # - after every PR is merged to `main`
+  # - on every PR update
   #
   # If the state version has changed, waits for the new cached states to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
@@ -344,6 +356,12 @@ jobs:
       lwd_state_dir: 'lwd-cache'
 
   # Test update sync of lightwalletd with a lightwalletd and Zebra tip state
+  # Runs:
+  # - after every PR is merged to `main`
+  # - on every PR update
+  #
+  # If the state version has changed, waits for the new cached states to be created.
+  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-update-sync:
     needs: [ test-full-sync, lightwalletd-full-sync ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
