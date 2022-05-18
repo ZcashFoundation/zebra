@@ -51,13 +51,13 @@ pub(super) const MERKLE_DEPTH: usize = 32;
 /// https://zips.z.cash/protocol/protocol.pdf#orchardmerklecrh
 /// https://zips.z.cash/protocol/protocol.pdf#constants
 fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pallas::Base {
-    let mut s = bitvec![Lsb0, u8;];
+    let mut s = bitvec![u8, Lsb0;];
 
     // Prefix: l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer)
     let l = MERKLE_DEPTH - 1 - layer as usize;
-    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from([l, 0])[0..10]);
-    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(left.to_repr())[0..255]);
-    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(right.to_repr())[0..255]);
+    s.extend_from_bitslice(&BitArray::<_, Lsb0>::from([l, 0])[0..10]);
+    s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(left.to_repr())[0..255]);
+    s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(right.to_repr())[0..255]);
 
     match sinsemilla_hash(b"z.cash:Orchard-MerkleCRH", &s) {
         Some(h) => h,
