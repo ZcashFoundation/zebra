@@ -53,7 +53,7 @@ pub async fn run() -> Result<()> {
     // We want a zebra state dir and a lightwalletd data dir in place,
     // so `UpdateCachedState` can be used as our test type
     //
-    // But for now, we don't want to require the cached state, because it's not ready yet.
+    // But for now, we don't want to require the cached state, because it has been unreliable.
     // TODO: use `UpdateCachedState`
     let test_type = FullSyncFromGenesis {
         allow_lightwalletd_cached_state: true,
