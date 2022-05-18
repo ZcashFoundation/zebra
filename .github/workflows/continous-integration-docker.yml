@@ -66,23 +66,56 @@ env:
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
 
 jobs:
-  changed-files:
+  get-available-disks:
     runs-on: ubuntu-latest
-    name: Checks changed-files
+    name: Find available cached state disks
     outputs:
-      rebuild: ${{ steps.changed-files-rebuild.outputs.any_changed == 'true' }}
+      lwd_tip_disk: ${{ steps.get-available-disks.outputs.lwd_tip_disk }}
+      zebra_tip_disk: ${{ steps.get-available-disks.outputs.zebra_tip_disk }}
+      zebra_checkpoint_disk: ${{ steps.get-available-disks.outputs.zebra_checkpoint_disk }}
     steps:
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
           fetch-depth: 0
+      # Find a cached state disk for subsequent jobs needing a cached state without
+      # restricting the result from any branch.
+      #
+      # This search is executed considering the actual version from constants.rs
+      # 
+      # Generate one of the following outputs with a boolean to pass to subsequent jobs:
+      # - lwd_tip_disk
+      # - zebra_tip_disk
+      # - zebra_checkpoint_disk
+      - name: Find cached state disks
+        id: get-available-disks
+        run: |
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
+          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
-      - name: Disk rebuild files
-        id: changed-files-rebuild
-        uses: tj-actions/changed-files@v19
-        with:
-          files: |
-            zebra-state/**/constants.rs
+          LWD_TIP_DISK=$(gcloud compute images list --filter="name~lwd-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          if [[ -z "$LWD_TIP_DISK" ]]; then
+              echo "No TIP disk found for LWD"
+          else
+              echo "Disk: $LWD_TIP_DISK"
+              ::set-output name=lwd_tip_disk::${{ toJSON(true) }}
+          fi
+
+          ZEBRA_TIP_DISK=$(gcloud compute images list --filter="name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          if [[ -z "$ZEBRA_TIP_DISK" ]]; then
+              echo "No TIP disk found for ZEBRA"
+          else
+              echo "Disk: $ZEBRA_TIP_DISK"
+              ::set-output name=zebra_tip_disk::${{ toJSON(true) }}
+          fi
+
+          ZEBRA_CHECKPOINT_DISK=$(gcloud compute images list --filter="name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          if [[ -z "$ZEBRA_CHECKPOINT_DISK" ]]; then
+              echo "No CHECKPOINT found for ZEBRA"
+          else
+              echo "Disk: $ZEBRA_CHECKPOINT_DISK"
+              ::set-output name=zebra_checkpoint_disk::${{ toJSON(true) }}
+          fi
 
   build:
     uses: ./.github/workflows/build-docker-image.yml
@@ -192,10 +225,13 @@ jobs:
   # - on every PR update, but only if Zebra's state version changes in the PR
   # - on request
   regenerate-stateful-disks:
-    needs: [build, changed-files]
+    needs: [ build, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    # Only run this job if the database format version has (likely) changed.
-    if: ${{ (needs.changed-files.outputs.rebuild == 'true' && github.event_name == 'push') || github.event.inputs.regenerate-disks == 'true' }}
+    # Only run this job if there's no available disk matching the actual state version from constants.rs,
+    # or if we manually execute a workflow_dispatch using regenerate-disks.
+    #
+    # Note: the output from get-available-disks should match with the caller workflow inputs
+    if: ${{ (fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) && github.event_name == 'push') || github.event.inputs.regenerate-disks == 'true' }}
     with:
       test_id: sync-to-checkpoint
       test_description: Test sync up to mandatory checkpoint
@@ -229,13 +265,16 @@ jobs:
   # - on every PR update, but only if Zebra's state version changes in the PR
   # - on request
   test-full-sync:
-    needs: [build, changed-files]
+    needs: [ build, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    # TODO:
     # to also run on Mergify head branches,
     # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || (needs.changed-files.outputs.rebuild == 'true' && github.event_name == 'push') || github.event.inputs.run-full-sync == 'true' }}
+    # Only run this job if there's no available disk matching the actual state version from constants.rs,
+    # or if we manually execute a workflow_dispatch using run-full-sync.
+    #
+    # Note: the output from get-available-disks should match with the caller workflow inputs
+    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) && github.event_name == 'push') || github.event.inputs.run-full-sync == 'true' }}
     with:
       test_id: full-sync-to-tip
       test_description: Test a full sync up to the tip
@@ -264,27 +303,6 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
 
-  # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
-  #
-  # If the state version has changed, waits for the new cached states to be created.
-  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
-  lightwalletd-transactions-test:
-    needs: test-full-sync
-    uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
-    with:
-      app_name: lightwalletd
-      test_id: lwd-send-transactions
-      test_description: Test sending transactions via lightwalletd
-      test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
-      needs_zebra_state: true
-      needs_lwd_state: true
-      saves_to_disk: false
-      disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
-      lwd_state_dir: 'lwd-cache'
-
   # Test full sync of lightwalletd with a Zebra tip state
   lightwalletd-full-sync:
     needs: build
@@ -304,9 +322,30 @@ jobs:
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
 
+  # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
+  #
+  # If the state version has changed, waits for the new cached states to be created.
+  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
+  lightwalletd-transactions-test:
+    needs: [ test-full-sync, lightwalletd-full-sync ]
+    uses: ./.github/workflows/deploy-gcp-tests.yml
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    with:
+      app_name: lightwalletd
+      test_id: lwd-send-transactions
+      test_description: Test sending transactions via lightwalletd
+      test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      needs_zebra_state: true
+      needs_lwd_state: true
+      saves_to_disk: false
+      disk_suffix: tip
+      root_state_path: '/var/cache'
+      zebra_state_dir: 'zebrad-cache'
+      lwd_state_dir: 'lwd-cache'
+
   # Test update sync of lightwalletd with a lightwalletd and Zebra tip state
   lightwalletd-update-sync:
-    needs: build
+    needs: [ test-full-sync, lightwalletd-full-sync ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
