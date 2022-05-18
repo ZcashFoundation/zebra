@@ -1,0 +1,9 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+assertion_line: 161
+expression: info
+---
+{
+  "build": "vRPC test",
+  "subversion": "[SubVersion]"
+}

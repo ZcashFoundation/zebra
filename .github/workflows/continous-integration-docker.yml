@@ -79,7 +79,7 @@ jobs:
 
       - name: Disk rebuild files
         id: changed-files-rebuild
-        uses: tj-actions/changed-files@v19
+        uses: tj-actions/changed-files@v20
         with:
           files: |
             zebra-state/**/constants.rs
@@ -255,7 +255,6 @@ jobs:
       zebra_state_dir: 'zebrad-cache'
 
   # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
-  # TODO: use a cached lightwalletd tip state to speed up the test (#4303)
   lightwalletd-transactions-test:
     needs: build
     uses: ./.github/workflows/deploy-gcp-tests.yml
@@ -264,9 +263,49 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-send-transactions
       test_description: Test sending transactions via lightwalletd
-      test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lightwalletd-cache'
+      test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
       needs_zebra_state: true
+      needs_lwd_state: true
       saves_to_disk: false
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
+      lwd_state_dir: 'lwd-cache'
+
+  # Test full sync of lightwalletd with a Zebra tip state
+  lightwalletd-full-sync:
+    needs: build
+    uses: ./.github/workflows/deploy-gcp-tests.yml
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    with:
+      app_name: lightwalletd
+      test_id: lwd-full-sync
+      test_description: Test lightwalletd full sync
+      test_variables: '-e TEST_LWD_FULL_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      needs_zebra_state: true
+      needs_lwd_state: false
+      saves_to_disk: true
+      disk_prefix: lwd-cache
+      disk_suffix: tip
+      root_state_path: '/var/cache'
+      zebra_state_dir: 'zebrad-cache'
+      lwd_state_dir: 'lwd-cache'
+
+  # Test update sync of lightwalletd with a lightwalletd and Zebra tip state
+  lightwalletd-update-sync:
+    needs: build
+    uses: ./.github/workflows/deploy-gcp-tests.yml
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    with:
+      app_name: lightwalletd
+      test_id: lwd-update-sync
+      test_description: Test lightwalletd update sync with both states
+      test_variables: '-e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      needs_zebra_state: true
+      needs_lwd_state: true
+      saves_to_disk: false
+      disk_prefix: lwd-cache
+      disk_suffix: tip
+      root_state_path: '/var/cache'
+      zebra_state_dir: 'zebrad-cache'
+      lwd_state_dir: 'lwd-cache'

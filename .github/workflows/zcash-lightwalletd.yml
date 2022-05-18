@@ -2,6 +2,7 @@ name: zcash-lightwalletd
 
 on:
   workflow_dispatch:
+  
   push:
     branches:
       - 'main'
@@ -14,9 +15,25 @@ on:
       - 'zebrad/tests/acceptance.rs'
       - 'zebrad/src/config.rs'
       - 'zebrad/src/commands/start.rs'
-      # workflow definitions
-      #
-      # unlike the Zebra code, these workflow definitions do change the docker image
+      # these workflow definitions actually change the docker image
+      - 'docker/zcash-lightwalletd/Dockerfile'
+      - '.github/workflows/zcash-lightwalletd.yml'
+
+  # Update the lightwalletd image when each related PR changes
+  #
+  # TODO: after NU5 mainnet activation and wallet orchard features are stable,
+  #       consider just rebuilding the image on `main` merges
+  pull_request:
+    branches:
+      - main
+    paths:
+      # rebuild lightwalletd whenever the related Zebra code changes
+      # (this code isn't actually compiled in this docker image)
+      - 'zebra-rpc/**'
+      - 'zebrad/tests/acceptance.rs'
+      - 'zebrad/src/config.rs'
+      - 'zebrad/src/commands/start.rs'
+      # these workflow definitions actually change the docker image
       - 'docker/zcash-lightwalletd/Dockerfile'
       - '.github/workflows/zcash-lightwalletd.yml'
 
@@ -82,7 +99,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.7.1
+        uses: google-github-actions/auth@v0.7.2
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'

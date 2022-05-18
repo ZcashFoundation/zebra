@@ -80,7 +80,7 @@ jobs:
 
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.7.1
+        uses: google-github-actions/auth@v0.7.2
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
@@ -118,10 +118,10 @@ jobs:
             CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
           push: true
-          # To improve build speeds, for eacrh branch we push an additonal image to the registry,
+          # To improve build speeds, for each branch we push an additional image to the registry,
           # to be used as the caching layer, using the `max` caching mode.
           #
-          # We use multiple cache sources to confirm a cache hit, starting from the `main` branch cahe,
+          # We use multiple cache sources to confirm a cache hit, starting from the `main` branch cache,
           # and if there's no hit, then continue with a cache scoped per branch.
           cache-from: |
             type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:main-cache
