@@ -9,7 +9,7 @@ edition = "2021"
 
 [dependencies]
 # TODO: make a release and point to it
-zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script.git", rev = "7704c1ee42e04c252eef7c886c5b6921754dfbbd" }
+zcash_script = "0.1.6"
 
 zebra-chain = { path = "../zebra-chain" }
 
