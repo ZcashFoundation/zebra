@@ -73,6 +73,9 @@ jobs:
       lwd_tip_disk: ${{ steps.get-available-disks.outputs.lwd_tip_disk }}
       zebra_tip_disk: ${{ steps.get-available-disks.outputs.zebra_tip_disk }}
       zebra_checkpoint_disk: ${{ steps.get-available-disks.outputs.zebra_checkpoint_disk }}
+    permissions:
+      contents: 'read'
+      id-token: 'write'
     steps:
       - uses: actions/checkout@v3.0.2
         with:
