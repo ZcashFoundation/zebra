@@ -4,6 +4,7 @@ authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 version = "1.0.0-beta.10"
 edition = "2021"
+rust-version = "1.58"
 repository = "https://github.com/ZcashFoundation/zebra"
 # make `cargo run` use `zebrad` by default
 # when run in the workspace directory
