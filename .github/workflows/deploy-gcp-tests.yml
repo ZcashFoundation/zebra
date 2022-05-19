@@ -228,27 +228,29 @@ jobs:
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
           echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
+          if [[ "${{ inputs.needs_lwd_state }}" == "true" ]]; then
+              DISK_PREFIX=${{ inputs.lwd_state_dir }}
+          else
+              DISK_PREFIX=${{ inputs.zebra_state_dir || inputs.disk_prefix }}
+          fi
+
           # Try to find an image generated from the main branch
           # Fields are listed in the "Create image from state disk" step
-          CACHED_DISK_NAME=$(gcloud compute images list --verbosity=debug --filter="name~${{ inputs.disk_prefix }}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "main Disk: $CACHED_DISK_NAME"
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               # Try to find an image generated from any other branch
-              CACHED_DISK_NAME=$(gcloud compute images list --verbosity=debug --filter="name~${{ inputs.disk_prefix }}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+              CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
               echo "Disk: $CACHED_DISK_NAME"
           fi
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               echo "No cached state disk available"
-              echo "Expected ${{ inputs.disk_prefix }}-(branch)-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
+              echo "Expected ${DISK_PREFIX}-(branch)-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
               echo "Cached state test jobs must depend on the cached state rebuild job"
               exit 1
           fi
-
-          echo "Description: $(gcloud compute images describe $CACHED_DISK_NAME --format='value(DESCRIPTION)')"
-
-          echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> $GITHUB_ENV
 
           echo "Description: $(gcloud compute images describe $CACHED_DISK_NAME --format='value(DESCRIPTION)')"
 
