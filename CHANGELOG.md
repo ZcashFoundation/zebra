@@ -4,6 +4,88 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-beta.10](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.10) - 2022-05-19
+
+Zebra's latest beta finalizes the support for `lightwalletd` RPC methods and continues with the testing of each of these features. Also, this beta sets the NU5 mainnet activation height.
+
+### Added
+
+#### RPC
+
+- `z_gettreestate` RPC (#3990)
+
+##### Tests
+
+- grpc test for `GetTaddressBalanceStream` and `GetAddressUtxosStream` (#4407)
+- snapshot tests for RPC methods responses (#4352 #4401)
+
+#### CI
+
+- `lightwalletd_update_sync` test to CI (#4269)
+- `lightwalletd_full_sync` test to CI (#4268)
+
+### Changed
+
+- Set NU5 mainnet activation height and current network protocol version (#4390)
+- NU5 mainnet dependency upgrades (#4405)
+- Use the latest lightwalletd version (#4398)
+
+#### Rust Dependencies
+
+- orchard, redjubjub, jubjub, group, bls12_381, bitvec, halo2, jubjub, primitive_types, 
+  librustzcash, zcash_history, zcash_encoding, bellman, zcash_script, incrementalmerkletree (#4405)
+- vergen from 7.0.0 to 7.1.0 (#4420)
+- tokio-util from 0.7.1 to 0.7.2 (#4406)
+- inferno from 0.11.2 to 0.11.3 (#4357)
+- tokio from 1.18.1 to 1.18.2 (#4358)
+- prost from 0.10.2 to 0.10.3 (#4348)
+- bech32 from 0.8.1 to 0.9.0 (#4394)
+
+#### CI Dependencies
+
+- google-github-actions/auth from 0.7.1 to 0.7.3 (#4404 #4419)
+- tj-actions/changed-files from 19 to 20 (#4403)
+- w9jds/firebase-action from 2.0.0 to 2.1.0 (#4402)
+
+#### Others
+
+- Rename workflow files (#3941)
+- Added block hash and height to syncer errors (#4287)
+- Drop sentry dependencies when enable-sentry feature is disabled (#4372)
+- Deprecate gcr.io as a registry and build faster (#4298)
+- Clippy: Remove redundant bindings, allocations, and generics (#4353)
+
+#### Documentation
+
+- Added "old state directories aren't deleted" to known issues (#4365)
+- Added support for Mermaid to render graphs (#4359)
+- Fix some typos (#4397)
+
+### Fixed
+
+#### RPC
+
+- Use the Sapling activation height in gRPC tests (#4424)
+
+#### State
+
+- Return non-finalized UTXOs and tx IDs in address queries (#4356)
+- List cached state files before or after tests (#4409)
+
+#### CI and testing fixes
+
+- Updated Cargo.lock check job name in patch workflow (#4428)
+- Put gRPC tests behind an optional feature flag to fix production build issues (#4369)
+- Stop failing the send transaction test (#4416)
+- Require cached lightwalletd state for the send transaction tests (#4303)
+- Errors in Docker entrypoint (#4411)
+- Only use cached state disks with the same state version (#4391)
+- Output length in some tests (#4387)
+- Wrong file being referenced by CI (#4364)
+- Make test selection and logging consistent (#4375)
+- Allow builds over 1 hour and tests without the sentry feature (#4370)
+
+
 ## [Zebra 1.0.0-beta.9](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.9) - 2022-05-06
 
 Zebra's latest beta continues our work on `lightwalletd` RPC methods, and contains some internal CI improvements.
