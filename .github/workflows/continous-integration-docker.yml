@@ -109,6 +109,7 @@ jobs:
           LWD_TIP_DISK=$(gcloud compute images list --filter="name~lwd-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           if [[ -z "$LWD_TIP_DISK" ]]; then
               echo "No TIP disk found for LWD"
+              echo "::set-output name=lwd_tip_disk::${{ toJSON(false) }}"
           else
               echo "Disk: $LWD_TIP_DISK"
               echo "::set-output name=lwd_tip_disk::${{ toJSON(true) }}"
@@ -117,6 +118,7 @@ jobs:
           ZEBRA_TIP_DISK=$(gcloud compute images list --filter="name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           if [[ -z "$ZEBRA_TIP_DISK" ]]; then
               echo "No TIP disk found for ZEBRA"
+              echo "::set-output name=lwd_tip_disk::${{ toJSON(false) }}"
           else
               echo "Disk: $ZEBRA_TIP_DISK"
               echo "::set-output name=zebra_tip_disk::${{ toJSON(true) }}"
@@ -125,6 +127,7 @@ jobs:
           ZEBRA_CHECKPOINT_DISK=$(gcloud compute images list --filter="name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           if [[ -z "$ZEBRA_CHECKPOINT_DISK" ]]; then
               echo "No CHECKPOINT found for ZEBRA"
+              echo "::set-output name=lwd_tip_disk::${{ toJSON(false) }}"
           else
               echo "Disk: $ZEBRA_CHECKPOINT_DISK"
               echo "::set-output name=zebra_checkpoint_disk::${{ toJSON(true) }}"
