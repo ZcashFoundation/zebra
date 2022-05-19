@@ -32,6 +32,8 @@ Zebra's latest beta finalizes the support for `lightwalletd` RPC methods and con
 
 #### Rust Dependencies
 
+- orchard, redjubjub, jubjub, group, bls12_381, bitvec, halo2, jubjub, primitive_types, 
+  librustzcash, zcash_history, zcash_encoding, bellman, zcash_script (#4405)
 - vergen from 7.0.0 to 7.1.0 (#4420)
 - tokio-util from 0.7.1 to 0.7.2 (#4406)
 - inferno from 0.11.2 to 0.11.3 (#4357)
