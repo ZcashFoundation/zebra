@@ -40,6 +40,12 @@ on:
       - '.github/workflows/build-docker-image.yml'
 
 jobs:
+  get-available-disks:
+    name: Find available cached state disks
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
   build:
     name: Build images
     runs-on: ubuntu-latest
