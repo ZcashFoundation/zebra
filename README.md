@@ -100,6 +100,9 @@ install mechanism. To run `zebrad`, follow the instructions to compile `zebrad`
 for your platform:
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
+     - Zebra is tested with the latest `stable` Rust version.
+        Earlier versions are not supported or tested, but they might work.
+        (Rust 1.57 and earlier are not supported, due to missing features.)
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
