@@ -64,14 +64,14 @@ fn Q(D: &[u8]) -> pallas::Point {
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash>
 #[allow(non_snake_case)]
-fn S(j: &BitSlice<Lsb0, u8>) -> pallas::Point {
+fn S(j: &BitSlice<u8, Lsb0>) -> pallas::Point {
     // The value of j is a 10-bit value, therefore must never exceed 2^10 in
     // value.
     assert_eq!(j.len(), 10);
 
     // I2LEOSP_32(𝑗)
     let mut leosp_32_j = [0u8; 4];
-    leosp_32_j[..2].copy_from_slice(j.as_raw_slice());
+    leosp_32_j[..2].copy_from_slice(j.to_bitvec().as_raw_slice());
 
     pallas_group_hash(b"z.cash:SinsemillaS", &leosp_32_j)
 }
@@ -114,7 +114,7 @@ fn incomplete_addition(
 ///
 /// If `M` is greater than `k*c = 2530` bits.
 #[allow(non_snake_case)]
-pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> Option<pallas::Point> {
+pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<u8, Lsb0>) -> Option<pallas::Point> {
     let k = 10;
     let c = 253;
 
@@ -129,8 +129,7 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> Option<pallas
     for chunk in M.chunks(k) {
         // Pad each chunk with zeros.
         let mut store = [0u8; 2];
-        let bits =
-            BitSlice::<Lsb0, _>::from_slice_mut(&mut store).expect("must work for small slices");
+        let bits = BitSlice::<_, Lsb0>::from_slice_mut(&mut store);
         bits[..chunk.len()].copy_from_bitslice(chunk);
 
         acc = incomplete_addition(incomplete_addition(acc, Some(S(&bits[..k]))), acc);
@@ -156,7 +155,7 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<Lsb0, u8>) -> Option<pallas
 ///
 /// If `M` is greater than `k*c = 2530` bits in `sinsemilla_hash_to_point`.
 #[allow(non_snake_case)]
-pub fn sinsemilla_hash(D: &[u8], M: &BitVec<Lsb0, u8>) -> Option<pallas::Base> {
+pub fn sinsemilla_hash(D: &[u8], M: &BitVec<u8, Lsb0>) -> Option<pallas::Base> {
     extract_p_bottom(sinsemilla_hash_to_point(D, M))
 }
 
@@ -173,7 +172,7 @@ pub fn sinsemilla_hash(D: &[u8], M: &BitVec<Lsb0, u8>) -> Option<pallas::Base> {
 pub fn sinsemilla_commit(
     r: pallas::Scalar,
     D: &[u8],
-    M: &BitVec<Lsb0, u8>,
+    M: &BitVec<u8, Lsb0>,
 ) -> Option<pallas::Point> {
     sinsemilla_hash_to_point(&[D, b"-M"].concat(), M)
         .map(|point| point + pallas_group_hash(&[D, b"-r"].concat(), b"") * r)
@@ -186,7 +185,7 @@ pub fn sinsemilla_commit(
 pub fn sinsemilla_short_commit(
     r: pallas::Scalar,
     D: &[u8],
-    M: &BitVec<Lsb0, u8>,
+    M: &BitVec<u8, Lsb0>,
 ) -> Option<pallas::Base> {
     extract_p_bottom(sinsemilla_commit(r, D, M))
 }
@@ -215,7 +214,7 @@ mod tests {
 
         let D = b"z.cash:test-Sinsemilla";
         let M = bitvec![
-            Lsb0, u8; 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0,
+            u8, Lsb0; 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0,
             1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0,
         ];
 
@@ -247,7 +246,7 @@ mod tests {
 
         for tv in tests::vectors::SINSEMILLA.iter() {
             let D = tv.domain.as_slice();
-            let M: &BitVec<Lsb0, u8> = &tv.msg.iter().collect();
+            let M: &BitVec<u8, Lsb0> = &tv.msg.iter().collect();
 
             assert_eq!(
                 sinsemilla_hash_to_point(D, M).expect("should not fail per Theorem 5.4.4"),

@@ -59,8 +59,8 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
-  build:
-    name: Build stable on ubuntu-latest
+  check-cargo-lock:
+    name: Check Cargo.lock is up to date
     timeout-minutes: 60
     runs-on: ubuntu-latest
 

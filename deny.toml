@@ -27,9 +27,9 @@ skip = [
     #  wait for zcash_proofs fork be merged back into upstream
     # https://github.com/ZcashFoundation/zebra/issues/3831
     { name = "equihash", version = "=0.1.0" },
-    { name = "zcash_encoding", version = "=0.0.0" },
+    { name = "zcash_encoding", version = "=0.1.0" },
     { name = "zcash_note_encryption", version = "=0.1.0" },
-    { name = "zcash_primitives", version = "=0.5.0" },
+    { name = "zcash_primitives", version = "=0.6.0" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
@@ -51,9 +51,6 @@ skip-tree = [
     # wait for structopt upgrade (or upgrade to clap 3)
     { name = "heck", version = "=0.3.3" },
 
-    # wait for bellman to upgrade
-    { name = "blake2s_simd", version = "=0.5.11" },
-
     # wait for halo2 to upgrade
     { name = "blake2b_simd", version = "=0.5.11" },
 
@@ -63,9 +60,6 @@ skip-tree = [
 
     # wait for insta to remove duplicated dependencies
     { name = "sha-1", version = "=0.8.2" },
-
-    # wait for orchard -> bigint to upgrade
-    { name = "crunchy", version = "=0.1.6" },
 
     # wait for curve25519-dalek to upgrade
     { name = "digest", version = "=0.9.0" },
@@ -83,6 +77,8 @@ skip-tree = [
     # upgrade abscissa and arti
     { name = "darling", version = "=0.12.4" },
     { name = "darling", version = "=0.13.4" },
+
+    { name = "proc-macro-crate", version = "=0.1.5" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
@@ -100,11 +96,9 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
-    "https://github.com/nuttycom/hdwallet",
 ]
 
 [sources.allow-org]
 github = [
     "ZcashFoundation",
-    "zcash",
 ]

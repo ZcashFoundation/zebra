@@ -50,13 +50,13 @@ pub(super) const MERKLE_DEPTH: usize = 32;
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#merklecrh
 fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
-    let mut s = bitvec![Lsb0, u8;];
+    let mut s = bitvec![u8, Lsb0;];
 
     // Prefix: l = I2LEBSP_6(MerkleDepth^Sapling − 1 − layer)
     let l = (MERKLE_DEPTH - 1) as u8 - layer;
-    s.extend_from_bitslice(&BitSlice::<Lsb0, _>::from_element(&l)[0..6]);
-    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(left)[0..255]);
-    s.extend_from_bitslice(&BitArray::<Lsb0, _>::from(right)[0..255]);
+    s.extend_from_bitslice(&BitSlice::<_, Lsb0>::from_element(&l)[0..6]);
+    s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(left)[0..255]);
+    s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(right)[0..255]);
 
     pedersen_hash(*b"Zcash_PH", &s).to_bytes()
 }
