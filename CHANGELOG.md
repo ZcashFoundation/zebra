@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-beta.10](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.10) - 2022-05-19
 
-Zebra's latest beta finalizes the support for `lightwalletd` RPC methods and continue with the testing of each of this features. Also, this beta set the NU5 mainnet activation height.
+Zebra's latest beta finalizes the support for `lightwalletd` RPC methods and continues with the testing of each of these features. Also, this beta sets the NU5 mainnet activation height.
 
 ### Added
 
