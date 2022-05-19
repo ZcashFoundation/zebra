@@ -43,8 +43,7 @@ Zebra's latest beta finalizes the support for `lightwalletd` RPC methods and con
 
 #### CI Dependencies
 
-- google-github-actions/auth from 0.7.2 to 0.7.3 (#4419)
-- google-github-actions/auth from 0.7.1 to 0.7.2 (#4404)
+- google-github-actions/auth from 0.7.1 to 0.7.3 (#4404 #4419)
 - tj-actions/changed-files from 19 to 20 (#4403)
 - w9jds/firebase-action from 2.0.0 to 2.1.0 (#4402)
 
