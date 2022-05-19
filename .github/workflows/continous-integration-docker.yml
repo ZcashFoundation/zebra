@@ -327,7 +327,7 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   # TODO: move this job under lightwalletd-full-sync to have a sequential logic
   lightwalletd-transactions-test:
-    needs: [ test-full-sync, lightwalletd-full-sync ]
+    needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
@@ -377,7 +377,7 @@ jobs:
   # If the state version has changed, waits for the new cached states to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-update-sync:
-    needs: [ test-full-sync, lightwalletd-full-sync ]
+    needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
