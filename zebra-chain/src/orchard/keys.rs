@@ -653,17 +653,17 @@ impl From<FullViewingKey> for IncomingViewingKey {
     /// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
     #[allow(non_snake_case)]
     fn from(fvk: FullViewingKey) -> Self {
-        let mut M: BitVec<Lsb0, u8> = BitVec::new();
+        let mut M: BitVec<u8, Lsb0> = BitVec::new();
 
         // I2LEBSP_l^Orchard_base(ak)︁
         let ak_bytes =
             extract_p(pallas::Point::from_bytes(&fvk.spend_validating_key.into()).unwrap())
                 .to_repr();
-        M.extend_from_bitslice(&BitArray::<Lsb0, _>::from(ak_bytes)[0..255]);
+        M.extend_from_bitslice(&BitArray::<_, Lsb0>::from(ak_bytes)[0..255]);
 
         // I2LEBSP_l^Orchard_base(nk)︁
         let nk_bytes: [u8; 32] = fvk.nullifier_deriving_key.into();
-        M.extend_from_bitslice(&BitArray::<Lsb0, _>::from(nk_bytes)[0..255]);
+        M.extend_from_bitslice(&BitArray::<_, Lsb0>::from(nk_bytes)[0..255]);
 
         // Commit^ivk_rivk
         // rivk needs to be 255 bits long

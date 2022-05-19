@@ -110,7 +110,7 @@ impl NoteCommitment {
         T: RngCore + CryptoRng,
     {
         // s as in the argument name for WindowedPedersenCommit_r(s)
-        let mut s: BitVec<Lsb0, u8> = BitVec::new();
+        let mut s: BitVec<u8, Lsb0> = BitVec::new();
 
         // Prefix
         s.append(&mut bitvec![1; 6]);

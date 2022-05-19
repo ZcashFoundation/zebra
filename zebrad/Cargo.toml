@@ -2,8 +2,11 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 edition = "2021"
+# Zebra is only supported on the latest stable Rust version. Some earlier versions might work.
+# Zebra uses features introduced in Rust 1.58.
+rust-version = "1.58"
 repository = "https://github.com/ZcashFoundation/zebra"
 # make `cargo run` use `zebrad` by default
 # when run in the workspace directory
@@ -93,6 +96,7 @@ semver = "1.0.9"
 serde_json = { version = "1.0.81", features = ["preserve_order"] }
 tempfile = "3.3.0"
 tokio = { version = "1.18.2", features = ["full", "test-util"] }
+tokio-stream = "0.1.8"
 
 # test feature lightwalletd-grpc-tests
 prost = "0.10.3"
