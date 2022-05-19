@@ -5403,7 +5403,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "color-eyre 0.6.1",
  "ed25519-zebra",
@@ -5423,7 +5423,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "futures-core",
  "pin-project 0.4.29",
@@ -6244,7 +6244,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 dependencies = [
  "aes",
  "bech32",
@@ -6305,7 +6305,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 dependencies = [
  "bellman",
  "blake2b_simd 1.0.0",
@@ -6347,7 +6347,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 dependencies = [
  "arti-client",
  "bitflags",
@@ -6382,14 +6382,14 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 dependencies = [
  "zebra-chain",
 ]
 
 [[package]]
 name = "zebra-rpc"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 dependencies = [
  "chrono",
  "futures",
@@ -6418,7 +6418,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 dependencies = [
  "displaydoc",
  "hex",
@@ -6431,7 +6431,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 dependencies = [
  "bincode",
  "chrono",
@@ -6466,7 +6466,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 dependencies = [
  "color-eyre 0.5.11",
  "futures",
@@ -6491,7 +6491,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 dependencies = [
  "color-eyre 0.6.1",
  "hex",
@@ -6506,7 +6506,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-beta.9"
+version = "1.0.0-beta.10"
 dependencies = [
  "abscissa_core",
  "atty",
