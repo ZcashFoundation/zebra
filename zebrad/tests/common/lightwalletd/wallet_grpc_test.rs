@@ -31,7 +31,9 @@
 use color_eyre::eyre::Result;
 
 use zebra_chain::{
-    block::Block, parameters::Network, parameters::NetworkUpgrade::Canopy,
+    block::Block,
+    parameters::Network,
+    parameters::NetworkUpgrade::{self, Canopy},
     serialization::ZcashDeserializeInto,
 };
 
@@ -107,27 +109,34 @@ pub async fn run() -> Result<()> {
     // As we are using a pretty much synchronized blockchain, we can assume the tip is above the Canopy network upgrade
     assert!(block_tip.height > Canopy.activation_height(network).unwrap().0 as u64);
 
+    // `lightwalletd` only supports post-Sapling blocks, so we begin at the
+    // Sapling activation height.
+    let sapling_activation_height = NetworkUpgrade::Sapling
+        .activation_height(network)
+        .unwrap()
+        .0 as u64;
+
     // Call `GetBlock` with block 1 height
     let block_one = rpc_client
         .get_block(BlockId {
-            height: 1,
+            height: sapling_activation_height,
             hash: vec![],
         })
         .await?
         .into_inner();
 
     // Make sure we got block 1 back
-    assert_eq!(block_one.height, 1);
+    assert_eq!(block_one.height, sapling_activation_height);
 
     // Call `GetBlockRange` with the range starting at block 1 up to block 10
     let mut block_range = rpc_client
         .get_block_range(BlockRange {
             start: Some(BlockId {
-                height: 1,
+                height: sapling_activation_height,
                 hash: vec![],
             }),
             end: Some(BlockId {
-                height: 10,
+                height: sapling_activation_height + 10,
                 hash: vec![],
             }),
         })
@@ -135,10 +144,10 @@ pub async fn run() -> Result<()> {
         .into_inner();
 
     // Make sure the returned Stream of blocks is what we expect
-    let mut counter = 0;
+    let mut counter = sapling_activation_height;
     while let Some(block) = block_range.message().await? {
-        counter += 1;
         assert_eq!(block.height, counter);
+        counter += 1;
     }
 
     // Get the first transction of the first block in the mainnet
