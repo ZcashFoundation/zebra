@@ -238,16 +238,14 @@ jobs:
   # Regenerate mandatory checkpoint Zebra cached state disks.
   #
   # Runs:
-  # - on every PR update, but only if Zebra's state version changes in the PR
-  # - on request
+  # - on any push event, but only if there's no available disk matching the actual state version from constants.rs
+  # - on request, using workflow_dispatch with regenerate-disks
+  #
+  # Note: the output from get-available-disks should match with the caller workflow inputs
   regenerate-stateful-disks:
     needs: [ build, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    # Only run this job if there's no available disk matching the actual state version from constants.rs,
-    # or if we manually execute a workflow_dispatch using regenerate-disks.
-    #
-    # Note: the output from get-available-disks should match with the caller workflow inputs
-    if: ${{ (fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) && github.event_name == 'push') || github.event.inputs.regenerate-disks == 'true' }}
+    if: ${{ (!fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) && github.event_name == 'push') || github.event.inputs.regenerate-disks == 'true' }}
     with:
       test_id: sync-to-checkpoint
       test_description: Test sync up to mandatory checkpoint
@@ -280,6 +278,7 @@ jobs:
   # - after every PR is merged to `main`
   # - on every PR update, but only if there's no available disk matching the actual state version from constants.rs
   # - on request, using workflow_dispatch with run-full-sync
+  #
   # Note: the output from get-available-disks should match with the caller workflow inputs
   test-full-sync:
     needs: [ build, get-available-disks ]
@@ -287,7 +286,7 @@ jobs:
     # to also run on Mergify head branches,
     # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) && github.event_name == 'push') || github.event.inputs.run-full-sync == 'true' }}
+    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || (!fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) && github.event_name == 'push') || github.event.inputs.run-full-sync == 'true' }}
     with:
       test_id: full-sync-to-tip
       test_description: Test a full sync up to the tip
