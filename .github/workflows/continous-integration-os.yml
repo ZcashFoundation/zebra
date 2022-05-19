@@ -259,7 +259,7 @@ jobs:
           override: true
 
       - uses: Swatinem/rust-cache@v1
-      
+
       - name: Check Cargo.lock is up to date
         uses: actions-rs/cargo@v1.0.3
         with:
