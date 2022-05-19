@@ -30,18 +30,21 @@ Zebra's latest beta finalizes the support for `lightwalletd` RPC methods and con
 - NU5 mainnet dependency upgrades (#4405)
 - Use the latest lightwalletd version (#4398)
 
-#### Dependency upgrades
+#### Rust Dependencies
 
-- google-github-actions/auth from 0.7.2 to 0.7.3 (#4419)
 - vergen from 7.0.0 to 7.1.0 (#4420)
 - tokio-util from 0.7.1 to 0.7.2 (#4406)
-- google-github-actions/auth from 0.7.1 to 0.7.2 (#4404)
-- tj-actions/changed-files from 19 to 20 (#4403)
-- w9jds/firebase-action from 2.0.0 to 2.1.0 (#4402)
 - inferno from 0.11.2 to 0.11.3 (#4357)
 - tokio from 1.18.1 to 1.18.2 (#4358)
 - prost from 0.10.2 to 0.10.3 (#4348)
-- from 0.8.1 to 0.9.0 (#4394)
+- bech32 from 0.8.1 to 0.9.0 (#4394)
+
+#### CI Dependencies
+
+- google-github-actions/auth from 0.7.2 to 0.7.3 (#4419)
+- google-github-actions/auth from 0.7.1 to 0.7.2 (#4404)
+- tj-actions/changed-files from 19 to 20 (#4403)
+- w9jds/firebase-action from 2.0.0 to 2.1.0 (#4402)
 
 #### Others
 
