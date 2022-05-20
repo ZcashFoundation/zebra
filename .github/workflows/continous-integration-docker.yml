@@ -106,7 +106,7 @@ jobs:
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "$GITHUB_WORKSPACE/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
           echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
-          LWD_TIP_DISK=$(gcloud compute images list --filter="name~lwd-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          LWD_TIP_DISK=$(gcloud compute images list --filter="name~lwd-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           if [[ -z "$LWD_TIP_DISK" ]]; then
               echo "No TIP disk found for LWD"
               echo "::set-output name=lwd_tip_disk::${{ toJSON(false) }}"
@@ -115,7 +115,7 @@ jobs:
               echo "::set-output name=lwd_tip_disk::${{ toJSON(true) }}"
           fi
 
-          ZEBRA_TIP_DISK=$(gcloud compute images list --filter="name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          ZEBRA_TIP_DISK=$(gcloud compute images list --filter="name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           if [[ -z "$ZEBRA_TIP_DISK" ]]; then
               echo "No TIP disk found for ZEBRA"
               echo "::set-output name=zebra_tip_disk::${{ toJSON(false) }}"
@@ -124,7 +124,7 @@ jobs:
               echo "::set-output name=zebra_tip_disk::${{ toJSON(true) }}"
           fi
 
-          ZEBRA_CHECKPOINT_DISK=$(gcloud compute images list --filter="name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          ZEBRA_CHECKPOINT_DISK=$(gcloud compute images list --filter="name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           if [[ -z "$ZEBRA_CHECKPOINT_DISK" ]]; then
               echo "No CHECKPOINT found for ZEBRA"
               echo "::set-output name=zebra_checkpoint_disk::${{ toJSON(false) }}"
