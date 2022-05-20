@@ -862,6 +862,10 @@ lazy_static! {
     pub static ref SAPLING_FINAL_ROOT_TESTNET_1599199_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("4de75d10def701ad22ecc17517a3adc8789ea8c214ac5bfc917b8924377e6c89")
         .expect("final root bytes are in valid hex representation").rev();
+
+    // Sapling note commitment tree.
+    pub static ref SAPLING_TREESTATE_MAINNET_419201_STRING: String =
+        String::from(include_str!("sapling-treestate-main-0-419-201.txt"));
 }
 
 #[cfg(test)]
