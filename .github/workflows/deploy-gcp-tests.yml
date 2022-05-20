@@ -241,24 +241,18 @@ jobs:
 
           # Try to find an image generated from the main branch
           # Fields are listed in the "Create image from state disk" step
-          #
-          # TODO: require ${NETWORK} in the name after PR #4391 merges to main, and runs a full sync
-          #       network should replace [a-z]*
-          CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "main Disk: $CACHED_DISK_NAME"
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               # Try to find an image generated from any other branch
-              #
-              # TODO: require ${NETWORK} in the name after PRs #4391 and #4385 merge to main
-              #       network should replace [a-z]*
-              CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-[a-z]*-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+              CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
               echo "Disk: $CACHED_DISK_NAME"
           fi
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               echo "No cached state disk available"
-              echo "Expected ${{ inputs.disk_prefix }}-(branch)-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
+              echo "Expected ${DISK_PREFIX}-(branch)-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
               echo "Cached state test jobs must depend on the cached state rebuild job"
               exit 1
           fi
