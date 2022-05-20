@@ -84,6 +84,9 @@ As we resolve various outstanding known issues and implement new functionality w
 We should check and update if necessary:
 
 - [ ] The "Known Issues" section
+- [ ] The "Build and Run Instructions" section. Check if any new dependencies were introduced and
+      list them if needed; one possible approach is to check for changes in the `Dockerfile`
+      since the last tag: `git diff <previous-release-tag> docker/Dockerfile`.
 
 to ensure that any items that are resolved in the latest release are no longer listed in the README.
 
