@@ -277,7 +277,7 @@ impl Version for zcash_history::V1 {
             .to_work()
             .expect("work must be valid during contextual verification");
         // There is no direct `std::primitive::u128` to `bigint::U256` conversion
-        let work = bigint::U256::from_big_endian(&work.as_u128().to_be_bytes());
+        let work = primitive_types::U256::from_big_endian(&work.as_u128().to_be_bytes());
 
         let sapling_tx_count = block.sapling_transactions_count();
 

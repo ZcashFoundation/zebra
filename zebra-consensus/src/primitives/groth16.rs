@@ -2,7 +2,6 @@
 
 use std::{
     convert::{TryFrom, TryInto},
-    error::Error,
     fmt,
     future::Future,
     mem,
@@ -129,13 +128,9 @@ pub static JOINSPLIT_VERIFIER: Lazy<ServiceFn<fn(Item) -> Ready<Result<(), Boxed
         // function (which is possible because it doesn't capture any state).
         tower::service_fn(
             (|item: Item| {
-                // Workaround bug in `bellman::VerificationError` fmt::Display
-                // implementation https://github.com/zkcrypto/bellman/pull/77
-                #[allow(deprecated)]
                 ready(
                     item.verify_single(&GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key)
-                        // When that is fixed, change to `e.to_string()`
-                        .map_err(|e| TransactionError::Groth16(e.description().to_string()))
+                        .map_err(|e| TransactionError::Groth16(e.to_string()))
                         .map_err(tower_fallback::BoxedError::from),
                 )
             }) as fn(_) -> _,

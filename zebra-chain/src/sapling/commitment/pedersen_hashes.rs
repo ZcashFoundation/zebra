@@ -20,13 +20,13 @@ fn I_i(domain: [u8; 8], i: u32) -> jubjub::ExtendedPoint {
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
 #[allow(non_snake_case)]
-fn M_i(segment: &BitSlice<Lsb0, u8>) -> jubjub::Fr {
+fn M_i(segment: &BitSlice<u8, Lsb0>) -> jubjub::Fr {
     let mut m_i = jubjub::Fr::zero();
 
     for (j, chunk) in segment.chunks(3).enumerate() {
         // Pad each chunk with zeros.
         let mut store = 0u8;
-        let bits = BitSlice::<Lsb0, _>::from_element_mut(&mut store);
+        let bits = BitSlice::<_, Lsb0>::from_element_mut(&mut store);
         chunk
             .iter()
             .enumerate()
@@ -68,7 +68,7 @@ fn M_i(segment: &BitSlice<Lsb0, u8>) -> jubjub::Fr {
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
 #[allow(non_snake_case)]
-pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::ExtendedPoint {
+pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<u8, Lsb0>) -> jubjub::ExtendedPoint {
     let mut result = jubjub::ExtendedPoint::identity();
 
     // Split M into n segments of 3 * c bits, where c = 63, padding the last
@@ -94,7 +94,7 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
 #[allow(non_snake_case)]
-pub fn pedersen_hash(domain: [u8; 8], M: &BitVec<Lsb0, u8>) -> jubjub::Fq {
+pub fn pedersen_hash(domain: [u8; 8], M: &BitVec<u8, Lsb0>) -> jubjub::Fq {
     jubjub::AffinePoint::from(pedersen_hash_to_point(domain, M)).get_u()
 }
 
@@ -121,7 +121,7 @@ pub fn mixing_pedersen_hash(P: jubjub::ExtendedPoint, x: jubjub::Fr) -> jubjub::
 ///   PedersenHashToPoint("Zcash_PH", s) + [r]FindGroupHash^J^(r)("Zcash_PH", "r")
 ///
 /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
-pub fn windowed_pedersen_commitment(r: jubjub::Fr, s: &BitVec<Lsb0, u8>) -> jubjub::ExtendedPoint {
+pub fn windowed_pedersen_commitment(r: jubjub::Fr, s: &BitVec<u8, Lsb0>) -> jubjub::ExtendedPoint {
     const D: [u8; 8] = *b"Zcash_PH";
 
     pedersen_hash_to_point(D, s) + find_group_hash(D, b"r") * r

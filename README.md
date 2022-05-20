@@ -100,10 +100,13 @@ install mechanism. To run `zebrad`, follow the instructions to compile `zebrad`
 for your platform:
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
+     - Zebra is tested with the latest `stable` Rust version.
+        Earlier versions are not supported or tested, but they might work.
+        (Rust 1.57 and earlier are not supported, due to missing features.)
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.9 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.10 zebrad`
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
@@ -203,6 +206,8 @@ So Zebra's state should always be valid, unless your OS or disk hardware is corr
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
+- [The getaddresstxids RPC is missing spending transparent addresses](https://github.com/ZcashFoundation/zebra/pull/4355)
+  - This should be fixed in the next Zebra release
 - [Old state versions are not deleted](https://github.com/ZcashFoundation/zebra/issues/1213)
   - When Zebra changes its state format, it does not delete the old state directory. You can delete old state directories if you need the space.
 - [No Windows support #3801](https://github.com/ZcashFoundation/zebra/issues/3801)

@@ -15,7 +15,7 @@
 //!
 //! - `GetTaddressTxids`: Covered.
 //! - `GetTaddressBalance`: Covered.
-//! - `GetTaddressBalanceStream`: Not covered.
+//! - `GetTaddressBalanceStream`: Covered.
 //!
 //! - `GetMempoolTx`: Not covered.
 //! - `GetMempoolStream`: Not covered.
@@ -23,7 +23,7 @@
 //! - `GetTreeState`: Not covered, Need #3990
 //!
 //! - `GetAddressUtxos` -= Covered.
-//! - `GetAddressUtxosStream`: Not covered.
+//! - `GetAddressUtxosStream`: Covered.
 //!
 //! - `GetLightdInfo`: Covered.
 //! - `Ping`: Not covered and it will never will, ping is only used for testing purposes.
@@ -31,7 +31,9 @@
 use color_eyre::eyre::Result;
 
 use zebra_chain::{
-    block::Block, parameters::Network, parameters::NetworkUpgrade::Canopy,
+    block::Block,
+    parameters::Network,
+    parameters::NetworkUpgrade::{self, Canopy},
     serialization::ZcashDeserializeInto,
 };
 
@@ -41,9 +43,9 @@ use crate::common::{
     launch::spawn_zebrad_for_rpc_without_initial_peers,
     lightwalletd::{
         wallet_grpc::{
-            connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, AddressList, BlockId,
-            BlockRange, ChainSpec, Empty, GetAddressUtxosArg, TransparentAddressBlockFilter,
-            TxFilter,
+            connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Address, AddressList,
+            BlockId, BlockRange, ChainSpec, Empty, GetAddressUtxosArg,
+            TransparentAddressBlockFilter, TxFilter,
         },
         zebra_skip_lightwalletd_tests,
         LightwalletdTestType::UpdateCachedState,
@@ -107,27 +109,34 @@ pub async fn run() -> Result<()> {
     // As we are using a pretty much synchronized blockchain, we can assume the tip is above the Canopy network upgrade
     assert!(block_tip.height > Canopy.activation_height(network).unwrap().0 as u64);
 
+    // `lightwalletd` only supports post-Sapling blocks, so we begin at the
+    // Sapling activation height.
+    let sapling_activation_height = NetworkUpgrade::Sapling
+        .activation_height(network)
+        .unwrap()
+        .0 as u64;
+
     // Call `GetBlock` with block 1 height
     let block_one = rpc_client
         .get_block(BlockId {
-            height: 1,
+            height: sapling_activation_height,
             hash: vec![],
         })
         .await?
         .into_inner();
 
     // Make sure we got block 1 back
-    assert_eq!(block_one.height, 1);
+    assert_eq!(block_one.height, sapling_activation_height);
 
     // Call `GetBlockRange` with the range starting at block 1 up to block 10
     let mut block_range = rpc_client
         .get_block_range(BlockRange {
             start: Some(BlockId {
-                height: 1,
+                height: sapling_activation_height,
                 hash: vec![],
             }),
             end: Some(BlockId {
-                height: 10,
+                height: sapling_activation_height + 10,
                 hash: vec![],
             }),
         })
@@ -135,10 +144,10 @@ pub async fn run() -> Result<()> {
         .into_inner();
 
     // Make sure the returned Stream of blocks is what we expect
-    let mut counter = 0;
+    let mut counter = sapling_activation_height;
     while let Some(block) = block_range.message().await? {
-        counter += 1;
         assert_eq!(block.height, counter);
+        counter += 1;
     }
 
     // Get the first transction of the first block in the mainnet
@@ -202,7 +211,48 @@ pub async fn run() -> Result<()> {
     // because new coins are created in each block
     assert!(balance.value_zat > 0);
 
-    // TODO: Create call and check for `GetTaddressBalanceStream`
+    // Call `GetTaddressBalanceStream` with the ZF funding stream address as a stream argument
+    let zf_stream_address = Address {
+        address: "t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1".to_string(),
+    };
+
+    let balance_zf = rpc_client
+        .get_taddress_balance_stream(tokio_stream::iter(vec![zf_stream_address.clone()]))
+        .await?
+        .into_inner();
+
+    // With ZFND funding stream address, the balance will always be greater than zero,
+    // because new coins are created in each block
+    assert!(balance_zf.value_zat > 0);
+
+    // Call `GetTaddressBalanceStream` with the MG funding stream address as a stream argument
+    let mg_stream_address = Address {
+        address: "t3XyYW8yBFRuMnfvm5KLGFbEVz25kckZXym".to_string(),
+    };
+
+    let balance_mg = rpc_client
+        .get_taddress_balance_stream(tokio_stream::iter(vec![mg_stream_address.clone()]))
+        .await?
+        .into_inner();
+
+    // With Major Grants funding stream address, the balance will always be greater than zero,
+    // because new coins are created in each block
+    assert!(balance_mg.value_zat > 0);
+
+    // Call `GetTaddressBalanceStream` with both, the ZFND and the MG funding stream addresses as a stream argument
+    let balance_both = rpc_client
+        .get_taddress_balance_stream(tokio_stream::iter(vec![
+            zf_stream_address,
+            mg_stream_address,
+        ]))
+        .await?
+        .into_inner();
+
+    // The result is the sum of the values in both addresses
+    assert_eq!(
+        balance_both.value_zat,
+        balance_zf.value_zat + balance_mg.value_zat
+    );
 
     // TODO: Create call and checks for `GetMempoolTx` and `GetMempoolTxStream`?
 
@@ -231,7 +281,23 @@ pub async fn run() -> Result<()> {
     // As we requested one entry we should get a response of length 1
     assert_eq!(utxos.address_utxos.len(), 1);
 
-    // TODO: Create call and check for `GetAddressUtxosStream`
+    // Call `GetAddressUtxosStream` with the ZF funding stream address that will always have utxos
+    let mut utxos_zf = rpc_client
+        .get_address_utxos_stream(GetAddressUtxosArg {
+            addresses: vec!["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1".to_string()],
+            start_height: 1,
+            max_entries: 2,
+        })
+        .await?
+        .into_inner();
+
+    let mut counter = 0;
+    while let Some(_utxos) = utxos_zf.message().await? {
+        counter += 1;
+    }
+    // As we are in a "in sync" chain we know there are more than 2 utxos for this address
+    // but we will receive the max of 2 from the stream response because we used a limit of 2 `max_entries`.
+    assert_eq!(2, counter);
 
     // Call `GetLightdInfo`
     let lightd_info = rpc_client.get_lightd_info(Empty {}).await?.into_inner();

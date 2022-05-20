@@ -22,14 +22,14 @@ fn point_from_hex<T: AsRef<[u8]>>(point_in_hex: T) -> jubjub::AffinePoint {
 }
 
 pub struct TestVector {
-    pub input_bits: BitVec<Lsb0, u8>,
+    pub input_bits: BitVec<u8, Lsb0>,
     pub output_point: jubjub::AffinePoint,
 }
 
 lazy_static! {
     pub static ref TEST_VECTORS: [TestVector; 12] = [
         TestVector {
-            input_bits: bitvec![Lsb0, u8; 1, 1, 1, 1, 1, 1],
+            input_bits: bitvec![u8, Lsb0; 1, 1, 1, 1, 1, 1],
             // original librustzcash affine point test vector (in reversed-endian byte order):
             //     "06b1187c11ca4fb4383b2e0d0dbbde3ad3617338b5029187ec65a5eaed5e4d0b",
             //     "3ce70f536652f0dea496393a1e55c4e08b9d55508e16d11e5db40d4810cbc982"
@@ -38,7 +38,7 @@ lazy_static! {
             )
         },
         TestVector {
-            input_bits: bitvec![Lsb0, u8; 1, 1, 1, 1, 1, 1, 0],
+            input_bits: bitvec![u8, Lsb0; 1, 1, 1, 1, 1, 1, 0],
             // Original librustzcash affine point test vector (in reversed-endian byte order):
             // "2fc3bc454c337f71d4f04f86304262fcbfc9ecd808716b92fc42cbe6827f7f1a",
             // "46d0d25bf1a654eedc6a9b1e5af398925113959feac31b7a2c036ff9b9ec0638"
@@ -47,7 +47,7 @@ lazy_static! {
             )
         },
         TestVector {
-            input_bits: bitvec![Lsb0, u8; 1, 1, 1, 1, 1, 1, 1],
+            input_bits: bitvec![u8, Lsb0; 1, 1, 1, 1, 1, 1, 1],
             // Original librustzcash affine point test vector (in reversed-endian byte order):
             // "4f8ce0e0a9e674b3ab9606a7d7aefba386e81583d81918127814cde41d209d97",
             // "312b5ab93b14c9b9af334fe1fe3c50fffb53fbd074fa40ca600febde7c97e346"
@@ -56,7 +56,7 @@ lazy_static! {
             )
         },
         TestVector {
-            input_bits: bitvec![Lsb0, u8; 1, 1, 1, 1, 1, 1, 1, 0, 0],
+            input_bits: bitvec![u8, Lsb0; 1, 1, 1, 1, 1, 1, 1, 0, 0],
             // Original librustzcash affine point test vector (in reversed-endian byte order):
             // "4f8ce0e0a9e674b3ab9606a7d7aefba386e81583d81918127814cde41d209d97",
             // "312b5ab93b14c9b9af334fe1fe3c50fffb53fbd074fa40ca600febde7c97e346"
@@ -65,7 +65,7 @@ lazy_static! {
             ),
         },
         TestVector {
-            input_bits: bitvec![Lsb0, u8;
+            input_bits: bitvec![u8, Lsb0;
                 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0,
                 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1,
                 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1,
@@ -82,7 +82,7 @@ lazy_static! {
             ),
         },
         TestVector {
-            input_bits: bitvec![Lsb0, u8;
+            input_bits: bitvec![u8, Lsb0;
                 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0,
                 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0,
                 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0,
@@ -99,7 +99,7 @@ lazy_static! {
             ),
         },
         TestVector {
-            input_bits: bitvec![Lsb0, u8;
+            input_bits: bitvec![u8, Lsb0;
                 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0,
                 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0,
                 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0,
@@ -116,7 +116,7 @@ lazy_static! {
             )
         },
         TestVector {
-            input_bits: bitvec![Lsb0, u8;
+            input_bits: bitvec![u8, Lsb0;
                 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0,
                 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0,
                 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1,
@@ -153,7 +153,7 @@ lazy_static! {
             ),
         },
         TestVector {
-            input_bits: bitvec![Lsb0, u8;
+            input_bits: bitvec![u8, Lsb0;
                 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0,
                 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0,
                 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1,
@@ -191,7 +191,7 @@ lazy_static! {
             ),
         },
         TestVector {
-            input_bits: bitvec![Lsb0, u8;
+            input_bits: bitvec![u8, Lsb0;
                 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1,
                 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0,
                 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1,
@@ -235,7 +235,7 @@ lazy_static! {
             ),
         },
         TestVector {
-            input_bits: bitvec![Lsb0, u8;
+            input_bits: bitvec![u8, Lsb0;
                 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0,
                 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1,
                 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0,
@@ -279,7 +279,7 @@ lazy_static! {
             ),
         },
         TestVector {
-            input_bits: bitvec![Lsb0, u8;
+            input_bits: bitvec![u8, Lsb0;
                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
