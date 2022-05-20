@@ -129,6 +129,7 @@ impl
         // The transparent input data
         &transparent::Input,
         // The hash of the transaction the input is from
+        // (not the transaction the spent output was created by)
         &transaction::Hash,
         // The output spent by the input
         // Includes the location of the transaction that created the output
