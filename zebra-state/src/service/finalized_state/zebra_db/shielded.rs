@@ -166,6 +166,33 @@ impl ZebraDb {
 }
 
 impl DiskWriteBatch {
+    /// Prepare a database batch containing `finalized.block`'s shielded transaction indexes,
+    /// and return it (without actually writing anything).
+    ///
+    /// If this method returns an error, it will be propagated,
+    /// and the batch should not be written to the database.
+    ///
+    /// # Errors
+    ///
+    /// - Propagates any errors from updating note commitment trees
+    pub fn prepare_shielded_transaction_batch(
+        &mut self,
+        db: &DiskDb,
+        finalized: &FinalizedBlock,
+        note_commitment_trees: &mut NoteCommitmentTrees,
+    ) -> Result<(), BoxError> {
+        let FinalizedBlock { block, .. } = finalized;
+
+        // Index each transaction's shielded data
+        for transaction in &block.transactions {
+            self.prepare_nullifier_batch(db, transaction)?;
+
+            DiskWriteBatch::update_note_commitment_trees(transaction, note_commitment_trees)?;
+        }
+
+        Ok(())
+    }
+
     /// Prepare a database batch containing `finalized.block`'s nullifiers,
     /// and return it (without actually writing anything).
     ///

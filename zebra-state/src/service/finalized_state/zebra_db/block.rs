@@ -379,14 +379,15 @@ impl DiskWriteBatch {
         }
 
         // Commit transaction indexes
-        self.prepare_transaction_index_batch(
+        self.prepare_transparent_transaction_batch(
             db,
             &finalized,
-            new_outputs_by_out_loc,
-            spent_utxos_by_out_loc,
+            &new_outputs_by_out_loc,
+            &spent_utxos_by_outpoint,
+            &spent_utxos_by_out_loc,
             address_balances,
-            &mut note_commitment_trees,
         )?;
+        self.prepare_shielded_transaction_batch(db, &finalized, &mut note_commitment_trees)?;
 
         self.prepare_note_commitment_batch(db, &finalized, note_commitment_trees, history_tree)?;
 
@@ -474,44 +475,5 @@ impl DiskWriteBatch {
         }
 
         false
-    }
-
-    // Write transaction methods
-
-    /// Prepare a database batch containing `finalized.block`'s transaction indexes,
-    /// and return it (without actually writing anything).
-    ///
-    /// If this method returns an error, it will be propagated,
-    /// and the batch should not be written to the database.
-    ///
-    /// # Errors
-    ///
-    /// - Propagates any errors from updating note commitment trees
-    //
-    // TODO: move db, finalized, and maybe other arguments into DiskWriteBatch
-    pub fn prepare_transaction_index_batch(
-        &mut self,
-        db: &DiskDb,
-        finalized: &FinalizedBlock,
-        new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
-        utxos_spent_by_block: BTreeMap<OutputLocation, transparent::Utxo>,
-        address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
-        note_commitment_trees: &mut NoteCommitmentTrees,
-    ) -> Result<(), BoxError> {
-        let FinalizedBlock { block, .. } = finalized;
-
-        // Index each transaction's transparent and shielded data
-        for transaction in block.transactions.iter() {
-            self.prepare_nullifier_batch(db, transaction)?;
-
-            DiskWriteBatch::update_note_commitment_trees(transaction, note_commitment_trees)?;
-        }
-
-        self.prepare_transparent_outputs_batch(
-            db,
-            new_outputs_by_out_loc,
-            utxos_spent_by_block,
-            address_balances,
-        )
     }
 }

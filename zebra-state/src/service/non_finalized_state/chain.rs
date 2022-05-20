@@ -791,9 +791,9 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
                 "transactions must be unique within a single chain"
             );
 
-            // index the utxos this produced
+            // add the utxos this produced
             self.update_chain_tip_with(&(outputs, &transaction_hash, new_outputs))?;
-            // index the utxos this consumed
+            // delete the utxos this consumed
             self.update_chain_tip_with(&(inputs, &transaction_hash, spent_outputs))?;
 
             // add the shielded data
@@ -921,7 +921,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
 
             // remove the utxos this produced
             self.revert_chain_with(&(outputs, transaction_hash, new_outputs), position);
-            // remove the utxos this consumed
+            // reset the utxos this consumed
             self.revert_chain_with(&(inputs, transaction_hash, spent_outputs), position);
 
             // remove `transaction.hash` from `tx_by_hash`
@@ -1081,6 +1081,7 @@ impl
         // The inputs from a transaction in this block
         &Vec<transparent::Input>,
         // The hash of the transaction that the inputs are from
+        // (not the transaction the spent output was created by)
         &transaction::Hash,
         // The outputs for all inputs spent in this transaction (or block)
         &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
