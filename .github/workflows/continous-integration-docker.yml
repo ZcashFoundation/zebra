@@ -319,58 +319,6 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
 
-  # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
-  #
-  # Runs:
-  # - after every PR is merged to `main`
-  # - on every PR update
-  #
-  # If the state version has changed, waits for the new cached states to be created.
-  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
-  # TODO: move this job under lightwalletd-full-sync to have a sequential logic
-  lightwalletd-transactions-test:
-    needs: lightwalletd-full-sync
-    uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
-    with:
-      app_name: lightwalletd
-      test_id: lwd-send-transactions
-      test_description: Test sending transactions via lightwalletd
-      test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
-      needs_zebra_state: true
-      needs_lwd_state: true
-      saves_to_disk: false
-      disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
-      lwd_state_dir: 'lwd-cache'
-
-  # Test that Zebra can handle gRPC wallet calls, using a cached Zebra tip state
-  #
-  # Runs:
-  # - after every PR is merged to `main`
-  # - on every PR update
-  #
-  # If the state version has changed, waits for the new cached states to be created.
-  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
-  # TODO: move this job under lightwalletd-full-sync to have a sequential logic
-  lightwalletd-grpc-test:
-    needs: lightwalletd-full-sync
-    uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
-    with:
-      app_name: lightwalletd
-      test_id: lwd-grpc-wallet
-      test_description: Test gRPC calls via lightwalletd
-      test_variables: '-e TEST_LWD_GRPC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
-      needs_zebra_state: true
-      needs_lwd_state: true
-      saves_to_disk: false
-      disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
-      lwd_state_dir: 'lwd-cache'
-
   # Test full sync of lightwalletd with a Zebra tip state
   #
   # Runs:
@@ -417,6 +365,56 @@ jobs:
       needs_lwd_state: true
       saves_to_disk: false
       disk_prefix: lwd-cache
+      disk_suffix: tip
+      root_state_path: '/var/cache'
+      zebra_state_dir: 'zebrad-cache'
+      lwd_state_dir: 'lwd-cache'
+
+  # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
+  #
+  # Runs:
+  # - after every PR is merged to `main`
+  # - on every PR update
+  #
+  # If the state version has changed, waits for the new cached states to be created.
+  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
+  lightwalletd-transactions-test:
+    needs: lightwalletd-full-sync
+    uses: ./.github/workflows/deploy-gcp-tests.yml
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    with:
+      app_name: lightwalletd
+      test_id: lwd-send-transactions
+      test_description: Test sending transactions via lightwalletd
+      test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      needs_zebra_state: true
+      needs_lwd_state: true
+      saves_to_disk: false
+      disk_suffix: tip
+      root_state_path: '/var/cache'
+      zebra_state_dir: 'zebrad-cache'
+      lwd_state_dir: 'lwd-cache'
+
+  # Test that Zebra can handle gRPC wallet calls, using a cached Zebra tip state
+  #
+  # Runs:
+  # - after every PR is merged to `main`
+  # - on every PR update
+  #
+  # If the state version has changed, waits for the new cached states to be created.
+  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
+  lightwalletd-grpc-test:
+    needs: lightwalletd-full-sync
+    uses: ./.github/workflows/deploy-gcp-tests.yml
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    with:
+      app_name: lightwalletd
+      test_id: lwd-grpc-wallet
+      test_description: Test gRPC calls via lightwalletd
+      test_variables: '-e TEST_LWD_GRPC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      needs_zebra_state: true
+      needs_lwd_state: true
+      saves_to_disk: false
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
