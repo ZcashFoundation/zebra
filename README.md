@@ -206,8 +206,6 @@ So Zebra's state should always be valid, unless your OS or disk hardware is corr
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
-- [The getaddresstxids RPC is missing spending transparent addresses](https://github.com/ZcashFoundation/zebra/pull/4355)
-  - This should be fixed in the next Zebra release
 - [Old state versions are not deleted](https://github.com/ZcashFoundation/zebra/issues/1213)
   - When Zebra changes its state format, it does not delete the old state directory. You can delete old state directories if you need the space.
 - [No Windows support #3801](https://github.com/ZcashFoundation/zebra/issues/3801)
