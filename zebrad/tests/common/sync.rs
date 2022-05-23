@@ -42,7 +42,7 @@ pub const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 ///
 /// Temporary workaround for slow syncs - stop at 99.5%.
 /// TODO: revert this change (#4456)
-pub const SYNC_FINISHED_REGEX: &str = "estimated progress to chain tip sync_percent=99.5";
+pub const SYNC_FINISHED_REGEX: &str = "estimated progress to chain tip sync_percent=99.2";
 
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///
