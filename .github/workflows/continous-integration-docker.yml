@@ -95,7 +95,7 @@ jobs:
       # restricting the result from any branch.
       #
       # This search is executed considering the actual version from constants.rs
-      # 
+      #
       # Generate one of the following outputs with a boolean to pass to subsequent jobs:
       # - lwd_tip_disk
       # - zebra_tip_disk
