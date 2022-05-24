@@ -36,9 +36,8 @@ env:
 
 jobs:
   coverage:
-    name: Coverage nightly
+    name: Coverage (+stable)
     # The large timeout is to accommodate:
-    # - nightly builds (75 minutes, typically 30-50 minutes), and
     # - parameter downloads (an extra 90 minutes, but only when the cache expires)
     timeout-minutes: 165
     runs-on: ubuntu-latest
@@ -50,7 +49,7 @@ jobs:
 
       - uses: actions-rs/toolchain@v1.0.7
         with:
-          toolchain: nightly
+          toolchain: stable
           override: true
           profile: minimal
           components: llvm-tools-preview
