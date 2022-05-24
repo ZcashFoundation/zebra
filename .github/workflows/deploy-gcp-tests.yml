@@ -396,7 +396,7 @@ jobs:
   delete-instance:
     name: Delete ${{ inputs.test_id }} instance
     runs-on: ubuntu-latest
-    needs: [ test-without-cached-state, test-with-cached-state, create-state-image ]
+    needs: [ create-state-image ]
     # If a disk generation step timeouts (+6 hours) the previous job (creating the image) will be skipped.
     # Even if the instance continues running, no image will be created, so it's better to delete it.
     if: always()
