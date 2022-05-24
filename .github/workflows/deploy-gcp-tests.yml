@@ -400,6 +400,7 @@ jobs:
     # If a disk generation step timeouts (+6 hours) the previous job (creating the image) will be skipped.
     # Even if the instance continues running, no image will be created, so it's better to delete it.
     if: always()
+    continue-on-error: true
     permissions:
       contents: 'read'
       id-token: 'write'
