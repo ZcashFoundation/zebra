@@ -36,7 +36,7 @@ env:
 
 jobs:
   coverage:
-    name: Coverage (+stable)
+    name: Coverage on stable
     # The large timeout is to accommodate:
     # - parameter downloads (an extra 90 minutes, but only when the cache expires)
     timeout-minutes: 165
