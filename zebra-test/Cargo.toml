@@ -25,7 +25,7 @@ color-eyre = "0.5.11"
 owo-colors = "3.4.0"
 spandoc = "0.2.2"
 thiserror = "1.0.31"
-tracing-subscriber = "0.2.25"
+tracing-subscriber = { version = "0.2.25", features = ["parking_lot"] }
 tracing-error = "0.1.2"
 tracing = "0.1.31"
 

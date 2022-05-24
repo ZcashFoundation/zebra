@@ -59,7 +59,7 @@ rand07 = { package = "rand", version = "0.7" }
 spandoc = "0.2.2"
 tokio = { version = "1.18.2", features = ["full", "parking_lot"] }
 tracing-error = "0.1.2"
-tracing-subscriber = "0.2.25"
+tracing-subscriber = { version = "0.2.25", features = ["parking_lot"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
