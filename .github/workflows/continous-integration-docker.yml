@@ -134,6 +134,8 @@ jobs:
           fi
 
   build:
+    # We use a blank name to match the patch workflow name
+    name: ""
     uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
@@ -243,6 +245,8 @@ jobs:
   #
   # Note: the output from get-available-disks should match with the caller workflow inputs
   regenerate-stateful-disks:
+    # We use a blank name to match the patch workflow name
+    name: ""
     needs: [ build, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || github.event.inputs.regenerate-disks == 'true' }}
@@ -260,6 +264,7 @@ jobs:
   # If the state version has changed, waits for the new cached state to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   test-stateful-sync:
+    name: ""
     needs: regenerate-stateful-disks
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
@@ -281,6 +286,7 @@ jobs:
   #
   # Note: the output from get-available-disks should match with the caller workflow inputs
   test-full-sync:
+    name: ""
     needs: [ build, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
     # to also run on Mergify head branches,
@@ -305,6 +311,7 @@ jobs:
   # If the state version has changed, waits for the new cached state to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-rpc-test:
+    name: ""
     needs: test-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
@@ -329,6 +336,7 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   # TODO: move this job under lightwalletd-full-sync to have a sequential logic
   lightwalletd-transactions-test:
+    name: ""
     needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
@@ -354,6 +362,7 @@ jobs:
   # If the state version has changed, waits for the new cached state to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-full-sync:
+    name: ""
     needs: test-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
@@ -379,6 +388,7 @@ jobs:
   # If the state version has changed, waits for the new cached states to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-update-sync:
+    name: ""
     needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
