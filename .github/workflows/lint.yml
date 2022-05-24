@@ -118,3 +118,13 @@ jobs:
         with:
           level: warning
           fail_on_error: false
+
+  codespell:
+    runs-on: ubuntu-latest
+    if: ${{ needs.changed-files.outputs.rust == 'true' }}
+    needs: changed-files
+    steps:
+      - uses: actions/checkout@v3.0.2
+      - uses: plettich/action-codespell@master
+        with:
+          github_token: ${{ secrets.github_token }}
