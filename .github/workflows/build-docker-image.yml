@@ -39,7 +39,6 @@ on:
 
 jobs:
   build:
-    name: Build images
     timeout-minutes: 210
     runs-on: ubuntu-latest
     permissions:
