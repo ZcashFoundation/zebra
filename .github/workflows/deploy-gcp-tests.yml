@@ -132,53 +132,6 @@ jobs:
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
-      - name: Get state version from constants.rs
-        run: |
-          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
-          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
-
-          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
-
-      - name: Get sync height from logs
-        run: |
-          SYNC_HEIGHT=""
-
-          DOCKER_LOGS=$(\
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker logs ${{ inputs.test_id }} --tail 20")
-
-          SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE '${{ inputs.height_grep_text }}\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
-          echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
-
-      # Create image from disk that will be used for following tests
-      # Force the image creation as the disk is still attached even though is not being used by the container
-      - name: Create image from state disk
-        if: ${{ inputs.saves_to_disk }}
-        run: |
-          gcloud compute images create ${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }} \
-          --force \
-          --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
-          --source-disk-zone=${{ env.ZONE }} \
-          --storage-location=us \
-          --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
-
-      - name: Delete test instance
-        # If the disk generation step timeouts (+6 hours) the previous step (creating the image) will be skipped.
-        # Even if the instance continues running, no image will be created, so it's better to delete it.
-        if: always()
-        continue-on-error: true
-        run: |
-          INSTANCE=$(gcloud compute instances list --filter=${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
-          if [ -z "${INSTANCE}" ]; then
-            echo "No instance to delete"
-          else
-            gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
-          fi
-
   test-with-cached-state:
     name: Run ${{ inputs.test_id }} test
     if: ${{ inputs.needs_zebra_state }}
@@ -357,6 +310,72 @@ jobs:
           --mount type=volume,src=${{ inputs.disk_prefix }}-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
+  create-state-image:
+    name: Create ${{ inputs.test_id }} cached state image
+    runs-on: ubuntu-latest
+    needs: [ test-with-cached-state ]
+    if: ${{ inputs.saves_to_disk }}
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      # Disk images in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase ${{ inputs.network }}
+      #
+      # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.7.3
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Get the state version from the local constants.rs file to be used in the image creation,
+      # as the state version is part of the disk image name.
+      #
+      # Passes the state version to subsequent steps using $STATE_VERSION env variable
+      - name: Get state version from constants.rs
+        run: |
+          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
+          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
+
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
+
+      # Get the sync height from the test logs, which is later used as part of the
+      # disk description.
+      #
+      # The regex used to grep the sync height is provided by ${{ inputs.height_grep_text }},
+      # this allows to dinamically change the height as needed by different situations or 
+      # based on the logs output from different tests
+      #
+      # Passes the sync height to subsequent steps using $SYNC_HEIGHT env variable
+      - name: Get sync height from logs
+        run: |
+          SYNC_HEIGHT=""
+
+          DOCKER_LOGS=$(\
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command="docker logs ${{ inputs.test_id }} --tail 20")
+
+          SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE '${{ inputs.height_grep_text }}\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
+          echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
+
       # Create an image from disk that will be used for following/other tests
       # This image can contain:
       # - Zebra cached state
@@ -366,7 +385,6 @@ jobs:
       # Force the image creation (--force) as the disk is still attached even though is not being
       # used by the container
       - name: Create image from state disk
-        if: ${{ inputs.saves_to_disk }}
         run: |
           gcloud compute images create ${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }} \
           --force \
@@ -375,9 +393,33 @@ jobs:
           --storage-location=us \
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
 
+  delete-instance:
+    name: Delete ${{ inputs.test_id }} instance
+    # If a disk generation step timeouts (+6 hours) the previous job (creating the image) will be skipped.
+    # Even if the instance continues running, no image will be created, so it's better to delete it.
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.7.3
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Deletes the instances that has been recently deployed in the actual commit after all
+      # previous jobs have run, no matter the outcome of the job.
       - name: Delete test instance
-        # We don't want to leave a failed instance in GCP using resources
-        if: always()
         continue-on-error: true
         run: |
           INSTANCE=$(gcloud compute instances list --filter=${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} --format='value(NAME)')
