@@ -134,7 +134,7 @@ jobs:
           fi
 
   build:
-    name: Build
+    name: Build images
     uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
