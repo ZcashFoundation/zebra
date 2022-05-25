@@ -38,8 +38,9 @@ jobs:
   coverage:
     name: Coverage on stable
     # The large timeout is to accommodate:
+    # - stable builds (typically 30-50 minutes), and
     # - parameter downloads (an extra 90 minutes, but only when the cache expires)
-    timeout-minutes: 165
+    timeout-minutes: 140
     runs-on: ubuntu-latest
 
     steps:
