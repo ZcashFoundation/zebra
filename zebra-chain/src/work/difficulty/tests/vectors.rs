@@ -186,7 +186,7 @@ fn compact_extremes() {
     assert_eq!(difficulty_max.to_work(), None);
 
     // Bitcoin test vectors for CompactDifficulty
-    // See https://developer.bitcoin.org/reference/block_chain.html#target-nbits
+    // See <https://developer.bitcoin.org/reference/block_chain.html#target-nbits>
     // These values are not in the table below, because they do not fit in u128
     //
     // The minimum difficulty on the bitcoin mainnet and testnet
@@ -217,7 +217,7 @@ fn compact_extremes() {
 
 /// Bitcoin test vectors for CompactDifficulty, and their corresponding
 /// ExpandedDifficulty and Work values.
-/// See https://developer.bitcoin.org/reference/block_chain.html#target-nbits
+/// See <https://developer.bitcoin.org/reference/block_chain.html#target-nbits>
 static COMPACT_DIFFICULTY_CASES: &[(u32, Option<u128>, Option<u128>)] = &[
     // These Work values will never happen in practice, because the corresponding
     // difficulties are extremely high. So it is ok for us to reject them.

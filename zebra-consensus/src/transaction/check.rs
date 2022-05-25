@@ -38,7 +38,7 @@ pub fn lock_time_has_passed(
             // > The transaction can be added to any block which has a greater height.
             // The Bitcoin documentation is wrong or outdated here,
             // so this code is based on the `zcashd` implementation at:
-            // https://github.com/zcash/zcash/blob/1a7c2a3b04bcad6549be6d571bfdff8af9a2c814/src/main.cpp#L722
+            // <https://github.com/zcash/zcash/blob/1a7c2a3b04bcad6549be6d571bfdff8af9a2c814/src/main.cpp#L722>
             if block_height > unlock_height {
                 Ok(())
             } else {
@@ -47,7 +47,7 @@ pub fn lock_time_has_passed(
         }
         Some(LockTime::Time(unlock_time)) => {
             // > The transaction can be added to any block whose block time is greater than the locktime.
-            // https://developer.bitcoin.org/devguide/transactions.html#locktime-and-sequence-number
+            // <https://developer.bitcoin.org/devguide/transactions.html#locktime-and-sequence-number>
             if block_time > unlock_time {
                 Ok(())
             } else {
@@ -157,7 +157,7 @@ pub fn joinsplit_has_vpub_zero(tx: &Transaction) -> Result<(), TransactionError>
         //
         // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+        // <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
         if *vpub_old != zero && *vpub_new != zero {
             return Err(TransactionError::BothVPubsNonZero);
         }
@@ -169,8 +169,8 @@ pub fn joinsplit_has_vpub_zero(tx: &Transaction) -> Result<(), TransactionError>
 /// Check if a transaction is adding to the sprout pool after Canopy
 /// network upgrade given a block height and a network.
 ///
-/// https://zips.z.cash/zip-0211
-/// https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+/// <https://zips.z.cash/zip-0211>
+/// <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
 pub fn disabled_add_to_sprout_pool(
     tx: &Transaction,
     height: Height,
@@ -184,7 +184,7 @@ pub fn disabled_add_to_sprout_pool(
     //
     // > [Canopy onward]: `vpub_old` MUST be zero.
     //
-    // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+    // <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
     if height >= canopy_activation_height {
         let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
 
@@ -211,13 +211,13 @@ pub fn disabled_add_to_sprout_pool(
 /// Any subsequent reference is a forbidden double spend-
 /// an attempt to spend the same satoshis twice."
 ///
-/// https://developer.bitcoin.org/devguide/block_chain.html#introduction
+/// <https://developer.bitcoin.org/devguide/block_chain.html#introduction>
 ///
 /// A _nullifier_ *MUST NOT* repeat either within a _transaction_, or across _transactions_ in a
 /// _valid blockchain_ . *Sprout* and *Sapling* and *Orchard* _nulliers_ are considered disjoint,
 /// even if they have the same bit pattern.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#nullifierset
+/// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
 pub fn spend_conflicts(transaction: &Transaction) -> Result<(), TransactionError> {
     use crate::error::TransactionError::*;
 
@@ -280,11 +280,11 @@ where
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 ///
-/// [ZIP-212]: https://zips.z.cash/zip-0212#consensus-rule-change-for-coinbase-transactions
+/// [ZIP-212]: <https://zips.z.cash/zip-0212#consensus-rule-change-for-coinbase-transactions>
 ///
 /// TODO: Currently, a 0x01 lead byte is allowed in the "grace period" mentioned since we're
 /// using `librustzcash` to implement this and it doesn't currently allow changing that behavior.
-/// https://github.com/ZcashFoundation/zebra/issues/3027
+/// <https://github.com/ZcashFoundation/zebra/issues/3027>
 pub fn coinbase_outputs_are_decryptable(
     transaction: &Transaction,
     network: Network,

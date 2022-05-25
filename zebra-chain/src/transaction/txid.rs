@@ -9,8 +9,8 @@ use crate::serialization::{sha256d, ZcashSerialize};
 /// different parts of the transaction, depending on the transaction version.
 /// For V5 transactions, it follows [ZIP-244] and [ZIP-225].
 ///
-/// [ZIP-244]: https://zips.z.cash/zip-0244
-/// [ZIP-225]: https://zips.z.cash/zip-0225
+/// [ZIP-244]: <https://zips.z.cash/zip-0244>
+/// [ZIP-225]: <https://zips.z.cash/zip-0225>
 pub(super) struct TxIdBuilder<'a> {
     trans: &'a Transaction,
 }

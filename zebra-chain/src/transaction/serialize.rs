@@ -203,13 +203,13 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         //
         // > Elements of a Spend description MUST be valid encodings of the types given above.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+        // <https://zips.z.cash/protocol/protocol.pdf#spenddesc>
         //
         // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes
         //
         // > LEOS2IP_{256}(anchorSapling), if present, MUST be less than 𝑞_𝕁.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus
+        // <https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus>
         //
         // Validated in [`crate::sapling::tree::Root::zcash_deserialize`].
         let shared_anchor = if spends_count > 0 {
@@ -224,10 +224,10 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         //
         // > Elements of a Spend description MUST be valid encodings of the types given above.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+        // <https://zips.z.cash/protocol/protocol.pdf#spenddesc>
         //
         // Type is `ZKSpend.Proof`, described in
-        // https://zips.z.cash/protocol/protocol.pdf#grothencoding
+        // <https://zips.z.cash/protocol/protocol.pdf#grothencoding>
         // It is not enforced here; this just reads 192 bytes.
         // The type is validated when validating the proof, see
         // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
@@ -239,11 +239,11 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         //
         // > Elements of a Spend description MUST be valid encodings of the types given above.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+        // <https://zips.z.cash/protocol/protocol.pdf#spenddesc>
         //
         // Type is SpendAuthSig^{Sapling}.Signature, i.e.
         // B^Y^{[ceiling(ℓ_G/8) + ceiling(bitlength(𝑟_G)/8)]} i.e. 64 bytes
-        // https://zips.z.cash/protocol/protocol.pdf#concretereddsa
+        // <https://zips.z.cash/protocol/protocol.pdf#concretereddsa>
         // See [`redjubjub::Signature<SpendAuth>::zcash_deserialize`].
         let spend_sigs = zcash_deserialize_external_count(spends_count, &mut reader)?;
 
@@ -253,10 +253,10 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         //
         // > Elements of a Output description MUST be valid encodings of the types given above.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#outputdesc
+        // <https://zips.z.cash/protocol/protocol.pdf#outputdesc>
         //
         // Type is `ZKOutput.Proof`, described in
-        // https://zips.z.cash/protocol/protocol.pdf#grothencoding
+        // <https://zips.z.cash/protocol/protocol.pdf#grothencoding>
         // It is not enforced here; this just reads 192 bytes.
         // The type is validated when validating the proof, see
         // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
@@ -329,7 +329,7 @@ impl ZcashSerialize for Option<orchard::ShieldedData> {
                 // We don't need to write anything else here.
                 // "The fields flagsOrchard, valueBalanceOrchard, anchorOrchard, sizeProofsOrchard,
                 // proofsOrchard , and bindingSigOrchard are present if and only if nActionsOrchard > 0."
-                // `§` note of the second table of https://zips.z.cash/protocol/protocol.pdf#txnencoding
+                // `§` note of the second table of <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
             }
             Some(orchard_shielded_data) => {
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
@@ -383,7 +383,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
 
         // "The fields flagsOrchard, valueBalanceOrchard, anchorOrchard, sizeProofsOrchard,
         // proofsOrchard , and bindingSigOrchard are present if and only if nActionsOrchard > 0."
-        // `§` note of the second table of https://zips.z.cash/protocol/protocol.pdf#txnencoding
+        // `§` note of the second table of <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
         if actions.is_empty() {
             return Ok(None);
         }
@@ -392,7 +392,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
         //
         // > Elements of an Action description MUST be canonical encodings of the types given above.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#actiondesc
+        // <https://zips.z.cash/protocol/protocol.pdf#actiondesc>
         //
         // Some Action elements are validated in this function; they are described below.
 
@@ -410,7 +410,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
 
         // Denoted as `sizeProofsOrchard` and `proofsOrchard` in the spec.
         // Consensus: type is `ZKAction.Proof`, i.e. a byte sequence.
-        // https://zips.z.cash/protocol/protocol.pdf#halo2encoding
+        // <https://zips.z.cash/protocol/protocol.pdf#halo2encoding>
         let proof: Halo2Proof = (&mut reader).zcash_deserialize_into()?;
 
         // Denoted as `vSpendAuthSigsOrchard` in the spec.
@@ -543,7 +543,7 @@ impl ZcashSerialize for Transaction {
                 joinsplit_data,
             } => {
                 // Transaction V4 spec:
-                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+                // <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
 
                 // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(SAPLING_VERSION_GROUP_ID)?;
@@ -620,7 +620,7 @@ impl ZcashSerialize for Transaction {
                 orchard_shielded_data,
             } => {
                 // Transaction V5 spec:
-                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+                // <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
 
                 // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
@@ -667,7 +667,7 @@ impl ZcashDeserialize for Transaction {
         // > [Pre-Sapling] The encoded size of the transaction MUST be less than or
         // > equal to 100000 bytes.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         //
         // Zebra does not verify this rule because we checkpoint up to Canopy blocks, but:
         // Since transactions must get mined into a block to be useful,
@@ -716,7 +716,7 @@ impl ZcashDeserialize for Transaction {
         // and "The transaction version number MUST be 4 or 5" from the last two rules above.
         // This is done in the zebra-consensus crate, in the transactions checks.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         match (version, overwintered) {
             (1, false) => Ok(Transaction::V1 {
                 // Denoted as `tx_in_count` and `tx_in` in the spec.
@@ -767,7 +767,7 @@ impl ZcashDeserialize for Transaction {
             }
             (4, true) => {
                 // Transaction V4 spec:
-                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+                // <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
 
                 // Denoted as `nVersionGroupId` in the spec.
                 let id = limited_reader.read_u32::<LittleEndian>()?;
@@ -832,7 +832,7 @@ impl ZcashDeserialize for Transaction {
                     // > [Sapling onward] If effectiveVersion = 4 and there are no Spend
                     // > descriptions or Output descriptions, then valueBalanceSapling MUST be 0.
                     //
-                    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+                    // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
                     if value_balance != 0 {
                         return Err(SerializationError::BadTransactionBalance);
                     }
@@ -860,7 +860,7 @@ impl ZcashDeserialize for Transaction {
             }
             (5, true) => {
                 // Transaction V5 spec:
-                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+                // <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
 
                 // Denoted as `nVersionGroupId` in the spec.
                 let id = limited_reader.read_u32::<LittleEndian>()?;

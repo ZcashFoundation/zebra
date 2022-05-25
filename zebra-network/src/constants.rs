@@ -194,13 +194,13 @@ pub const GET_ADDR_FANOUT: usize = 1;
 /// `addr`:
 /// > The number of IP address entries up to a maximum of 1,000.
 ///
-/// https://developer.bitcoin.org/reference/p2p_networking.html#addr
+/// <https://developer.bitcoin.org/reference/p2p_networking.html#addr>
 ///
 /// `addrv2`:
 /// > One message can contain up to 1,000 addresses.
 /// > Clients MUST reject messages with more addresses.
 ///
-/// https://zips.z.cash/zip-0155#specification
+/// <https://zips.z.cash/zip-0155#specification>
 pub const MAX_ADDRS_IN_MESSAGE: usize = 1000;
 
 /// The fraction of addresses Zebra sends in response to a `Peers` request.
@@ -236,7 +236,7 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 ///
 /// This must be a valid [BIP 14] user agent.
 ///
-/// [BIP 14]: https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki
+/// [BIP 14]: <https://github.com/bitcoin/bips/blob/master/bip-0014.mediawiki>
 //
 // TODO: generate this from crate metadata (#2375)
 pub const USER_AGENT: &str = "/Zebra:1.0.0-beta.10/";
@@ -316,8 +316,8 @@ lazy_static! {
 /// [6.1.3.3 Efficient Resource Usage] from [RFC 1123: Requirements for Internet Hosts]
 /// suggest no less than 5 seconds for resolving timeout.
 ///
-/// [RFC 1123: Requirements for Internet Hosts] https://tools.ietf.org/rfcmarkup?doc=1123
-/// [6.1.3.3  Efficient Resource Usage] https://tools.ietf.org/rfcmarkup?doc=1123#page-77
+/// [RFC 1123: Requirements for Internet Hosts] <https://tools.ietf.org/rfcmarkup?doc=1123>
+/// [6.1.3.3  Efficient Resource Usage] <https://tools.ietf.org/rfcmarkup?doc=1123#page-77>
 pub const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Magic numbers used to identify different Zcash networks.

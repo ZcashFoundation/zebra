@@ -1,5 +1,5 @@
 // Test vector data generated from
-// https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/sapling_pedersen.py
+// <https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/sapling_pedersen.py>
 //
 // These vectors in particular correspond to the Personalization::NoteCommitment
 // enum variant from the original source.

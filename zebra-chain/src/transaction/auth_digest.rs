@@ -17,7 +17,7 @@ use super::Transaction;
 /// Note: Zebra displays transaction and block hashes in big-endian byte-order,
 /// following the u256 convention set by Bitcoin and zcashd.
 ///
-/// [ZIP-244]: https://zips.z.cash/zip-0244
+/// [ZIP-244]: <https://zips.z.cash/zip-0244>
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct AuthDigest(pub [u8; 32]);

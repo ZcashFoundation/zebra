@@ -207,18 +207,18 @@ pub const POW_AVERAGING_WINDOW: usize = 17;
 /// The multiplier used to derive the testnet minimum difficulty block time gap
 /// threshold.
 ///
-/// Based on https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network
+/// Based on <https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network>
 const TESTNET_MINIMUM_DIFFICULTY_GAP_MULTIPLIER: i32 = 6;
 
 /// The start height for the testnet minimum difficulty consensus rule.
 ///
-/// Based on https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network
+/// Based on <https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network>
 const TESTNET_MINIMUM_DIFFICULTY_START_HEIGHT: block::Height = block::Height(299_188);
 
 /// The activation height for the block maximum time rule on Testnet.
 ///
 /// Part of the block header consensus rules in the Zcash specification at
-/// https://zips.z.cash/protocol/protocol.pdf#blockheader
+/// <https://zips.z.cash/protocol/protocol.pdf#blockheader>
 pub const TESTNET_MAX_TIME_START_HEIGHT: block::Height = block::Height(653_606);
 
 impl NetworkUpgrade {
@@ -250,7 +250,7 @@ impl NetworkUpgrade {
             // zebra-state will have this feature enabled. But we are using
             // Rust Edition 2021 and Cargo resolver version 2, so the "zebra-test"
             // feature should only be enabled for tests:
-            // https://doc.rust-lang.org/cargo/reference/features.html#resolver-version-2-command-line-flags
+            // <https://doc.rust-lang.org/cargo/reference/features.html#resolver-version-2-command-line-flags>
             #[cfg(feature = "zebra-test")]
             if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() {
                 (
@@ -370,7 +370,7 @@ impl NetworkUpgrade {
     /// Returns the minimum difficulty block spacing for `network` and `height`.
     /// Returns `None` if the testnet minimum difficulty consensus rule is not active.
     ///
-    /// Based on https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network
+    /// Based on <https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-the-test-network>
     pub fn minimum_difficulty_spacing_for_height(
         network: Network,
         height: block::Height,
@@ -440,7 +440,7 @@ impl NetworkUpgrade {
     /// TESTNET_MAX_TIME_START_HEIGHT to return true.
     /// Returns false otherwise.
     ///
-    /// Part of the consensus rules at https://zips.z.cash/protocol/protocol.pdf#blockheader
+    /// Part of the consensus rules at <https://zips.z.cash/protocol/protocol.pdf#blockheader>
     pub fn is_max_block_time_enforced(network: Network, height: block::Height) -> bool {
         match network {
             Network::Mainnet => true,

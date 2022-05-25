@@ -7,7 +7,7 @@ pub struct TestVector {
     pub(crate) hash: [u8; 32],
 }
 
-// From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_sinsemilla.py
+// From <https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_sinsemilla.py>
 lazy_static! {
     pub static ref SINSEMILLA: [TestVector; 11] = [
         TestVector {

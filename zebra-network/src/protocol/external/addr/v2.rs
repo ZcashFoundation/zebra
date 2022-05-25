@@ -39,31 +39,31 @@ use zebra_chain::serialization::{zcash_serialize_bytes, ZcashSerialize};
 /// > Field addr has a variable length, with a maximum of 512 bytes (4096 bits).
 /// > Clients MUST reject messages with a longer addr field, irrespective of the network ID.
 ///
-/// https://zips.z.cash/zip-0155#specification
+/// <https://zips.z.cash/zip-0155#specification>
 pub const MAX_ADDR_V2_ADDR_SIZE: usize = 512;
 
 /// The network ID of [`Ipv4Addr`]s in `addrv2` messages.
 ///
 /// > 0x01  IPV4  4   IPv4 address (globally routed internet)
 ///
-/// https://zips.z.cash/zip-0155#specification
+/// <https://zips.z.cash/zip-0155#specification>
 pub const ADDR_V2_IPV4_NETWORK_ID: u8 = 0x01;
 
 /// The size of [`Ipv4Addr`]s in `addrv2` messages.
 ///
-/// https://zips.z.cash/zip-0155#specification
+/// <https://zips.z.cash/zip-0155#specification>
 pub const ADDR_V2_IPV4_ADDR_SIZE: usize = 4;
 
 /// The network ID of [`Ipv6Addr`]s in `addrv2` messages.
 ///
 /// > 0x02  IPV6  16  IPv6 address (globally routed internet)
 ///
-/// https://zips.z.cash/zip-0155#specification
+/// <https://zips.z.cash/zip-0155#specification>
 pub const ADDR_V2_IPV6_NETWORK_ID: u8 = 0x02;
 
 /// The size of [`Ipv6Addr`]s in `addrv2` messages.
 ///
-/// https://zips.z.cash/zip-0155#specification
+/// <https://zips.z.cash/zip-0155#specification>
 pub const ADDR_V2_IPV6_ADDR_SIZE: usize = 16;
 
 /// The second format used for Bitcoin node addresses.
@@ -111,7 +111,7 @@ pub(in super::super) enum AddrV2 {
 // We can't guarantee that peers support addrv2 until it activates,
 // and outdated peers are excluded from the network by a network upgrade.
 // (Likely NU5 on mainnet, and NU6 on testnet.)
-// https://zips.z.cash/zip-0155#deployment
+// <https://zips.z.cash/zip-0155#deployment>
 //
 // And Zebra doesn't use different codecs for different peer versions.
 #[cfg(test)]
@@ -253,7 +253,7 @@ impl ZcashSerialize for AddrV2 {
 }
 
 /// Deserialize an `addrv2` entry according to:
-/// https://zips.z.cash/zip-0155#specification
+/// <https://zips.z.cash/zip-0155#specification>
 ///
 /// Unimplemented and unrecognised addresses are deserialized as [`AddrV2::Unsupported`].
 /// (Deserialization consumes the correct number of bytes for unsupported addresses.)

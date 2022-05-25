@@ -21,7 +21,7 @@ pub struct TestVector {
 
 lazy_static! {
     /// Array of ZIP-143 test vectors.
-    // From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/zip_0143.py
+    // From <https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/zip_0143.py>
     pub static ref TEST_VECTORS: Vec<TestVector> = vec![
         TestVector {
             tx: vec![

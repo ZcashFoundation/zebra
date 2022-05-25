@@ -1,5 +1,5 @@
-// Produced by https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_empty_roots.py
-// Reproduced by https://github.com/zcash/orchard/blob/main/src/tree.rs
+// Produced by <https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_empty_roots.py>
+// Reproduced by <https://github.com/zcash/orchard/blob/main/src/tree.rs>
 pub const EMPTY_ROOTS: [[u8; 32]; 33] = [
     [
         0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -168,7 +168,7 @@ pub const EMPTY_ROOTS: [[u8; 32]; 33] = [
     ],
 ];
 
-// From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_merkle_tree.py
+// From <https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_merkle_tree.py>
 pub const COMMITMENTS: [[[u8; 32]; 5]; 10] = [
     [
         [
@@ -446,7 +446,7 @@ pub struct TestVector {
     pub anchor: [u8; 32],
 }
 
-// From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_merkle_tree.py
+// From <https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_merkle_tree.py>
 pub const ROOTS: [TestVector; 10] = [
     TestVector {
         anchor: [

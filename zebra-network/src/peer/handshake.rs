@@ -1034,7 +1034,7 @@ pub(crate) async fn register_inventory_status(
             // (We process inventory messages with any number of
             // transactions.)
             //
-            // https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring
+            // <https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html#inventory-monitoring>
             //
             // Note: zcashd has a bug where it merges queued inv messages of
             // the same or different types. Zebra compensates by sending `notfound`

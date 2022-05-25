@@ -8,7 +8,7 @@
 //!
 //! TODO: compare with similar code in linkerd.
 //!
-//! [aws-fallback]: https://aws.amazon.com/builders-library/avoiding-fallback-in-distributed-systems/
+//! [aws-fallback]: <https://aws.amazon.com/builders-library/avoiding-fallback-in-distributed-systems/>
 
 pub mod future;
 mod service;

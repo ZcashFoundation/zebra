@@ -112,7 +112,7 @@ pub static OUTPUT_VERIFIER: Lazy<
 /// Global batch verification context for Groth16 proofs of JoinSplit statements.
 ///
 /// This service does not yet batch verifications, see
-/// https://github.com/ZcashFoundation/zebra/issues/3127
+/// <https://github.com/ZcashFoundation/zebra/issues/3127>
 ///
 /// Note that making a `Service` call requires mutable access to the service, so
 /// you should call `.clone()` on the global handle to create a local, mutable
@@ -217,7 +217,7 @@ impl Description for Output {
 /// `nf2`: the second nullifier from the JoinSplit description.
 /// `joinsplit_pub_key`: the JoinSplit public validation key from the transaction.
 ///
-/// [1]: https://zips.z.cash/protocol/protocol.pdf#hsigcrh
+/// [1]: <https://zips.z.cash/protocol/protocol.pdf#hsigcrh>
 pub(super) fn h_sig(
     random_seed: &RandomSeed,
     nf1: &Nullifier,
@@ -249,7 +249,7 @@ impl Description for (&JoinSplit<Groth16Proof>, &ed25519::VerificationKeyBytes) 
     /// the transaction. (All JoinSplits in a transaction share the same validation key.)
     ///
     /// This is not yet officially documented; see the reference implementation:
-    /// https://github.com/zcash/librustzcash/blob/0ec7f97c976d55e1a194a37b27f247e8887fca1d/zcash_proofs/src/sprout.rs#L152-L166
+    /// <https://github.com/zcash/librustzcash/blob/0ec7f97c976d55e1a194a37b27f247e8887fca1d/zcash_proofs/src/sprout.rs#L152-L166>
     /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
     fn primary_inputs(&self) -> Vec<jubjub::Fq> {
         let (joinsplit, joinsplit_pub_key) = self;
@@ -299,7 +299,7 @@ pub type Item = batch::Item<Bls12>;
 
 /// A wrapper to allow a TryFrom blanket implementation of the [`Description`]
 /// trait for the [`Item`] struct.
-/// See https://github.com/rust-lang/rust/issues/50133 for more details.
+/// See <https://github.com/rust-lang/rust/issues/50133> for more details.
 pub struct DescriptionWrapper<T>(pub T);
 
 impl<T> TryFrom<DescriptionWrapper<&T>> for Item
@@ -313,7 +313,7 @@ where
         //
         // > Elements of a JoinSplit description MUST have the types given above
         //
-        // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+        // <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
         //
         // This validates the 𝜋_{ZKJoinSplit} element. In #3179 we plan to validate
         // during deserialization, see [`JoinSplit::zcash_deserialize`].

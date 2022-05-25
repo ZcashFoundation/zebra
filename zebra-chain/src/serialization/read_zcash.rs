@@ -2,7 +2,7 @@ use std::io;
 
 /// Extends [`Read`] with methods for writing Zcash/Bitcoin types.
 ///
-/// [`Read`]: https://doc.rust-lang.org/std/io/trait.Read.html
+/// [`Read`]: <https://doc.rust-lang.org/std/io/trait.Read.html>
 pub trait ReadZcashExt: io::Read {
     /// Convenience method to read a `[u8; 4]`.
     #[inline]

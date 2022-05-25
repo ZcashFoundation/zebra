@@ -252,7 +252,7 @@ impl CompactDifficulty {
     /// Also returns None on Work overflow, which should be impossible on a
     /// valid chain.
     ///
-    /// [Zcash Specification]: https://zips.z.cash/protocol/protocol.pdf#workdef
+    /// [Zcash Specification]: <https://zips.z.cash/protocol/protocol.pdf#workdef>
     pub fn to_work(self) -> Option<Work> {
         let expanded = self.to_expanded()?;
         Work::try_from(expanded).ok()

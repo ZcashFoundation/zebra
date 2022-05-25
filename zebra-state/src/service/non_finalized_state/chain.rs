@@ -292,7 +292,7 @@ impl Chain {
         // Rebuild the note commitment trees, starting from the finalized tip tree.
         // TODO: change to a more efficient approach by removing nodes
         // from the tree of the original chain (in `pop_tip()`).
-        // See https://github.com/ZcashFoundation/zebra/issues/2378
+        // See <https://github.com/ZcashFoundation/zebra/issues/2378>
         for block in forked.blocks.values() {
             for transaction in block.block.transactions.iter() {
                 for sprout_note_commitment in transaction.sprout_note_commitments() {
@@ -1403,7 +1403,7 @@ impl Ord for Chain {
     /// the vast majority of nodes should eventually agree on their best valid block chain
     /// up to that height."
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#blockchain
+    /// <https://zips.z.cash/protocol/protocol.pdf#blockchain>
     ///
     /// # Correctness
     ///

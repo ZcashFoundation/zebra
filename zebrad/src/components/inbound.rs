@@ -329,7 +329,7 @@ impl Service<zn::Request> for Inbound {
                     // Truncate the list
                     //
                     // TODO: replace with div_ceil once it stabilises
-                    //       https://github.com/rust-lang/rust/issues/88581
+                    //       <https://github.com/rust-lang/rust/issues/88581>
                     let address_limit = (peers.len() + ADDR_RESPONSE_LIMIT_DENOMINATOR - 1) / ADDR_RESPONSE_LIMIT_DENOMINATOR;
                     let address_limit = MAX_ADDRS_IN_MESSAGE.min(address_limit);
                     peers.truncate(address_limit);
@@ -357,7 +357,7 @@ impl Service<zn::Request> for Inbound {
                 // future because:
                 // * we're not sure when the returned future will complete, and
                 // * we don't limit how many returned futures can be concurrently running
-                // https://github.com/tower-rs/tower/blob/master/tower/src/util/call_all/common.rs#L112
+                // <https://github.com/tower-rs/tower/blob/master/tower/src/util/call_all/common.rs#L112>
                 use futures::stream::TryStreamExt;
                 hashes
                     .iter()

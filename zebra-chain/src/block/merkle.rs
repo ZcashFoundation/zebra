@@ -67,7 +67,7 @@ use crate::transaction::{self, Transaction};
 /// data on disk, and because it does not permanently fail blocks or use an
 /// aggressive anti-DoS mechanism.
 ///
-/// [ZIP-244]: https://zips.z.cash/zip-0244
+/// [ZIP-244]: <https://zips.z.cash/zip-0244>
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Root(pub [u8; 32]);
@@ -88,7 +88,7 @@ fn hash(h1: &[u8; 32], h2: &[u8; 32]) -> [u8; 32] {
 fn auth_data_hash(h1: &[u8; 32], h2: &[u8; 32]) -> [u8; 32] {
     // > Non-leaf hashes in this tree are BLAKE2b-256 hashes personalized by
     // > the string "ZcashAuthDatHash".
-    // https://zips.z.cash/zip-0244#block-header-changes
+    // <https://zips.z.cash/zip-0244#block-header-changes>
     blake2b_simd::Params::new()
         .hash_length(32)
         .personal(b"ZcashAuthDatHash")
@@ -142,7 +142,7 @@ impl std::iter::FromIterator<transaction::Hash> for Root {
 ///
 /// See [`Root`] for an important disclaimer.
 ///
-/// [ZIP-244]: https://zips.z.cash/zip-0244
+/// [ZIP-244]: <https://zips.z.cash/zip-0244>
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct AuthDataRoot(pub(crate) [u8; 32]);
@@ -178,7 +178,7 @@ where
         // > For transaction versions before v5, a placeholder value consisting
         // > of 32 bytes of 0xFF is used in place of the authorizing data commitment.
         // > This is only used in the tree committed to by hashAuthDataRoot.
-        // https://zips.z.cash/zip-0244#authorizing-data-commitment
+        // <https://zips.z.cash/zip-0244#authorizing-data-commitment>
         transactions
             .into_iter()
             .map(|tx| {
@@ -199,7 +199,7 @@ impl std::iter::FromIterator<transaction::AuthDigest> for AuthDataRoot {
         // > This new commitment is named hashAuthDataRoot and is the root of a
         // > binary Merkle tree of transaction authorizing data commitments [...]
         // > padded with leaves having the "null" hash value [0u8; 32].
-        // https://zips.z.cash/zip-0244#block-header-changes
+        // <https://zips.z.cash/zip-0244#block-header-changes>
         // Pad with enough leaves to make the tree full (a power of 2).
         let pad_count = hashes.len().next_power_of_two() - hashes.len();
         hashes.extend(iter::repeat([0u8; 32]).take(pad_count));

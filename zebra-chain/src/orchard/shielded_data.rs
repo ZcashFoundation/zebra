@@ -97,7 +97,7 @@ impl ShieldedData {
     /// of the value commitments in the Action descriptions of the transaction, and
     /// the balancing value.
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#orchardbalance
+    /// <https://zips.z.cash/protocol/protocol.pdf#orchardbalance>
     pub fn binding_verification_key(&self) -> redpallas::VerificationKeyBytes<Binding> {
         let cv: ValueCommitment = self.actions().map(|action| action.cv).sum();
         let cv_balance: ValueCommitment =
@@ -162,7 +162,7 @@ impl AuthorizedAction {
 /// Actions are 5 * 32 + 580 + 80 bytes so the total size of each Action is 820 bytes.
 /// [7.5 Action Description Encoding and Consensus][ps]
 ///
-/// [ps] https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus
+/// [ps] <https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus>
 pub const ACTION_SIZE: u64 = 5 * 32 + 580 + 80;
 
 /// The size of a single Signature<SpendAuth>
@@ -170,7 +170,7 @@ pub const ACTION_SIZE: u64 = 5 * 32 + 580 + 80;
 /// Each Signature is 64 bytes.
 /// [7.1 Transaction Encoding and Consensus][ps]
 ///
-/// [ps] https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus
+/// [ps] <https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus>
 pub const SPEND_AUTH_SIG_SIZE: u64 = 64;
 
 /// The size of a single AuthorizedAction
@@ -193,7 +193,7 @@ impl TrustedPreallocate for Action {
         //
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         //
         // This acts as nActionsOrchard and is therefore subject to the rule.
         // The maximum value is actually smaller due to the block size limit,
@@ -248,7 +248,7 @@ impl ZcashDeserialize for Flags {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // Consensus rule: "In a version 5 transaction,
         // the reserved bits 2..7 of the flagsOrchard field MUST be zero."
-        // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+        // <https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus>
         Flags::from_bits(reader.read_u8()?)
             .ok_or(SerializationError::Parse("invalid reserved orchard flags"))
     }

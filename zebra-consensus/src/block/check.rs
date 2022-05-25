@@ -93,7 +93,7 @@ pub fn difficulty_is_valid(
     //
     // > The block MUST pass the difficulty filter.
     //
-    // https://zips.z.cash/protocol/protocol.pdf#blockheader
+    // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
     //
     // The difficulty filter is also context-free.
     if hash > &difficulty_threshold {
@@ -114,13 +114,13 @@ pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error
     //
     // > `solution` MUST represent a valid Equihash solution.
     //
-    // https://zips.z.cash/protocol/protocol.pdf#blockheader
+    // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
     header.solution.check(header)
 }
 
 /// Returns `Ok(())` if the block subsidy in `block` is valid for `network`
 ///
-/// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
+/// [3.9]: <https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts>
 pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockError> {
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
     let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
@@ -157,7 +157,7 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         // > that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
         // > recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
         //
-        // https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+        // <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
         for (receiver, expected_amount) in funding_streams {
             let address =
                 subsidy::funding_streams::funding_stream_address(height, network, receiver);
@@ -181,7 +181,7 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
 
 /// Returns `Ok(())` if the miner fees consensus rule is valid.
 ///
-/// [7.1.2]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+/// [7.1.2]: <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 pub fn miner_fees_are_valid(
     block: &Block,
     network: Network,
@@ -208,7 +208,7 @@ pub fn miner_fees_are_valid(
     // > minus vbalanceSapling, minus vbalanceOrchard, MUST NOT be greater than the value
     // > in zatoshi of block subsidy plus the transaction fees paid by transactions in this block.
     //
-    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
     let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance)
         .map_err(|_| SubsidyError::SumOverflow)?;
     let right = (block_subsidy + block_miner_fees).map_err(|_| SubsidyError::SumOverflow)?;
@@ -233,7 +233,7 @@ pub fn miner_fees_are_valid(
 /// is rejected by this rule at a given point in time may later be
 /// accepted." [§7.5][7.5]
 ///
-/// [7.5]: https://zips.z.cash/protocol/protocol.pdf#blockheader
+/// [7.5]: <https://zips.z.cash/protocol/protocol.pdf#blockheader>
 ///
 /// If the header time is invalid, returns an error containing `height` and `hash`.
 pub fn time_is_valid_at(
@@ -259,9 +259,9 @@ pub fn time_is_valid_at(
 ///
 /// - If block does not have a coinbase transaction.
 ///
-/// [ZIP-244]: https://zips.z.cash/zip-0244
-/// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
-/// [7.6]: https://zips.z.cash/protocol/nu5.pdf#blockheader
+/// [ZIP-244]: <https://zips.z.cash/zip-0244>
+/// [7.1]: <https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus>
+/// [7.6]: <https://zips.z.cash/protocol/nu5.pdf#blockheader>
 pub fn merkle_root_validity(
     network: Network,
     block: &Block,

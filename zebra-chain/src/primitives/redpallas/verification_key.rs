@@ -32,7 +32,7 @@ impl<T: SigType> From<VerificationKeyBytes<T>> for [u8; 32] {
     }
 }
 
-// TODO: impl Hash for VerificationKeyBytes, or import that impl: https://github.com/ZcashFoundation/zebra/issues/2044
+// TODO: impl Hash for VerificationKeyBytes, or import that impl: <https://github.com/ZcashFoundation/zebra/issues/2044>
 
 /// A valid RedPallas verification key.
 ///

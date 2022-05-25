@@ -1,4 +1,4 @@
-// From https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/merkle_tree.rs#L585
+// From <https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/merkle_tree.rs#L585>
 pub const HEX_EMPTY_ROOTS: [&str; 33] = [
     "0100000000000000000000000000000000000000000000000000000000000000",
     "817de36ab2d57feb077634bca77819c8e0bd298c04f6fed0e6a83cc1356ca155",
@@ -35,7 +35,7 @@ pub const HEX_EMPTY_ROOTS: [&str; 33] = [
     "fbc2f4300c01f0b7820d00e3347c8da4ee614674376cbc45359daa54f9b5493e",
 ];
 
-// From https://github.com/zcash/zcash/blob/master/src/test/data/merkle_commitments_sapling.json
+// From <https://github.com/zcash/zcash/blob/master/src/test/data/merkle_commitments_sapling.json>
 // Byte-reversed from those ones because the original test vectors are loaded using uint256S()
 pub const COMMITMENTS: [&str; 16] = [
     "b02310f2e087e55bfd07ef5e242e3b87ee5d00c9ab52f61e6bd42542f93a6f55",
@@ -57,7 +57,7 @@ pub const COMMITMENTS: [&str; 16] = [
 ];
 
 // Calculated by modifying TestCommitmentTree in
-// https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/merkle_tree.rs
+// <https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/merkle_tree.rs>
 // to compute the full Sapling height root (32).
 pub const ROOTS: [&str; 16] = [
     "ee880ed73e96ba0739578c87ba8e6a4bc33b5e63bb98875e6e2f04b214e9fb59",

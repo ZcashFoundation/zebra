@@ -783,11 +783,11 @@ mod tests {
 
             // tweak the version bytes so the timestamp is set to `time`
             // Version serialization is specified at:
-            // https://developer.bitcoin.org/reference/p2p_networking.html#version
+            // <https://developer.bitcoin.org/reference/p2p_networking.html#version>
             bytes[36..44].copy_from_slice(&time.to_le_bytes());
 
             // Checksum is specified at:
-            // https://developer.bitcoin.org/reference/p2p_networking.html#message-headers
+            // <https://developer.bitcoin.org/reference/p2p_networking.html#message-headers>
             let checksum = sha256d::Checksum::from(&bytes[HEADER_LEN..]);
             bytes[20..24].copy_from_slice(&checksum.0);
 

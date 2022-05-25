@@ -48,8 +48,8 @@ pub(super) const MERKLE_DEPTH: usize = 32;
 /// l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer),  and left, right, and
 /// the output are the x-coordinates of Pallas affine points.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#orchardmerklecrh
-/// https://zips.z.cash/protocol/protocol.pdf#constants
+/// <https://zips.z.cash/protocol/protocol.pdf#orchardmerklecrh>
+/// <https://zips.z.cash/protocol/protocol.pdf#constants>
 fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pallas::Base {
     let mut s = bitvec![u8, Lsb0;];
 
@@ -70,7 +70,7 @@ lazy_static! {
     ///
     /// The list is indexed by the layer number (0: root; MERKLE_DEPTH: leaf).
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#constants
+    /// <https://zips.z.cash/protocol/protocol.pdf#constants>
     pub(super) static ref EMPTY_ROOTS: Vec<pallas::Base> = {
         // The empty leaf node. This is layer 32.
         let mut v = vec![NoteCommitmentTree::uncommitted()];
@@ -165,7 +165,7 @@ struct Node(pallas::Base);
 /// [`merkle_tree::Hashable`] for [`Node`]s allows the conversion.
 ///
 /// [1]: bridgetree::Frontier
-/// [2]: https://zcash.github.io/rpc/z_gettreestate.html
+/// [2]: <https://zcash.github.io/rpc/z_gettreestate.html>
 /// [3]: merkle_tree::CommitmentTree
 impl merkle_tree::Hashable for Node {
     fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
@@ -452,7 +452,7 @@ impl From<&NoteCommitmentTree> for SerializedTree {
         // Note: This ensures compatibility with `zcashd` in the
         // [`z_gettreestate`][1] RPC.
         //
-        // [1]: https://zcash.github.io/rpc/z_gettreestate.html
+        // [1]: <https://zcash.github.io/rpc/z_gettreestate.html>
         if tree.inner == bridgetree::Frontier::empty() {
             return Self(serialized_tree);
         }

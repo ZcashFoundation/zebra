@@ -1,6 +1,6 @@
 //! Inventory Registry Implementation
 //!
-//! [RFC]: https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html
+//! [RFC]: <https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html>
 
 use std::{
     collections::HashMap,
@@ -55,7 +55,7 @@ type InventoryMarker = InventoryStatus<()>;
 ///
 /// For more details please refer to the [RFC].
 ///
-/// [RFC]: https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html
+/// [RFC]: <https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html>
 pub struct InventoryRegistry {
     /// Map tracking the latest inventory status from the current interval
     /// period.
@@ -125,7 +125,7 @@ impl<T> InventoryStatus<T> {
 
     /// Maps an `InventoryStatus<T>` to `InventoryStatus<U>` by applying a function to a contained value.
     pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> InventoryStatus<U> {
-        // Based on Option::map from https://doc.rust-lang.org/src/core/option.rs.html#844
+        // Based on Option::map from <https://doc.rust-lang.org/src/core/option.rs.html#844>
         match self {
             Available(item) => Available(f(item)),
             Missing(item) => Missing(f(item)),

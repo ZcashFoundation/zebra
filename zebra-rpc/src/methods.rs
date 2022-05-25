@@ -206,7 +206,7 @@ pub trait Rpc {
     /// # Notes
     ///
     /// Only the multi-argument format is used by lightwalletd and this is what we currently support:
-    /// https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102
+    /// <https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102>
     #[rpc(name = "getaddresstxids")]
     fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest)
         -> BoxFuture<Result<Vec<String>>>;
@@ -222,7 +222,7 @@ pub trait Rpc {
     /// # Notes
     ///
     /// lightwalletd always uses the multi-address request, without chaininfo:
-    /// https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L402
+    /// <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L402>
     #[rpc(name = "getaddressutxos")]
     fn get_address_utxos(
         &self,
@@ -1110,7 +1110,7 @@ pub struct GetTreestate {
 
 /// A treestate that is included in the [`z_gettreestate`][1] RPC response.
 ///
-/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
+/// [1]: <https://zcash.github.io/rpc/z_gettreestate.html>
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 struct Treestate<Tree: AsRef<[u8]>> {
     /// Contains an Orchard or Sapling serialized note commitment tree,
@@ -1123,7 +1123,7 @@ struct Treestate<Tree: AsRef<[u8]>> {
 /// Note that in the original [`z_gettreestate`][1] RPC, [`Commitments`] also
 /// contains the field `finalRoot`. Zebra does *not* use this field.
 ///
-/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
+/// [1]: <https://zcash.github.io/rpc/z_gettreestate.html>
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 struct Commitments<Tree: AsRef<[u8]>> {
     /// Orchard or Sapling serialized note commitment tree, hex-encoded.

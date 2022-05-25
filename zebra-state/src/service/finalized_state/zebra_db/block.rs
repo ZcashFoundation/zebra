@@ -370,7 +370,7 @@ impl DiskWriteBatch {
         // > A transaction MUST NOT spend an output of the genesis block coinbase transaction.
         // > (There is one such zero-valued output, on each of Testnet and Mainnet.)
         //
-        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         //
         // By returning early, Zebra commits the genesis block and transaction data,
         // but it ignores the genesis UTXO and value pool updates.

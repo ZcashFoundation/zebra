@@ -65,7 +65,7 @@ impl IntoDisk for orchard::tree::Root {
 // `incrementalmerkletree`) only supports `serde` for serialization. `bincode`
 // was chosen because it is small and fast. We explicitly use `DefaultOptions`
 // in particular to disallow trailing bytes; see
-// https://docs.rs/bincode/1.3.3/bincode/config/index.html#options-struct-vs-bincode-functions
+// <https://docs.rs/bincode/1.3.3/bincode/config/index.html#options-struct-vs-bincode-functions>
 
 impl IntoDisk for sprout::tree::NoteCommitmentTree {
     type Bytes = Vec<u8>;

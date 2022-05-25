@@ -148,9 +148,9 @@ proptest! {
                     // TODO: use `unconstrained` to avoid spurious cooperative multitasking waits
                     //       (needs a recent tokio version)
                     // See:
-                    // https://github.com/ZcashFoundation/zebra/pull/2777#discussion_r712488817
-                    // https://docs.rs/tokio/1.11.0/tokio/task/index.html#cooperative-scheduling
-                    // https://tokio.rs/blog/2020-04-preemption
+                    // <https://github.com/ZcashFoundation/zebra/pull/2777#discussion_r712488817>
+                    // <https://docs.rs/tokio/1.11.0/tokio/task/index.html#cooperative-scheduling>
+                    // <https://tokio.rs/blog/2020-04-preemption>
                     prop_assert_eq!(
                         chain_tip_change
                             .wait_for_tip_change()

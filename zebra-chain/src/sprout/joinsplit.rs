@@ -17,7 +17,7 @@ use super::{commitment, note, tree};
 /// A 256-bit seed that must be chosen independently at
 /// random for each [JoinSplit description].
 ///
-/// [JoinSplit description]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencodingandconsensus
+/// [JoinSplit description]: <https://zips.z.cash/protocol/protocol.pdf#joinsplitencodingandconsensus>
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
@@ -45,7 +45,7 @@ impl From<&RandomSeed> for [u8; 32] {
 
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
+/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding>
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct JoinSplit<P: ZkSnarkProof> {
     /// A value that the JoinSplit transfer removes from the transparent value
@@ -102,7 +102,7 @@ impl<P: ZkSnarkProof> JoinSplit<P> {
     /// Return the sprout value balance,
     /// the change in the transaction value pool due to this sprout [`JoinSplit`].
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
     /// See [`Transaction::sprout_value_balance`] for details.
     pub fn value_balance(&self) -> Amount<NegativeAllowed> {
@@ -125,7 +125,7 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
         //
         // > Elements of a JoinSplit description MUST have the types given above
         //
-        // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+        // <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
         //
         // See comments below for each specific type.
         Ok(JoinSplit::<P> {
@@ -140,13 +140,13 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
                 reader.read_32_bytes()?.into(),
             ],
             // Types are `NoteCommit^{Sprout}.Output`, i.e. `B^{ℓ^{Sprout}_{Merkle}}`,
-            // i.e. 32 bytes. https://zips.z.cash/protocol/protocol.pdf#abstractcommit
+            // i.e. 32 bytes. <https://zips.z.cash/protocol/protocol.pdf#abstractcommit>
             commitments: [
                 commitment::NoteCommitment::from(reader.read_32_bytes()?),
                 commitment::NoteCommitment::from(reader.read_32_bytes()?),
             ],
             // Type is `KA^{Sprout}.Public`, i.e. `B^Y^{[32]}`, i.e. 32 bytes.
-            // https://zips.z.cash/protocol/protocol.pdf#concretesproutkeyagreement
+            // <https://zips.z.cash/protocol/protocol.pdf#concretesproutkeyagreement>
             ephemeral_key: x25519_dalek::PublicKey::from(reader.read_32_bytes()?),
             // Type is `B^{[ℓ_{Seed}]}`, i.e. 32 bytes
             random_seed: RandomSeed::from(reader.read_32_bytes()?),
@@ -156,14 +156,14 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
                 note::Mac::zcash_deserialize(&mut reader)?,
                 note::Mac::zcash_deserialize(&mut reader)?,
             ],
-            // Type is described in https://zips.z.cash/protocol/protocol.pdf#grothencoding.
+            // Type is described in <https://zips.z.cash/protocol/protocol.pdf#grothencoding>.
             // It is not enforced here; this just reads 192 bytes.
             // The type is validated when validating the proof, see
             // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
             zkproof: P::zcash_deserialize(&mut reader)?,
             // Types are `Sym.C`, i.e. `B^Y^{[N]}`, i.e. arbitrary-sized byte arrays
-            // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
-            // 601 bytes in https://zips.z.cash/protocol/protocol.pdf#joinsplitencodingandconsensus
+            // <https://zips.z.cash/protocol/protocol.pdf#concretesym> but fixed to
+            // 601 bytes in <https://zips.z.cash/protocol/protocol.pdf#joinsplitencodingandconsensus>
             // See [`note::EncryptedNote::zcash_deserialize`].
             enc_ciphertexts: [
                 note::EncryptedNote::zcash_deserialize(&mut reader)?,
@@ -184,13 +184,13 @@ const JOINSPLIT_SIZE_WITHOUT_ZKPROOF: u64 =
 ///
 /// A BTCV14 proof takes 296 bytes, per the Zcash [protocol specification §7.2][ps]
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
+/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding>
 pub(crate) const BCTV14_JOINSPLIT_SIZE: u64 = JOINSPLIT_SIZE_WITHOUT_ZKPROOF + 296;
 /// The size of a version 4+ joinsplit transaction, which uses a Groth16 proof
 ///
 /// A Groth16 proof takes 192 bytes, per the Zcash [protocol specification §7.2][ps]
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
+/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding>
 pub(crate) const GROTH16_JOINSPLIT_SIZE: u64 = JOINSPLIT_SIZE_WITHOUT_ZKPROOF + 192;
 
 impl TrustedPreallocate for JoinSplit<Bctv14Proof> {

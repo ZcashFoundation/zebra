@@ -241,7 +241,7 @@ impl StateService {
     /// This function encodes the logic for [committing non-finalized blocks][1]
     /// in RFC0005.
     ///
-    /// [1]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks
+    /// [1]: <https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks>
     #[instrument(level = "debug", skip(self, prepared))]
     fn queue_and_commit_non_finalized(
         &mut self,
@@ -770,7 +770,7 @@ impl Service<Request> for StateService {
                             BoxError::from("block was dropped from the state CommitBlock queue")
                         })
                         // TODO: replace with Result::flatten once it stabilises
-                        // https://github.com/rust-lang/rust/issues/70142
+                        // <https://github.com/rust-lang/rust/issues/70142>
                         .and_then(convert::identity)
                         .map(Response::Committed)
                         .map_err(Into::into)
@@ -797,7 +797,7 @@ impl Service<Request> for StateService {
                             )
                         })
                         // TODO: replace with Result::flatten once it stabilises
-                        // https://github.com/rust-lang/rust/issues/70142
+                        // <https://github.com/rust-lang/rust/issues/70142>
                         .and_then(convert::identity)
                         .map(Response::Committed)
                         .map_err(Into::into)
@@ -902,7 +902,7 @@ impl Service<Request> for StateService {
                 // IF THOSE HEADERS ARE ALREADY KNOWN.  To dodge this behavior,
                 // return slightly fewer than the maximum, to get it to go away.
                 //
-                // https://github.com/bitcoin/bitcoin/pull/4468/files#r17026905
+                // <https://github.com/bitcoin/bitcoin/pull/4468/files#r17026905>
                 let count = MAX_FIND_BLOCK_HEADERS_RESULTS - 2;
                 let res = self.find_best_chain_hashes(known_blocks, stop, count);
                 let res: Vec<_> = res

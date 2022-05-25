@@ -38,9 +38,9 @@
 //! inventory case) is to provide a way to borrow a particular backing service,
 //! say by address.
 //!
-//! [finagle]: https://twitter.github.io/finagle/guide/Clients.html#power-of-two-choices-p2c-least-loaded
-//! [p2c]: http://www.eecs.harvard.edu/~michaelm/postscripts/handbook2001.pdf
-//! [tower-balance]: https://crates.io/crates/tower-balance
+//! [finagle]: <https://twitter.github.io/finagle/guide/Clients.html#power-of-two-choices-p2c-least-loaded>
+//! [p2c]: <http://www.eecs.harvard.edu/~michaelm/postscripts/handbook2001.pdf>
+//! [tower-balance]: <https://crates.io/crates/tower-balance>
 //!
 //! # Behavior During Network Upgrades
 //!
@@ -86,8 +86,8 @@
 //! those that it has successfully connected to before), the node should be able to recover and
 //! rejoin the network by itself, as long as the address book is populated with enough entries.
 //!
-//! [ZIP-201]: https://zips.z.cash/zip-0201
-//! [network-coalescence]: https://zips.z.cash/zip-0201#network-coalescence
+//! [ZIP-201]: <https://zips.z.cash/zip-0201>
+//! [network-coalescence]: <https://zips.z.cash/zip-0201#network-coalescence>
 
 use std::{
     collections::{HashMap, HashSet},

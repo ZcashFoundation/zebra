@@ -253,9 +253,9 @@ impl NonEmptyHistoryTree {
     fn prune(&mut self) -> Result<(), io::Error> {
         // Go through all the peaks of the tree.
         // This code is based on a librustzcash example:
-        // https://github.com/zcash/librustzcash/blob/02052526925fba9389f1428d6df254d4dec967e6/zcash_history/examples/long.rs
+        // <https://github.com/zcash/librustzcash/blob/02052526925fba9389f1428d6df254d4dec967e6/zcash_history/examples/long.rs>
         // The explanation of how it works is from zcashd:
-        // https://github.com/zcash/zcash/blob/0247c0c682d59184a717a6536edb0d18834be9a7/src/coins.cpp#L351
+        // <https://github.com/zcash/zcash/blob/0247c0c682d59184a717a6536edb0d18834be9a7/src/coins.cpp#L351>
 
         let mut peak_pos_set = HashSet::new();
 

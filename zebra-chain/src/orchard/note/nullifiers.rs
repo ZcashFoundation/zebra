@@ -21,7 +21,7 @@ use super::super::{
 ///
 /// PoseidonHash(x, y) = f([x, y, 0])_1 (using 1-based indexing).
 ///
-/// [poseidonhash]: https://zips.z.cash/protocol/nu5.pdf#poseidonhash
+/// [poseidonhash]: <https://zips.z.cash/protocol/nu5.pdf#poseidonhash>
 fn poseidon_hash(_x: pallas::Base, _y: pallas::Base) -> pallas::Base {
     // TODO: implement: #2064
     unimplemented!("PoseidonHash is not yet implemented (#2064)")
@@ -36,8 +36,8 @@ fn poseidon_hash(_x: pallas::Base, _y: pallas::Base) -> pallas::Base {
 ///
 /// PRF^nfOrchard(nk*, ρ*) := PoseidonHash(nk*, ρ*)
 ///
-/// [concreteprfs]: https://zips.z.cash/protocol/nu5.pdf#concreteprfs
-/// [poseidonhash]: https://zips.z.cash/protocol/nu5.pdf#poseidonhash
+/// [concreteprfs]: <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
+/// [poseidonhash]: <https://zips.z.cash/protocol/nu5.pdf#poseidonhash>
 fn prf_nf(nk: pallas::Base, rho: pallas::Base) -> pallas::Base {
     poseidon_hash(nk, rho)
 }

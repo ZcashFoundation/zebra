@@ -66,7 +66,7 @@ impl VerifiedSet {
 
     /// Returns the total cost of the verified transactions in the set.
     ///
-    /// [ZIP-401]: https://zips.z.cash/zip-0401
+    /// [ZIP-401]: <https://zips.z.cash/zip-0401>
     pub fn total_cost(&self) -> u64 {
         self.total_cost
     }
@@ -134,7 +134,7 @@ impl VerifiedSet {
     /// to 20,000 (mempooltxcostlimit/min(cost)), so the actual cost shouldn't
     /// be too bad.
     ///
-    /// [ZIP-401]: https://zips.z.cash/zip-0401
+    /// [ZIP-401]: <https://zips.z.cash/zip-0401>
     pub fn evict_one(&mut self) -> Option<VerifiedUnminedTx> {
         if self.transactions.is_empty() {
             None

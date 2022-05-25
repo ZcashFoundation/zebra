@@ -6,7 +6,7 @@ pub struct TestVector {
     pub(crate) point: [u8; 32],
 }
 
-// From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_group_hash.py
+// From <https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_group_hash.py>
 lazy_static! {
     pub static ref GROUP_HASHES: [TestVector; 11] = [
         TestVector {

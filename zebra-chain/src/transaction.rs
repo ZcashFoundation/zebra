@@ -210,7 +210,7 @@ impl Transaction {
     ///
     /// Returns None for pre-v5 transactions.
     ///
-    /// [ZIP-244]: https://zips.z.cash/zip-0244.
+    /// [ZIP-244]: <https://zips.z.cash/zip-0244>.
     pub fn auth_digest(&self) -> Option<AuthDigest> {
         match self {
             Transaction::V1 { .. }
@@ -320,7 +320,7 @@ impl Transaction {
         // (Or have to use a lock time.)
         //
         // It matches the `zcashd` check here:
-        // https://github.com/zcash/zcash/blob/1a7c2a3b04bcad6549be6d571bfdff8af9a2c814/src/main.cpp#L720
+        // <https://github.com/zcash/zcash/blob/1a7c2a3b04bcad6549be6d571bfdff8af9a2c814/src/main.cpp#L720>
         if lock_time == LockTime::unlocked() {
             return None;
         }
@@ -338,7 +338,7 @@ impl Transaction {
         // time in these transactions. `zcashd` only checks the lock time when it finds a
         // transparent input sequence number that is not `u32::MAX`.
         //
-        // https://developer.bitcoin.org/devguide/transactions.html#non-standard-transactions
+        // <https://developer.bitcoin.org/devguide/transactions.html#non-standard-transactions>
         let has_sequence_number_enabling_lock_time = self
             .inputs()
             .iter()
@@ -361,7 +361,7 @@ impl Transaction {
             | Transaction::V5 { expiry_height, .. } => match expiry_height {
                 // Consensus rule:
                 // > No limit: To set no limit on transactions (so that they do not expire), nExpiryHeight should be set to 0.
-                // https://zips.z.cash/zip-0203#specification
+                // <https://zips.z.cash/zip-0203#specification>
                 block::Height(0) => None,
                 block::Height(expiry_height) => Some(block::Height(*expiry_height)),
             },
@@ -397,7 +397,7 @@ impl Transaction {
     /// Get this transaction's network upgrade field, if any.
     /// This field is serialized as `nConsensusBranchId` ([7.1]).
     ///
-    /// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
+    /// [7.1]: <https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus>
     pub fn network_upgrade(&self) -> Option<NetworkUpgrade> {
         match self {
             Transaction::V1 { .. }
@@ -984,7 +984,7 @@ impl Transaction {
     /// Negative values are removed from the transparent chain value pool,
     /// and added to this transaction.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
     /// `utxos` must contain the utxos of every input in the transaction,
     /// including UTXOs created by earlier transactions in this block.
@@ -1247,7 +1247,7 @@ impl Transaction {
     /// Negative values are removed from this transaction,
     /// and added to the sprout pool.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     fn sprout_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
         self.sprout_joinsplit_value_balances().sum()
     }
@@ -1262,7 +1262,7 @@ impl Transaction {
     /// Negative values are removed from this transaction,
     /// and added to sapling pool.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     pub fn sapling_value_balance(&self) -> ValueBalance<NegativeAllowed> {
         let sapling_value_balance = match self {
             Transaction::V4 {
@@ -1329,7 +1329,7 @@ impl Transaction {
     /// Negative values are removed from this transaction,
     /// and added to orchard pool.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     pub fn orchard_value_balance(&self) -> ValueBalance<NegativeAllowed> {
         let orchard_value_balance = self
             .orchard_shielded_data()
@@ -1375,7 +1375,7 @@ impl Transaction {
     /// Negative values are removed from this transaction,
     /// and added to the corresponding pool.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
     /// `utxos` must contain the utxos of every input in the transaction,
     /// including UTXOs created by earlier transactions in this block.

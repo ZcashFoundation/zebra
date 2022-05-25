@@ -69,7 +69,7 @@ impl NonAdjacentForm for pallas::Scalar {
     ///
     /// Thanks to [`curve25519-dalek`].
     ///
-    /// [`curve25519-dalek`]: https://github.com/dalek-cryptography/curve25519-dalek/blob/3e189820da03cc034f5fa143fc7b2ccb21fffa5e/src/scalar.rs#L907
+    /// [`curve25519-dalek`]: <https://github.com/dalek-cryptography/curve25519-dalek/blob/3e189820da03cc034f5fa143fc7b2ccb21fffa5e/src/scalar.rs#L907>
     fn non_adjacent_form(&self, w: usize) -> [i8; 256] {
         // required by the NAF definition
         debug_assert!(w >= 2);

@@ -33,7 +33,7 @@ use super::{
 /// `V4` transactions serialize the fields of spends and outputs together.
 /// `V5` transactions split them into multiple arrays.
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
+/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#spendencoding>
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Spend<AnchorV: AnchorVariant> {
     /// A value commitment to the value of the input note.
@@ -65,7 +65,7 @@ pub struct Spend<AnchorV: AnchorVariant> {
 ///
 /// Serialized as `SpendDescriptionV5` in [protocol specification §7.3][ps].
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
+/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#spendencoding>
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SpendPrefixInTransactionV5 {
     /// A value commitment to the value of the input note.
@@ -190,19 +190,19 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
         //
         // > Elements of a Spend description MUST be valid encodings of the types given above.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+        // <https://zips.z.cash/protocol/protocol.pdf#spenddesc>
         //
         // See comments below for each specific type.
         //
         // > LEOS2IP_{256}(anchorSapling), if present, MUST be less than 𝑞_𝕁.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus
+        // <https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus>
         //
         // Applies to `per_spend_anchor` below; validated in
         // [`crate::sapling::tree::Root::zcash_deserialize`].
         Ok(Spend {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
-            // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
+            // <https://zips.z.cash/protocol/protocol.pdf#abstractcommit>
             // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
             cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
             // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes.
@@ -211,21 +211,21 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
             // Type is `B^Y^{[ℓ_{PRFnfSapling}/8]}`, i.e. 32 bytes
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
             // Type is `SpendAuthSig^{Sapling}.Public`, i.e. J
-            // https://zips.z.cash/protocol/protocol.pdf#concretereddsa
+            // <https://zips.z.cash/protocol/protocol.pdf#concretereddsa>
             // See [`ValidatingKey::try_from`].
             rk: reader
                 .read_32_bytes()?
                 .try_into()
                 .map_err(SerializationError::Parse)?,
             // Type is `ZKSpend.Proof`, described in
-            // https://zips.z.cash/protocol/protocol.pdf#grothencoding
+            // <https://zips.z.cash/protocol/protocol.pdf#grothencoding>
             // It is not enforced here; this just reads 192 bytes.
             // The type is validated when validating the proof, see
             // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
             zkproof: Groth16Proof::zcash_deserialize(&mut reader)?,
             // Type is SpendAuthSig^{Sapling}.Signature, i.e.
             // B^Y^{[ceiling(ℓ_G/8) + ceiling(bitlength(𝑟_G)/8)]} i.e. 64 bytes
-            // https://zips.z.cash/protocol/protocol.pdf#concretereddsa
+            // <https://zips.z.cash/protocol/protocol.pdf#concretereddsa>
             spend_auth_sig: reader.read_64_bytes()?.into(),
         })
     }
@@ -252,18 +252,18 @@ impl ZcashDeserialize for SpendPrefixInTransactionV5 {
         //
         // > Elements of a Spend description MUST be valid encodings of the types given above.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+        // <https://zips.z.cash/protocol/protocol.pdf#spenddesc>
         //
         // See comments below for each specific type.
         Ok(SpendPrefixInTransactionV5 {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
-            // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
+            // <https://zips.z.cash/protocol/protocol.pdf#abstractcommit>
             // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
             cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
             // Type is `B^Y^{[ℓ_{PRFnfSapling}/8]}`, i.e. 32 bytes
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
             // Type is `SpendAuthSig^{Sapling}.Public`, i.e. J
-            // https://zips.z.cash/protocol/protocol.pdf#concretereddsa
+            // <https://zips.z.cash/protocol/protocol.pdf#concretereddsa>
             // See [`ValidatingKey::try_from`].
             rk: reader
                 .read_32_bytes()?
@@ -302,7 +302,7 @@ pub(crate) const SHARED_ANCHOR_SPEND_PREFIX_SIZE: u64 = 32 + 32 + 32;
 /// a 32 byte nullifier, a 32 byte rk, a 192 byte zkproof (serialized separately
 /// in V5), and a 64 byte spendAuthSig (serialized separately in V5).
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
+/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#spendencoding>
 pub(crate) const SHARED_ANCHOR_SPEND_SIZE: u64 = SHARED_ANCHOR_SPEND_PREFIX_SIZE + 192 + 64;
 
 /// The maximum number of sapling spends in a valid Zcash on-chain transaction V4.
@@ -310,7 +310,7 @@ impl TrustedPreallocate for Spend<PerSpendAnchor> {
     fn max_allocation() -> u64 {
         const MAX: u64 = (MAX_BLOCK_BYTES - 1) / ANCHOR_PER_SPEND_SIZE;
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
-        // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+        // <https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus>
         // This acts as nSpendsSapling and is therefore subject to the rule.
         // The maximum value is actually smaller due to the block size limit,
         // but we ensure the 2^16 limit with a static assertion.
@@ -335,7 +335,7 @@ impl TrustedPreallocate for SpendPrefixInTransactionV5 {
         //
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         //
         // This acts as nSpendsSapling and is therefore subject to the rule.
         // The maximum value is actually smaller due to the block size limit,

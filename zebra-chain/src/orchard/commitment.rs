@@ -26,7 +26,7 @@ use super::{
 
 /// Generates a random scalar from the scalar field 𝔽_{q_P}.
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#pallasandvesta
+/// <https://zips.z.cash/protocol/nu5.pdf#pallasandvesta>
 pub fn generate_trapdoor<T>(csprng: &mut T) -> pallas::Scalar
 where
     T: RngCore + CryptoRng,
@@ -44,7 +44,7 @@ pub struct CommitmentRandomness(pallas::Scalar);
 impl From<SeedRandomness> for CommitmentRandomness {
     /// rcm = ToScalar^Orchard((PRF^expand_rseed ([5]))
     ///
-    /// https://zips.z.cash/protocol/nu5.pdf#orchardsend
+    /// <https://zips.z.cash/protocol/nu5.pdf#orchardsend>
     fn from(rseed: SeedRandomness) -> Self {
         Self(pallas::Scalar::from_bytes_wide(&prf_expand(
             rseed.0,
@@ -113,7 +113,7 @@ impl NoteCommitment {
     ///
     /// NoteCommit^Orchard_rcm(repr_P(gd),repr_P(pkd), v, ρ, ψ) :=
     ///
-    /// https://zips.z.cash/protocol/nu5.pdf#concretewindowedcommit
+    /// <https://zips.z.cash/protocol/nu5.pdf#concretewindowedcommit>
     #[allow(non_snake_case)]
     pub fn new(note: Note) -> Option<Self> {
         // s as in the argument name for WindowedPedersenCommit_r(s)
@@ -158,7 +158,7 @@ impl NoteCommitment {
 /// A homomorphic Pedersen commitment to the net value of a _note_, used in
 /// Action descriptions.
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit
+/// <https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit>
 #[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct ValueCommitment(#[serde(with = "serde_helpers::Affine")] pub pallas::Affine);
 
@@ -213,7 +213,7 @@ impl Eq for ValueCommitment {}
 
 /// LEBS2OSP256(repr_P(cv))
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#pallasandvesta
+/// <https://zips.z.cash/protocol/nu5.pdf#pallasandvesta>
 impl From<ValueCommitment> for [u8; 32] {
     fn from(cm: ValueCommitment) -> [u8; 32] {
         cm.0.to_bytes()
@@ -256,7 +256,7 @@ impl std::iter::Sum for ValueCommitment {
 
 /// LEBS2OSP256(repr_P(cv))
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#pallasandvesta
+/// <https://zips.z.cash/protocol/nu5.pdf#pallasandvesta>
 impl TryFrom<[u8; 32]> for ValueCommitment {
     type Error = &'static str;
 
@@ -287,7 +287,7 @@ impl ZcashDeserialize for ValueCommitment {
 impl ValueCommitment {
     /// Generate a new _ValueCommitment_.
     ///
-    /// https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit
+    /// <https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit>
     pub fn randomized<T>(csprng: &mut T, value: Amount) -> Self
     where
         T: RngCore + CryptoRng,
@@ -301,7 +301,7 @@ impl ValueCommitment {
     ///
     /// ValueCommit^Orchard(v) :=
     ///
-    /// https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit
+    /// <https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit>
     #[allow(non_snake_case)]
     pub fn new(rcv: pallas::Scalar, value: Amount) -> Self {
         lazy_static! {

@@ -115,7 +115,7 @@ impl NetworkChainTipHeightEstimator {
             // Undo the rounding towards negative infinity done by `chrono::Duration`, which yields
             // an incorrect value for the dividend of the division.
             //
-            // (See https://docs.rs/time/0.1.44/src/time/duration.rs.html#166-173)
+            // (See <https://docs.rs/time/0.1.44/src/time/duration.rs.html#166-173)>
             time_difference_seconds -= 1;
         }
 

@@ -111,7 +111,7 @@ impl Block {
     /// > for SIGHASH transaction hashes, as specified in [ZIP-244].
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-    /// [ZIP-244]: https://zips.z.cash/zip-0244
+    /// [ZIP-244]: <https://zips.z.cash/zip-0244>
     pub fn check_transaction_network_upgrade_consistency(
         &self,
         network: Network,
@@ -185,7 +185,7 @@ impl Block {
     /// Positive values are added to the corresponding chain value pool.
     /// Negative values are removed from the corresponding pool.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
     /// `utxos` must contain the [`Utxo`]s of every input in this block,
     /// including UTXOs created by earlier transactions in this block.
@@ -209,7 +209,7 @@ impl Block {
     /// Compute the root of the authorizing data Merkle tree,
     /// as defined in [ZIP-244].
     ///
-    /// [ZIP-244]: https://zips.z.cash/zip-0244
+    /// [ZIP-244]: <https://zips.z.cash/zip-0244>
     pub fn auth_data_root(&self) -> AuthDataRoot {
         self.transactions.iter().collect::<AuthDataRoot>()
     }

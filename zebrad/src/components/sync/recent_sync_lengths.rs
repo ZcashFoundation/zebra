@@ -58,7 +58,7 @@ impl RecentSyncLengths {
         // but we might want to ignore some obtain tips lengths
         //
         // See "Response Lengths During Sync -> Details" in:
-        // https://github.com/ZcashFoundation/zebra/issues/2592#issuecomment-897304684
+        // <https://github.com/ZcashFoundation/zebra/issues/2592#issuecomment-897304684>
         self.update(sync_length)
     }
 

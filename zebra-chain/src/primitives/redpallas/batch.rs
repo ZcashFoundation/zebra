@@ -146,7 +146,7 @@ impl Item {
                 //
                 // > Elements of an Action description MUST be canonical encodings of the types given above.
                 //
-                // https://zips.z.cash/protocol/protocol.pdf#actiondesc
+                // <https://zips.z.cash/protocol/protocol.pdf#actiondesc>
                 //
                 // This validates the `rk` element, whose type is
                 // SpendAuthSig^{Orchard}.Public, i.e. ℙ.
@@ -210,7 +210,7 @@ impl Verifier {
     /// are uppercase. This does not exactly match the RedDSA
     /// notation in the [protocol specification §B.1][ps].
     ///
-    /// [ps]: https://zips.z.cash/protocol/protocol.pdf#reddsabatchverify
+    /// [ps]: <https://zips.z.cash/protocol/protocol.pdf#reddsabatchverify>
     #[allow(non_snake_case)]
     pub fn verify<R: RngCore + CryptoRng>(self, mut rng: R) -> Result<(), Error> {
         let n = self.signatures.len();
@@ -255,7 +255,7 @@ impl Verifier {
                     //
                     // > Elements of an Action description MUST be canonical encodings of the types given above.
                     //
-                    // https://zips.z.cash/protocol/protocol.pdf#actiondesc
+                    // <https://zips.z.cash/protocol/protocol.pdf#actiondesc>
                     //
                     // This validates the `rk` element, whose type is
                     // SpendAuthSig^{Orchard}.Public, i.e. ℙ.
