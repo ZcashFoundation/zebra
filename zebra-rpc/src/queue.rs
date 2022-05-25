@@ -311,6 +311,8 @@ impl Runner {
             let gossip = Gossip::Tx(unmined.clone());
             let request = Request::Queue(vec![gossip]);
 
+            tracing::info!("rpc_queue:retry: Attempt to send transaction to mempool: {:?}", unmined.id);
+
             // Send to mempool and ignore any error
             let _ = mempool.clone().oneshot(request).await;
 

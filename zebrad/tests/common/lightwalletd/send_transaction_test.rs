@@ -87,18 +87,48 @@ pub async fn run() -> Result<()> {
 
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
 
-    for transaction in transactions {
+    dbg!(&transactions.len());
+
+    for transaction in &transactions {
         let expected_response = wallet_grpc::SendResponse {
             error_code: 0,
             error_message: format!("\"{}\"", transaction.hash()),
         };
 
-        let request = prepare_send_transaction_request(transaction);
+        let request = prepare_send_transaction_request(transaction.clone());
 
         let response = rpc_client.send_transaction(request).await?.into_inner();
 
         assert_eq!(response, expected_response);
     }
+
+    //wait 
+    tokio::time::sleep(tokio::time::Duration::from_secs(120)).await;
+
+
+    let mut response2 = rpc_client.get_mempool_tx(
+        wallet_grpc::Exclude {
+            txid: vec![],
+        }
+    ).await?.into_inner();
+
+    let mut counter = 0;
+    while let Some(txs) = response2.message().await? {
+        dbg!(txs);
+        counter += 1;
+    }
+
+    dbg!(response2);
+
+    let mut response3 = rpc_client.get_mempool_stream(wallet_grpc::Empty {}).await?.into_inner();
+
+    let mut counter = 0;
+    while let Some(txs) = response3.message().await? {
+        dbg!(txs);
+        counter += 1;
+    }
+
+    dbg!(response3);
 
     Ok(())
 }

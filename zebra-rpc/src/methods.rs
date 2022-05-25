@@ -504,12 +504,17 @@ where
             );
 
             match &queue_results[0] {
-                Ok(()) => Ok(SentTransactionHash(transaction_hash)),
-                Err(error) => Err(Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                }),
+                Ok(()) => { 
+                    tracing::info!("send_raw_transaction: Transaction was sent to the mempool: {}", transaction_hash);
+                    Ok(SentTransactionHash(transaction_hash))
+                },
+                Err(error) => {
+                    Err(Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })
+                },
             }
         }
         .boxed()
@@ -587,6 +592,8 @@ where
                     // Sort returned transaction IDs in numeric/string order.
                     // (zcashd's sort order appears arbitrary.)
                     tx_ids.sort();
+
+                    tracing::info!("get_raw_mempool: Transactions in the mempool: {:?}", &tx_ids);
 
                     Ok(tx_ids)
                 }

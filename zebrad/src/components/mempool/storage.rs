@@ -171,6 +171,7 @@ impl Storage {
     /// If inserting this transaction evicts other transactions, they will be tracked
     /// as [`SameEffectsChainRejectionError::RandomlyEvicted`].
     pub fn insert(&mut self, tx: VerifiedUnminedTx) -> Result<UnminedTxId, MempoolError> {
+
         // # Security
         //
         // This method must call `reject`, rather than modifying the rejection lists directly.
@@ -231,6 +232,8 @@ impl Storage {
                 result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
             }
         }
+
+        tracing::info!("storage: Transaction inserted to the mempool: {:?}", &result.as_ref().ok());
 
         result
     }

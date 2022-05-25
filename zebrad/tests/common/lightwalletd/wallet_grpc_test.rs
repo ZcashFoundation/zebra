@@ -44,7 +44,7 @@ use crate::common::{
     lightwalletd::{
         wallet_grpc::{
             connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Address, AddressList,
-            BlockId, BlockRange, ChainSpec, Empty, GetAddressUtxosArg,
+            BlockId, BlockRange, ChainSpec, Empty, Exclude, GetAddressUtxosArg, RawTransaction,
             TransparentAddressBlockFilter, TxFilter,
         },
         zebra_skip_lightwalletd_tests,
@@ -255,6 +255,49 @@ pub async fn run() -> Result<()> {
     );
 
     // TODO: Create call and checks for `GetMempoolTx` and `GetMempoolTxStream`?
+
+    use zebra_chain::{
+        transaction::Transaction,
+        serialization::{ZcashDeserialize, ZcashSerialize},
+    };
+
+
+    let transaction = Transaction::zcash_deserialize(&zebra_test::vectors::DUMMY_TX1[..]).unwrap();
+    let transaction_bytes = transaction.zcash_serialize_to_vec().unwrap();
+
+        let transaction_hex = hex::encode(&transaction_bytes);
+
+        let request = RawTransaction {
+            data: transaction_bytes,
+            height: -1,
+        };
+
+        
+        let response = rpc_client.send_transaction(request).await.unwrap().into_inner();
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(150)).await;
+
+        let mut response2 = rpc_client.get_mempool_tx(
+            Exclude {
+                txid: vec![],
+            }
+        ).await?.into_inner();
+    
+        let mut counter = 0;
+        while let Some(txs) = response2.message().await? {
+            dbg!(txs);
+            counter += 1;
+        }
+    
+        dbg!(response2);
+    
+    
+
+    //let response = fut.await.unrwap().into_inner();
+    
+
+
+
 
     // TODO: Activate after #3990 is merged
     // Currently, this call fails as the method is not available

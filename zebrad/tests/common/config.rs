@@ -77,6 +77,6 @@ pub fn persistent_test_config() -> Result<ZebradConfig> {
 pub fn testdir() -> Result<TempDir> {
     tempfile::Builder::new()
         .prefix("zebrad_tests")
-        .tempdir()
+        .tempdir_in("/media/oxarbitrage/4eb53770-4e4f-4d80-a830-0914f3f5b89a/zebra/issue4350")
         .map_err(Into::into)
 }
