@@ -64,6 +64,8 @@ env:
   # TODO: use the output from ./.github/workflows/build-docker-image.yml
   IMAGE_NAME: zebrad-test
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
+  # TODO: use environmental secrets for dynamic values
+  NETWORK: Mainnet
 
 jobs:
   get-available-disks:
@@ -85,11 +87,20 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.7.3
+        uses: google-github-actions/auth@v0.8.0
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
+
+      # Disk images in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase ${{ env.NETWORK or github.event.inputs.network }}
+      #
+      # Passes a lowercase Network name to subsequent steps using $NETWORK env variable
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ env.NETWORK || github.event.inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Find a cached state disk for subsequent jobs needing a cached state without
       # restricting the result from any branch.
