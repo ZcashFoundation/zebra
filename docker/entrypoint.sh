@@ -57,6 +57,12 @@ case "$1" in
             ls -lhR "$LIGHTWALLETD_DATA_DIR/db" || (echo "No $LIGHTWALLETD_DATA_DIR/db"; ls -lhR "$LIGHTWALLETD_DATA_DIR" | head -50 || echo "No $LIGHTWALLETD_DATA_DIR directory")
         elif [[ "$TEST_LWD_UPDATE_SYNC" -eq "1" ]]; then
             # Starting with a cached Zebra and lightwalletd tip, run a quick update sync.
+            #
+            # Temporarily skip this test, because the lwd cached state doesn't work.
+            # TODO: re-enable this test (#4415)
+            echo "Test skipped due to bug #4415"
+            exit 0
+
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
             ls -lhR "$LIGHTWALLETD_DATA_DIR/db" || (echo "No $LIGHTWALLETD_DATA_DIR/db"; ls -lhR "$LIGHTWALLETD_DATA_DIR" | head -50 || echo "No $LIGHTWALLETD_DATA_DIR directory")
             cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored lightwalletd_update_sync
