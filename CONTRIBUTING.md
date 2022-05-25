@@ -1,9 +1,11 @@
 # Contributing
 
-* [Running and Debugging](#running-and-debugging)
-* [Bug Reports](#bug-reports)
-* [Pull Requests](#pull-requests)
-* [Zebra RFCs](#zebra-rfcs)
+- [Contributing](#contributing)
+  - [Running and Debugging](#running-and-debugging)
+  - [Bug Reports](#bug-reports)
+  - [Pull Requests](#pull-requests)
+  - [Coverage Reports](#coverage-reports)
+  - [Zebra RFCs](#zebra-rfcs)
 
 ## Running and Debugging
 [running-and-debugging]: #running-and-debugging
@@ -14,13 +16,13 @@ how to build, run, and instrument Zebra.
 ## Bug Reports
 [bug-reports]: #bug-reports
 
-[File an issue](https://github.com/ZcashFoundation/zebra/issues/new/choose)
-on the issue tracker using the bug report template.
+[File an issu](https://github.com/ZcashFoundation/zebra/issues/new/choose)
+on the issue tracker usin the bug report template.
 
 ## Pull Requests
 [pull-requests]: #pull-requests
 
-PRs are welcome for small and large changes, but please don't make large PRs
+PRs are welcome for small and large changes, but pleas don't make large PRs
 without coordinating with us via the issue tracker or Discord. This helps
 increase development coordination and makes PRs easier to merge.
 
