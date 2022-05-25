@@ -87,7 +87,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.7.3
+        uses: google-github-actions/auth@v0.8.0
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
@@ -397,11 +397,15 @@ jobs:
   #
   # If the state version has changed, waits for the new cached states to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
-  lightwalletd-transactions-test:
+  lightwalletd-full-sync:
     name: lightwalletd tip send
-    needs: test-full-sync
+    needs: [ test-full-sync, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    # to also run on Mergify head branches,
+    # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
+    # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
+    # TODO: this test is unreliable, in the meanwhile we'll only generate a new lwd cached state when a full sync is also triggered
+    if: ${{ (!cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) }}
     with:
       app_name: lightwalletd
       test_id: lwd-send-transactions
