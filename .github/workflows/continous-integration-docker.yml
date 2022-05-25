@@ -378,7 +378,7 @@ jobs:
     # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
     # TODO: this test is unreliable, in the meanwhile we'll only generate a new lwd cached state when a full sync is also triggered
-    if: ${{ (!cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) }}
+    if: ${{ (github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) }}
     with:
       app_name: lightwalletd
       test_id: lwd-full-sync
