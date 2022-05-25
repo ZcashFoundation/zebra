@@ -1,13 +1,11 @@
 //! Sprout commitment types.
 
-#![allow(clippy::unit_arg)]
-
 use sha2::{Digest, Sha256};
 
 use super::note::Note;
 
 /// The randomness used in the Pedersen Hash for note commitment.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
@@ -21,14 +19,12 @@ impl AsRef<[u8]> for CommitmentRandomness {
 }
 
 /// Note commitments for the output notes.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
 )]
 pub struct NoteCommitment(pub(crate) [u8; 32]);
-
-impl Eq for NoteCommitment {}
 
 impl From<[u8; 32]> for NoteCommitment {
     fn from(bytes: [u8; 32]) -> Self {
