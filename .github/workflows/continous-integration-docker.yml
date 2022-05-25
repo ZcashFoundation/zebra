@@ -335,6 +335,36 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
 
+  # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
+  #
+  # Runs:
+  # - after every PR is merged to `main`
+  # - on every PR update
+  #
+  # If the state version has changed, waits for the new cached states to be created.
+  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
+  lightwalletd-transactions-test:
+    name: lightwalletd tip send
+    needs: [ test-full-sync, get-available-disks ]
+    uses: ./.github/workflows/deploy-gcp-tests.yml
+    # to also run on Mergify head branches,
+    # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
+    # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
+    # TODO: this test is unreliable, in the meanwhile we'll only generate a new lwd cached state when a full sync is also triggered
+    if: ${{ (!cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) }}
+    with:
+      app_name: lightwalletd
+      test_id: lwd-send-transactions
+      test_description: Test sending transactions via lightwalletd
+      test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      needs_zebra_state: true
+      needs_lwd_state: true
+      saves_to_disk: false
+      disk_suffix: tip
+      root_state_path: '/var/cache'
+      zebra_state_dir: 'zebrad-cache'
+      lwd_state_dir: 'lwd-cache'
+
   # Test full sync of lightwalletd with a Zebra tip state
   #
   # Runs:
@@ -384,36 +414,6 @@ jobs:
       needs_lwd_state: true
       saves_to_disk: false
       disk_prefix: lwd-cache
-      disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
-      lwd_state_dir: 'lwd-cache'
-
-  # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
-  #
-  # Runs:
-  # - after every PR is merged to `main`
-  # - on every PR update
-  #
-  # If the state version has changed, waits for the new cached states to be created.
-  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
-  lightwalletd-full-sync:
-    name: lightwalletd tip send
-    needs: [ test-full-sync, get-available-disks ]
-    uses: ./.github/workflows/deploy-gcp-tests.yml
-    # to also run on Mergify head branches,
-    # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
-    # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    # TODO: this test is unreliable, in the meanwhile we'll only generate a new lwd cached state when a full sync is also triggered
-    if: ${{ (!cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) }}
-    with:
-      app_name: lightwalletd
-      test_id: lwd-send-transactions
-      test_description: Test sending transactions via lightwalletd
-      test_variables: '-e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
-      needs_zebra_state: true
-      needs_lwd_state: true
-      saves_to_disk: false
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
