@@ -346,7 +346,7 @@ jobs:
   # TODO: move this job under lightwalletd-full-sync to have a sequential logic
   lightwalletd-transactions-test:
     name: lightwalletd tip send
-    needs: [ test-full-sync, get-available-disks ]
+    needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
