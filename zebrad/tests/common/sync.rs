@@ -39,10 +39,7 @@ pub const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 /// - we have synced all known checkpoints,
 /// - the syncer has stopped downloading lots of blocks, and
 /// - we are regularly downloading some blocks via the syncer or block gossip.
-///
-/// Temporary workaround for slow syncs - stop at 99.5%.
-/// TODO: revert this change (#4456)
-pub const SYNC_FINISHED_REGEX: &str = "estimated progress to chain tip sync_percent=99";
+pub const SYNC_FINISHED_REGEX: &str = "finished initial sync to chain tip, using gossiped blocks";
 
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///
