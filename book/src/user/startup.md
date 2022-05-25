@@ -62,7 +62,9 @@ zebra_state::service: created new read-only state service
 ...
 ```
 
-### Discover Initial Peers
+### Peer Handling
+
+#### Discover Initial Peers
 
 Zebra queries DNS seeders for initial peer IP addresses, then tries to connect to `network.peerset_initial_target_size` initial peers.
 
@@ -76,7 +78,7 @@ add_initial_peers: zebra_network::config: resolved seed peer IP addresses seed="
 add_initial_peers: zebra_network::peer_set::initialize: limiting the initial peers list from 112 to 25
 ```
 
-### Connect to Initial Peers
+#### Connect to Initial Peers
 
 Zebra connects to the initial peers, and starts an ongoing task to crawl for more peers. If Zebra is making a lot of requests, it opens new connections to peers, up to the connection limit.
 
@@ -89,6 +91,27 @@ add_initial_peers: zebra_network::peer_set::initialize: an initial peer connecti
 add_initial_peers: zebra_network::peer_set::initialize: finished connecting to initial seed peers handshake_success_total=11 handshake_error_total=14 outbound_connections=11
 zebra_network::peer_set::initialize: sending initial request for peers active_initial_peer_count=11
 crawl_and_dial: zebra_network::peer_set::initialize: starting the peer address crawler crawl_new_peer_interval=30s outbound_connections=11
+```
+
+#### Requests to Peers
+
+Zebra randomly chooses peers for each request:
+- choosing peers that are not already answering a request, and
+- prefers peers that have answered fewer requests recently.
+
+This helps load balance requests across peers.
+
+### Initialize JSON-RPC Server
+
+Applications like `lightwalletd` can query and send data to Zebra using JSON-RPC.
+
+Submitted transactions are retried a few times, using an ongoing retry task.
+
+The RPC service is optional, if it is not configured, its tasks do not run.
+
+```
+zebra_rpc::server: Trying to open RPC endpoint at 127.0.0.1:57638...
+zebra_rpc::server: Opened RPC endpoint at 127.0.0.1:57638
 ```
 
 ### Initialize Verifiers
@@ -111,14 +134,6 @@ init{config=Config { checkpoint_sync: true, ... } ... }: zebra_consensus::chain:
 init{config=Config { debug_skip_parameter_preload: false, ... } ... }: zebra_consensus::chain: Groth16 pre-download and check task finished
 ```
 
-### Requests to Peers
-
-Zebra randomly chooses peers for each request:
-- choosing peers that are not already answering a request, and
-- prefers peers that have answered fewer requests recently.
-
-This helps load balance requests across peers.
-
 ### Initialize Transaction Mempool
 
 Zebra syncs transactions from other peers, verifies them, then gossips their hashes.
@@ -134,7 +149,9 @@ zebrad::components::mempool::queue_checker: initializing mempool queue checker t
 zebrad::components::mempool::gossip: initializing transaction gossip task
 ```
 
-### Initialize Block Syncer
+### Syncing the Block Chain
+
+#### Initialize Block Syncer
 
 Zebra syncs blocks from other peers, verifies them, then gossips their hashes:
 1. Download the genesis block by hash
@@ -150,20 +167,7 @@ zebrad::commands::start: initializing syncer
 zebrad::components::sync::gossip: initializing block gossip task
 ```
 
-### Initialize JSON-RPC Server
-
-Applications like `lightwalletd` can query and send data to Zebra using JSON-RPC.
-
-Submitted transactions are retried a few times, using an ongoing retry task.
-
-The RPC service is optional, if it is not configured, its tasks do not run.
-
-```
-zebra_rpc::server: Trying to open RPC endpoint at 127.0.0.1:57638...
-zebra_rpc::server: Opened RPC endpoint at 127.0.0.1:57638
-```
-
-### Sync to the Chain Tip
+#### Sync to the Chain Tip
 
 Starting at the cached state chain tip, Zebra syncs to the network consensus chain tip, using ongoing tasks.
 
@@ -179,7 +183,7 @@ sync:try_to_sync: zebrad::components::sync: extending tips tips.len=1 in_flight=
 sync:try_to_sync:obtain_tips:checkpoint: zebra_consensus::checkpoint: verified checkpoint range block_count=400 current_range=(Excluded(Height(0)), Included(Height(400)))
 ```
 
-### Handling Gossiped Block Hashes
+#### Handling Gossiped Block Hashes
 
 Zebra's peer request service downloads gossiped block hashes, then verifies, saves, and gossips their hashes itself.
 
