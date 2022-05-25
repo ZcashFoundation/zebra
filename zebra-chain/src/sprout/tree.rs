@@ -273,9 +273,9 @@ impl NoteCommitmentTree {
             .cached_root
             .write()
             .expect("a thread that previously held exclusive lock access panicked");
-        match write_root.deref() {
+        match *write_root {
             // Another thread got write access first, return cached root.
-            Some(root) => *root,
+            Some(root) => root,
             None => {
                 // Compute root and cache it.
                 let root = Root(self.inner.root().0);

@@ -38,7 +38,7 @@ where
 }
 
 /// The randomness used in the Simsemilla hash for note commitment.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct CommitmentRandomness(pallas::Scalar);
 
 impl From<SeedRandomness> for CommitmentRandomness {
@@ -54,7 +54,7 @@ impl From<SeedRandomness> for CommitmentRandomness {
 }
 
 /// Note commitments for the output notes.
-#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 pub struct NoteCommitment(#[serde(with = "serde_helpers::Affine")] pub pallas::Affine);
 
 impl fmt::Debug for NoteCommitment {
@@ -75,8 +75,6 @@ impl fmt::Debug for NoteCommitment {
         }
     }
 }
-
-impl Eq for NoteCommitment {}
 
 impl From<pallas::Point> for NoteCommitment {
     fn from(projective_point: pallas::Point) -> Self {
@@ -159,7 +157,7 @@ impl NoteCommitment {
 /// Action descriptions.
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit>
-#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 pub struct ValueCommitment(#[serde(with = "serde_helpers::Affine")] pub pallas::Affine);
 
 impl<'a> std::ops::Add<&'a ValueCommitment> for ValueCommitment {
@@ -208,8 +206,6 @@ impl From<pallas::Point> for ValueCommitment {
         Self(pallas::Affine::from(projective_point))
     }
 }
-
-impl Eq for ValueCommitment {}
 
 /// LEBS2OSP256(repr_P(cv))
 ///

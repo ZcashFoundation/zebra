@@ -1,7 +1,7 @@
 //! Orchard key types.
 //!
 //! <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
-#![allow(clippy::unit_arg)]
+
 #![allow(dead_code)]
 
 #[cfg(test)]
@@ -983,7 +983,7 @@ impl PartialEq<[u8; 32]> for TransmissionKey {
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#saplingandorchardencrypt>
 // TODO: derive `OutgoingCipherKey`: <https://github.com/ZcashFoundation/zebra/issues/2041>
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct OutgoingCipherKey([u8; 32]);
 
 impl fmt::Debug for OutgoingCipherKey {
@@ -1040,7 +1040,7 @@ impl PartialEq<[u8; 32]> for EphemeralPrivateKey {
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concreteorchardkeyagreement>
 /// <https://zips.z.cash/protocol/nu5.pdf#saplingandorchardencrypt>
-#[derive(Copy, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Copy, Clone, Deserialize, PartialEq, Eq, Serialize)]
 pub struct EphemeralPublicKey(#[serde(with = "serde_helpers::Affine")] pub(crate) pallas::Affine);
 
 impl fmt::Debug for EphemeralPublicKey {
@@ -1061,8 +1061,6 @@ impl fmt::Debug for EphemeralPublicKey {
         }
     }
 }
-
-impl Eq for EphemeralPublicKey {}
 
 impl From<EphemeralPublicKey> for [u8; 32] {
     fn from(epk: EphemeralPublicKey) -> [u8; 32] {

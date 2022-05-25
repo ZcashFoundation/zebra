@@ -102,7 +102,7 @@ where
 ///
 /// Typically, we can rely on outbound addresses, but inbound addresses don't
 /// give us enough information to reconnect to that peer.
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum ConnectedAddr {
     /// The address we used to make a direct outbound connection.
     ///

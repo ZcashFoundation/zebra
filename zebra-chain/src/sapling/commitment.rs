@@ -44,11 +44,11 @@ where
 }
 
 /// The randomness used in the Pedersen Hash for note commitment.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct CommitmentRandomness(jubjub::Fr);
 
 /// Note commitments for the output notes.
-#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 pub struct NoteCommitment(#[serde(with = "serde_helpers::AffinePoint")] pub jubjub::AffinePoint);
 
 impl fmt::Debug for NoteCommitment {
@@ -59,8 +59,6 @@ impl fmt::Debug for NoteCommitment {
             .finish()
     }
 }
-
-impl Eq for NoteCommitment {}
 
 impl From<jubjub::ExtendedPoint> for NoteCommitment {
     fn from(extended_point: jubjub::ExtendedPoint) -> Self {
@@ -157,7 +155,7 @@ impl NoteCommitment {
 /// [`NotSmallOrderValueCommitment`].
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit>
-#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 pub struct ValueCommitment(#[serde(with = "serde_helpers::AffinePoint")] jubjub::AffinePoint);
 
 impl<'a> std::ops::Add<&'a ValueCommitment> for ValueCommitment {
@@ -198,8 +196,6 @@ impl From<jubjub::ExtendedPoint> for ValueCommitment {
         Self(jubjub::AffinePoint::from(extended_point))
     }
 }
-
-impl Eq for ValueCommitment {}
 
 /// LEBS2OSP256(repr_J(cv))
 ///
