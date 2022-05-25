@@ -129,3 +129,4 @@ jobs:
       - uses: plettich/action-codespell@master
         with:
           github_token: ${{ secrets.github_token }}
+          level: warning
