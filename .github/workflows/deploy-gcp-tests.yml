@@ -297,7 +297,10 @@ jobs:
       - name: Run ${{ inputs.test_id }} test
         # This step mounts the volume only when a single cached state is needed, in this case
         # the cached state from Zebra.
-        if: ${{ inputs.needs_zebra_state && !inputs.needs_lwd_state }}
+        # lightwalletd-full-sync test is an exception to this rule, as it does not need a lwd cached state,
+        # but it does saves a lwd cached state
+        # TODO: we should find a better logic for this use cases
+        if: ${{ inputs.needs_zebra_state && !inputs.needs_lwd_state && inputs.test_id != lightwalletd-full-sync }}
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -340,7 +343,10 @@ jobs:
       - name: Run ${{ inputs.test_id }} test
         # This step mounts the volume only when both cached states are needed, in this case
         # the cached state from Zebra and Lightwalletd
-        if: ${{ inputs.needs_zebra_state && inputs.needs_lwd_state }}
+        # lightwalletd-full-sync test is an exception to this rule, as it does not need a lwd cached state,
+        # but it does saves a lwd cached state
+        # TODO: we should find a better logic for this use cases
+        if: ${{ inputs.needs_zebra_state && inputs.needs_lwd_state || inputs.test_id == lightwalletd-full-sync }}
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
