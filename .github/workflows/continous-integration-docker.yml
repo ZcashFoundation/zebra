@@ -343,15 +343,12 @@ jobs:
   #
   # If the state version has changed, waits for the new cached states to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
+  # TODO: move this job under lightwalletd-full-sync to have a sequential logic
   lightwalletd-transactions-test:
     name: lightwalletd tip send
     needs: [ test-full-sync, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    # to also run on Mergify head branches,
-    # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
-    # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    # TODO: this test is unreliable, in the meanwhile we'll only generate a new lwd cached state when a full sync is also triggered
-    if: ${{ (!cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-send-transactions
@@ -375,9 +372,13 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-full-sync:
     name: lightwalletd tip
-    needs: test-full-sync
+    needs: [ test-full-sync, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    # to also run on Mergify head branches,
+    # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
+    # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
+    # TODO: this test is unreliable, in the meanwhile we'll only generate a new lwd cached state when a full sync is also triggered
+    if: ${{ (!cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) }}
     with:
       app_name: lightwalletd
       test_id: lwd-full-sync
@@ -399,7 +400,6 @@ jobs:
   #
   # If the state version has changed, waits for the new cached states to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
-  # TODO: move this job under lightwalletd-full-sync to have a sequential logic
   lightwalletd-update-sync:
     name: lightwalletd tip update
     needs: lightwalletd-full-sync
