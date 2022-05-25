@@ -64,6 +64,8 @@ env:
   # TODO: use the output from ./.github/workflows/build-docker-image.yml
   IMAGE_NAME: zebrad-test
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
+  # TODO: use environmental secrets for dynamic values
+  NETWORK: Mainnet
 
 jobs:
   get-available-disks:
@@ -85,11 +87,20 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.7.3
+        uses: google-github-actions/auth@v0.8.0
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
+
+      # Disk images in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase ${{ env.NETWORK or github.event.inputs.network }}
+      #
+      # Passes a lowercase Network name to subsequent steps using $NETWORK env variable
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ env.NETWORK || github.event.inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Find a cached state disk for subsequent jobs needing a cached state without
       # restricting the result from any branch.
@@ -134,6 +145,7 @@ jobs:
           fi
 
   build:
+    name: Build
     uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
@@ -243,6 +255,7 @@ jobs:
   #
   # Note: the output from get-available-disks should match with the caller workflow inputs
   regenerate-stateful-disks:
+    name: Zebra checkpoint
     needs: [ build, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || github.event.inputs.regenerate-disks == 'true' }}
@@ -260,6 +273,7 @@ jobs:
   # If the state version has changed, waits for the new cached state to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   test-stateful-sync:
+    name: Zebra checkpoint update
     needs: regenerate-stateful-disks
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
@@ -281,6 +295,7 @@ jobs:
   #
   # Note: the output from get-available-disks should match with the caller workflow inputs
   test-full-sync:
+    name: Zebra tip
     needs: [ build, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
     # to also run on Mergify head branches,
@@ -294,7 +309,7 @@ jobs:
       needs_zebra_state: false
       saves_to_disk: true
       disk_suffix: tip
-      height_grep_text: 'finished initial sync to chain tip, using gossiped blocks sync_percent=100.* current_height=Height'
+      height_grep_text: 'estimated progress to chain tip sync_percent=99.* current_height=Height'
 
   # Test that Zebra can answer a synthetic RPC call, using a cached Zebra tip state
   #
@@ -305,6 +320,7 @@ jobs:
   # If the state version has changed, waits for the new cached state to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-rpc-test:
+    name: Zebra tip JSON-RPC
     needs: test-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
@@ -329,6 +345,7 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   # TODO: move this job under lightwalletd-full-sync to have a sequential logic
   lightwalletd-transactions-test:
+    name: lightwalletd tip send
     needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
@@ -354,9 +371,14 @@ jobs:
   # If the state version has changed, waits for the new cached state to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-full-sync:
-    needs: test-full-sync
+    name: lightwalletd tip
+    needs: [ test-full-sync, get-available-disks ]
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    # to also run on Mergify head branches,
+    # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
+    # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
+    # TODO: this test is unreliable, in the meanwhile we'll only generate a new lwd cached state when a full sync is also triggered
+    if: ${{ (!cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) }}
     with:
       app_name: lightwalletd
       test_id: lwd-full-sync
@@ -379,6 +401,7 @@ jobs:
   # If the state version has changed, waits for the new cached states to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-update-sync:
+    name: lightwalletd tip update
     needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
