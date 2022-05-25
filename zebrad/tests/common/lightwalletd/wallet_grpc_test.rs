@@ -1,17 +1,19 @@
-//! Test all grpc calls a wallet connected to a lightwalletd instance backed by zebra can do.
+//! Test all gRPC calls a wallet connected to a lightwalletd instance backed by
+//! zebra can do.
 //!
-//! This test requires a cached chain state that is partially synchronized, i.e., it should be a
-//! few blocks below the network chain tip height. It also requires a lightwalletd data dir in sync
-//! with the cached chain state.
+//! This test requires a cached chain state that is partially synchronized,
+//! i.e., it should be a few blocks below the network chain tip height. It also
+//! requires a lightwalletd data dir in sync with the cached chain state.
 //!
-//! Current coverage of all available rpc methods according to `CompactTxStreamer`:
+//! Current coverage of all available rpc methods according to
+//! `CompactTxStreamer`:
 //!
 //! - `GetLatestBlock`: Covered.
 //! - `GetBlock`: Covered.
 //! - `GetBlockRange`: Covered.
 //!
 //! - `GetTransaction`: Covered.
-//! - `SendTransaction`: Not covered and it will never will, it has its own test.
+//! - `SendTransaction`: Not covered and it will never be, it has its own test.
 //!
 //! - `GetTaddressTxids`: Covered.
 //! - `GetTaddressBalance`: Covered.
@@ -20,13 +22,14 @@
 //! - `GetMempoolTx`: Not covered.
 //! - `GetMempoolStream`: Not covered.
 //!
-//! - `GetTreeState`: Not covered, Need #3990
+//! - `GetTreeState`: Covered.
 //!
-//! - `GetAddressUtxos` -= Covered.
+//! - `GetAddressUtxos`: Covered.
 //! - `GetAddressUtxosStream`: Covered.
 //!
 //! - `GetLightdInfo`: Covered.
-//! - `Ping`: Not covered and it will never will, ping is only used for testing purposes.
+//! - `Ping`: Not covered and it will never be. `Ping` is only used for testing
+//! purposes.
 
 use color_eyre::eyre::Result;
 
@@ -256,17 +259,33 @@ pub async fn run() -> Result<()> {
 
     // TODO: Create call and checks for `GetMempoolTx` and `GetMempoolTxStream`?
 
-    // TODO: Activate after #3990 is merged
-    // Currently, this call fails as the method is not available
-    /*
-    // Call `GetTreeState` for block 1.
-    let tree_state = rpc_client.get_tree_state(BlockId {
-        height: 1,
-        hash: vec![]
-    }).await?.into_inner();
+    let sapling_treestate_init_height = sapling_activation_height + 1;
 
-    dbg!(tree_state);
-    */
+    // Call `GetTreeState`.
+    let treestate = rpc_client
+        .get_tree_state(BlockId {
+            height: sapling_treestate_init_height,
+            hash: vec![],
+        })
+        .await?
+        .into_inner();
+
+    // Check that the network is correct.
+    assert_eq!(treestate.network, "main");
+    // Check that the height is correct.
+    assert_eq!(treestate.height, sapling_treestate_init_height);
+    // Check that the hash is correct.
+    assert_eq!(
+        treestate.hash,
+        "00000000014d117faa2ea701b24261d364a6c6a62e5bc4bc27335eb9b3c1e2a8"
+    );
+    // Check that the time is correct.
+    assert_eq!(treestate.time, 1540779438);
+    // Check that the note commitment tree is correct.
+    assert_eq!(
+        treestate.tree,
+        *zebra_test::vectors::SAPLING_TREESTATE_MAINNET_419201_STRING
+    );
 
     // Call `GetAddressUtxos` with the ZF funding stream address that will always have utxos
     let utxos = rpc_client
