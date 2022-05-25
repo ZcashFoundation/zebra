@@ -1,0 +1,28 @@
+# These jobs can be skipped based on cached Google Cloud state disks,
+# so they always need to run on every PR.
+#
+# TODO: when we refactor checking disks into a re-usable workflow,
+#       call it here, and patch if the disks *are* available
+name: CI Docker
+
+on:
+  pull_request:
+    branches:
+      - main
+
+  push:
+    branches:
+      - main
+
+jobs:
+  regenerate-stateful-disks:
+    name: Zebra checkpoint / Run sync-to-checkpoint test
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-full-sync:
+    name: Zebra tip / Run full-sync-to-tip test
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
