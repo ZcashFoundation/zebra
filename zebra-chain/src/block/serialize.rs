@@ -162,3 +162,9 @@ impl AsRef<[u8]> for SerializedBlock {
         self.bytes.as_ref()
     }
 }
+
+impl From<Vec<u8>> for SerializedBlock {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self { bytes }
+    }
+}
