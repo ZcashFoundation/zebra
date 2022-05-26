@@ -33,7 +33,7 @@ use super::{
 /// `V4` transactions serialize the fields of spends and outputs together.
 /// `V5` transactions split them into multiple arrays.
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
+/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#spendencoding>
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Spend<AnchorV: AnchorVariant> {
     /// A value commitment to the value of the input note.
@@ -65,7 +65,7 @@ pub struct Spend<AnchorV: AnchorVariant> {
 ///
 /// Serialized as `SpendDescriptionV5` in [protocol specification §7.3][ps].
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
+/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#spendencoding>
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SpendPrefixInTransactionV5 {
     /// A value commitment to the value of the input note.
@@ -302,7 +302,7 @@ pub(crate) const SHARED_ANCHOR_SPEND_PREFIX_SIZE: u64 = 32 + 32 + 32;
 /// a 32 byte nullifier, a 32 byte rk, a 192 byte zkproof (serialized separately
 /// in V5), and a 64 byte spendAuthSig (serialized separately in V5).
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
+/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#spendencoding>
 pub(crate) const SHARED_ANCHOR_SPEND_SIZE: u64 = SHARED_ANCHOR_SPEND_PREFIX_SIZE + 192 + 64;
 
 /// The maximum number of sapling spends in a valid Zcash on-chain transaction V4.

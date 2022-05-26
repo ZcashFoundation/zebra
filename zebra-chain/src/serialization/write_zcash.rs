@@ -2,7 +2,7 @@ use std::io;
 
 /// Extends [`Write`] with methods for writing Zcash/Bitcoin types.
 ///
-/// [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
+/// [`Write`]: <https://doc.rust-lang.org/std/io/trait.Write.html>
 pub trait WriteZcashExt: io::Write {
     /// Convenience method to write exactly 32 u8's.
     #[inline]

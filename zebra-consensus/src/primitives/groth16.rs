@@ -217,7 +217,7 @@ impl Description for Output {
 /// `nf2`: the second nullifier from the JoinSplit description.
 /// `joinsplit_pub_key`: the JoinSplit public validation key from the transaction.
 ///
-/// [1]: https://zips.z.cash/protocol/protocol.pdf#hsigcrh
+/// [1]: <https://zips.z.cash/protocol/protocol.pdf#hsigcrh>
 pub(super) fn h_sig(
     random_seed: &RandomSeed,
     nf1: &Nullifier,

@@ -17,7 +17,7 @@ use super::{commitment, note, tree};
 /// A 256-bit seed that must be chosen independently at
 /// random for each [JoinSplit description].
 ///
-/// [JoinSplit description]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencodingandconsensus
+/// [JoinSplit description]: <https://zips.z.cash/protocol/protocol.pdf#joinsplitencodingandconsensus>
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
@@ -45,7 +45,7 @@ impl From<&RandomSeed> for [u8; 32] {
 
 /// A _JoinSplit Description_, as described in [protocol specification §7.2][ps].
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
+/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding>
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct JoinSplit<P: ZkSnarkProof> {
     /// A value that the JoinSplit transfer removes from the transparent value
@@ -184,13 +184,13 @@ const JOINSPLIT_SIZE_WITHOUT_ZKPROOF: u64 =
 ///
 /// A BTCV14 proof takes 296 bytes, per the Zcash [protocol specification §7.2][ps]
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
+/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding>
 pub(crate) const BCTV14_JOINSPLIT_SIZE: u64 = JOINSPLIT_SIZE_WITHOUT_ZKPROOF + 296;
 /// The size of a version 4+ joinsplit transaction, which uses a Groth16 proof
 ///
 /// A Groth16 proof takes 192 bytes, per the Zcash [protocol specification §7.2][ps]
 ///
-/// [ps]: https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding
+/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#joinsplitencoding>
 pub(crate) const GROTH16_JOINSPLIT_SIZE: u64 = JOINSPLIT_SIZE_WITHOUT_ZKPROOF + 192;
 
 impl TrustedPreallocate for JoinSplit<Bctv14Proof> {

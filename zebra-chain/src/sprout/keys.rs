@@ -4,7 +4,7 @@
 //! sk_enc), and the shielded payment address addr_pk = (a_pk, pk_enc) are
 //! derived from a_sk, as described in ['Sprout Key Components'][ps]
 //!
-//! [ps]: https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
+//! [ps]: <https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents>
 #![allow(clippy::unit_arg)]
 
 use std::{fmt, io};

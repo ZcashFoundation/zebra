@@ -67,7 +67,7 @@ use crate::transaction::{self, Transaction};
 /// data on disk, and because it does not permanently fail blocks or use an
 /// aggressive anti-DoS mechanism.
 ///
-/// [ZIP-244]: https://zips.z.cash/zip-0244
+/// [ZIP-244]: <https://zips.z.cash/zip-0244>
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Root(pub [u8; 32]);
@@ -142,7 +142,7 @@ impl std::iter::FromIterator<transaction::Hash> for Root {
 ///
 /// See [`Root`] for an important disclaimer.
 ///
-/// [ZIP-244]: https://zips.z.cash/zip-0244
+/// [ZIP-244]: <https://zips.z.cash/zip-0244>
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct AuthDataRoot(pub(crate) [u8; 32]);

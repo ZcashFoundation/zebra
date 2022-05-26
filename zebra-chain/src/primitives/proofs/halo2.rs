@@ -10,7 +10,7 @@ use crate::serialization::{
 /// Halo2 proofs in Zcash Orchard do not have a fixed size, hence the newtype
 /// around a vector of bytes.
 ///
-/// [halo2]: https://zips.z.cash/protocol/nu5.pdf#halo2
+/// [halo2]: <https://zips.z.cash/protocol/nu5.pdf#halo2>
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Halo2Proof(pub Vec<u8>);
 

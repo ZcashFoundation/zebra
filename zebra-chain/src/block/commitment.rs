@@ -189,7 +189,7 @@ impl ChainHistoryBlockTxAuthCommitmentHash {
     /// `auth_data_root` is the root of the Merkle tree of authorizing data
     /// commmitments of each transaction in the *current* block.
     ///
-    ///  [ZIP-244]: https://zips.z.cash/zip-0244#block-header-changes
+    ///  [ZIP-244]: <https://zips.z.cash/zip-0244#block-header-changes>
     pub fn from_commitments(
         history_tree_root: &ChainHistoryMmrRootHash,
         auth_data_root: &AuthDataRoot,

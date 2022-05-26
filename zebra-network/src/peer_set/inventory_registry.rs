@@ -1,6 +1,6 @@
 //! Inventory Registry Implementation
 //!
-//! [RFC]: https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html
+//! [RFC]: <https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html>
 
 use std::{
     collections::HashMap,
@@ -55,7 +55,7 @@ type InventoryMarker = InventoryStatus<()>;
 ///
 /// For more details please refer to the [RFC].
 ///
-/// [RFC]: https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html
+/// [RFC]: <https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html>
 pub struct InventoryRegistry {
     /// Map tracking the latest inventory status from the current interval
     /// period.

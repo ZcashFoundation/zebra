@@ -29,7 +29,7 @@ mod human_readable_parts {
 /// Also known as a _diversified payment address_ for Sapling, as
 /// defined in [§4.2.2][4.2.2].
 ///
-/// [4.2.2]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+/// [4.2.2]: <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Address {
     network: Network,

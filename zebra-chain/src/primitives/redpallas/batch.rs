@@ -210,7 +210,7 @@ impl Verifier {
     /// are uppercase. This does not exactly match the RedDSA
     /// notation in the [protocol specification §B.1][ps].
     ///
-    /// [ps]: https://zips.z.cash/protocol/protocol.pdf#reddsabatchverify
+    /// [ps]: <https://zips.z.cash/protocol/protocol.pdf#reddsabatchverify>
     #[allow(non_snake_case)]
     pub fn verify<R: RngCore + CryptoRng>(self, mut rng: R) -> Result<(), Error> {
         let n = self.signatures.len();

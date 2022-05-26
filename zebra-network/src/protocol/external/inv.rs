@@ -47,9 +47,9 @@ pub enum InventoryHash {
     ///
     /// Introduced by [ZIP-239][zip239], which is analogous to Bitcoin's [BIP-339][bip339].
     ///
-    /// [auth_digest]: https://zips.z.cash/zip-0244#authorizing-data-commitment
-    /// [zip239]: https://zips.z.cash/zip-0239
-    /// [bip339]: https://github.com/bitcoin/bips/blob/master/bip-0339.mediawiki
+    /// [auth_digest]: <https://zips.z.cash/zip-0244#authorizing-data-commitment>
+    /// [zip239]: <https://zips.z.cash/zip-0239>
+    /// [bip339]: <https://github.com/bitcoin/bips/blob/master/bip-0339.mediawiki>
     Wtx(transaction::WtxId),
 }
 

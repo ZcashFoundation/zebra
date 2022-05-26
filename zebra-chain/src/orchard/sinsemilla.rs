@@ -13,7 +13,7 @@ use halo2::{
 /// ExtractP returns the type P𝑥 which is precise for its range, unlike
 /// ExtractJ(𝑟) which returns a bit sequence.
 ///
-/// [concreteextractorpallas]: https://zips.z.cash/protocol/nu5.pdf#concreteextractorpallas
+/// [concreteextractorpallas]: <https://zips.z.cash/protocol/nu5.pdf#concreteextractorpallas>
 pub fn extract_p(point: pallas::Point) -> pallas::Base {
     let option: Option<Coordinates<pallas::Affine>> =
         pallas::Affine::from(point).coordinates().into();

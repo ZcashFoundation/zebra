@@ -1110,7 +1110,7 @@ pub struct GetTreestate {
 
 /// A treestate that is included in the [`z_gettreestate`][1] RPC response.
 ///
-/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
+/// [1]: <https://zcash.github.io/rpc/z_gettreestate.html>
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 struct Treestate<Tree: AsRef<[u8]>> {
     /// Contains an Orchard or Sapling serialized note commitment tree,
@@ -1123,7 +1123,7 @@ struct Treestate<Tree: AsRef<[u8]>> {
 /// Note that in the original [`z_gettreestate`][1] RPC, [`Commitments`] also
 /// contains the field `finalRoot`. Zebra does *not* use this field.
 ///
-/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
+/// [1]: <https://zcash.github.io/rpc/z_gettreestate.html>
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 struct Commitments<Tree: AsRef<[u8]>> {
     /// Orchard or Sapling serialized note commitment tree, hex-encoded.

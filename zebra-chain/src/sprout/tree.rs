@@ -37,7 +37,7 @@ pub(super) const MERKLE_DEPTH: usize = 29;
 /// Note: the implementation of MerkleCRH^Sprout does not use the `layer`
 /// argument from the definition above since the argument does not affect the output.
 ///
-/// [MerkleCRH^Sprout]: https://zips.z.cash/protocol/protocol.pdf#merklecrh
+/// [MerkleCRH^Sprout]: <https://zips.z.cash/protocol/protocol.pdf#merklecrh>
 fn merkle_crh_sprout(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     let mut other_block = [0u8; 64];
     other_block[..32].copy_from_slice(&left[..]);
@@ -140,7 +140,7 @@ impl incrementalmerkletree::Hashable for Node {
     ///
     /// Note that Sprout does not use the `level` argument.
     ///
-    /// [MerkleCRH^Sprout]: https://zips.z.cash/protocol/protocol.pdf#sproutmerklecrh
+    /// [MerkleCRH^Sprout]: <https://zips.z.cash/protocol/protocol.pdf#sproutmerklecrh>
     fn combine(_level: incrementalmerkletree::Altitude, a: &Self, b: &Self) -> Self {
         Self(merkle_crh_sprout(a.0, b.0))
     }
@@ -197,8 +197,8 @@ pub enum NoteCommitmentTreeError {
 /// Internally this wraps [`incrementalmerkletree::bridgetree::Frontier`], so that we can maintain and increment
 /// the full tree with only the minimal amount of non-empty nodes/leaves required.
 ///
-/// [Sprout Note Commitment Tree]: https://zips.z.cash/protocol/protocol.pdf#merkletree
-/// [nullifier set]: https://zips.z.cash/protocol/protocol.pdf#nullifierset
+/// [Sprout Note Commitment Tree]: <https://zips.z.cash/protocol/protocol.pdf#merkletree>
+/// [nullifier set]: <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NoteCommitmentTree {
     /// The tree represented as a [`incrementalmerkletree::bridgetree::Frontier`].
@@ -294,7 +294,7 @@ impl NoteCommitmentTree {
     ///
     /// Uncommitted^Sprout = [0]^(l^[Sprout_Merkle]).
     ///
-    /// [Sprout_Merkle]: https://zips.z.cash/protocol/protocol.pdf#constants
+    /// [Sprout_Merkle]: <https://zips.z.cash/protocol/protocol.pdf#constants>
     pub fn uncommitted() -> [u8; 32] {
         [0; 32]
     }
@@ -303,7 +303,7 @@ impl NoteCommitmentTree {
     ///
     /// For Sprout, the tree is [capped at 2^29 leaf nodes][spec].
     ///
-    /// [spec]: https://zips.z.cash/protocol/protocol.pdf#merkletree
+    /// [spec]: <https://zips.z.cash/protocol/protocol.pdf#merkletree>
     pub fn count(&self) -> u64 {
         self.inner.position().map_or(0, |pos| u64::from(pos) + 1)
     }

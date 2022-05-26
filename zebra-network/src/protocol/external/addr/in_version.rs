@@ -45,7 +45,7 @@ pub struct AddrInVersion {
     /// The peer's IPv6 socket address.
     /// IPv4 addresses are serialized as an [IPv4-mapped IPv6 address].
     ///
-    /// [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
+    /// [IPv4-mapped IPv6 address]: <https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses>
     #[cfg_attr(
         any(test, feature = "proptest-impl"),
         proptest(strategy = "addr_v1_ipv6_mapped_socket_addr_strategy()")

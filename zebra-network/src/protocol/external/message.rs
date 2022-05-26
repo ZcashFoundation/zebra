@@ -34,7 +34,7 @@ use zebra_chain::serialization::arbitrary::datetime_full;
 /// that we have a clearly-defined validation boundary for network messages
 /// during serialization).
 ///
-/// [btc_wiki_protocol]: https://en.bitcoin.it/wiki/Protocol_documentation
+/// [btc_wiki_protocol]: <https://en.bitcoin.it/wiki/Protocol_documentation>
 #[derive(Clone, Eq, PartialEq, Debug)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum Message {
@@ -277,7 +277,7 @@ pub enum Message {
     /// This was defined in [BIP35], which is included in Zcash.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#mempool)
-    /// [BIP35]: https://github.com/bitcoin/bips/blob/master/bip-0035.mediawiki
+    /// [BIP35]: <https://github.com/bitcoin/bips/blob/master/bip-0035.mediawiki>
     Mempool,
 
     /// A `filterload` message.
@@ -287,7 +287,7 @@ pub enum Message {
     /// Zebra currently ignores this message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#filterload.2C_filteradd.2C_filterclear.2C_merkleblock)
-    /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
+    /// [BIP37]: <https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki>
     FilterLoad {
         /// The filter itself is simply a bit field of arbitrary
         /// byte-aligned size. The maximum size is 36,000 bytes.
@@ -312,7 +312,7 @@ pub enum Message {
     /// Zebra currently ignores this message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#filterload.2C_filteradd.2C_filterclear.2C_merkleblock)
-    /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
+    /// [BIP37]: <https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki>
     FilterAdd {
         /// The data element to add to the current filter.
         // The data field must be smaller than or equal to 520 bytes
@@ -330,7 +330,7 @@ pub enum Message {
     /// Zebra currently ignores this message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#filterload.2C_filteradd.2C_filterclear.2C_merkleblock)
-    /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
+    /// [BIP37]: <https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki>
     FilterClear,
 }
 
