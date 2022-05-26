@@ -8,7 +8,7 @@ use std::{cmp, convert::TryFrom, fmt};
 /// usage of the memo field is by agreement between the sender and
 /// recipient of the note.
 ///
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#notept>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#notept
 #[derive(Clone)]
 pub struct Memo(pub(crate) Box<[u8; 512]>);
 

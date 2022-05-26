@@ -1,6 +1,6 @@
 //! Sapling _Output descriptions_, as described in [protocol specification §7.4][ps].
 //!
-//! [ps]: <https://zips.z.cash/protocol/protocol.pdf#outputencoding>
+//! [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
 
 use std::io;
 
@@ -21,7 +21,7 @@ use super::{commitment, keys, note};
 /// `V4` transactions serialize the fields of spends and outputs together.
 /// `V5` transactions split them into multiple arrays.
 ///
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#outputencoding>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Output {
     /// A value commitment to the value of the input note.
@@ -52,7 +52,7 @@ pub struct OutputInTransactionV4(pub Output);
 ///
 /// Serialized as `OutputDescriptionV5` in [protocol specification §7.3][ps].
 ///
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#outputencoding>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OutputPrefixInTransactionV5 {
     /// A value commitment to the value of the input note.
@@ -242,7 +242,7 @@ impl ZcashDeserialize for OutputPrefixInTransactionV5 {
 pub(crate) const OUTPUT_PREFIX_SIZE: u64 = 32 + 32 + 32 + 580 + 80;
 /// An output contains: a 32 byte cv, a 32 byte cmu, a 32 byte ephemeral key
 /// a 580 byte encCiphertext, an 80 byte outCiphertext, and a 192 byte zkproof
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#outputencoding>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
 pub(crate) const OUTPUT_SIZE: u64 = OUTPUT_PREFIX_SIZE + 192;
 
 /// The maximum number of sapling outputs in a valid Zcash on-chain transaction.

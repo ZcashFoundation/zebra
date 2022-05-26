@@ -36,7 +36,7 @@ mod verified_set;
 ///
 /// We use the specified value for all lists for consistency.
 ///
-/// [ZIP-401]: <https://zips.z.cash/zip-0401#specification>
+/// [ZIP-401]: https://zips.z.cash/zip-0401#specification
 pub(crate) const MAX_EVICTION_MEMORY_ENTRIES: usize = 40_000;
 
 /// Transactions rejected based on transaction authorizing data (scripts, proofs, signatures),
@@ -84,7 +84,7 @@ pub enum SameEffectsChainRejectionError {
     /// Consensus rule:
     /// > The txid (rather than the wtxid ...) is used even for version 5 transactions
     ///
-    /// [ZIP-401]: <https://zips.z.cash/zip-0401#specification>
+    /// [ZIP-401]: https://zips.z.cash/zip-0401#specification
     #[error("transaction evicted from the mempool due to ZIP-401 denial of service limits")]
     RandomlyEvicted,
 }
@@ -208,7 +208,7 @@ impl Storage {
         // 'EvictTransaction' is equivalent to [`VerifiedSet::evict_one()`] in
         // our implementation.
         //
-        // [ZIP-401]: <https://zips.z.cash/zip-0401>
+        // [ZIP-401]: https://zips.z.cash/zip-0401
         while self.verified.total_cost() > self.tx_cost_limit {
             // > EvictTransaction MUST do the following:
             // > Select a random transaction to evict, with probability in direct proportion to
@@ -481,7 +481,7 @@ impl Storage {
     /// > if they have not been mined.
     ///
     ///
-    /// [ZIP-203]: <https://zips.z.cash/zip-0203#specification>
+    /// [ZIP-203]: https://zips.z.cash/zip-0203#specification
     pub fn remove_expired_transactions(
         &mut self,
         tip_height: zebra_chain::block::Height,

@@ -21,7 +21,7 @@ use super::{
 /// output.  Action descriptions are data included in a transaction that
 /// describe Action transfers.
 ///
-/// [actiondesc]: <https://zips.z.cash/protocol/nu5.pdf#actiondesc>
+/// [actiondesc]: https://zips.z.cash/protocol/nu5.pdf#actiondesc
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Action {
     /// A value commitment to net value of the input note minus the output note

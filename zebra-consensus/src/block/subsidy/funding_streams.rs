@@ -1,6 +1,6 @@
 //! Funding Streams calculations. - [§7.8][7.8]
 //!
-//! [7.8]: <https://zips.z.cash/protocol/protocol.pdf#subsidies>
+//! [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
 use zebra_chain::{
     amount::{Amount, Error, NonNegative},
@@ -21,7 +21,7 @@ mod tests;
 /// Returns the `fs.Value(height)` for each stream receiver
 /// as described in [protocol specification §7.8][7.8]
 ///
-/// [7.8]: <https://zips.z.cash/protocol/protocol.pdf#subsidies>
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn funding_stream_values(
     height: Height,
     network: Network,
@@ -52,7 +52,7 @@ pub fn funding_stream_values(
 /// Returns the minimum height after the first halving
 /// as described in [protocol specification §7.10][7.10]
 ///
-/// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 pub fn height_for_first_halving(network: Network) -> Height {
     // First halving on Mainnet is at Canopy
     // while in Testnet is at block constant height of `1_116_000`
@@ -68,7 +68,7 @@ pub fn height_for_first_halving(network: Network) -> Height {
 /// Returns the address change period
 /// as described in [protocol specification §7.10][7.10]
 ///
-/// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 fn funding_stream_address_period(height: Height, network: Network) -> u32 {
     // - Spec equation: `address_period = floor((height - height_for_halving(1) - post_blossom_halving_interval)/funding_stream_address_change_interval)`:
     //   <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
@@ -82,7 +82,7 @@ fn funding_stream_address_period(height: Height, network: Network) -> u32 {
 /// Returns the position in the address slice for each funding stream
 /// as described in [protocol specification §7.10][7.10]
 ///
-/// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 fn funding_stream_address_index(height: Height, network: Network) -> usize {
     let num_addresses = match network {
         Network::Mainnet => FUNDING_STREAMS_NUM_ADDRESSES_MAINNET,
@@ -122,7 +122,7 @@ pub fn funding_stream_address(
 /// Given a funding stream address, create a script and check if it is the same
 /// as the given lock_script as described in [protocol specification §7.10][7.10]
 ///
-/// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 pub fn check_script_form(lock_script: &Script, address: Address) -> bool {
     let mut address_hash = address
         .zcash_serialize_to_vec()

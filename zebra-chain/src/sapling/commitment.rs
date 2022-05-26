@@ -318,8 +318,8 @@ impl TryFrom<ValueCommitment> for NotSmallOrderValueCommitment {
     /// > cv and epk [MUST NOT be of small order][2], i.e. [h_J]cv MUST NOT be 𝒪_J
     /// > and [ℎ_J]epk MUST NOT be 𝒪_J.
     ///
-    /// [1]: <https://zips.z.cash/protocol/protocol.pdf#spenddesc>
-    /// [2]: <https://zips.z.cash/protocol/protocol.pdf#outputdesc>
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
+    /// [2]: https://zips.z.cash/protocol/protocol.pdf#outputdesc
     fn try_from(value_commitment: ValueCommitment) -> Result<Self, Self::Error> {
         if value_commitment.0.is_small_order().into() {
             Err("jubjub::AffinePoint value for Sapling ValueCommitment is of small order")

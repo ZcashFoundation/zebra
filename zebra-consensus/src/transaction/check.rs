@@ -280,7 +280,7 @@ where
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 ///
-/// [ZIP-212]: <https://zips.z.cash/zip-0212#consensus-rule-change-for-coinbase-transactions>
+/// [ZIP-212]: https://zips.z.cash/zip-0212#consensus-rule-change-for-coinbase-transactions
 ///
 /// TODO: Currently, a 0x01 lead byte is allowed in the "grace period" mentioned since we're
 /// using `librustzcash` to implement this and it doesn't currently allow changing that behavior.
@@ -309,8 +309,8 @@ pub fn coinbase_outputs_are_decryptable(
 /// Returns `Ok(())` if the expiry height for the coinbase transaction is valid
 /// according to specifications [7.1] and [ZIP-203].
 ///
-/// [7.1]: <https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus>
-/// [ZIP-203]: <https://zips.z.cash/zip-0203>
+/// [7.1]: https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+/// [ZIP-203]: https://zips.z.cash/zip-0203
 pub fn coinbase_expiry_height(
     block_height: &Height,
     coinbase: &Transaction,
@@ -351,8 +351,8 @@ pub fn coinbase_expiry_height(
 /// Returns `Ok(())` if the expiry height for a non coinbase transaction is
 /// valid according to specifications [7.1] and [ZIP-203].
 ///
-/// [7.1]: <https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus>
-/// [ZIP-203]: <https://zips.z.cash/zip-0203>
+/// [7.1]: https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+/// [ZIP-203]: https://zips.z.cash/zip-0203
 pub fn non_coinbase_expiry_height(
     block_height: &Height,
     transaction: &Transaction,

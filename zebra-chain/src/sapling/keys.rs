@@ -5,8 +5,8 @@
 //! diversified payment address addr_d = (d, pk_d ) are derived from sk,
 //! as described in [Sapling Key Components][ps]." - [§3.1][3.1]
 //!
-//! [ps]: <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
-//! [3.1]: <https://zips.z.cash/protocol/protocol.pdf#addressesandkeys>
+//! [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+//! [3.1]: https://zips.z.cash/protocol/protocol.pdf#addressesandkeys
 #![allow(clippy::unit_arg)]
 #![allow(dead_code)]
 
@@ -42,8 +42,8 @@ use crate::{
 ///
 /// From [zcash_primitives][0].
 ///
-/// [0]: <https://docs.rs/zcash_primitives/0.2.0/zcash_primitives/constants/constant.GH_FIRST_BLOCK.html>
-/// [1]: <https://zips.z.cash/protocol/protocol.pdf#beacon>
+/// [0]: https://docs.rs/zcash_primitives/0.2.0/zcash_primitives/constants/constant.GH_FIRST_BLOCK.html
+/// [1]: https://zips.z.cash/protocol/protocol.pdf#beacon
 pub(super) const RANDOMNESS_BEACON_URS: &[u8; 64] =
     b"096b36a5804bfacef1691e173c366a47ff5ba84a44f26ddd7e8d9f79d5b42df0";
 
@@ -111,7 +111,7 @@ fn crh_ivk(ak: [u8; 32], nk: [u8; 32]) -> [u8; 32] {
 /// d is an 8-byte domain separator ("personalization"), m is the hash
 /// input.
 ///
-/// [0]: <https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/group_hash.rs#L15>
+/// [0]: https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/group_hash.rs#L15
 /// <https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub>
 fn jubjub_group_hash(d: [u8; 8], m: &[u8]) -> Option<jubjub::ExtendedPoint> {
     let hash = blake2s_simd::Params::new()
@@ -142,7 +142,7 @@ fn jubjub_group_hash(d: [u8; 8], m: &[u8]) -> Option<jubjub::ExtendedPoint> {
 /// d is an 8-byte domain separator ("personalization"), m is the hash
 /// input.
 ///
-/// [0]: <https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/jubjub/mod.rs#L409>
+/// [0]: https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/jubjub/mod.rs#L409
 /// <https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub>
 // TODO: move common functions like these out of the keys module into
 // a more appropriate location
@@ -197,7 +197,7 @@ mod sk_hrp {
 /// Our root secret key of the Sapling key derivation tree. All other
 /// Sapling key types derive from the `SpendingKey` value.
 ///
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
@@ -299,7 +299,7 @@ impl PartialEq for SpendingKey {
 /// Used to generate _spend authorization randomizers_ to sign each
 /// _Spend Description_, proving ownership of notes.
 ///
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone)]
 pub struct SpendAuthorizingKey(pub(crate) Scalar);
 
@@ -357,7 +357,7 @@ impl PartialEq<[u8; 32]> for SpendAuthorizingKey {
 ///
 /// Used in the _Spend Statement_ to prove nullifier integrity.
 ///
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone)]
 pub struct ProofAuthorizingKey(pub(crate) Scalar);
 
@@ -414,7 +414,7 @@ impl PartialEq<[u8; 32]> for ProofAuthorizingKey {
 ///
 /// Used to decrypt outgoing notes without spending them.
 ///
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct OutgoingViewingKey(pub(crate) [u8; 32]);
 
@@ -466,7 +466,7 @@ impl PartialEq<[u8; 32]> for OutgoingViewingKey {
 /// Used to validate _Spend Authorization Signatures_, proving
 /// ownership of notes.
 ///
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Debug)]
 pub struct AuthorizingKey(pub(crate) redjubjub::VerificationKey<SpendAuth>);
 
@@ -483,7 +483,7 @@ impl TryFrom<[u8; 32]> for AuthorizingKey {
     /// > When decoding this representation, the key MUST be considered invalid
     /// > if abst_J returns ⊥ for either ak or nk, or if ak not in J^{(r)*}
     ///
-    /// [1]: <https://zips.z.cash/protocol/protocol.pdf#saplingfullviewingkeyencoding>
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#saplingfullviewingkeyencoding
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
         let affine_point = jubjub::AffinePoint::from_bytes(bytes);
         if affine_point.is_none().into() {
@@ -529,7 +529,7 @@ impl PartialEq<[u8; 32]> for AuthorizingKey {
 ///
 /// Used to create a `Nullifier` per note.
 ///
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone)]
 pub struct NullifierDerivingKey(pub(crate) jubjub::AffinePoint);
 
@@ -616,7 +616,7 @@ mod ivk_hrp {
 ///
 /// Used to decrypt incoming notes without spending them.
 ///
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct IncomingViewingKey {
     network: Network,
@@ -676,7 +676,7 @@ impl From<(AuthorizingKey, NullifierDerivingKey)> for IncomingViewingKey {
     // "If ivk = 0, discard this key and start over with a new
     // [spending key]." - [§4.2.2][ps]
     //
-    // [ps]: <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
+    // [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     fn from((ask, nk): (AuthorizingKey, NullifierDerivingKey)) -> Self {
         let hash_bytes = crh_ivk(ask.into(), nk.into());
 
@@ -719,7 +719,7 @@ impl PartialEq<[u8; 32]> for IncomingViewingKey {
 /// Combined with an _IncomingViewingKey_, produces a _diversified
 /// payment address_.
 ///
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 #[derive(Copy, Clone, Eq, PartialEq)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
@@ -785,7 +785,7 @@ impl From<SpendingKey> for Diversifier {
     /// that cannot be distinguished (without knowledge of the
     /// spending key) from one with a random diversifier...'
     ///
-    /// [4.2.2]: <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
+    /// [4.2.2]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
     fn from(sk: SpendingKey) -> Diversifier {
         let mut i = 0u8;
 
@@ -847,9 +847,9 @@ impl Diversifier {
 /// Note that it can be the identity point, since its type is
 /// [`KA^{Sapling}.PublicPrimeSubgroup`][ka] which in turn is [`J^{(r)}`][jubjub].
 ///
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents>
-/// [ka]: <https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement>
-/// [jubjub]: <https://zips.z.cash/protocol/protocol.pdf#jubjub>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+/// [ka]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+/// [jubjub]: https://zips.z.cash/protocol/protocol.pdf#jubjub
 #[derive(Copy, Clone, PartialEq)]
 pub struct TransmissionKey(pub(crate) jubjub::AffinePoint);
 
@@ -1009,8 +1009,8 @@ impl FromStr for FullViewingKey {
 /// represent [KA^{Sapling}.Public][2], which allows any points, including
 /// of small order).
 ///
-/// [1]: <https://zips.z.cash/protocol/protocol.pdf#outputdesc>
-/// [2]: <https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement>
+/// [1]: https://zips.z.cash/protocol/protocol.pdf#outputdesc
+/// [2]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
 #[derive(Copy, Clone, Deserialize, PartialEq, Serialize)]
 pub struct EphemeralPublicKey(
     #[serde(with = "serde_helpers::AffinePoint")] pub(crate) jubjub::AffinePoint,
@@ -1057,7 +1057,7 @@ impl TryFrom<[u8; 32]> for EphemeralPublicKey {
     /// > Check that a Output description's cv and epk are not of small order,
     /// > i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]epk MUST NOT be 𝒪_J.
     ///
-    /// [1]: <https://zips.z.cash/protocol/protocol.pdf#outputdesc>
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#outputdesc
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
         let possible_point = jubjub::AffinePoint::from_bytes(bytes);
 
@@ -1091,8 +1091,8 @@ impl ZcashDeserialize for EphemeralPublicKey {
 /// represent [SpendAuthSig^{Sapling}.Public][2], which allows any points, including
 /// of small order).
 ///
-/// [1]: <https://zips.z.cash/protocol/protocol.pdf#spenddesc>
-/// [2]: <https://zips.z.cash/protocol/protocol.pdf#concretereddsa>
+/// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
+/// [2]: https://zips.z.cash/protocol/protocol.pdf#concretereddsa
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct ValidatingKey(redjubjub::VerificationKey<SpendAuth>);
 
@@ -1108,7 +1108,7 @@ impl TryFrom<redjubjub::VerificationKey<SpendAuth>> for ValidatingKey {
     /// > Check that a Spend description's cv and rk are not of small order,
     /// > i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk MUST NOT be 𝒪_J.
     ///
-    /// [1]: <https://zips.z.cash/protocol/protocol.pdf#spenddesc>
+    /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
     fn try_from(key: redjubjub::VerificationKey<SpendAuth>) -> Result<Self, Self::Error> {
         if bool::from(
             jubjub::AffinePoint::from_bytes(key.into())
