@@ -28,19 +28,24 @@ impl Tracing {
         let use_color =
             config.force_use_color || (config.use_color && atty::is(atty::Stream::Stdout));
 
-        // Construct a tracing subscriber with the supplied filter and enable reloading.
+        // Construct a tracing subscriber with the supplied logging filter, and enable reloading.
         let builder = FmtSubscriber::builder()
             .with_ansi(use_color)
             .with_env_filter(&filter)
             .with_filter_reloading();
         let filter_handle = builder.reload_handle();
+        let subscriber = builder.finish().with(ErrorLayer::default());
 
+        // Add optional layers based on dynamic and compile-time configs
+
+        // Add a flamegraph
         let (flamelayer, flamegrapher) = if let Some(path) = flame_root {
             let (flamelayer, flamegrapher) = flame::layer(path);
             (Some(flamelayer), Some(flamegrapher))
         } else {
             (None, None)
         };
+        let subscriber = subscriber.with(flamelayer);
 
         let journaldlayer = if config.use_journald {
             let layer = tracing_journald::layer()
@@ -49,18 +54,13 @@ impl Tracing {
         } else {
             None
         };
-
-        let subscriber = builder.finish().with(ErrorLayer::default());
+        let subscriber = subscriber.with(journaldlayer);
 
         #[cfg(feature = "enable-sentry")]
         let subscriber = subscriber.with(sentry_tracing::layer());
 
-        match (flamelayer, journaldlayer) {
-            (None, None) => subscriber.init(),
-            (Some(layer1), None) => subscriber.with(layer1).init(),
-            (None, Some(layer2)) => subscriber.with(layer2).init(),
-            (Some(layer1), Some(layer2)) => subscriber.with(layer1).with(layer2).init(),
-        };
+        // Initialise the global tracing subscriber
+        subscriber.init();
 
         tracing::info!(
             ?filter,
