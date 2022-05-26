@@ -56,7 +56,7 @@ impl Default for Config {
             // > There MUST be a configuration option mempoolevictionmemoryminutes,
             // > which SHOULD default to 60 [minutes].
             //
-            // [ZIP-401]: <https://zips.z.cash/zip-0401#specification>
+            // [ZIP-401]: https://zips.z.cash/zip-0401#specification
             tx_cost_limit: 80_000_000,
             eviction_memory_time: Duration::from_secs(60 * 60),
 

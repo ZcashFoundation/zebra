@@ -3,7 +3,7 @@
 //! Zebra canonicalises all received addresses into Rust [`SocketAddr`]s.
 //! If the address is an [IPv4-mapped IPv6 address], it becomes a [`SocketAddr::V4`]
 //!
-//! [IPv4-mapped IPv6 address]: <https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses>
+//! [IPv4-mapped IPv6 address]: https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
 
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 

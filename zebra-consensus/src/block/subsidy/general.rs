@@ -1,6 +1,6 @@
 //! Block and Miner subsidies, halvings and target spacing modifiers. - [§7.8][7.8]
 //!
-//! [7.8]: <https://zips.z.cash/protocol/protocol.pdf#subsidies>
+//! [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
 use std::{collections::HashSet, convert::TryFrom};
 
@@ -17,7 +17,7 @@ use crate::parameters::subsidy::*;
 ///
 /// `1 << Halving(height)`, as described in [protocol specification §7.8][7.8]
 ///
-/// [7.8]: <https://zips.z.cash/protocol/protocol.pdf#subsidies>
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn halving_divisor(height: Height, network: Network) -> u64 {
     let blossom_height = Blossom
         .activation_height(network)
@@ -44,7 +44,7 @@ pub fn halving_divisor(height: Height, network: Network) -> u64 {
 
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
-/// [7.8]: <https://zips.z.cash/protocol/protocol.pdf#subsidies>
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn block_subsidy(height: Height, network: Network) -> Result<Amount<NonNegative>, Error> {
     let blossom_height = Blossom
         .activation_height(network)

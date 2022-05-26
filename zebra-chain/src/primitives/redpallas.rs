@@ -50,7 +50,7 @@ pub type Randomizer = pallas::Scalar;
 /// To handle this, we encode the parameter choice as a genuine type
 /// parameter.
 ///
-/// [concretereddsa]: <https://zips.z.cash/protocol/nu5.pdf#concretereddsa>
+/// [concretereddsa]: https://zips.z.cash/protocol/nu5.pdf#concretereddsa
 pub trait SigType: private::Sealed {}
 
 /// A type variable corresponding to Zcash's `BindingSig`.

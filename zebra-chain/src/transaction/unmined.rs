@@ -44,7 +44,7 @@ use UnminedTxId::*;
 /// > of ensuring that such transactions are not evicted preferentially to typical
 /// > transparent transactions because of their size.
 ///
-/// [ZIP-401]: <https://zips.z.cash/zip-0401>
+/// [ZIP-401]: https://zips.z.cash/zip-0401
 const MEMPOOL_TRANSACTION_COST_THRESHOLD: u64 = 4000;
 
 /// A unique identifier for an unmined transaction, regardless of version.
@@ -58,9 +58,9 @@ const MEMPOOL_TRANSACTION_COST_THRESHOLD: u64 = 4000;
 /// as defined in [ZIP-239]."
 /// [Spec: Transaction Identifiers]
 ///
-/// [ZIP-239]: <https://zips.z.cash/zip-0239>
-/// [ZIP-244]: <https://zips.z.cash/zip-0244>
-/// [Spec: Transaction Identifiers]: <https://zips.z.cash/protocol/protocol.pdf#txnidentifiers>
+/// [ZIP-239]: https://zips.z.cash/zip-0239
+/// [ZIP-244]: https://zips.z.cash/zip-0244
+/// [Spec: Transaction Identifiers]: https://zips.z.cash/protocol/protocol.pdf#txnidentifiers
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum UnminedTxId {
@@ -308,7 +308,7 @@ impl VerifiedUnminedTx {
     /// >
     /// > max(serialized transaction size in bytes, 4000)
     ///
-    /// [ZIP-401]: <https://zips.z.cash/zip-0401>
+    /// [ZIP-401]: https://zips.z.cash/zip-0401
     pub fn cost(&self) -> u64 {
         std::cmp::max(
             self.transaction.size as u64,
@@ -326,7 +326,7 @@ impl VerifiedUnminedTx {
     /// > a fee less than the conventional fee, otherwise 0. The conventional fee
     /// > is currently defined as 1000 zatoshis
     ///
-    /// [ZIP-401]: <https://zips.z.cash/zip-0401>
+    /// [ZIP-401]: https://zips.z.cash/zip-0401
     pub fn eviction_weight(self) -> u64 {
         let conventional_fee = 1000;
 

@@ -9,7 +9,7 @@
 
 /// The byte-encoding of the basepoint for `SpendAuthSig` on the [Pallas curve][pallasandvesta].
 ///
-/// [pallasandvesta]: <https://zips.z.cash/protocol/nu5.pdf#pallasandvesta>
+/// [pallasandvesta]: https://zips.z.cash/protocol/nu5.pdf#pallasandvesta
 // Reproducible by pallas::Point::hash_to_curve("z.cash:Orchard")(b"G").to_bytes()
 pub const SPENDAUTHSIG_BASEPOINT_BYTES: [u8; 32] = [
     99, 201, 117, 184, 132, 114, 26, 141, 12, 161, 112, 123, 227, 12, 127, 12, 95, 68, 95, 62, 124,

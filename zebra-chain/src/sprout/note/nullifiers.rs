@@ -34,7 +34,7 @@ fn prf_nf(a_sk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
 
 /// Nullifier seed, named rho in the [spec][ps].
 ///
-/// [ps]: <https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents>
+/// [ps]: https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
 
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(

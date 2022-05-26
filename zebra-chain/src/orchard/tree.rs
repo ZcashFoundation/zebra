@@ -165,7 +165,7 @@ struct Node(pallas::Base);
 /// [`merkle_tree::Hashable`] for [`Node`]s allows the conversion.
 ///
 /// [1]: bridgetree::Frontier
-/// [2]: <https://zcash.github.io/rpc/z_gettreestate.html>
+/// [2]: https://zcash.github.io/rpc/z_gettreestate.html
 /// [3]: merkle_tree::CommitmentTree
 impl merkle_tree::Hashable for Node {
     fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
@@ -452,7 +452,7 @@ impl From<&NoteCommitmentTree> for SerializedTree {
         // Note: This ensures compatibility with `zcashd` in the
         // [`z_gettreestate`][1] RPC.
         //
-        // [1]: <https://zcash.github.io/rpc/z_gettreestate.html>
+        // [1]: https://zcash.github.io/rpc/z_gettreestate.html
         if tree.inner == bridgetree::Frontier::empty() {
             return Self(serialized_tree);
         }

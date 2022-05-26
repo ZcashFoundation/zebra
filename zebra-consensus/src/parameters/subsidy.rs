@@ -7,12 +7,12 @@ use zebra_chain::{amount::COIN, block::Height, parameters::Network};
 
 /// An initial period from Genesis to this Height where the block subsidy is gradually incremented. [What is slow-start mining][slow-mining]
 ///
-/// [slow-mining]: <https://z.cash/support/faq/#what-is-slow-start-mining>
+/// [slow-mining]: https://z.cash/support/faq/#what-is-slow-start-mining
 pub const SLOW_START_INTERVAL: Height = Height(20_000);
 
 /// `SlowStartShift()` as described in [protocol specification §7.8][7.8]
 ///
-/// [7.8]: <https://zips.z.cash/protocol/protocol.pdf#subsidies>
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 ///
 /// This calculation is exact, because `SLOW_START_INTERVAL` is divisible by 2.
 pub const SLOW_START_SHIFT: Height = Height(SLOW_START_INTERVAL.0 / 2);
@@ -41,7 +41,7 @@ pub const POST_BLOSSOM_HALVING_INTERVAL: Height =
 /// The first halving height in the testnet is at block height `1_116_000`
 /// as specified in [protocol specification §7.10.1][7.10.1]
 ///
-/// [7.10.1]: <https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams>
+/// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 pub const FIRST_HALVING_TESTNET: Height = Height(1_116_000);
 
 /// The funding stream receiver categories.
@@ -63,14 +63,14 @@ pub const FUNDING_STREAM_RECEIVERS_NUMBER: usize = FundingStreamReceiver::receiv
 
 /// Denominator as described in [protocol specification §7.10.1][7.10.1].
 ///
-/// [7.10.1]: <https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams>
+/// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 
 lazy_static! {
     /// The numerator for each funding stream receiver category
     /// as described in [protocol specification §7.10.1][7.10.1].
     ///
-    /// [7.10.1]: <https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams>
+    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub static ref FUNDING_STREAM_RECEIVER_NUMERATORS: HashMap<FundingStreamReceiver, u64> = {
         let mut hash_map = HashMap::new();
         hash_map.insert(FundingStreamReceiver::Ecc, 7);
@@ -82,7 +82,7 @@ lazy_static! {
     /// Start and end Heights for funding streams
     /// as described in [protocol specification §7.10.1][7.10.1].
     ///
-    /// [7.10.1]: <https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams>
+    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub static ref FUNDING_STREAM_HEIGHT_RANGES: HashMap<Network, std::ops::Range<Height>> = {
         let mut hash_map = HashMap::new();
         hash_map.insert(Network::Mainnet, Height(1_046_400)..Height(2_726_400));
@@ -115,7 +115,7 @@ lazy_static! {
 /// Address change interval function here as a constant
 /// as described in [protocol specification §7.10.1][7.10.1].
 ///
-/// [7.10.1]: <https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams>
+/// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 pub const FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL: Height =
     Height(POST_BLOSSOM_HALVING_INTERVAL.0 / 48);
 
@@ -123,7 +123,7 @@ pub const FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL: Height =
 /// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
 /// however we know this value beforehand so we prefer to make it a constant instead.
 ///
-/// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 pub const FUNDING_STREAMS_NUM_ADDRESSES_MAINNET: usize = 48;
 
 /// List of addresses for the ECC funding stream in the Mainnet.
@@ -190,7 +190,7 @@ pub const FUNDING_STREAM_MG_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRES
 /// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
 /// however we know this value beforehand so we prefer to make it a constant instead.
 ///
-/// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 pub const FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 51;
 
 /// List of addresses for the ECC funding stream in the Testnet.

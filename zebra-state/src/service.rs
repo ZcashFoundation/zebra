@@ -241,7 +241,7 @@ impl StateService {
     /// This function encodes the logic for [committing non-finalized blocks][1]
     /// in RFC0005.
     ///
-    /// [1]: <https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks>
+    /// [1]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html#committing-non-finalized-blocks
     #[instrument(level = "debug", skip(self, prepared))]
     fn queue_and_commit_non_finalized(
         &mut self,

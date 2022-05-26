@@ -116,7 +116,7 @@ impl From<&zebra_chain::orchard::ShieldedData> for Item {
 /// An error that may occur when verifying [Halo2 proofs of Zcash Orchard Action
 /// descriptions][actions].
 ///
-/// [actions]: <https://zips.z.cash/protocol/protocol.pdf#actiondesc>
+/// [actions]: https://zips.z.cash/protocol/protocol.pdf#actiondesc
 // TODO: if halo2::plonk::Error gets the std::error::Error trait derived on it,
 // remove this and just wrap `halo2::plonk::Error` as an enum variant of
 // `crate::transaction::Error`, which does the trait derivation via `thiserror`

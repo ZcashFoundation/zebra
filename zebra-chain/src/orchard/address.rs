@@ -9,7 +9,7 @@ use super::keys;
 /// Also known as a _diversified payment address_ for Orchard, as
 /// defined in [§5.6.4.1 of the Zcash Specification][orchardpaymentaddrencoding].
 ///
-/// [orchardpaymentaddrencoding]: <https://zips.z.cash/protocol/nu5.pdf#orchardpaymentaddrencoding>
+/// [orchardpaymentaddrencoding]: https://zips.z.cash/protocol/nu5.pdf#orchardpaymentaddrencoding
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Address {
     pub(crate) diversifier: keys::Diversifier,
