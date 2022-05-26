@@ -89,7 +89,7 @@ tonic-build = { version = "0.7.2", optional = true }
 abscissa_core = { version = "0.5", features = ["testing"] }
 hex = "0.4.3"
 once_cell = "1.12.0"
-regex = "1.5.5"
+regex = "1.5.6"
 reqwest = "0.11"
 semver = "1.0.9"
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
@@ -99,7 +99,7 @@ tokio = { version = "1.18.2", features = ["full", "test-util"] }
 tokio-stream = "0.1.8"
 
 # test feature lightwalletd-grpc-tests
-prost = "0.10.3"
+prost = "0.10.4"
 tonic = "0.7.2"
 
 proptest = "0.10.1"

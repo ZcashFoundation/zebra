@@ -33,6 +33,7 @@ jobs:
             **/Cargo.lock
             clippy.toml
             .cargo/config.toml
+            .github/workflows/lint.yml
 
       - name: Workflow files
         id: changed-files-workflows
@@ -118,3 +119,13 @@ jobs:
         with:
           level: warning
           fail_on_error: false
+
+  codespell:
+    runs-on: ubuntu-latest
+    needs: changed-files
+    steps:
+      - uses: actions/checkout@v3.0.2
+      - uses: plettich/action-codespell@master
+        with:
+          github_token: ${{ secrets.github_token }}
+          level: warning
