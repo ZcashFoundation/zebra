@@ -341,12 +341,15 @@ impl Service<Request> for Mempool {
                         if let Ok(inserted_id) = storage.insert(tx.clone()) {
                             // Save transaction ids that we will send to peers
                             send_to_peers_ids.insert(inserted_id);
+                            dbg!(inserted_id);
                         }
                     }
                     Err((txid, e)) => {
                         metrics::counter!("mempool.failed.verify.tasks.total", 1, "reason" => e.to_string());
                         storage.reject_if_needed(txid, e);
                         // TODO: should we also log the result?
+                        // YES, transactions from `sending_transactions_using_lightwalletd` are rejected here.
+                        dbg!(txid);
                     }
                 };
             }

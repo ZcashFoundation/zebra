@@ -206,6 +206,8 @@ pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
     config.network.network = network;
     config.mempool.debug_enable_at_height = Some(0);
 
+    config.tracing.filter = Some("info,zebrad=debug,zebra_rpc=debug".to_string());
+
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 
     let mut zebrad = zebra_directory
