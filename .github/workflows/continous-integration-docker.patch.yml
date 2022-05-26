@@ -1,5 +1,7 @@
 name: CI Docker
 
+# These jobs *don't* depend on cached Google Cloud state disks,
+# so they can be skipped when the modified files make the actual workflow run.
 on:
   pull_request:
     branches:
@@ -76,20 +78,8 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
-  regenerate-stateful-disks:
-    name: Zebra checkpoint / Run sync-to-checkpoint test
-    runs-on: ubuntu-latest
-    steps:
-      - run: 'echo "No build required"'
-
   test-stateful-sync:
     name: Zebra checkpoint update / Run sync-past-checkpoint test
-    runs-on: ubuntu-latest
-    steps:
-      - run: 'echo "No build required"'
-
-  test-full-sync:
-    name: Zebra tip / Run full-sync-to-tip test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
