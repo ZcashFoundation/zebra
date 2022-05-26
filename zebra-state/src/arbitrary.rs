@@ -97,7 +97,7 @@ impl PreparedBlock {
 }
 
 impl ContextuallyValidBlock {
-    /// Create a block that's ready for non-finalized [`Chain`] contextual validation,
+    /// Create a block that's ready for non-finalized `Chain` contextual validation,
     /// using a [`PreparedBlock`] and fake zero-valued spent UTXOs.
     ///
     /// Only for use in tests.

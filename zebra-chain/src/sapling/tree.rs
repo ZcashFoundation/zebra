@@ -292,7 +292,7 @@ pub struct NoteCommitmentTree {
     /// tree). This is particularly important since we decided to instantiate
     /// the trees from the genesis block, for simplicity.
     ///
-    /// We use a [`RwLock`] for this cache, because it is only written once per
+    /// We use a [`RwLock`](std::sync::RwLock) for this cache, because it is only written once per
     /// tree update. Each tree has its own cached root, a new lock is created
     /// for each clone.
     cached_root: std::sync::RwLock<Option<Root>>,
@@ -376,7 +376,8 @@ impl NoteCommitmentTree {
 }
 
 impl Clone for NoteCommitmentTree {
-    /// Clones the inner tree, and creates a new `RwLock` with the cloned root data.
+    /// Clones the inner tree, and creates a new [`RwLock`](std::sync::RwLock)
+    /// with the cloned root data.
     fn clone(&self) -> Self {
         let cached_root = *self
             .cached_root

@@ -230,8 +230,9 @@ pub struct NoteCommitmentTree {
     /// the tree). This is particularly important since we decided to
     /// instantiate the trees from the genesis block, for simplicity.
     ///
-    /// We use a [`RwLock`] for this cache, because it is only written once per tree update.
-    /// Each tree has its own cached root, a new lock is created for each clone.
+    /// We use a [`RwLock`](std::sync::RwLock) for this cache, because it is
+    /// only written once per tree update. Each tree has its own cached root, a
+    /// new lock is created for each clone.
     cached_root: std::sync::RwLock<Option<Root>>,
 }
 
@@ -292,7 +293,7 @@ impl NoteCommitmentTree {
 
     /// Returns an as-yet unused leaf node value of a Sprout note commitment tree.
     ///
-    /// Uncommitted^Sprout = [0]^(l^[Sprout_Merkle]).
+    /// Uncommitted^Sprout = \[0\]^(l^[Sprout_Merkle]).
     ///
     /// [Sprout_Merkle]: https://zips.z.cash/protocol/protocol.pdf#constants
     pub fn uncommitted() -> [u8; 32] {

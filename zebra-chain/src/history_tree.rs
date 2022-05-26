@@ -54,7 +54,7 @@ enum InnerHistoryTree {
 }
 
 /// History tree (Merkle mountain range) structure that contains information about
-/// the block history, as specified in [ZIP-221][https://zips.z.cash/zip-0221].
+/// the block history, as specified in [ZIP-221](https://zips.z.cash/zip-0221).
 #[derive(Debug)]
 pub struct NonEmptyHistoryTree {
     network: Network,
@@ -75,8 +75,8 @@ pub struct NonEmptyHistoryTree {
 impl NonEmptyHistoryTree {
     /// Recreate a [`HistoryTree`] from previously saved data.
     ///
-    /// The parameters must come from the values of [HistoryTree::size],
-    /// [HistoryTree::peaks] and [HistoryTree::current_height] of a HistoryTree.
+    /// The parameters must come from the values of [`NonEmptyHistoryTree::size`],
+    /// [`NonEmptyHistoryTree::peaks`] and [`NonEmptyHistoryTree::current_height`] of a HistoryTree.
     pub fn from_cache(
         network: Network,
         size: u32,

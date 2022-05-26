@@ -545,7 +545,7 @@ impl Block {
 
 /// Fix `transaction` so it obeys more consensus rules.
 ///
-/// Spends [`OutPoint`]s from `utxos`, and adds newly created outputs.
+/// Spends [`transparent::OutPoint`]s from `utxos`, and adds newly created outputs.
 ///
 /// If the transaction can't be fixed, returns `None`.
 pub fn fix_generated_transaction<F, T, E>(
@@ -625,7 +625,7 @@ where
     }
 }
 
-/// Find a valid [`OutPoint`] in `utxos` to spend in `transaction`.
+/// Find a valid [`transparent::OutPoint`] in `utxos` to spend in `transaction`.
 ///
 /// Modifies `transaction` and updates `spend_restriction` if needed.
 ///

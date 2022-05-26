@@ -106,7 +106,7 @@ fn incomplete_addition(
 /// the Sinsemilla hash for the Orchard incremental Merkle tree (§ 5.4.1.3
 /// ‘MerkleCRH^Orchard Hash Function’).
 ///
-/// SinsemillaHashToPoint(𝐷: B^Y^[N] , 𝑀 : B ^[{0 .. 𝑘·𝑐}] ) → P ∪ {⊥}
+/// SinsemillaHashToPoint(𝐷: B^Y^\[N\] , 𝑀 : B ^[{0 .. 𝑘·𝑐}] ) → P ∪ {⊥}
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash>
 ///
@@ -147,7 +147,7 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<u8, Lsb0>) -> Option<pallas
 /// PedersenHash) is to make efcient use of the lookups available in recent
 /// proof systems including Halo 2."
 ///
-/// SinsemillaHash: B^Y^[N] × B[{0 .. 𝑘·𝑐}] → P_𝑥 ∪ {⊥}
+/// SinsemillaHash: B^Y^\[N\] × B[{0 .. 𝑘·𝑐}] → P_𝑥 ∪ {⊥}
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash>
 ///
@@ -165,7 +165,7 @@ pub fn sinsemilla_hash(D: &[u8], M: &BitVec<u8, Lsb0>) -> Option<pallas::Base> {
 /// hash, and adding a randomized point on the Pallas curve (with complete
 /// addition, vs incomplete addition as used in [`sinsemilla_hash_to_point`]).
 ///
-/// SinsemillaCommit_r(D, M) := SinsemillaHashToPoint(D || "-M", M) + [r]GroupHash^P(D || "-r", "")
+/// SinsemillaCommit_r(D, M) := SinsemillaHashToPoint(D || "-M", M) + \[r\]GroupHash^P(D || "-r", "")
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit>
 #[allow(non_snake_case)]

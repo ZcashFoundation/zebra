@@ -83,7 +83,7 @@ impl From<Psi> for [u8; 32] {
 }
 
 impl From<SeedRandomness> for Psi {
-    /// rcm = ToScalar^Orchard((PRF^expand_rseed ([9]))
+    /// rcm = ToScalar^Orchard((PRF^expand_rseed (\[9\]))
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardsend>
     fn from(rseed: SeedRandomness) -> Self {

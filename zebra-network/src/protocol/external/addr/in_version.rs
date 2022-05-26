@@ -1,6 +1,6 @@
 //! Zcash `version` message node address serialization.
 //!
-//! The [`AddrInVersion`] format is the same as the `addr` ([`v1`]) message,
+//! The [`AddrInVersion`] format is the same as the `addr` ([`super::v1`]) message,
 //! but without the timestamp field.
 
 use std::{

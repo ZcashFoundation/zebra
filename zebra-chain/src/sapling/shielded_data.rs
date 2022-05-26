@@ -149,7 +149,7 @@ where
         /// transaction.
         ///
         /// Use the [`ShieldedData::outputs`] method to get an iterator over the
-        /// [`Outputs`]s in this `TransferData`.
+        /// [`Output`]s in this `TransferData`.
         maybe_outputs: Vec<Output>,
     },
 
@@ -162,7 +162,7 @@ where
         /// At least one output, in the order they appear in the transaction.
         ///
         /// Use the [`ShieldedData::outputs`] method to get an iterator over the
-        /// [`Outputs`]s in this `TransferData`.
+        /// [`Output`]s in this `TransferData`.
         outputs: AtLeastOne<Output>,
     },
 }

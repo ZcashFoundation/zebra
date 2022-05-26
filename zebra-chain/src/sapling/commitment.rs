@@ -312,11 +312,11 @@ impl TryFrom<ValueCommitment> for NotSmallOrderValueCommitment {
     ///
     /// # Consensus
     ///
-    /// > cv and rk [MUST NOT be of small order][1], i.e. [h_J]cv MUST NOT be 𝒪_J
-    /// > and [h_J]rk MUST NOT be 𝒪_J.
+    /// > cv and rk [MUST NOT be of small order][1], i.e. \[h_J\]cv MUST NOT be 𝒪_J
+    /// > and \[h_J\]rk MUST NOT be 𝒪_J.
     ///
-    /// > cv and epk [MUST NOT be of small order][2], i.e. [h_J]cv MUST NOT be 𝒪_J
-    /// > and [ℎ_J]epk MUST NOT be 𝒪_J.
+    /// > cv and epk [MUST NOT be of small order][2], i.e. \[h_J\]cv MUST NOT be 𝒪_J
+    /// > and \[ℎ_J\]epk MUST NOT be 𝒪_J.
     ///
     /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
     /// [2]: https://zips.z.cash/protocol/protocol.pdf#outputdesc
