@@ -31,7 +31,7 @@ impl Tracing {
         // Construct a tracing subscriber with the supplied filter and enable reloading.
         let builder = FmtSubscriber::builder()
             .with_ansi(use_color)
-            .with_env_filter(filter)
+            .with_env_filter(&filter)
             .with_filter_reloading();
         let filter_handle = builder.reload_handle();
 
@@ -62,6 +62,13 @@ impl Tracing {
             (Some(layer1), Some(layer2)) => subscriber.with(layer1).with(layer2).init(),
         };
 
+        tracing::info!(
+            ?filter,
+            TRACING_STATIC_MAX_LEVEL = ?tracing::level_filters::STATIC_MAX_LEVEL,
+            LOG_STATIC_MAX_LEVEL = ?log::STATIC_MAX_LEVEL,
+            "started tracing component",
+        );
+
         Ok(Self {
             filter_handle,
             flamegrapher,
@@ -79,9 +86,19 @@ impl Tracing {
     ///
     /// This can be used to provide a dynamic tracing filter endpoint.
     pub fn reload_filter(&self, filter: impl Into<EnvFilter>) {
+        let filter = filter.into();
+        let filter_str = filter.to_string();
+
         self.filter_handle
             .reload(filter)
             .expect("the subscriber is not dropped before the component is");
+
+        tracing::info!(
+            filter = ?filter_str,
+            TRACING_STATIC_MAX_LEVEL = ?tracing::level_filters::STATIC_MAX_LEVEL,
+            LOG_STATIC_MAX_LEVEL = ?log::STATIC_MAX_LEVEL,
+            "reloaded tracing filter",
+        );
     }
 }
 
