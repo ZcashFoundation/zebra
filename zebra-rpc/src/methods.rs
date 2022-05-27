@@ -126,16 +126,18 @@ pub trait Rpc {
     /// # Parameters
     ///
     /// - `height`: (string, required) The height number for the block to be returned.
+    /// - `verbosity`: (numeric, optional, default=1) 0 for hex encoded data, 1 for a json object,
+    ///     and 2 for json object with transaction data.
     ///
     /// # Notes
     ///
-    /// We only expose the `data` field as lightwalletd uses the non-verbose
-    /// mode for all getblock calls: <https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L232>
+    /// With verbosity=1, [`lightwalletd` only reads the `tx` field of the
+    /// result](https://github.com/zcash/lightwalletd/blob/dfac02093d85fb31fb9a8475b884dd6abca966c7/common/common.go#L152),
+    /// so we only return that for now.
     ///
     /// `lightwalletd` only requests blocks by height, so we don't support
     /// getting blocks by hash. (But we parse the height as a JSON string, not an integer).
-    ///
-    /// The `verbosity` parameter is ignored but required in the call.
+    /// `lightwalletd` also does not use verbosity=2, so we don't support it.
     #[rpc(name = "getblock")]
     fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>>;
 
@@ -515,7 +517,7 @@ where
         .boxed()
     }
 
-    fn get_block(&self, height: String, _verbosity: u8) -> BoxFuture<Result<GetBlock>> {
+    fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>> {
         let mut state = self.state.clone();
 
         async move {
@@ -538,7 +540,21 @@ where
                 })?;
 
             match response {
-                zebra_state::ReadResponse::Block(Some(block)) => Ok(GetBlock(block.into())),
+                zebra_state::ReadResponse::Block(Some(block)) => match verbosity {
+                    0 => Ok(GetBlock::Raw(block.into())),
+                    1 => Ok(GetBlock::Object {
+                        tx: block
+                            .transactions
+                            .iter()
+                            .map(|tx| tx.hash().encode_hex())
+                            .collect(),
+                    }),
+                    _ => Err(Error {
+                        code: ErrorCode::InvalidParams,
+                        message: "Invalid verbosity value".to_string(),
+                        data: None,
+                    }),
+                },
                 zebra_state::ReadResponse::Block(None) => Err(Error {
                     code: MISSING_BLOCK_ERROR_CODE,
                     message: "Block not found".to_string(),
@@ -1070,7 +1086,16 @@ pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
 ///
 /// See the notes for the [`Rpc::get_block` method].
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct GetBlock(#[serde(with = "hex")] SerializedBlock);
+#[serde(untagged)]
+pub enum GetBlock {
+    /// The request block, hex-encoded.
+    Raw(#[serde(with = "hex")] SerializedBlock),
+    /// The block object.
+    Object {
+        /// Vector of hex-encoded TXIDs of the transactions of the block
+        tx: Vec<String>,
+    },
+}
 
 /// Response to a `getbestblockhash` RPC request.
 ///
