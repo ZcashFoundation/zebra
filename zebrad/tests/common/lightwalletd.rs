@@ -350,12 +350,12 @@ impl LightwalletdTestType {
 
         if self.needs_zebra_cached_state() {
             // Fail if we need a cached Zebra state, but it's empty
-            zebrad_failure_messages.push("loaded Zebra state cache tip=None".to_string());
+            zebrad_failure_messages.push("loaded Zebra state cache .*tip.*=.*None".to_string());
         }
         if *self == LaunchWithEmptyState {
             // Fail if we need an empty Zebra state, but it has blocks
             zebrad_failure_messages
-                .push(r"loaded Zebra state cache tip=.*Height\([1-9][0-9]*\)".to_string());
+                .push(r"loaded Zebra state cache .*tip.*=.*Height\([1-9][0-9]*\)".to_string());
         }
 
         let zebrad_ignore_messages = Vec::new();
