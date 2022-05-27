@@ -107,3 +107,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
+
+  lightwalletd-grpc-test:
+    name: lightwalletd GRPC tests / Run lwd-grpc-wallet test
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
