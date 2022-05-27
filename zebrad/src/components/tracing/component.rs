@@ -13,6 +13,8 @@ use super::flame;
 /// Abscissa component for initializing the `tracing` subsystem
 pub struct Tracing {
     /// The installed filter reloading handle, if enabled.
+    //
+    // TODO: when fmt::Subscriber supports per-layer filtering, remove the Option
     filter_handle: Option<Handle<EnvFilter, Formatter>>,
 
     /// The originally configured filter.
@@ -34,6 +36,7 @@ impl Tracing {
             config.force_use_color || (config.use_color && atty::is(atty::Stream::Stdout));
 
         // Construct a format subscriber with the supplied global logging filter, and enable reloading.
+        // TODO: when fmt::Subscriber supports per-layer filtering, always enable this code
         #[cfg(not(all(feature = "tokio-console", tokio_unstable)))]
         let (subscriber, filter_handle) = {
             use tracing_subscriber::FmtSubscriber;
@@ -51,7 +54,9 @@ impl Tracing {
 
         // Construct a tracing registry with the supplied per-layer logging filter,
         // and disable filter reloading.
-        // (Tracing registries don't have an API for filter reloading.)
+        //
+        // TODO: when fmt::Subscriber supports per-layer filtering,
+        //       remove this registry code, and layer tokio-console on top of fmt::Subscriber
         #[cfg(all(feature = "tokio-console", tokio_unstable))]
         let (subscriber, filter_handle) = {
             use tracing_subscriber::{fmt, Layer};
@@ -85,7 +90,8 @@ impl Tracing {
             let layer = tracing_journald::layer()
                 .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?;
 
-            // If the global filter can't be used, add a per-layer filter instead
+            // If the global filter can't be used, add a per-layer filter instead.
+            // TODO: when fmt::Subscriber supports per-layer filtering, always enable this code
             #[cfg(all(feature = "tokio-console", tokio_unstable))]
             let layer = {
                 use tracing_subscriber::Layer;
@@ -101,9 +107,8 @@ impl Tracing {
         #[cfg(feature = "enable-sentry")]
         let subscriber = subscriber.with(sentry_tracing::layer());
 
-        // spawn the console server in the background, and return the console layer
-        //
-        // TODO: set Builder::poll_duration_histogram_max() ?
+        // spawn the console server in the background, and apply the console layer
+        // TODO: set Builder::poll_duration_histogram_max() if needed
         #[cfg(all(feature = "tokio-console", tokio_unstable))]
         let subscriber = subscriber.with(console_subscriber::spawn());
 
