@@ -77,14 +77,33 @@ async fn rpc_getblock() {
         Mainnet,
     );
 
-    // Make calls and check response
-    for (i, block) in blocks.into_iter().enumerate() {
+    // Make calls with verbosity=0 and check response
+    for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(i.to_string(), 0u8)
             .await
             .expect("We should have a GetBlock struct");
 
-        assert_eq!(get_block.0, block.into());
+        assert_eq!(get_block, GetBlock::Raw(block.clone().into()));
+    }
+
+    // Make calls with verbosity=1 and check response
+    for (i, block) in blocks.iter().enumerate() {
+        let get_block = rpc
+            .get_block(i.to_string(), 1u8)
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(
+            get_block,
+            GetBlock::Object {
+                tx: block
+                    .transactions
+                    .iter()
+                    .map(|tx| tx.hash().encode_hex())
+                    .collect()
+            }
+        );
     }
 
     mempool.expect_no_requests().await;
