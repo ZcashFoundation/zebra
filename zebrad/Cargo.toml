@@ -75,6 +75,10 @@ rand = { version = "0.8.5", package = "rand" }
 sentry-tracing = { version = "0.23.0", optional = true }
 sentry = { version = "0.23.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"], optional = true }
 
+# zebrad uses tracing for logging,
+# we only use `log` to print the static log levels in transitive dependencies
+log = { version = "0.4.14", optional = true }
+
 # test feature proptest-impl
 proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
