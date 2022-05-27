@@ -85,7 +85,9 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     ///
     /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
-    /// See [`Transaction::sprout_value_balance`] for details.
+    /// See [`sprout_value_balance`][svb] for details.
+    ///
+    /// [svb]: crate::transaction::Transaction::sprout_value_balance
     pub fn value_balance(&self) -> Result<Amount<NegativeAllowed>, amount::Error> {
         self.joinsplit_value_balances().sum()
     }
@@ -93,7 +95,9 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     /// Return a list of sprout value balances,
     /// the changes in the transaction value pool due to each sprout [`JoinSplit`].
     ///
-    /// See [`Transaction::sprout_value_balance`] for details.
+    /// See [`sprout_value_balance`][svb] for details.
+    ///
+    /// [svb]: crate::transaction::Transaction::sprout_value_balance
     pub fn joinsplit_value_balances(
         &self,
     ) -> Box<dyn Iterator<Item = Amount<NegativeAllowed>> + '_> {

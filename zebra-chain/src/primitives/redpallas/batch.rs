@@ -132,11 +132,10 @@ impl<'msg, M: AsRef<[u8]>> From<(VerificationKeyBytes<Binding>, Signature<Bindin
 impl Item {
     /// Perform non-batched verification of this `Item`.
     ///
-    /// This is useful (in combination with `Item::clone`) for implementing fallback
-    /// logic when batch verification fails. In contrast to
-    /// [`VerificationKey::verify`](crate::VerificationKey::verify), which requires
-    /// borrowing the message data, the `Item` type is unlinked from the lifetime of
-    /// the message.
+    /// This is useful (in combination with `Item::clone`) for implementing
+    /// fallback logic when batch verification fails. In contrast to
+    /// [`VerificationKey::verify`], which requires borrowing the message data,
+    /// the `Item` type is unlinked from the lifetime of the message.
     pub fn verify_single(self) -> Result<(), Error> {
         match self.inner {
             Inner::Binding { vk_bytes, sig, c } => VerificationKey::<Binding>::try_from(vk_bytes)

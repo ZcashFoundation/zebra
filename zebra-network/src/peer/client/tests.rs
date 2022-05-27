@@ -81,7 +81,7 @@ impl ClientTestHarness {
             .expect("heartbeat shutdown receiver endpoint has already been dropped");
     }
 
-    /// Closes the receiver endpoint of [`ClientRequests`] that are supposed to be sent to the
+    /// Closes the receiver endpoint of [`ClientRequest`]s that are supposed to be sent to the
     /// remote peer.
     ///
     /// The remote peer that would receive the requests is mocked for testing.
@@ -92,7 +92,7 @@ impl ClientTestHarness {
             .close();
     }
 
-    /// Drops the receiver endpoint of [`ClientRequests`], forcefully closing the channel.
+    /// Drops the receiver endpoint of [`ClientRequest`]s, forcefully closing the channel.
     ///
     /// The remote peer that would receive the requests is mocked for testing.
     pub fn drop_outbound_client_request_receiver(&mut self) {
@@ -118,7 +118,7 @@ impl ClientTestHarness {
         }
     }
 
-    /// Drops the receiver endpoint of [`InventoryChanges`], forcefully closing the channel.
+    /// Drops the receiver endpoint of [`InventoryChange`]s, forcefully closing the channel.
     ///
     /// The inventory registry that would track the changes is mocked for testing.
     ///

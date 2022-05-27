@@ -34,8 +34,11 @@ pub(crate) mod tests;
 ///
 /// Zebra also tracks how recently a peer has sent us messages, and derives peer
 /// liveness based on the current time. This derived state is tracked using
-/// [`AddressBook::maybe_connected_peers`] and
-/// [`AddressBook::reconnection_peers`].
+/// [`maybe_connected_peers`][mcp] and
+/// [`reconnection_peers`][rp].
+///
+/// [mcp]: crate::AddressBook::maybe_connected_peers
+/// [rp]: crate::AddressBook::reconnection_peers
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum PeerAddrState {
@@ -309,7 +312,7 @@ impl MetaAddr {
     /// and the services must be the services from that peer's handshake.
     ///
     /// Otherwise:
-    /// - malicious peers could interfere with other peers' `AddressBook` state,
+    /// - malicious peers could interfere with other peers' [`AddressBook`](crate::AddressBook) state,
     ///   or
     /// - Zebra could advertise unreachable addresses to its own peers.
     pub fn new_responded(addr: &SocketAddr, services: &PeerServices) -> MetaAddrChange {
@@ -851,9 +854,11 @@ impl Ord for MetaAddr {
     /// with `Responded` peers sorted first as a group.
     ///
     /// This order should not be used for reconnection attempts: use
-    /// [`AddressBook::reconnection_peers`] instead.
+    /// [`reconnection_peers`][rp] instead.
     ///
     /// See [`CandidateSet`] for more details.
+    ///
+    /// [rp]: crate::AddressBook::reconnection_peers
     fn cmp(&self, other: &Self) -> Ordering {
         use std::net::IpAddr::{V4, V6};
         use Ordering::*;

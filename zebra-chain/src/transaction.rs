@@ -1201,7 +1201,9 @@ impl Transaction {
     ///
     /// Each value balance is the sprout `vpub_new` field, minus the `vpub_old` field.
     ///
-    /// See `sprout_value_balance` for details.
+    /// See [`sprout_value_balance`][svb] for details.
+    ///
+    /// [svb]: crate::transaction::Transaction::sprout_value_balance
     fn sprout_joinsplit_value_balances(
         &self,
     ) -> impl Iterator<Item = ValueBalance<NegativeAllowed>> + '_ {

@@ -9,7 +9,7 @@ use zebra_chain::serialization::SerializationError;
 
 use crate::protocol::external::InventoryHash;
 
-/// A wrapper around `Arc<PeerError>` that implements `Error`.
+/// A wrapper around [`Arc<PeerError>`] that implements `Error`.
 #[derive(Error, Debug, Clone)]
 #[error(transparent)]
 pub struct SharedPeerError(Arc<TracedError<PeerError>>);
@@ -40,19 +40,19 @@ pub enum PeerError {
     #[error("Peer closed connection")]
     ConnectionClosed,
 
-    /// Zebra dropped the [`Connection`].
+    /// Zebra dropped the [`Connection`](crate::peer::Connection).
     #[error("Internal connection dropped")]
     ConnectionDropped,
 
-    /// Zebra dropped the [`Client`].
+    /// Zebra dropped the [`Client`](crate::peer::Client).
     #[error("Internal client dropped")]
     ClientDropped,
 
-    /// A [`Client`]'s internal connection task exited.
+    /// A [`Client`](crate::peer::Client)'s internal connection task exited.
     #[error("Internal peer connection task exited")]
     ConnectionTaskExited,
 
-    /// Zebra's [`Client`] cancelled its heartbeat task.
+    /// Zebra's [`Client`](crate::peer::Client) cancelled its heartbeat task.
     #[error("Internal client cancelled its heartbeat task")]
     ClientCancelledHeartbeatTask,
 
@@ -64,7 +64,7 @@ pub enum PeerError {
     #[error("Sending Client request timed out")]
     ConnectionSendTimeout,
 
-    /// Receiving a response to a [`peer::Client`] request took too long.
+    /// Receiving a response to a [`Client`](crate::peer::Client) request took too long.
     #[error("Receiving client response timed out")]
     ConnectionReceiveTimeout,
 
@@ -94,7 +94,9 @@ pub enum PeerError {
     /// or peers can download and verify the missing data.
     ///
     /// If the peer has some of the data, the request returns an [`Ok`] response,
-    /// with any `notfound` data is marked as [`Missing`](InventoryResponse::Missing).
+    /// with any `notfound` data is marked as [`Missing`][m].
+    ///
+    /// [m] crate::protocol::external::InventoryResponse::Missing
     #[error("Remote peer could not find any of the items: {0:?}")]
     NotFoundResponse(Vec<InventoryHash>),
 
@@ -205,7 +207,7 @@ impl ErrorSlot {
     }
 }
 
-/// Error returned when the `ErrorSlot` already contains an error.
+/// Error returned when the [`ErrorSlot`] already contains an error.
 #[derive(Clone, Debug)]
 pub struct AlreadyErrored {
     /// The original error in the error slot.
