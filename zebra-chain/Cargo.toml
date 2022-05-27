@@ -71,7 +71,7 @@ redjubjub = "0.5.0"
 zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
-color-eyre = "0.6.0"
+color-eyre = "0.6.1"
 criterion = { version = "0.3.5", features = ["html_reports"] }
 itertools = "0.10.3"
 spandoc = "0.2.2"
