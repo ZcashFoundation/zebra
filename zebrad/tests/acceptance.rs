@@ -756,6 +756,7 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
 /// The timeout is specified using an environment variable, with the name configured by the
 /// `timeout_argument_name` parameter. The value of the environment variable must the number of
 /// minutes specified as an integer.
+#[allow(clippy::print_stderr)]
 fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
     let timeout_argument: Option<u64> = env::var(timeout_argument_name)
         .ok()
