@@ -1,0 +1,19 @@
+name: Lint
+
+on:
+  pull_request:
+    branches:
+      - 'main'
+
+jobs:
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
