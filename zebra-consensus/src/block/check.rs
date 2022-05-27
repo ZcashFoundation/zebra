@@ -29,7 +29,7 @@ pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>,
     //
     // > A block MUST have at least one transaction
     //
-    // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
     let first = block
         .transactions
         .get(0)
@@ -37,19 +37,19 @@ pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>,
     // > The first transaction in a block MUST be a coinbase transaction,
     // > and subsequent transactions MUST NOT be coinbase transactions.
     //
-    // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
     //
     // > A transaction that has a single transparent input with a null prevout
     // > field, is called a coinbase transaction.
     //
-    // <https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions>
+    // https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions
     let mut rest = block.transactions.iter().skip(1);
     if !first.is_coinbase() {
         return Err(TransactionError::CoinbasePosition)?;
     }
     // > A transparent input in a non-coinbase transaction MUST NOT have a null prevout
     //
-    // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     if !rest.all(|tx| tx.is_valid_non_coinbase()) {
         return Err(TransactionError::CoinbaseAfterFirst)?;
     }
@@ -93,7 +93,7 @@ pub fn difficulty_is_valid(
     //
     // > The block MUST pass the difficulty filter.
     //
-    // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
     //
     // The difficulty filter is also context-free.
     if hash > &difficulty_threshold {
@@ -114,7 +114,7 @@ pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error
     //
     // > `solution` MUST represent a valid Equihash solution.
     //
-    // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
     header.solution.check(header)
 }
 
@@ -157,7 +157,7 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
         // > that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
         // > recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
+        // https://zips.z.cash/protocol/protocol.pdf#fundingstreams
         for (receiver, expected_amount) in funding_streams {
             let address =
                 subsidy::funding_streams::funding_stream_address(height, network, receiver);
@@ -208,7 +208,7 @@ pub fn miner_fees_are_valid(
     // > minus vbalanceSapling, minus vbalanceOrchard, MUST NOT be greater than the value
     // > in zatoshi of block subsidy plus the transaction fees paid by transactions in this block.
     //
-    // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance)
         .map_err(|_| SubsidyError::SumOverflow)?;
     let right = (block_subsidy + block_miner_fees).map_err(|_| SubsidyError::SumOverflow)?;

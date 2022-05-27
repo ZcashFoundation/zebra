@@ -114,7 +114,7 @@ impl NoteCommitment {
         s.append(&mut bitvec![1; 6]);
 
         // Jubjub repr_J canonical byte encoding
-        // <https://zips.z.cash/protocol/protocol.pdf#jubjub>
+        // https://zips.z.cash/protocol/protocol.pdf#jubjub
         //
         // The `TryFrom<Diversifier>` impls for the `jubjub::*Point`s handles
         // calling `DiversifyHash` implicitly.

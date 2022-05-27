@@ -49,7 +49,7 @@ impl<A, M> InventoryResponse<A, M> {
     /// Maps a `InventoryResponse<A, M>` to `InventoryResponse<B, M>` by applying a function to a
     /// contained [`Available`] value, leaving the [`Missing`] value untouched.
     pub fn map_available<B, F: FnOnce(A) -> B>(self, f: F) -> InventoryResponse<B, M> {
-        // Based on Result::map from <https://doc.rust-lang.org/src/core/result.rs.html#765>
+        // Based on Result::map from https://doc.rust-lang.org/src/core/result.rs.html#765
         match self {
             Available(a) => Available(f(a)),
             Missing(m) => Missing(m),
@@ -59,7 +59,7 @@ impl<A, M> InventoryResponse<A, M> {
     /// Maps a `InventoryResponse<A, M>` to `InventoryResponse<A, N>` by applying a function to a
     /// contained [`Missing`] value, leaving the [`Available`] value untouched.
     pub fn map_missing<N, F: FnOnce(M) -> N>(self, f: F) -> InventoryResponse<A, N> {
-        // Based on Result::map_err from <https://doc.rust-lang.org/src/core/result.rs.html#850>
+        // Based on Result::map_err from https://doc.rust-lang.org/src/core/result.rs.html#850
         match self {
             Available(a) => Available(a),
             Missing(m) => Missing(f(m)),

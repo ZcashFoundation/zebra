@@ -320,7 +320,7 @@ impl Input {
 )]
 pub struct Output {
     /// Transaction value.
-    // At <https://en.bitcoin.it/wiki/Protocol_documentation#tx>, this is an i64.
+    // At https://en.bitcoin.it/wiki/Protocol_documentation#tx, this is an i64.
     pub value: Amount<NonNegative>,
 
     /// The lock script defines the conditions under which this output can be spent.

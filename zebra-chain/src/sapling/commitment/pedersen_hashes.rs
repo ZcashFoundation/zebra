@@ -76,7 +76,7 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<u8, Lsb0>) -> jubjub::
     //
     // This loop is 1-indexed per the math definitions in the spec.
     //
-    // <https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash>
+    // https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
     for (i, segment) in M
         .chunks(189)
         .enumerate()

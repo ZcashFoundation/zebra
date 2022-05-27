@@ -5,7 +5,7 @@ use crate::groth16::h_sig;
 #[test]
 fn h_sig_works() {
     // Test vector from zcash:
-    // <https://github.com/zcash/zcash/blob/2c17d1e2740115c9c88046db4a3bb0aa069dae4f/src/gtest/test_joinsplit.cpp#L252>
+    // https://github.com/zcash/zcash/blob/2c17d1e2740115c9c88046db4a3bb0aa069dae4f/src/gtest/test_joinsplit.cpp#L252
     let tests: [[&str; 5]; 4] = [
         [
             "6161616161616161616161616161616161616161616161616161616161616161",

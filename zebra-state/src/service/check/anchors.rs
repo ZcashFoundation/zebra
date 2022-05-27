@@ -48,7 +48,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
                 // > use as the anchor of subsequent JoinSplit descriptions in
                 // > the same transaction.
                 //
-                // <https://zips.z.cash/protocol/protocol.pdf#joinsplit>
+                // https://zips.z.cash/protocol/protocol.pdf#joinsplit
                 //
                 // # Consensus
                 //
@@ -61,7 +61,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
                 // > anchor MUST be the output Sprout treestate of a previous
                 // > block.
                 //
-                // <https://zips.z.cash/protocol/protocol.pdf#joinsplit>
+                // https://zips.z.cash/protocol/protocol.pdf#joinsplit
                 //
                 // Note that in order to satisfy the latter consensus rule above,
                 // [`interstitial_trees`] is always empty in the first iteration
@@ -116,7 +116,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
         // > in each Spend description for v4 transactions, or encoded once and
         // > shared between all Spend descriptions in a v5 transaction.
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
+        // https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs
         //
         // This rule is also implemented in
         // [`zebra_chain::sapling::shielded_data`].
@@ -146,7 +146,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
         // > (i.e. when there are any Action descriptions), MUST refer to some
         // > earlier block’s final Orchard treestate.
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#actions>
+        // https://zips.z.cash/protocol/protocol.pdf#actions
         if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
             tracing::debug!(?orchard_shielded_data.shared_anchor, "observed orchard anchor");
 

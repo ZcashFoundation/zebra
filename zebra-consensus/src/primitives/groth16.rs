@@ -313,7 +313,7 @@ where
         //
         // > Elements of a JoinSplit description MUST have the types given above
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
+        // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
         //
         // This validates the 𝜋_{ZKJoinSplit} element. In #3179 we plan to validate
         // during deserialization, see [`JoinSplit::zcash_deserialize`].

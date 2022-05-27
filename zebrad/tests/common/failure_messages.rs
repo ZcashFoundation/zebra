@@ -66,7 +66,7 @@ pub const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     "json: cannot unmarshal",
     "into Go value of type",
     // lightwalletd custom RPC error messages from:
-    // <https://github.com/adityapk00/lightwalletd/blob/master/common/common.go>
+    // https://github.com/adityapk00/lightwalletd/blob/master/common/common.go
     "block requested is newer than latest block",
     "Cache add failed",
     "error decoding",

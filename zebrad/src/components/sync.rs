@@ -938,7 +938,7 @@ where
                 // attempt to catch if that happens and log it.
                 //
                 // TODO: add a proper test and remove this
-                // <https://github.com/ZcashFoundation/zebra/issues/2909>
+                // https://github.com/ZcashFoundation/zebra/issues/2909
                 let err_str = format!("{:?}", e);
                 if err_str.contains("AlreadyVerified")
                     || err_str.contains("AlreadyInChain")

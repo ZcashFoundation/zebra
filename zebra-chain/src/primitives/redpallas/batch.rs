@@ -146,7 +146,7 @@ impl Item {
                 //
                 // > Elements of an Action description MUST be canonical encodings of the types given above.
                 //
-                // <https://zips.z.cash/protocol/protocol.pdf#actiondesc>
+                // https://zips.z.cash/protocol/protocol.pdf#actiondesc
                 //
                 // This validates the `rk` element, whose type is
                 // SpendAuthSig^{Orchard}.Public, i.e. ℙ.
@@ -255,7 +255,7 @@ impl Verifier {
                     //
                     // > Elements of an Action description MUST be canonical encodings of the types given above.
                     //
-                    // <https://zips.z.cash/protocol/protocol.pdf#actiondesc>
+                    // https://zips.z.cash/protocol/protocol.pdf#actiondesc
                     //
                     // This validates the `rk` element, whose type is
                     // SpendAuthSig^{Orchard}.Public, i.e. ℙ.

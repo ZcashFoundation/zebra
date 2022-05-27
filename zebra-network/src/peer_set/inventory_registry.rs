@@ -125,7 +125,7 @@ impl<T> InventoryStatus<T> {
 
     /// Maps an `InventoryStatus<T>` to `InventoryStatus<U>` by applying a function to a contained value.
     pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> InventoryStatus<U> {
-        // Based on Option::map from <https://doc.rust-lang.org/src/core/option.rs.html#844>
+        // Based on Option::map from https://doc.rust-lang.org/src/core/option.rs.html#844
         match self {
             Available(item) => Available(f(item)),
             Missing(item) => Missing(f(item)),

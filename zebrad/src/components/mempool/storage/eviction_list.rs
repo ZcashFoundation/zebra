@@ -42,7 +42,7 @@ impl EvictionList {
     /// If the TXID is already in the list.
     ///
     pub fn insert(&mut self, key: transaction::Hash) {
-        // From <https://zips.z.cash/zip-0401#specification>:
+        // From https://zips.z.cash/zip-0401#specification:
         // > Nodes SHOULD remove transactions from RecentlyEvicted that were evicted more than
         // > mempoolevictionmemoryminutes minutes ago. This MAY be done periodically,
         // > and/or just before RecentlyEvicted is accessed when receiving a transaction.

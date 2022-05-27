@@ -57,7 +57,7 @@ pub const COMMITMENTS: [&str; 16] = [
 ];
 
 // Calculated by modifying TestCommitmentTree in
-// <https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/merkle_tree.rs>
+// https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/merkle_tree.rs
 // to compute the full Sapling height root (32).
 pub const ROOTS: [&str; 16] = [
     "ee880ed73e96ba0739578c87ba8e6a4bc33b5e63bb98875e6e2f04b214e9fb59",

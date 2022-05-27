@@ -140,7 +140,7 @@ fn block_commitment_is_valid_for_chain_history(
             // > the Sapling note commitment tree for the final Sapling treestate of
             // > this block .
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+            // https://zips.z.cash/protocol/protocol.pdf#blockheader
             //
             // We don't need to validate this rule since we checkpoint on Canopy.
             //
@@ -153,7 +153,7 @@ fn block_commitment_is_valid_for_chain_history(
             // > [Heartwood and Canopy only, pre-NU5] hashLightClientRoot MUST be set to the
             // > hashChainHistoryRoot for this block , as specified in [ZIP-221].
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+            // https://zips.z.cash/protocol/protocol.pdf#blockheader
             //
             // The network is checked by [`Block::commitment`] above; it will only
             // return the chain history root if it's Heartwood or Canopy.
@@ -263,7 +263,7 @@ fn difficulty_threshold_is_valid(
     // > For each block other than the genesis block, `nTime` MUST be strictly greater
     // than the median-time-past of that block.
     //
-    // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
     let genesis_height = NetworkUpgrade::Genesis
         .activation_height(network)
         .expect("Zebra always has a genesis height available");
@@ -281,7 +281,7 @@ fn difficulty_threshold_is_valid(
     // or greater on Testnet, `nTime` MUST be less than or equal to the median-time-past
     // of that block plus 90*60 seconds.
     //
-    // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
     if NetworkUpgrade::is_max_block_time_enforced(network, candidate_height)
         && candidate_time > block_time_max
     {
@@ -295,7 +295,7 @@ fn difficulty_threshold_is_valid(
     //
     // > For a block at block height `Height`, `nBits` MUST be equal to `ThresholdBits(Height)`.
     //
-    // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
     let expected_difficulty = difficulty_adjustment.expected_difficulty_threshold();
     if difficulty_threshold != expected_difficulty {
         Err(ValidateContextError::InvalidDifficultyThreshold {

@@ -138,16 +138,16 @@ impl ZcashDeserialize for OutputInTransactionV4 {
         //
         // > Elements of a Output description MUST be valid encodings of the types given above.
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#outputdesc>
+        // https://zips.z.cash/protocol/protocol.pdf#outputdesc
         //
         // > LEOS2IP_{256}(cmu) MUST be less than 𝑞_J.
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus>
+        // https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
         //
         // See comments below for each specific type.
         Ok(OutputInTransactionV4(Output {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
-            // <https://zips.z.cash/protocol/protocol.pdf#abstractcommit>
+            // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
             // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
             cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
             // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes.
@@ -155,21 +155,21 @@ impl ZcashDeserialize for OutputInTransactionV4 {
             // See [`jubjub::Fq::zcash_deserialize`].
             cm_u: jubjub::Fq::zcash_deserialize(&mut reader)?,
             // Type is `KA^{Sapling}.Public`, i.e. J
-            // <https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement>
+            // https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
             // See [`keys::EphemeralPublicKey::zcash_deserialize`].
             ephemeral_key: keys::EphemeralPublicKey::zcash_deserialize(&mut reader)?,
             // Type is `Sym.C`, i.e. `B^Y^{[N]}`, i.e. arbitrary-sized byte arrays
-            // <https://zips.z.cash/protocol/protocol.pdf#concretesym> but fixed to
-            // 580 bytes in <https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus>
+            // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
+            // 580 bytes in https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
             // See [`note::EncryptedNote::zcash_deserialize`].
             enc_ciphertext: note::EncryptedNote::zcash_deserialize(&mut reader)?,
             // Type is `Sym.C`, i.e. `B^Y^{[N]}`, i.e. arbitrary-sized byte arrays.
-            // <https://zips.z.cash/protocol/protocol.pdf#concretesym> but fixed to
-            // 80 bytes in <https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus>
+            // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
+            // 80 bytes in https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
             // See [`note::WrappedNoteKey::zcash_deserialize`].
             out_ciphertext: note::WrappedNoteKey::zcash_deserialize(&mut reader)?,
             // Type is `ZKOutput.Proof`, described in
-            // <https://zips.z.cash/protocol/protocol.pdf#grothencoding>
+            // https://zips.z.cash/protocol/protocol.pdf#grothencoding
             // It is not enforced here; this just reads 192 bytes.
             // The type is validated when validating the proof, see
             // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
@@ -201,16 +201,16 @@ impl ZcashDeserialize for OutputPrefixInTransactionV5 {
         //
         // > Elements of a Output description MUST be valid encodings of the types given above.
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#outputdesc>
+        // https://zips.z.cash/protocol/protocol.pdf#outputdesc
         //
         // > LEOS2IP_{256}(cmu) MUST be less than 𝑞_J.
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus>
+        // https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
         //
         // See comments below for each specific type.
         Ok(OutputPrefixInTransactionV5 {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
-            // <https://zips.z.cash/protocol/protocol.pdf#abstractcommit>
+            // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
             // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
             cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
             // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes.
@@ -218,17 +218,17 @@ impl ZcashDeserialize for OutputPrefixInTransactionV5 {
             // See [`jubjub::Fq::zcash_deserialize`].
             cm_u: jubjub::Fq::zcash_deserialize(&mut reader)?,
             // Type is `KA^{Sapling}.Public`, i.e. J
-            // <https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement>
+            // https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
             // See [`keys::EphemeralPublicKey::zcash_deserialize`].
             ephemeral_key: keys::EphemeralPublicKey::zcash_deserialize(&mut reader)?,
             // Type is `Sym.C`, i.e. `B^Y^{[N]}`, i.e. arbitrary-sized byte arrays
-            // <https://zips.z.cash/protocol/protocol.pdf#concretesym> but fixed to
-            // 580 bytes in <https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus>
+            // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
+            // 580 bytes in https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
             // See [`note::EncryptedNote::zcash_deserialize`].
             enc_ciphertext: note::EncryptedNote::zcash_deserialize(&mut reader)?,
             // Type is `Sym.C`, i.e. `B^Y^{[N]}`, i.e. arbitrary-sized byte arrays.
-            // <https://zips.z.cash/protocol/protocol.pdf#concretesym> but fixed to
-            // 80 bytes in <https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus>
+            // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
+            // 80 bytes in https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
             // See [`note::WrappedNoteKey::zcash_deserialize`].
             out_ciphertext: note::WrappedNoteKey::zcash_deserialize(&mut reader)?,
         })
@@ -261,7 +261,7 @@ impl TrustedPreallocate for OutputInTransactionV4 {
         //
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         //
         // This acts as nOutputsSapling and is therefore subject to the rule.
         // The maximum value is actually smaller due to the block size limit,

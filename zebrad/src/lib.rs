@@ -18,7 +18,7 @@
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebrad")]
 // Tracing causes false positives on this lint:
-// <https://github.com/tokio-rs/tracing/issues/553>
+// https://github.com/tokio-rs/tracing/issues/553
 #![allow(clippy::cognitive_complexity)]
 
 #[macro_use]

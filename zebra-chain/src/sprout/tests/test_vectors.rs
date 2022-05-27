@@ -55,7 +55,7 @@ pub const COMMITMENTS: [&str; 16] = [
 
 // Calculated by the above implementation for MERKLE_DEPTH = 29 by the
 // same code confirmed to produce the test vectors from
-// <https://github.com/zcash/zcash/blob/master/src/test/data/merkle_roots.json>
+// https://github.com/zcash/zcash/blob/master/src/test/data/merkle_roots.json
 // when MERKLE_DEPTH = 4.
 pub const ROOTS: [&str; 16] = [
     "b8e10b6c157be92c43a733e2c9bddb963a2fb9ea80ebcb307acdcc5fc89f1656",

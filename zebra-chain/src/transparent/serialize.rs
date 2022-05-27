@@ -143,7 +143,7 @@ pub(crate) fn parse_coinbase_height(
         // to handle this edge case.
         //
         // TODO: update this check based on the consensus rule changes in
-        //       <https://github.com/zcash/zips/issues/540>
+        //       https://github.com/zcash/zips/issues/540
         (Some(0x04), _) if data[..] == GENESIS_COINBASE_DATA[..] => {
             Ok((Height(0), CoinbaseData(data)))
         }
@@ -194,7 +194,7 @@ pub(crate) fn write_coinbase_height<W: io::Write>(
         // (If we don't do this check, then deserialization will fail.)
         //
         // TODO: update this check based on the consensus rule changes in
-        //       <https://github.com/zcash/zips/issues/540>
+        //       https://github.com/zcash/zips/issues/540
         if coinbase_data.0 != GENESIS_COINBASE_DATA {
             return Err(io::Error::new(
                 io::ErrorKind::Other,

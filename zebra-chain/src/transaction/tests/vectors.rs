@@ -145,7 +145,7 @@ fn doesnt_deserialize_transaction_with_invalid_value_balance() {
     // Set value balance to non-zero
     // There are 4 * 4 byte fields and 2 * 1 byte compact sizes = 18 bytes before the 8 byte amount
     // (Zcash is little-endian unless otherwise specified:
-    // <https://zips.z.cash/protocol/nu5.pdf#endian>)
+    // https://zips.z.cash/protocol/nu5.pdf#endian)
     input_bytes[18] = 1;
 
     let result = Transaction::zcash_deserialize(&input_bytes[..]);

@@ -189,21 +189,21 @@ mod test {
         };
 
         // After slow-start mining and before Blossom the block subsidy is 12.5 ZEC
-        // <https://z.cash/support/faq/#what-is-slow-start-mining>
+        // https://z.cash/support/faq/#what-is-slow-start-mining
         assert_eq!(
             Amount::try_from(1_250_000_000),
             block_subsidy((blossom_height - 1).unwrap(), network)
         );
 
         // After Blossom the block subsidy is reduced to 6.25 ZEC without halving
-        // <https://z.cash/upgrade/blossom/>
+        // https://z.cash/upgrade/blossom/
         assert_eq!(
             Amount::try_from(625_000_000),
             block_subsidy(blossom_height, network)
         );
 
         // After the 1st halving, the block subsidy is reduced to 3.125 ZEC
-        // <https://z.cash/upgrade/canopy/>
+        // https://z.cash/upgrade/canopy/
         assert_eq!(
             Amount::try_from(312_500_000),
             block_subsidy(first_halving_height, network)

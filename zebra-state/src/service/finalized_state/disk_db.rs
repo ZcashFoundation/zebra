@@ -487,7 +487,7 @@ impl DiskDb {
 
         // Use the recommended LZ4 compression type.
         //
-        // <https://github.com/facebook/rocksdb/wiki/Compression#configuration>
+        // https://github.com/facebook/rocksdb/wiki/Compression#configuration
         opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
 
         // Tune level-style database file compaction.
@@ -545,8 +545,8 @@ impl DiskDb {
         // - 8192 low-level I/O files (via the Unix C functions), and
         // - 1000 TCP Control Block entries (network connections).
         //
-        // <https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/setmaxstdio?view=msvc-160#remarks>
-        // <http://smallvoid.com/article/winnt-tcpip-max-limit.html>
+        // https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/setmaxstdio?view=msvc-160#remarks
+        // http://smallvoid.com/article/winnt-tcpip-max-limit.html
         //
         // `zebra-state`'s `IDEAL_OPEN_FILE_LIMIT` is much less than
         // the Windows low-level I/O file limit.
@@ -668,7 +668,7 @@ impl DiskDb {
         // > A: No. The users of RocksDB need to make sure all functions have finished before they close RocksDB.
         // > You can speed up the waiting by calling CancelAllBackgroundWork().
         //
-        // <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ>
+        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
         info!("stopping background database tasks");
         self.db.cancel_all_background_work(true);
 
@@ -682,7 +682,7 @@ impl DiskDb {
         // > RocksDB instances usually depend on some internal static variables.
         // > Users need to make sure rocksdb::DB instances are destroyed before those static variables.
         //
-        // <https://github.com/facebook/rocksdb/wiki/Known-Issues>
+        // https://github.com/facebook/rocksdb/wiki/Known-Issues
         //
         // But our current code doesn't seem to cause any issues.
         // We might want to explicitly drop the database as part of graceful shutdown (#1678).
@@ -724,7 +724,7 @@ impl DiskDb {
         //
         // We'd like to call `DB::destroy` here, but calling destroy on a
         // live DB is undefined behaviour:
-        // <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#basic-readwrite>
+        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#basic-readwrite
         //
         // So we assume that all the database files are under `path`, and
         // delete them using standard filesystem APIs. Deleting open files

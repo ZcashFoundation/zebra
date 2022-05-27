@@ -26,7 +26,7 @@ pub struct TestVector {
 
 lazy_static! {
     /// Array of Orchard note encryptions using an all-zero OVKs.
-    // From <https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_note_encryption.py>
+    // From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_note_encryption.py
     // (edited with `sender_ovk = b'\0' * 32`)
     pub static ref ORCHARD_NOTE_ENCRYPTION_ZERO_VECTOR: Vec<TestVector> = vec![
         TestVector {
@@ -2123,7 +2123,7 @@ lazy_static! {
 
 
     /// Array of random Orchard note encryptions.
-    // From <https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_note_encryption.py>
+    // From https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/orchard_note_encryption.py
     pub static ref ORCHARD_NOTE_ENCRYPTION_VECTOR: Vec<TestVector> = vec![
         TestVector {
             incoming_viewing_key: [

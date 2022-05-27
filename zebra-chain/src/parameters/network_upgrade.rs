@@ -250,7 +250,7 @@ impl NetworkUpgrade {
             // zebra-state will have this feature enabled. But we are using
             // Rust Edition 2021 and Cargo resolver version 2, so the "zebra-test"
             // feature should only be enabled for tests:
-            // <https://doc.rust-lang.org/cargo/reference/features.html#resolver-version-2-command-line-flags>
+            // https://doc.rust-lang.org/cargo/reference/features.html#resolver-version-2-command-line-flags
             #[cfg(feature = "zebra-test")]
             if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() {
                 (

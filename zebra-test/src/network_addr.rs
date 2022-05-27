@@ -12,7 +12,7 @@ lazy_static! {
     ///
     /// These test vectors can be read by [`zebra_network::protocol::external::Codec::read_addr`].
     /// They should produce successful results containing IP addresses.
-    // From <https://github.com/zingolabs/zcash/blob/9ee66e423a3fbf4829ffeec354e82f4fbceff864/src/test/netbase_tests.cpp#L397>
+    // From https://github.com/zingolabs/zcash/blob/9ee66e423a3fbf4829ffeec354e82f4fbceff864/src/test/netbase_tests.cpp#L397
     pub static ref ADDR_V1_IP_VECTORS: Vec<Vec<u8>> = vec![
         // stream_addrv1_hex
         <Vec<u8>>::from_hex(
@@ -90,7 +90,7 @@ lazy_static! {
     ///
     /// These test vectors can be read by [`zebra_network::protocol::external::Codec::read_addrv2`],
     /// They should produce successful results containing IP addresses.
-    // From <https://github.com/zingolabs/zcash/blob/9ee66e423a3fbf4829ffeec354e82f4fbceff864/src/test/netbase_tests.cpp#L421>
+    // From https://github.com/zingolabs/zcash/blob/9ee66e423a3fbf4829ffeec354e82f4fbceff864/src/test/netbase_tests.cpp#L421
     pub static ref ADDR_V2_IP_VECTORS: Vec<Vec<u8>> = vec![
         // stream_addrv2_hex
         <Vec<u8>>::from_hex(
@@ -234,7 +234,7 @@ lazy_static! {
     ///
     /// These test vectors can be read by [`zebra_network::protocol::external::Codec::read_addrv2`].
     /// They should produce successful but empty results.
-    // From <https://github.com/zingolabs/zcash/blob/9ee66e423a3fbf4829ffeec354e82f4fbceff864/src/test/netbase_tests.cpp#L421>
+    // From https://github.com/zingolabs/zcash/blob/9ee66e423a3fbf4829ffeec354e82f4fbceff864/src/test/netbase_tests.cpp#L421
     pub static ref ADDR_V2_EMPTY_VECTORS: Vec<Vec<u8>> = vec![
         // torv3_hex
         <Vec<u8>>::from_hex(

@@ -58,9 +58,9 @@ fn get_transparent_output_address() -> Result<()> {
 
     // Hashes were extracted from the transaction (parsed with zebra-chain,
     // then manually extracted from lock_script).
-    // Final expected values were generated with <https://secretscan.org/PrivateKeyHex>,
+    // Final expected values were generated with https://secretscan.org/PrivateKeyHex,
     // by filling field 4 with the prefix followed by the address hash.
-    // Refer to <https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding>
+    // Refer to https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding
     // for the prefixes.
 
     // Script hash 1b8a9bda4b62cd0d0582b55455d0778c86f8628f

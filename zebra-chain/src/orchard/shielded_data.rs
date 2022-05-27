@@ -193,7 +193,7 @@ impl TrustedPreallocate for Action {
         //
         // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         //
         // This acts as nActionsOrchard and is therefore subject to the rule.
         // The maximum value is actually smaller due to the block size limit,
@@ -248,7 +248,7 @@ impl ZcashDeserialize for Flags {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // Consensus rule: "In a version 5 transaction,
         // the reserved bits 2..7 of the flagsOrchard field MUST be zero."
-        // <https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus>
+        // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
         Flags::from_bits(reader.read_u8()?)
             .ok_or(SerializationError::Parse("invalid reserved orchard flags"))
     }

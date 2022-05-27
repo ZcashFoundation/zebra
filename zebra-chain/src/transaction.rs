@@ -320,7 +320,7 @@ impl Transaction {
         // (Or have to use a lock time.)
         //
         // It matches the `zcashd` check here:
-        // <https://github.com/zcash/zcash/blob/1a7c2a3b04bcad6549be6d571bfdff8af9a2c814/src/main.cpp#L720>
+        // https://github.com/zcash/zcash/blob/1a7c2a3b04bcad6549be6d571bfdff8af9a2c814/src/main.cpp#L720
         if lock_time == LockTime::unlocked() {
             return None;
         }
@@ -338,7 +338,7 @@ impl Transaction {
         // time in these transactions. `zcashd` only checks the lock time when it finds a
         // transparent input sequence number that is not `u32::MAX`.
         //
-        // <https://developer.bitcoin.org/devguide/transactions.html#non-standard-transactions>
+        // https://developer.bitcoin.org/devguide/transactions.html#non-standard-transactions
         let has_sequence_number_enabling_lock_time = self
             .inputs()
             .iter()
@@ -361,7 +361,7 @@ impl Transaction {
             | Transaction::V5 { expiry_height, .. } => match expiry_height {
                 // Consensus rule:
                 // > No limit: To set no limit on transactions (so that they do not expire), nExpiryHeight should be set to 0.
-                // <https://zips.z.cash/zip-0203#specification>
+                // https://zips.z.cash/zip-0203#specification
                 block::Height(0) => None,
                 block::Height(expiry_height) => Some(block::Height(*expiry_height)),
             },

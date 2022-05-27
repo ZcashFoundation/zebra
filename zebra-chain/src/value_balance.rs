@@ -157,7 +157,7 @@ impl ValueBalance<NegativeAllowed> {
     pub fn remaining_transaction_value(&self) -> Result<Amount<NonNegative>, amount::Error> {
         // Calculated by summing the transparent, sprout, sapling, and orchard value balances,
         // as specified in:
-        // <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
+        // https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
         //
         // This will error if the remaining value in the transaction value pool is negative.
         (self.transparent + self.sprout + self.sapling + self.orchard)?.constrain::<NonNegative>()

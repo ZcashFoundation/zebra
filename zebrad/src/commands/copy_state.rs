@@ -130,7 +130,7 @@ impl CopyStateCmd {
         let target_start_time = Instant::now();
         // TODO: call Options::PrepareForBulkLoad()
         // See "What's the fastest way to load data into RocksDB?" in
-        // <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ>
+        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
         let (
             mut target_state,
             _target_read_only_state_service,

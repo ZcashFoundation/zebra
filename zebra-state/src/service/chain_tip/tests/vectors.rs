@@ -42,9 +42,9 @@ fn chain_tip_change_is_initially_not_ready() {
     // TODO: use `tokio::task::unconstrained` to avoid spurious waits from tokio's cooperative multitasking
     //       (needs a recent tokio version)
     // See:
-    // <https://github.com/ZcashFoundation/zebra/pull/2777#discussion_r712488817>
-    // <https://docs.rs/tokio/1.11.0/tokio/task/index.html#cooperative-scheduling>
-    // <https://tokio.rs/blog/2020-04-preemption>
+    // https://github.com/ZcashFoundation/zebra/pull/2777#discussion_r712488817
+    // https://docs.rs/tokio/1.11.0/tokio/task/index.html#cooperative-scheduling
+    // https://tokio.rs/blog/2020-04-preemption
 
     let first = chain_tip_change
         .wait_for_tip_change()

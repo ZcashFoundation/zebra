@@ -42,7 +42,7 @@ impl Runnable for GenerateCmd {
         .to_owned();
 
         // this avoids a ValueAfterTable error
-        // <https://github.com/alexcrichton/toml-rs/issues/145>
+        // https://github.com/alexcrichton/toml-rs/issues/145
         let conf = toml::Value::try_from(default_config).unwrap();
         output += &toml::to_string_pretty(&conf).expect("default config should be serializable");
         match self.output_file {

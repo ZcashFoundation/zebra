@@ -125,7 +125,7 @@ pub fn sinsemilla_hash_to_point(D: &[u8], M: &BitVec<u8, Lsb0>) -> Option<pallas
     // Split M into n segments of k bits, where k = 10 and c = 253, padding
     // the last segment with zeros.
     //
-    // <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash>
+    // https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash
     for chunk in M.chunks(k) {
         // Pad each chunk with zeros.
         let mut store = [0u8; 2];
@@ -191,8 +191,8 @@ pub fn sinsemilla_short_commit(
 }
 
 // TODO: test the above correctness and compatibility with the zcash-hackworks test vectors
-// <https://github.com/ZcashFoundation/zebra/issues/2079>
-// <https://github.com/zcash-hackworks/zcash-test-vectors/pulls>
+// https://github.com/ZcashFoundation/zebra/issues/2079
+// https://github.com/zcash-hackworks/zcash-test-vectors/pulls
 
 #[cfg(test)]
 mod tests {

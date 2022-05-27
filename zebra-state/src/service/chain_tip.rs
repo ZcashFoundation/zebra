@@ -326,7 +326,7 @@ impl LatestChainTip {
 
         self.receiver.with_watch_data(|chain_tip_block| {
             // TODO: replace with Option::inspect when it stabilises
-            //       <https://github.com/rust-lang/rust/issues/91345>
+            //       https://github.com/rust-lang/rust/issues/91345
             register_span_fields(chain_tip_block.as_ref());
 
             chain_tip_block.as_ref().map(f)
@@ -516,7 +516,7 @@ impl ChainTipChange {
         // > This can handled in the same way as any regular chain orphaning or reorganization,
         // > as long as the new chain is valid.
         //
-        // <https://zips.z.cash/zip-0200#chain-reorganization>
+        // https://zips.z.cash/zip-0200#chain-reorganization
 
         // If we're at a network upgrade activation block, reset.
         //
@@ -526,7 +526,7 @@ impl ChainTipChange {
         // > the node's local transaction memory pool SHOULD be cleared of transactions
         // > that will never be valid on the post-upgrade consensus branch.
         //
-        // <https://zips.z.cash/zip-0200#memory-pool>
+        // https://zips.z.cash/zip-0200#memory-pool
         //
         // Skipped blocks can include network upgrade activation blocks.
         // Fork changes can activate or deactivate a network upgrade.

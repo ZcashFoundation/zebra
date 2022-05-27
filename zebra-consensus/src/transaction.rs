@@ -333,11 +333,11 @@ where
             //
             // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
+            // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
             check::joinsplit_has_vpub_zero(&tx)?;
 
             // [Canopy onward]: `vpub_old` MUST be zero.
-            // <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
+            // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
             check::disabled_add_to_sprout_pool(&tx, req.height(), network)?;
 
             check::spend_conflicts(&tx)?;
@@ -350,7 +350,7 @@ where
             //
             // Note: this rule originally applied to Sapling, but we assume it also applies to Orchard.
             //
-            // <https://zips.z.cash/zip-0213#specification>
+            // https://zips.z.cash/zip-0213#specification
 
             // Load spent UTXOs from state.
             let (spent_utxos, spent_outputs) =
@@ -555,7 +555,7 @@ where
             // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
             // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             //
             // Note: Here we verify the transaction version number of the above two rules, the group
             // id is checked in zebra-chain crate, in the transaction serialize.
@@ -648,7 +648,7 @@ where
             // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
             // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             //
             // Note: Here we verify the transaction version number of the above rule, the group
             // id is checked in zebra-chain crate, in the transaction serialize.
@@ -721,7 +721,7 @@ where
                 // > The proof π_ZKJoinSplit MUST be valid given a
                 // > primary input formed from the relevant other fields and h_{Sig}
                 //
-                // <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
+                // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
                 //
                 // Queue the verification of the Groth16 spend proof
                 // for each JoinSplit description while adding the
@@ -740,7 +740,7 @@ where
             // > - joinSplitSig MUST represent a valid signature under
             //     joinSplitPubKey of dataToBeSigned, as defined in § 4.11
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             //
             // The `if` part is indirectly enforced, since the `joinsplit_data`
             // is only parsed if those conditions apply in
@@ -751,7 +751,7 @@ where
             // > A valid Ed25519 validating key is defined as a sequence of 32
             // > bytes encoding a point on the Ed25519 curve
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#concreteed25519>
+            // https://zips.z.cash/protocol/protocol.pdf#concreteed25519
             //
             // which is enforced during signature verification, in both batched
             // and single verification, when decompressing the encoded point.
@@ -761,8 +761,8 @@ where
             // async checks that (at a minimum) must pass for the
             // transaction to verify.
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#sproutnonmalleability>
-            // <https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus>
+            // https://zips.z.cash/protocol/protocol.pdf#sproutnonmalleability
+            // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
             let ed25519_verifier = primitives::ed25519::VERIFIER.clone();
             let ed25519_item =
                 (joinsplit_data.pub_key, joinsplit_data.sig, shielded_sighash).into();
@@ -792,7 +792,7 @@ where
                 // > given a primary input formed from the other
                 // > fields except spendAuthSig.
                 //
-                // <https://zips.z.cash/protocol/protocol.pdf#spenddesc>
+                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
                 //
                 // Queue the verification of the Groth16 spend proof
                 // for each Spend description while adding the
@@ -821,7 +821,7 @@ where
                 // It calls [`jubjub::AffinePoint::from_bytes`] to parse R and
                 // that enforces the canonical encoding.
                 //
-                // <https://zips.z.cash/protocol/protocol.pdf#spenddesc>
+                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
                 //
                 // Queue the validation of the RedJubjub spend
                 // authorization signature for each Spend
@@ -842,7 +842,7 @@ where
                 // > valid given a primary input formed from the other
                 // > fields except C^enc and C^out.
                 //
-                // <https://zips.z.cash/protocol/protocol.pdf#outputdesc>
+                // https://zips.z.cash/protocol/protocol.pdf#outputdesc
                 //
                 // Queue the verification of the Groth16 output
                 // proof for each Output description while adding
@@ -862,7 +862,7 @@ where
             // > consistent with its vbalanceSapling value as specified in § 4.13
             // > ‘Balance and Binding Signature (Sapling)’.
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
+            // https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs
             //
             // > [Sapling onward] If effectiveVersion ≥ 4 and
             // > nSpendsSapling + nOutputsSapling > 0, then:
@@ -871,7 +871,7 @@ where
             // >   transaction binding validating key bvk Sapling of SigHash —
             // >   i.e. BindingSig^{Sapling}.Validate_{bvk^{Sapling}}(SigHash, bindingSigSapling ) = 1.
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             //
             // This is validated by the verifier. The `if` part is indirectly
             // enforced, since the `sapling_shielded_data` is only parsed if those
@@ -880,7 +880,7 @@ where
             // >   [NU5 onward] As specified in § 5.4.7, the validation of the 𝑅 component
             // >   of the signature changes to prohibit non-canonical encodings.
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             //
             // This is validated by the verifier, inside the `redjubjub` crate.
             // It calls [`jubjub::AffinePoint::from_bytes`] to parse R and
@@ -914,7 +914,7 @@ where
                 // > The proof 𝜋 MUST be valid given a primary input (cv, rt^{Orchard},
                 // > nf, rk, cm_x, enableSpends, enableOutputs)
                 //
-                // <https://zips.z.cash/protocol/protocol.pdf#actiondesc>
+                // https://zips.z.cash/protocol/protocol.pdf#actiondesc
                 //
                 // Queue the verification of the Halo2 proof for each Action
                 // description while adding the resulting future to our
@@ -936,7 +936,7 @@ where
                 // >   As specified in § 5.4.7, validation of the 𝑅 component of the
                 // >   signature prohibits non-canonical encodings.
                 //
-                // <https://zips.z.cash/protocol/protocol.pdf#actiondesc>
+                // https://zips.z.cash/protocol/protocol.pdf#actiondesc
                 //
                 // This is validated by the verifier, inside the [`primitives::redpallas`] module.
                 // It calls [`pallas::Affine::from_bytes`] to parse R and
@@ -961,7 +961,7 @@ where
             // > The Action transfers of a transaction MUST be consistent with
             // > its v balanceOrchard value as specified in § 4.14.
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#actions>
+            // https://zips.z.cash/protocol/protocol.pdf#actions
             //
             // > [NU5 onward] If effectiveVersion ≥ 5 and nActionsOrchard > 0, then:
             // > – let bvk^{Orchard} and SigHash be as defined in § 4.14;
@@ -969,7 +969,7 @@ where
             // >   transaction binding validating key bvk^{Orchard} of SigHash —
             // >   i.e. BindingSig^{Orchard}.Validate_{bvk^{Orchard}}(SigHash, bindingSigOrchard) = 1.
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             //
             // This is validated by the verifier. The `if` part is indirectly
             // enforced, since the `orchard_shielded_data` is only parsed if those
@@ -978,7 +978,7 @@ where
             // >   As specified in § 5.4.7, validation of the 𝑅 component of the signature
             // >   prohibits non-canonical encodings.
             //
-            // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
             //
             // This is validated by the verifier, inside the `redpallas` crate.
             // It calls [`pallas::Affine::from_bytes`] to parse R and

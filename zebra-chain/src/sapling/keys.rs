@@ -654,7 +654,7 @@ impl From<[u8; 32]> for IncomingViewingKey {
         // inside Scalar/Fr::from_bytes()? That seems the better
         // place...
         //
-        // <https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/primitives.rs#L86>
+        // https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/primitives.rs#L86
         bytes[31] &= 0b0000_0111;
 
         Self {

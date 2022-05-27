@@ -38,7 +38,7 @@ pub fn lock_time_has_passed(
             // > The transaction can be added to any block which has a greater height.
             // The Bitcoin documentation is wrong or outdated here,
             // so this code is based on the `zcashd` implementation at:
-            // <https://github.com/zcash/zcash/blob/1a7c2a3b04bcad6549be6d571bfdff8af9a2c814/src/main.cpp#L722>
+            // https://github.com/zcash/zcash/blob/1a7c2a3b04bcad6549be6d571bfdff8af9a2c814/src/main.cpp#L722
             if block_height > unlock_height {
                 Ok(())
             } else {
@@ -47,7 +47,7 @@ pub fn lock_time_has_passed(
         }
         Some(LockTime::Time(unlock_time)) => {
             // > The transaction can be added to any block whose block time is greater than the locktime.
-            // <https://developer.bitcoin.org/devguide/transactions.html#locktime-and-sequence-number>
+            // https://developer.bitcoin.org/devguide/transactions.html#locktime-and-sequence-number
             if block_time > unlock_time {
                 Ok(())
             } else {
@@ -157,7 +157,7 @@ pub fn joinsplit_has_vpub_zero(tx: &Transaction) -> Result<(), TransactionError>
         //
         // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
+        // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
         if *vpub_old != zero && *vpub_new != zero {
             return Err(TransactionError::BothVPubsNonZero);
         }
@@ -184,7 +184,7 @@ pub fn disabled_add_to_sprout_pool(
     //
     // > [Canopy onward]: `vpub_old` MUST be zero.
     //
-    // <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
+    // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
     if height >= canopy_activation_height {
         let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
 
@@ -325,7 +325,7 @@ pub fn coinbase_expiry_height(
         // > [NU5 onward] The nExpiryHeight field of a coinbase transaction
         // > MUST be equal to its block height.
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         if *block_height >= nu5_activation_height {
             if expiry_height != Some(*block_height) {
                 return Err(TransactionError::CoinbaseExpiryBlockHeight {
@@ -344,7 +344,7 @@ pub fn coinbase_expiry_height(
     // > [Overwinter to Canopy inclusive, pre-NU5] nExpiryHeight MUST be less than
     // > or equal to 499999999.
     //
-    // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     validate_expiry_height_max(expiry_height, true, block_height, coinbase)
 }
 
@@ -368,7 +368,7 @@ pub fn non_coinbase_expiry_height(
         // > [NU5 onward] nExpiryHeight MUST be less than or equal to 499999999
         // > for non-coinbase transactions.
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         validate_expiry_height_max(expiry_height, false, block_height, transaction)?;
 
         // # Consensus
@@ -377,7 +377,7 @@ pub fn non_coinbase_expiry_height(
         // > nExpiryHeight field is nonzero, then it MUST NOT be mined at a block
         // > height greater than its nExpiryHeight.
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         validate_expiry_height_mined(expiry_height, block_height, transaction)?;
     }
     Ok(())

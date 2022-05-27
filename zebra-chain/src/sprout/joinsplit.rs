@@ -125,7 +125,7 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
         //
         // > Elements of a JoinSplit description MUST have the types given above
         //
-        // <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
+        // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
         //
         // See comments below for each specific type.
         Ok(JoinSplit::<P> {
@@ -140,13 +140,13 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
                 reader.read_32_bytes()?.into(),
             ],
             // Types are `NoteCommit^{Sprout}.Output`, i.e. `B^{ℓ^{Sprout}_{Merkle}}`,
-            // i.e. 32 bytes. <https://zips.z.cash/protocol/protocol.pdf#abstractcommit>
+            // i.e. 32 bytes. https://zips.z.cash/protocol/protocol.pdf#abstractcommit
             commitments: [
                 commitment::NoteCommitment::from(reader.read_32_bytes()?),
                 commitment::NoteCommitment::from(reader.read_32_bytes()?),
             ],
             // Type is `KA^{Sprout}.Public`, i.e. `B^Y^{[32]}`, i.e. 32 bytes.
-            // <https://zips.z.cash/protocol/protocol.pdf#concretesproutkeyagreement>
+            // https://zips.z.cash/protocol/protocol.pdf#concretesproutkeyagreement
             ephemeral_key: x25519_dalek::PublicKey::from(reader.read_32_bytes()?),
             // Type is `B^{[ℓ_{Seed}]}`, i.e. 32 bytes
             random_seed: RandomSeed::from(reader.read_32_bytes()?),
@@ -156,14 +156,14 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
                 note::Mac::zcash_deserialize(&mut reader)?,
                 note::Mac::zcash_deserialize(&mut reader)?,
             ],
-            // Type is described in <https://zips.z.cash/protocol/protocol.pdf#grothencoding>.
+            // Type is described in https://zips.z.cash/protocol/protocol.pdf#grothencoding.
             // It is not enforced here; this just reads 192 bytes.
             // The type is validated when validating the proof, see
             // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
             zkproof: P::zcash_deserialize(&mut reader)?,
             // Types are `Sym.C`, i.e. `B^Y^{[N]}`, i.e. arbitrary-sized byte arrays
-            // <https://zips.z.cash/protocol/protocol.pdf#concretesym> but fixed to
-            // 601 bytes in <https://zips.z.cash/protocol/protocol.pdf#joinsplitencodingandconsensus>
+            // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
+            // 601 bytes in https://zips.z.cash/protocol/protocol.pdf#joinsplitencodingandconsensus
             // See [`note::EncryptedNote::zcash_deserialize`].
             enc_ciphertexts: [
                 note::EncryptedNote::zcash_deserialize(&mut reader)?,

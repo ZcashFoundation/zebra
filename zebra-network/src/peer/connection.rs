@@ -152,7 +152,7 @@ impl Handler {
             // `zcashd` returns requested transactions in a single batch of messages.
             // Other transaction or non-transaction messages can come before or after the batch.
             // After the transaction batch, `zcashd` sends `notfound` if any transactions are missing:
-            // <https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5617>
+            // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5617
             (
                 Handler::TransactionsById {
                     mut pending_ids,
@@ -250,7 +250,7 @@ impl Handler {
             // `zcashd` returns requested blocks in a single batch of messages.
             // Other blocks or non-blocks messages can come before or after the batch.
             // `zcashd` silently skips missing blocks, rather than sending a final `notfound` message.
-            // <https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5523>
+            // https://github.com/zcash/zcash/blob/e7b425298f6d9a54810cb7183f00be547e4d9415/src/main.cpp#L5523
             (
                 Handler::BlocksByHash {
                     mut pending_hashes,

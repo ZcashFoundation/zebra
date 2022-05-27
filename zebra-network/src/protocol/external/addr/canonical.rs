@@ -18,7 +18,7 @@ pub fn canonical_ip_addr(v6_addr: &Ipv6Addr) -> IpAddr {
     use IpAddr::*;
 
     // TODO: replace with `to_ipv4_mapped` when that stabilizes
-    // <https://github.com/rust-lang/rust/issues/27709>
+    // https://github.com/rust-lang/rust/issues/27709
     match v6_addr.to_ipv4() {
         // workaround for unstable `to_ipv4_mapped`
         Some(v4_addr) if v4_addr.to_ipv6_mapped() == *v6_addr => V4(v4_addr),

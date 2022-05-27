@@ -601,7 +601,7 @@ lazy_static! {
     // Block 141042 is almost ~2 MB in size (the maximum size for a block),
     // and contains 1 coinbase reward transaction and 20 transactions.
     // In each transaction, there is one joinsplit, with 244 inputs and 0 outputs.
-    // <https://zcash.readthedocs.io/en/latest/rtd_pages/shield_coinbase.html>
+    // https://zcash.readthedocs.io/en/latest/rtd_pages/shield_coinbase.html
     //
     // We store large blocks as binary, to reduce disk and network usage.
     // (git compresses blocks in transit and in its index, so there is not much need for extra compression.)

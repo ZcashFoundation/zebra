@@ -160,7 +160,7 @@ async fn rpc_getblock_missing_error() {
     );
 
     // Make sure Zebra returns the correct error code `-8` for missing blocks
-    // <https://github.com/adityapk00/lightwalletd/blob/c1bab818a683e4de69cd952317000f9bb2932274/common/common.go#L251-L254>
+    // https://github.com/adityapk00/lightwalletd/blob/c1bab818a683e4de69cd952317000f9bb2932274/common/common.go#L251-L254
     let block_future = tokio::spawn(rpc.get_block("0".to_string(), 0u8));
 
     // Make the mock service respond with no block

@@ -111,7 +111,7 @@ pub(in super::super) enum AddrV2 {
 // We can't guarantee that peers support addrv2 until it activates,
 // and outdated peers are excluded from the network by a network upgrade.
 // (Likely NU5 on mainnet, and NU6 on testnet.)
-// <https://zips.z.cash/zip-0155#deployment>
+// https://zips.z.cash/zip-0155#deployment
 //
 // And Zebra doesn't use different codecs for different peer versions.
 #[cfg(test)]
