@@ -22,25 +22,6 @@ on:
       - '.github/workflows/deploy-gcp-tests.yml'
       - '.github/workflows/build-docker-image.yml'
 
-  push:
-    branches:
-      - main
-    paths-ignore:
-      # code and tests
-      - '**/*.rs'
-      # hard-coded checkpoints and proptest regressions
-      - '**/*.txt'
-      # test data snapshots
-      - '**/*.snap'
-      # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      # workflow definitions
-      - 'docker/**'
-      - '.github/workflows/continous-integration-docker.yml'
-      - '.github/workflows/deploy-gcp-tests.yml'
-      - '.github/workflows/build-docker-image.yml'
-
 jobs:
   get-available-disks:
     name: Find available cached state disks
