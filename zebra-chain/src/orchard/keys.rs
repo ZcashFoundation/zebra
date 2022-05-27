@@ -666,7 +666,7 @@ impl TryFrom<[u8; 64]> for IncomingViewingKey {
         let mut ivk_bytes = [0u8; 32];
         ivk_bytes[..].copy_from_slice(&bytes[32..]);
 
-        let possible_scalar = pallas::Scalar::from_bytes(&ivk_bytes);
+        let possible_scalar = pallas::Scalar::from_repr(ivk_bytes);
 
         if possible_scalar.is_some().into() {
             let scalar = possible_scalar.unwrap();
@@ -718,7 +718,7 @@ impl TryFrom<FullViewingKey> for IncomingViewingKey {
         )
         .expect("deriving orchard commit^ivk should not output ⊥ ");
 
-        let ivk_ctoption = pallas::Scalar::from_bytes(&commit_x.into());
+        let ivk_ctoption = pallas::Scalar::from_repr(commit_x.into());
 
         // if ivk ∈ {0, ⊥}, discard this key
 
