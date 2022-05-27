@@ -13,7 +13,8 @@ repository = "https://github.com/ZcashFoundation/zebra"
 default-run = "zebrad"
 
 [features]
-default = []
+# In release builds, don't compile debug logging code, to improve performance.
+default = ["release_max_level_info"]
 
 # Production features that activate extra dependencies
 enable-sentry = ["sentry", "sentry-tracing"]
