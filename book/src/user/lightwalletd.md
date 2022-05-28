@@ -1,0 +1,248 @@
+# Running lightwalletd with zebra
+
+Starting on [v1.0.0-beta.10](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.10), the Zebra RPC methods are fully featured to run a lightwalletd service backed by zebrad.
+
+Contents:
+
+- [Download and build Zebra](#download-and-build-zebra)
+- [Configure zebra for lightwalletd](#configure-zebra-for-lightwalletd)
+  - [RPC section](#rpc-section)
+  - [State section](#state-section)
+  - [Network section](#network-section)
+- [Sync Zebra](#sync-zebra)
+- [Download and build lightwalletd](#download-and-build-lightwalletd)
+- [Sync lightwalled](#sync-lightwalled)
+- [Run tests](#run-tests)
+- [Connect wallet to lightwalletd](#connect-wallet-to-lightwalletd)
+  - [Download and build the cli-wallet](#download-and-build-the-cli-wallet)
+  - [Run the wallet](#run-the-wallet)
+- [Lightwalletd and nginx](#lightwalletd-and-nginx)
+
+## Download and build Zebra
+[#download-and-build-zebra]: #download-and-build-zebra
+
+```console
+git clone https://github.com/ZcashFoundation/zebra
+cd zebra
+cargo build --release
+```
+
+Zebra binary will be at `target/release/zebrad`.
+
+## Configure zebra for lightwalletd
+[#configure-zebra-for-lightwalletd]: #configure-zebra-for-lightwalletd
+
+We need a zebra configuration file. First, we create a file with the default settings:
+
+```console
+./target/release/zebrad generate -o zebrad.toml
+```
+
+This will create a `zebrad.toml` file. Tweak the following options in order to prepare for lightwalletd setup.
+
+### RPC section
+[#rpc-section]: #rpc-section
+
+This change is required for zebra to behave as an RPC endpoint. The standard port for RPC endpoint is `8232`.
+
+```
+[rpc]
+listen_addr = "127.0.0.1:8232"
+```
+
+### State section
+[#state-section]: #state-section
+
+Make sure your cache is in a hard drive with enough space to hold the full blockchain (around 30G at the moment of writing - 2022-05-28).
+
+```
+[state]
+cache_dir = "/lot/of/free/space/for/zebra"
+...
+```
+
+### Network section
+[#network-section]: #network-section
+
+Only change this if you want to sync for the testnet:
+
+```
+[network]
+...
+network = 'Testnet'
+...
+```
+
+## Sync Zebra
+[#sync-zebra]: #sync-zebra
+
+With the configuration in place you can start synchronizing Zebra with the Zcash blockchain. This may take a while depending on your hardware.
+
+```console
+./target/release/zebrad -c zebrad.toml start
+```
+
+Zebra will display information about sync process:
+
+```console
+...
+zebrad::commands::start: estimated progress to chain tip sync_percent=10.783 % 
+...
+```
+
+Until eventually it will get there:
+
+```console
+...
+zebrad::commands::start: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000 % 
+...
+```
+
+You can interrupt the process at any time with `ctrl-c` and Zebra will resume the next time at around the block you were downloading when stopping the process.
+
+When deploying for production infrastructure, the above command can/should be implemented as a server service or similar configuration. 
+
+For implementing zebra as a service please see [here](https://github.com/ZcashFoundation/zebra/blob/v1.0.0-beta.10/zebrad/systemd/zebrad.service).
+
+## Download and build lightwalletd
+[#download-and-build-lightwalletd]: #download-and-build-lightwalletd
+
+Once you have Zebra running (with open RPC port and synchronized) you can install lightwalletd. There are several versions of lightwalletd in different repositories:
+
+- [The original version](https://github.com/zcash/lightwalletd)
+- [The version used by zecwallet-lite and zecwallet-cli](https://github.com/adityapk00/lightwalletd)
+
+Most of the testing related to Zebra and lightwalletd was done with the zecwallet version in the [adityapk00](https://github.com/adityapk00) repository.
+
+Before installing lightwalletd, you need to have `go` in place.
+
+Please visit [this](https://gist.github.com/nikhita/432436d570b89cab172dcf2894465753) page for go installation/upgrade instructions.
+
+Make sure you have `go` in your path, can add it as:
+
+```console
+echo 'PATH=$PATH:/usr/local/go/bin' >> .profile
+source .profile
+```
+
+With go installed and in your path, download and install lightwalletd:
+
+```console
+git clone https://github.com/adityapk00/lightwalletd
+cd lightwalletd
+make
+make install
+```
+
+If everything went good you should have a `lightwalletd` binary in the root of the project.
+
+## Sync lightwalled
+[#sync-lightwalletd]: (#sync-lightwalletd)
+
+Please make sure you have zebrad running(with RPC endpoint and up to date blockchain) to synchronize lightwalletd.
+
+```console
+./lightwalletd --no-tls-very-insecure --zcash-conf-path ~/.zcash/zcash.conf --data-dir . --log-file /dev/stdout
+```
+
+Lightwalletd expects a `zcash.conf` file with just the following content:
+
+```
+txindex=1
+insightexplorer=1
+experimentalfeatures=1
+```
+
+With the above command lightwalletd will create a database folder `db` in the root of the project (we told lightwalletd to do so in the `--data-dir .` part of the command).
+
+By default lightwalletd service will listen on `127.0.0.1:9067`
+
+Lightwalletd will do its own synchronization, while it is doing you will see messages as:
+
+```console
+...
+app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 748000","time":"2022-05-28T19:25:49-03:00"}
+{"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 749540","time":"2022-05-28T19:25:53-03:00"}
+{"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 751074","time":"2022-05-28T19:25:57-03:00"}
+...
+```
+
+Wait until lightwalletd is in sync before connecting any wallet into it. You will know when it is in sync as those messages will not be displayed anymore.
+
+## Run tests
+[#run-tests]: (#run-tests)
+
+The Zebra team created tests for the interaction of zebra and lightwalletd. 
+
+Please refer to [acceptance](https://github.com/ZcashFoundation/zebra/blob/v1.0.0-beta.10/zebrad/tests/acceptance.rs) tests documentation in the `Lightwalletd tests` section.
+
+## Connect a wallet to lightwalletd
+[#connect-wallet-to-lightwalletd]: (#connect-wallet-to-lightwalletd)
+
+The final goal is to connect wallets to the lightwalletd service backed by Zebra. 
+
+For demo purposes we use [zecwallet-cli](https://github.com/adityapk00/zecwallet-light-cli).
+
+Make sure both `zebrad` and `lightwalletd` are running and listening.
+
+### Download and build the cli-wallet
+[#download-and-build-the-cli-wallet]: (#download-and-build-the-cli-wallet)
+
+```console
+$ git clone https://github.com/adityapk00/zecwallet-light-cli.git
+$ cd zecwallet-light-cli
+$ cargo build --release
+```
+
+### Run the wallet
+[#run-the-wallet]: (#run-the-wallet)
+
+```console
+$ ./target/release/zecwallet-cli --server 127.0.0.1:9067
+Lightclient connecting to http://127.0.0.1:9067/
+{
+  "result": "success",
+  "latest_block": 1683911,
+  "total_blocks_synced": 49476
+}
+Ready!
+(main) Block:1683911 (type 'help') >> 
+```
+## Lightwalletd and nginx
+[#lightwalletd-and-nginx]: (#lightwalletd-and-nginx)
+
+Sometimes during development or production it is useful to run lightwalletd behind a nginx proxy. This will result in having access and error logs. 
+
+The following is a basic configuration that will proxy connections from lightwalletd in port `9067` to port `8081` and creating access and error logs:
+
+```
+log_format  main    '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" [$request_body]';
+
+server {
+        listen       8081 http2;
+        server_name  localhost;
+
+        access_log   /var/log/nginx/lightwalletd.access.log main;
+        error_log   /var/log/nginx/lightwalletd.error.log;
+
+        location / {
+                include       /etc/nginx/mime.types;
+                grpc_pass grpc://localhost:9067;
+        }
+}
+
+```
+
+With that in place wallets should now connect to port `8081`:
+
+```console
+$ ./target/release/zecwallet-cli --server 127.0.0.1:8081
+Lightclient connecting to http://127.0.0.1:8081/
+{
+  "result": "success"
+}
+Ready!
+(main) Block:1683916 (type 'help') >> 
+```
