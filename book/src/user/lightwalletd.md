@@ -114,16 +114,7 @@ Once you have Zebra running (with open RPC port and synchronized) you can instal
 
 Most of the testing related to Zebra and lightwalletd was done with the zecwallet version in the [adityapk00](https://github.com/adityapk00) repository.
 
-Before installing lightwalletd, you need to have `go` in place.
-
-Please visit [this](https://gist.github.com/nikhita/432436d570b89cab172dcf2894465753) page for go installation/upgrade instructions.
-
-Make sure you have `go` in your path, can add it as:
-
-```console
-echo 'PATH=$PATH:/usr/local/go/bin' >> .profile
-source .profile
-```
+Before installing lightwalletd, you need to have `go` in place. Please visit the [go install page](https://go.dev/doc/install) with download and installation instructions.
 
 With go installed and in your path, download and install lightwalletd:
 
