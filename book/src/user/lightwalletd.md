@@ -1,6 +1,6 @@
 # Running lightwalletd with zebra
 
-Starting on [v1.0.0-beta.10](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.10), the Zebra RPC methods are fully featured to run a lightwalletd service backed by zebrad.
+Starting on [v1.0.0-beta.11](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.11), the Zebra RPC methods are fully featured to run a lightwalletd service backed by zebrad.
 
 Contents:
 
@@ -22,12 +22,10 @@ Contents:
 [#download-and-build-zebra]: #download-and-build-zebra
 
 ```console
-git clone https://github.com/ZcashFoundation/zebra
-cd zebra
-cargo build --release
+cargo install --locked --git https://github.com/ZcashFoundation/zebra zebrad
 ```
 
-Zebra binary will be at `target/release/zebrad`.
+Zebra binary will be at ` ~/.cargo/bin/zebrad`.
 
 ## Configure zebra for lightwalletd
 [#configure-zebra-for-lightwalletd]: #configure-zebra-for-lightwalletd
@@ -79,7 +77,7 @@ network = 'Testnet'
 With the configuration in place you can start synchronizing Zebra with the Zcash blockchain. This may take a while depending on your hardware.
 
 ```console
-./target/release/zebrad -c zebrad.toml start
+zebrad start
 ```
 
 Zebra will display information about sync process:
@@ -102,7 +100,7 @@ You can interrupt the process at any time with `ctrl-c` and Zebra will resume th
 
 When deploying for production infrastructure, the above command can/should be implemented as a server service or similar configuration. 
 
-For implementing zebra as a service please see [here](https://github.com/ZcashFoundation/zebra/blob/v1.0.0-beta.10/zebrad/systemd/zebrad.service).
+For implementing zebra as a service please see [here](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/systemd/zebrad.service).
 
 ## Download and build lightwalletd
 [#download-and-build-lightwalletd]: #download-and-build-lightwalletd
@@ -139,7 +137,7 @@ If everything went good you should have a `lightwalletd` binary in the root of t
 ## Sync lightwalled
 [#sync-lightwalletd]: (#sync-lightwalletd)
 
-Please make sure you have zebrad running(with RPC endpoint and up to date blockchain) to synchronize lightwalletd.
+Please make sure you have zebrad running (with RPC endpoint and up to date blockchain) to synchronize lightwalletd.
 
 ```console
 ./lightwalletd --no-tls-very-insecure --zcash-conf-path ~/.zcash/zcash.conf --data-dir . --log-file /dev/stdout
@@ -161,7 +159,7 @@ Lightwalletd will do its own synchronization, while it is doing you will see mes
 
 ```console
 ...
-app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 748000","time":"2022-05-28T19:25:49-03:00"}
+{"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 748000","time":"2022-05-28T19:25:49-03:00"}
 {"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 749540","time":"2022-05-28T19:25:53-03:00"}
 {"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 751074","time":"2022-05-28T19:25:57-03:00"}
 ...
@@ -174,7 +172,7 @@ Wait until lightwalletd is in sync before connecting any wallet into it. You wil
 
 The Zebra team created tests for the interaction of zebra and lightwalletd. 
 
-Please refer to [acceptance](https://github.com/ZcashFoundation/zebra/blob/v1.0.0-beta.10/zebrad/tests/acceptance.rs) tests documentation in the `Lightwalletd tests` section.
+Please refer to [acceptance](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/acceptance.rs) tests documentation in the `Lightwalletd tests` section.
 
 ## Connect a wallet to lightwalletd
 [#connect-wallet-to-lightwalletd]: (#connect-wallet-to-lightwalletd)
@@ -189,9 +187,7 @@ Make sure both `zebrad` and `lightwalletd` are running and listening.
 [#download-and-build-the-cli-wallet]: (#download-and-build-the-cli-wallet)
 
 ```console
-$ git clone https://github.com/adityapk00/zecwallet-light-cli.git
-$ cd zecwallet-light-cli
-$ cargo build --release
+cargo install --locked --git https://github.com/adityapk00/zecwallet-light-cli
 ```
 
 ### Run the wallet
