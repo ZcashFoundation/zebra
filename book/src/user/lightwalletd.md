@@ -33,10 +33,12 @@ Zebra binary will be at ` ~/.cargo/bin/zebrad`.
 We need a zebra configuration file. First, we create a file with the default settings:
 
 ```console
-./target/release/zebrad generate -o zebrad.toml
+zebrad generate -o ~/.config/zebrad.toml
 ```
 
-This will create a `zebrad.toml` file. Tweak the following options in order to prepare for lightwalletd setup.
+The above command places the generated `zebrad.toml` config file in the default preferences directory of Linux. For other OSes default locations [see here](https://docs.rs/dirs/latest/dirs/fn.preference_dir.html).
+
+Tweak the following options in order to prepare for lightwalletd setup.
 
 ### RPC section
 [#rpc-section]: #rpc-section
