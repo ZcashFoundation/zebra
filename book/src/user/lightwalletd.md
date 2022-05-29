@@ -14,7 +14,6 @@ Contents:
 - [Connect wallet to lightwalletd](#connect-wallet-to-lightwalletd)
   - [Download and build the cli-wallet](#download-and-build-the-cli-wallet)
   - [Run the wallet](#run-the-wallet)
-- [Lightwalletd and nginx](#lightwalletd-and-nginx)
 
 ## Download and build Zebra
 [#download-and-build-zebra]: #download-and-build-zebra
@@ -171,42 +170,4 @@ Lightclient connecting to http://127.0.0.1:9067/
 }
 Ready!
 (main) Block:1683911 (type 'help') >> 
-```
-## Lightwalletd and nginx
-[#lightwalletd-and-nginx]: (#lightwalletd-and-nginx)
-
-Sometimes during development or production it is useful to run lightwalletd behind a nginx proxy. This will result in having access and error logs. 
-
-The following is a basic configuration that will proxy connections from lightwalletd in port `9067` to port `8081` and creating access and error logs:
-
-```
-log_format  main    '$remote_addr - $remote_user [$time_local] "$request" '
-                    '$status $body_bytes_sent "$http_referer" '
-                    '"$http_user_agent" [$request_body]';
-
-server {
-        listen       8081 http2;
-        server_name  localhost;
-
-        access_log   /var/log/nginx/lightwalletd.access.log main;
-        error_log   /var/log/nginx/lightwalletd.error.log;
-
-        location / {
-                include       /etc/nginx/mime.types;
-                grpc_pass grpc://localhost:9067;
-        }
-}
-
-```
-
-With that in place wallets should now connect to port `8081`:
-
-```console
-$ ./target/release/zecwallet-cli --server 127.0.0.1:8081
-Lightclient connecting to http://127.0.0.1:8081/
-{
-  "result": "success"
-}
-Ready!
-(main) Block:1683916 (type 'help') >> 
 ```
