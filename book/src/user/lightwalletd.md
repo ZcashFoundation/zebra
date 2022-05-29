@@ -99,7 +99,7 @@ make
 make install
 ```
 
-If everything went good you should have a `lightwalletd` binary in the root of the project.
+If everything went good you should have a `lightwalletd` binary in `~/go/bin/`.
 
 ## Sync lightwalled
 [#sync-lightwalletd]: (#sync-lightwalletd)
