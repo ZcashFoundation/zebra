@@ -7,8 +7,6 @@ Contents:
 - [Download and build Zebra](#download-and-build-zebra)
 - [Configure zebra for lightwalletd](#configure-zebra-for-lightwalletd)
   - [RPC section](#rpc-section)
-  - [State section](#state-section)
-  - [Network section](#network-section)
 - [Sync Zebra](#sync-zebra)
 - [Download and build lightwalletd](#download-and-build-lightwalletd)
 - [Sync lightwalled](#sync-lightwalled)
@@ -38,7 +36,7 @@ zebrad generate -o ~/.config/zebrad.toml
 
 The above command places the generated `zebrad.toml` config file in the default preferences directory of Linux. For other OSes default locations [see here](https://docs.rs/dirs/latest/dirs/fn.preference_dir.html).
 
-Tweak the following options in order to prepare for lightwalletd setup.
+Tweak the following option in order to prepare for lightwalletd setup.
 
 ### RPC section
 [#rpc-section]: #rpc-section
@@ -48,29 +46,6 @@ This change is required for zebra to behave as an RPC endpoint. The standard por
 ```
 [rpc]
 listen_addr = "127.0.0.1:8232"
-```
-
-### State section
-[#state-section]: #state-section
-
-Make sure your cache is in a hard drive with enough space to hold the full blockchain (around 30G at the moment of writing - 2022-05-28).
-
-```
-[state]
-cache_dir = "/lot/of/free/space/for/zebra"
-...
-```
-
-### Network section
-[#network-section]: #network-section
-
-Only change this if you want to sync for the testnet:
-
-```
-[network]
-...
-network = 'Testnet'
-...
 ```
 
 ## Sync Zebra
