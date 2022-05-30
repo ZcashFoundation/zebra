@@ -155,7 +155,7 @@ Make sure both `zebrad` and `lightwalletd` are running and listening.
 cargo install --locked --git https://github.com/adityapk00/zecwallet-light-cli
 ```
 
-zecwallet-cli binary will be at ` ~/.cargo/bin/zecwallet-cli`.
+zecwallet-cli binary will be at `~/.cargo/bin/zecwallet-cli`.
 
 ### Run the wallet
 [#run-the-wallet]: (#run-the-wallet)
