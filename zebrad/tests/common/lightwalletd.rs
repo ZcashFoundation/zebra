@@ -266,11 +266,12 @@ impl LightwalletdTestType {
     }
 
     /// Returns the Zebra state path for this test, if set.
+    #[allow(clippy::print_stderr)]
     pub fn zebrad_state_path(&self, test_name: String) -> Option<PathBuf> {
         match env::var_os(ZEBRA_CACHED_STATE_DIR) {
             Some(path) => Some(path.into()),
             None => {
-                tracing::info!(
+                eprintln!(
                     "skipped {test_name:?} {self:?} lightwalletd test, \
                      set the {ZEBRA_CACHED_STATE_DIR:?} environment variable to run the test",
                 );

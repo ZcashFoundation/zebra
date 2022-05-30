@@ -1569,7 +1569,6 @@ async fn fully_synced_rpc_test() -> Result<()> {
     let cached_state_path = test_type.zebrad_state_path("fully_synced_rpc_test".to_string());
 
     if cached_state_path.is_none() {
-        tracing::info!("skipping fully synced zebrad RPC test");
         return Ok(());
     };
 
