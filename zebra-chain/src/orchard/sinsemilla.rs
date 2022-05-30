@@ -167,7 +167,7 @@ pub fn sinsemilla_hash(D: &[u8], M: &BitVec<u8, Lsb0>) -> Option<pallas::Base> {
 ///
 /// SinsemillaCommit_r(D, M) := SinsemillaHashToPoint(D || "-M", M) + [r]GroupHash^P(D || "-r", "")
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit
+/// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit>
 #[allow(non_snake_case)]
 pub fn sinsemilla_commit(
     r: pallas::Scalar,
@@ -180,7 +180,7 @@ pub fn sinsemilla_commit(
 
 /// SinsemillaShortCommit_r(D, M) := Extract⊥ P(SinsemillaCommit_r(D, M))
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit
+/// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit>
 #[allow(non_snake_case)]
 pub fn sinsemilla_short_commit(
     r: pallas::Scalar,

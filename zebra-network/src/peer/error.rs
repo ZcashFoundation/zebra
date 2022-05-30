@@ -154,7 +154,7 @@ impl PeerError {
 /// > that provides non-async methods for performing operations on the data within,
 /// > and only lock the mutex inside these methods
 ///
-/// https://docs.rs/tokio/1.15.0/tokio/sync/struct.Mutex.html#which-kind-of-mutex-should-you-use
+/// <https://docs.rs/tokio/1.15.0/tokio/sync/struct.Mutex.html#which-kind-of-mutex-should-you-use>
 #[derive(Default, Clone)]
 pub struct ErrorSlot(Arc<std::sync::Mutex<Option<SharedPeerError>>>);
 

@@ -83,7 +83,7 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     /// Return the sprout value balance,
     /// the change in the transaction value pool due to sprout [`JoinSplit`]s.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
     /// See [`Transaction::sprout_value_balance`] for details.
     pub fn value_balance(&self) -> Result<Amount<NegativeAllowed>, amount::Error> {

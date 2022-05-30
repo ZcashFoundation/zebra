@@ -548,7 +548,7 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
 /// Return true if `list` is sorted in ascending order.
 ///
 /// TODO: replace with Vec::is_sorted when it stabilises
-///       https://github.com/rust-lang/rust/issues/53485
+///       <https://github.com/rust-lang/rust/issues/53485>
 pub fn is_sorted<T: Ord + Clone>(list: &[T]) -> bool {
     // This could perform badly, but it is only used in tests, and the test vectors are small.
     let mut sorted_list = list.to_owned();

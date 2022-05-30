@@ -10,8 +10,8 @@ use super::super::keys::SpendingKey;
 /// spending key a_sk and a nullifier seed ρ, instantiated using the
 /// SHA-256 compression function.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#abstractprfs
-/// https://zips.z.cash/protocol/protocol.pdf#commitmentsandnullifiers
+/// <https://zips.z.cash/protocol/protocol.pdf#abstractprfs>
+/// <https://zips.z.cash/protocol/protocol.pdf#commitmentsandnullifiers>
 fn prf_nf(a_sk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
     let mut state = [0u32; 8];
     let mut block = GenericArray::<u8, U64>::default();

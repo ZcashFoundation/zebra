@@ -27,7 +27,7 @@ mod tests;
 /// > plaintext according to the preceding rule MUST have note plaintext lead byte equal to 0x02.
 /// > (This applies even during the “grace period” specified in [ZIP-212].)
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+/// <https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus>
 ///
 /// Wallets have a grace period of 32,256 blocks after Canopy's activation to validate those blocks,
 /// but nodes do not.
@@ -38,7 +38,7 @@ mod tests;
 /// > Let ActivationHeight be the activation height of this ZIP, and let GracePeriodEndHeight be
 /// > ActivationHeight + 32256.
 ///
-/// https://zips.z.cash/zip-0212#changes-to-the-process-of-receiving-sapling-or-orchard-notes
+/// <https://zips.z.cash/zip-0212#changes-to-the-process-of-receiving-sapling-or-orchard-notes>
 ///
 /// Zebra uses `librustzcash` to validate that rule, but it won't validate it during the grace
 /// period. Therefore Zebra must validate those blocks during the grace period using checkpoints.

@@ -1,7 +1,7 @@
 //! Test vectors for generating Orchard keys, addresses, notes, note
 //! commitments, and nullifiers.
 //!
-//! Produced by https://github.com/zcash-hackworks/zcash-test-vectors/blob/ec5fe3abef5219d0f8c9edbc93bb4038f1729dfe/orchard_key_components.py
+//! Produced by <https://github.com/zcash-hackworks/zcash-test-vectors/blob/ec5fe3abef5219d0f8c9edbc93bb4038f1729dfe/orchard_key_components.py>
 
 #![allow(dead_code)]
 

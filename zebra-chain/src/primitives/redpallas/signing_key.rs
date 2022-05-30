@@ -86,7 +86,7 @@ impl<T: SigType> SigningKey<T> {
 
     /// Create a signature of type `T` on `msg` using this `SigningKey`.
     ///
-    /// https://zips.z.cash/protocol/nu5.pdf#concretereddsa
+    /// <https://zips.z.cash/protocol/nu5.pdf#concretereddsa>
     // Similar to signature::Signer but without boxed errors.
     pub fn sign<R: RngCore + CryptoRng>(&self, mut rng: R, msg: &[u8]) -> Signature<T> {
         use super::HStar;

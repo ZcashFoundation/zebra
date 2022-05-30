@@ -34,8 +34,8 @@ mod sk_magics {
 /// a spending key, and instantiated using the SHA-256 compression
 /// function.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#abstractprfs
-/// https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
+/// <https://zips.z.cash/protocol/protocol.pdf#abstractprfs>
+/// <https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents>
 fn prf_addr(x: [u8; 32], t: u8) -> [u8; 32] {
     let mut state = [0u32; 8];
     let mut block = GenericArray::<u8, U64>::default();
@@ -170,8 +170,8 @@ impl From<SpendingKey> for ReceivingKey {
     /// is populated by default in an empty block of all zeros to
     /// start.
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
-    /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
+    /// <https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents>
+    /// <https://zips.z.cash/protocol/protocol.pdf#concreteprfs>
     fn from(spending_key: SpendingKey) -> ReceivingKey {
         let derived_bytes = prf_addr(spending_key.bytes, 0);
 
@@ -204,8 +204,8 @@ impl fmt::Debug for PayingKey {
 impl From<SpendingKey> for PayingKey {
     /// For this invocation of SHA256Compress as PRF^addr, t=1.
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents
-    /// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
+    /// <https://zips.z.cash/protocol/protocol.pdf#sproutkeycomponents>
+    /// <https://zips.z.cash/protocol/protocol.pdf#concreteprfs>
     fn from(spending_key: SpendingKey) -> PayingKey {
         let derived_bytes = prf_addr(spending_key.bytes, 1);
 
