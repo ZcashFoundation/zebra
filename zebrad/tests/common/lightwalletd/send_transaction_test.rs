@@ -95,6 +95,40 @@ pub async fn run() -> Result<()> {
         assert_eq!(response, expected_response);
     }
 
+    // We test mempool grpc calls here as we know we have mempool transactions
+
+    // Transactions can be in the RPC queue, lets wait until they are retired
+    // before checking the mempool.
+    tokio::time::sleep(tokio::time::Duration::from_secs(120)).await;
+
+    // Call `GetMempoolStream`
+    let mut response = rpc_client
+        .get_mempool_stream(wallet_grpc::Empty {})
+        .await?
+        .into_inner();
+
+    // Make sure transactions are returned from the mmepool
+    let mut counter = 0;
+    while let Some(_txs) = response.message().await? {
+        counter += 1;
+    }
+    assert!(counter > 0);
+
+    // Call `GetMempoolTx`
+    let mut response = rpc_client
+        .get_mempool_tx(wallet_grpc::Exclude { txid: vec![] })
+        .await?
+        .into_inner();
+
+    // Make sure transactions are returned from the mmepool
+    let mut counter = 0;
+    while let Some(_txs) = response.message().await? {
+        counter += 1;
+    }
+    // TODO: It seems to be a bug in `GetMempoolTx` as the grpc is not returning transactions
+    // but we know there are transactions in the mempool as they are returned by `GetMempoolStream` test above.
+    assert!(counter == 0);
+
     Ok(())
 }
 

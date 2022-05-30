@@ -13,14 +13,14 @@
 //! - `GetBlockRange`: Covered.
 //!
 //! - `GetTransaction`: Covered.
-//! - `SendTransaction`: Not covered and it will never be, it has its own test.
+//! - `SendTransaction`: Not covered and it will never be, it has its own test in `send_transactions_tests.rs` file.
 //!
 //! - `GetTaddressTxids`: Covered.
 //! - `GetTaddressBalance`: Covered.
 //! - `GetTaddressBalanceStream`: Covered.
 //!
-//! - `GetMempoolTx`: Not covered.
-//! - `GetMempoolStream`: Not covered.
+//! - `GetMempoolTx`: Covered in `send_transactions_tests.rs` file
+//! - `GetMempoolStream`: Covered in `send_transactions_tests.rs` file
 //!
 //! - `GetTreeState`: Covered.
 //!
