@@ -94,7 +94,7 @@ sentry = { version = "0.23.0", default-features = false, features = ["backtrace"
 #
 # zebrad uses tracing for logging,
 # we only use `log` to set and print the static log levels in transitive dependencies
-log = "0.4.14"
+log = "0.4.17"
 
 # test feature proptest-impl
 proptest = { version = "0.10.1", optional = true }
