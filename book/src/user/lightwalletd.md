@@ -155,11 +155,13 @@ Make sure both `zebrad` and `lightwalletd` are running and listening.
 cargo install --locked --git https://github.com/adityapk00/zecwallet-light-cli
 ```
 
+zecwallet-cli binary will be at ` ~/.cargo/bin/zecwallet-cli`.
+
 ### Run the wallet
 [#run-the-wallet]: (#run-the-wallet)
 
 ```console
-$ ./target/release/zecwallet-cli --server 127.0.0.1:9067
+$ zecwallet-cli --server 127.0.0.1:9067
 Lightclient connecting to http://127.0.0.1:9067/
 {
   "result": "success",
