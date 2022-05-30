@@ -81,7 +81,7 @@ For implementing zebra as a service please see [here](https://github.com/ZcashFo
 ## Download and build lightwalletd
 [#download-and-build-lightwalletd]: #download-and-build-lightwalletd
 
-Once you have Zebra running (with open RPC port and synchronized) you can install lightwalletd. There are several versions of lightwalletd in different repositories:
+While you synchronize Zebra you can install lightwalletd. There are several versions of lightwalletd in different repositories:
 
 - [The original version](https://github.com/zcash/lightwalletd)
 - [The version used by zecwallet-lite and zecwallet-cli](https://github.com/adityapk00/lightwalletd)
