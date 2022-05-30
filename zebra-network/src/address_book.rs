@@ -56,8 +56,9 @@ pub struct AddressBook {
     ///
     /// Some peers in this list might have open outbound or inbound connections.
     ///
-    /// We reverse the comparison order, because the standard library ([`BTreeMap`])
-    /// sorts in ascending order, but [`OrderedMap`] sorts in descending order.
+    /// We reverse the comparison order, because the standard library
+    /// ([`BTreeMap`](std::collections::BTreeMap)) sorts in ascending order, but
+    /// [`OrderedMap`] sorts in descending order.
     by_addr: OrderedMap<SocketAddr, MetaAddr, Reverse<MetaAddr>>,
 
     /// The maximum number of addresses in the address book.

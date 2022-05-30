@@ -104,7 +104,7 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
         Box::new(self.joinsplits().map(JoinSplit::value_balance))
     }
 
-    /// Collect the Sprout note commitments  for this transaction, if it contains [`Output`]s,
+    /// Collect the Sprout note commitments  for this transaction, if it contains `Output`s,
     /// in the order they appear in the transaction.
     pub fn note_commitments(&self) -> impl Iterator<Item = &sprout::commitment::NoteCommitment> {
         self.joinsplits()

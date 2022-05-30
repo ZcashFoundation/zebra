@@ -158,7 +158,7 @@ impl UnminedTxId {
     /// Returns a mutable reference to the unique ID
     /// that will be used if this transaction gets mined into a block.
     ///
-    /// See [mined_id] for details.
+    /// See [`Self::mined_id`] for details.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn mined_id_mut(&mut self) -> &mut Hash {
         match self {

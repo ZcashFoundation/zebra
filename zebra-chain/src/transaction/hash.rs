@@ -21,10 +21,12 @@
 //! so their legacy IDs are malleable, if submitted with different authorizing data.
 //! So the same spends and outputs can have a completely different [`struct@Hash`].
 //!
-//! Zebra's [`UnminedTxId`](crate::UnminedTxId) and
-//! [`UnminedTx`](crate::UnminedTx) enums provide the correct unique ID for
-//! unmined transactions. They can be used to handle transactions regardless of
-//! version, and get the [`WtxId`] or [`struct@Hash`] when required.
+//! Zebra's [`UnminedTxId`][1] and [`UnminedTx`][1] enums provide the correct
+//! unique ID for unmined transactions. They can be used to handle transactions
+//! regardless of version, and get the [`WtxId`] or [`struct@Hash`] when
+//! required.
+//!
+//! [1]: crate::transaction::UnminedTx
 
 use std::{
     convert::{TryFrom, TryInto},

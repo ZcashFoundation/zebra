@@ -81,7 +81,7 @@ pub enum Response {
     ///
     /// Since the [`Request::TransactionsById`] request is unique,
     /// the response transactions are also unique. The same applies to
-    /// [`Request::TransactionByMinedId`] requests, since the mempool does not allow
+    /// [`Request::TransactionsByMinedId`] requests, since the mempool does not allow
     /// different transactions with different mined IDs.
     Transactions(Vec<UnminedTx>),
 

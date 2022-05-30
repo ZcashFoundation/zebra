@@ -110,8 +110,8 @@ pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 
 /// The default peer address crawler interval.
 ///
-/// This should be at least [`HANDSHAKE_TIMEOUT`](constants::HANDSHAKE_TIMEOUT)
-/// lower than all other crawler intervals.
+/// This should be at least [`HANDSHAKE_TIMEOUT`] lower than all other crawler
+/// intervals.
 ///
 /// This makes the following sequence of events more likely:
 /// 1. a peer address crawl,

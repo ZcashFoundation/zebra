@@ -314,7 +314,7 @@ impl Arbitrary for LedgerState {
     /// Generate an arbitrary [`LedgerState`].
     ///
     /// The default strategy arbitrarily skips some coinbase transactions, and
-    /// has an arbitrary start height. To override, use a specific [`LegderState`]
+    /// has an arbitrary start height. To override, use a specific [`LedgerState`]
     /// strategy method.
     fn arbitrary_with(ledger_override: Self::Parameters) -> Self::Strategy {
         (
