@@ -181,6 +181,9 @@ sync:checkpoint: zebra_consensus::checkpoint: verified checkpoint range block_co
 sync:try_to_sync: zebrad::components::sync: starting sync, obtaining new tips state_tip=Some(Height(0))
 sync:try_to_sync: zebrad::components::sync: extending tips tips.len=1 in_flight=499 lookahead_limit=2000 state_tip=Some(Height(0))
 sync:try_to_sync:obtain_tips:checkpoint: zebra_consensus::checkpoint: verified checkpoint range block_count=400 current_range=(Excluded(Height(0)), Included(Height(400)))
+...
+zebrad::commands::start: estimated progress to chain tip sync_percent=0.537 % current_height=Height(9119) remaining_sync_blocks=1687657 time_since_last_state_block=PT0S
+...
 ```
 
 #### Handling Gossiped Block Hashes
