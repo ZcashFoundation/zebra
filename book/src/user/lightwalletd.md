@@ -106,19 +106,17 @@ If everything went good you should have a `lightwalletd` binary in `~/go/bin/`.
 
 Please make sure you have zebrad running (with RPC endpoint and up to date blockchain) to synchronize lightwalletd.
 
+- `lightwalletd` requires a `zcash.conf` file located somewhere, however this file can be empty if you are using the default zebra rpc endpoint (`127.0.0.1:8232`).
+
+- For production setups `lightwalletd` requires a `cert.pem`. For more information on how to do this please [see here](https://github.com/zcash/lightwalletd#production-usage).
+
+- `lightwalletd` can run without the certificate (with the `-no-tls-very-insecure` flag) however this is not recommended for production enviroments.
+
+With the cert in `./` and an empty `zcash.conf` we can start the sync with:
+
 ```console
-./lightwalletd --no-tls-very-insecure --zcash-conf-path ~/.zcash/zcash.conf --data-dir . --log-file /dev/stdout
+lightwalletd --zcash-conf-path ~/.config/zebra/zcash.conf --data-dir ~/.cache/lightwalletd --log-file /dev/stdout
 ```
-
-Lightwalletd expects a `zcash.conf` file with just the following content:
-
-```
-txindex=1
-insightexplorer=1
-experimentalfeatures=1
-```
-
-With the above command lightwalletd will create a database folder `db` in the root of the project (we told lightwalletd to do so in the `--data-dir .` part of the command).
 
 By default lightwalletd service will listen on `127.0.0.1:9067`
 
