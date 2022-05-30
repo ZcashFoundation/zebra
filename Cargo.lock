@@ -5780,9 +5780,9 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "vergen"
-version = "7.1.0"
+version = "7.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20e9626b9dd8e2b78d1f14adacd0787277e612094abceb023d550f9ba33d5d73"
+checksum = "626fd028e124b3ee607632d92ba99b5a5a086cfd404ede4af6c19ecd9b75a02d"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.0",
@@ -6520,6 +6520,7 @@ dependencies = [
  "indexmap",
  "inferno",
  "lazy_static",
+ "log",
  "metrics",
  "metrics-exporter-prometheus",
  "num-integer",
