@@ -7,7 +7,7 @@
 //!
 //! This module uses the legacy directory structure,
 //! to avoid compiling an empty "common" test binary:
-//! https://doc.rust-lang.org/book/ch11-03-test-organization.html#submodules-in-integration-tests
+//! <https://doc.rust-lang.org/book/ch11-03-test-organization.html#submodules-in-integration-tests>
 
 pub mod cached_state;
 pub mod check;

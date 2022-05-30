@@ -22,7 +22,7 @@ use crate::{
 /// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
 /// > even if they have the same bit pattern.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#nullifierset
+/// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
 #[tracing::instrument(skip(prepared, finalized_state))]
 pub(crate) fn no_duplicates_in_finalized_chain(
     prepared: &PreparedBlock,
@@ -67,7 +67,7 @@ pub(crate) fn no_duplicates_in_finalized_chain(
 /// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
 /// > even if they have the same bit pattern.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#nullifierset
+/// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
 ///
 /// We comply with the "disjoint" rule by storing the nullifiers for each
 /// pool in separate sets (also with different types), so that even if
@@ -104,7 +104,7 @@ where
 /// to a different best valid block chain that does not contain
 /// the transaction in which a note was output"
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#decryptivk
+/// <https://zips.z.cash/protocol/nu5.pdf#decryptivk>
 ///
 /// Note: reorganizations can also change the best chain to one
 /// where a note was unspent, rather than spent.

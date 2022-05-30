@@ -103,14 +103,14 @@ pub fn transparent_spend(
 /// This ensures that any program parsing block chain transactions linearly
 /// will encounter each output before it is used as an input."
 ///
-/// https://developer.bitcoin.org/reference/block_chain.html#merkle-trees
+/// <https://developer.bitcoin.org/reference/block_chain.html#merkle-trees>
 ///
 /// "each output of a particular transaction
 /// can only be used as an input once in the block chain.
 /// Any subsequent reference is a forbidden double spend-
 /// an attempt to spend the same satoshis twice."
 ///
-/// https://developer.bitcoin.org/devguide/block_chain.html#introduction
+/// <https://developer.bitcoin.org/devguide/block_chain.html#introduction>
 ///
 /// # Consensus
 ///
@@ -229,7 +229,7 @@ pub fn transparent_coinbase_spend(
 /// Consensus rule: The remaining value in the transparent transaction value pool
 /// MUST be nonnegative."
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#transactions
+/// <https://zips.z.cash/protocol/protocol.pdf#transactions>
 pub fn remaining_transaction_value(
     prepared: &PreparedBlock,
     utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,

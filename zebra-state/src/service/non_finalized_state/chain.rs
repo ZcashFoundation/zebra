@@ -1403,7 +1403,7 @@ impl Ord for Chain {
     /// the vast majority of nodes should eventually agree on their best valid block chain
     /// up to that height."
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#blockchain
+    /// <https://zips.z.cash/protocol/protocol.pdf#blockchain>
     ///
     /// # Correctness
     ///

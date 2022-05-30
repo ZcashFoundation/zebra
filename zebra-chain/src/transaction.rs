@@ -984,7 +984,7 @@ impl Transaction {
     /// Negative values are removed from the transparent chain value pool,
     /// and added to this transaction.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
     /// `utxos` must contain the utxos of every input in the transaction,
     /// including UTXOs created by earlier transactions in this block.
@@ -1247,7 +1247,7 @@ impl Transaction {
     /// Negative values are removed from this transaction,
     /// and added to the sprout pool.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     fn sprout_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
         self.sprout_joinsplit_value_balances().sum()
     }
@@ -1262,7 +1262,7 @@ impl Transaction {
     /// Negative values are removed from this transaction,
     /// and added to sapling pool.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     pub fn sapling_value_balance(&self) -> ValueBalance<NegativeAllowed> {
         let sapling_value_balance = match self {
             Transaction::V4 {
@@ -1329,7 +1329,7 @@ impl Transaction {
     /// Negative values are removed from this transaction,
     /// and added to orchard pool.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     pub fn orchard_value_balance(&self) -> ValueBalance<NegativeAllowed> {
         let orchard_value_balance = self
             .orchard_shielded_data()
@@ -1375,7 +1375,7 @@ impl Transaction {
     /// Negative values are removed from this transaction,
     /// and added to the corresponding pool.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
     /// `utxos` must contain the utxos of every input in the transaction,
     /// including UTXOs created by earlier transactions in this block.

@@ -40,7 +40,7 @@ mod magics {
 /// imply that a transparent Zcash address can be parsed identically
 /// to a Bitcoin address just by removing the "t".)
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding
+/// <https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding>
 #[derive(
     Copy, Clone, Eq, PartialEq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr,
 )]
@@ -241,7 +241,7 @@ impl Address {
     ///
     /// The resulting hash in both of these cases is always exactly 20
     /// bytes.
-    /// https://en.bitcoin.it/Base58Check_encoding#Encoding_a_Bitcoin_address
+    /// <https://en.bitcoin.it/Base58Check_encoding#Encoding_a_Bitcoin_address>
     fn hash_payload(bytes: &[u8]) -> [u8; 20] {
         let sha_hash = Sha256::digest(bytes);
         let ripe_hash = Ripemd160::digest(&sha_hash);

@@ -26,7 +26,7 @@ pub use nullifiers::{Nullifier, NullifierSeed};
 /// holds the spending key corresponding to a given shielded payment
 /// address.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#notes
+/// <https://zips.z.cash/protocol/protocol.pdf#notes>
 #[derive(Clone, Debug)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
