@@ -289,7 +289,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         // > in each Spend description for v4 transactions, or encoded once and
         // > shared between all Spend descriptions in a v5 transaction.
         //
-        // https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs
+        // <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
         //
         // This rule is also implemented in
         // [`zebra_state::service::check::anchor`] and

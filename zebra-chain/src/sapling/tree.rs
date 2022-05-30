@@ -465,7 +465,7 @@ impl From<&NoteCommitmentTree> for SerializedTree {
         // reason, Zebra implements its own conversion between the dense and
         // sparse formats for Sapling.
         //
-        // [1]: https://github.com/zcash/librustzcash/blob/a63a37a/zcash_primitives/src/merkle_tree.rs#L125
+        // [1]: <https://github.com/zcash/librustzcash/blob/a63a37a/zcash_primitives/src/merkle_tree.rs#L125>
         if let Some(frontier) = tree.inner.value() {
             let (left_leaf, right_leaf) = match frontier.leaf() {
                 Leaf::Left(left_value) => (Some(left_value), None),
