@@ -982,7 +982,7 @@ impl PartialEq<[u8; 32]> for TransmissionKey {
 /// An _outgoing cipher key_ for Orchard note encryption/decryption.
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#saplingandorchardencrypt>
-// TODO: derive `OutgoingCipherKey`: <https://github.com/ZcashFoundation/zebra/issues/2041>
+// TODO: derive `OutgoingCipherKey`: https://github.com/ZcashFoundation/zebra/issues/2041
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct OutgoingCipherKey([u8; 32]);
 

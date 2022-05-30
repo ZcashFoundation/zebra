@@ -1,4 +1,4 @@
-// From <https://github.com/zcash/zcash/blob/master/src/zcash/IncrementalMerkleTree.cpp#L439>
+// From https://github.com/zcash/zcash/blob/master/src/zcash/IncrementalMerkleTree.cpp#L439
 pub const HEX_EMPTY_ROOTS: [&str; 30] = [
     "0000000000000000000000000000000000000000000000000000000000000000",
     "da5698be17b9b46962335799779fbeca8ce5d491c0d26243bafef9ea1837a9d8",
@@ -31,7 +31,7 @@ pub const HEX_EMPTY_ROOTS: [&str; 30] = [
     "c0db2a74998c50eb7ba6534f6d410efc27c4bb88acb0222c7906ea28a327b511",
     "d7c612c817793191a1e68652121876d6b3bde40f4fa52bc314145ce6e5cdd259",
 ];
-// From <https://github.com/zcash/zcash/blob/master/src/test/data/merkle_commitments.json>
+// From https://github.com/zcash/zcash/blob/master/src/test/data/merkle_commitments.json
 // Byte-reversed from those ones because the original test vectors are
 // loaded using uint256S()
 pub const COMMITMENTS: [&str; 16] = [
