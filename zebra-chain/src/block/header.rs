@@ -85,7 +85,7 @@ pub struct Header {
 
 /// TODO: Use this error as the source for zebra_consensus::error::BlockError::Time,
 /// and make `BlockError::Time` add additional context.
-/// See https://github.com/ZcashFoundation/zebra/issues/1021 for more details.
+/// See <https://github.com/ZcashFoundation/zebra/issues/1021> for more details.
 #[allow(missing_docs)]
 #[derive(Error, Debug)]
 pub enum BlockTimeError {
@@ -100,7 +100,7 @@ pub enum BlockTimeError {
 
 impl Header {
     /// TODO: Inline this function into zebra_consensus::block::check::time_is_valid_at.
-    /// See https://github.com/ZcashFoundation/zebra/issues/1021 for more details.
+    /// See <https://github.com/ZcashFoundation/zebra/issues/1021> for more details.
     pub fn time_is_valid_at(
         &self,
         now: DateTime<Utc>,

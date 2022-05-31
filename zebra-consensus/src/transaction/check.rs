@@ -169,8 +169,8 @@ pub fn joinsplit_has_vpub_zero(tx: &Transaction) -> Result<(), TransactionError>
 /// Check if a transaction is adding to the sprout pool after Canopy
 /// network upgrade given a block height and a network.
 ///
-/// https://zips.z.cash/zip-0211
-/// https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
+/// <https://zips.z.cash/zip-0211>
+/// <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
 pub fn disabled_add_to_sprout_pool(
     tx: &Transaction,
     height: Height,
@@ -211,13 +211,13 @@ pub fn disabled_add_to_sprout_pool(
 /// Any subsequent reference is a forbidden double spend-
 /// an attempt to spend the same satoshis twice."
 ///
-/// https://developer.bitcoin.org/devguide/block_chain.html#introduction
+/// <https://developer.bitcoin.org/devguide/block_chain.html#introduction>
 ///
 /// A _nullifier_ *MUST NOT* repeat either within a _transaction_, or across _transactions_ in a
 /// _valid blockchain_ . *Sprout* and *Sapling* and *Orchard* _nulliers_ are considered disjoint,
 /// even if they have the same bit pattern.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#nullifierset
+/// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
 pub fn spend_conflicts(transaction: &Transaction) -> Result<(), TransactionError> {
     use crate::error::TransactionError::*;
 
@@ -284,7 +284,7 @@ where
 ///
 /// TODO: Currently, a 0x01 lead byte is allowed in the "grace period" mentioned since we're
 /// using `librustzcash` to implement this and it doesn't currently allow changing that behavior.
-/// https://github.com/ZcashFoundation/zebra/issues/3027
+/// <https://github.com/ZcashFoundation/zebra/issues/3027>
 pub fn coinbase_outputs_are_decryptable(
     transaction: &Transaction,
     network: Network,
@@ -309,8 +309,8 @@ pub fn coinbase_outputs_are_decryptable(
 /// Returns `Ok(())` if the expiry height for the coinbase transaction is valid
 /// according to specifications [7.1] and [ZIP-203].
 ///
-/// [7.1]: <https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus>
-/// [ZIP-203]: <https://zips.z.cash/zip-0203>
+/// [7.1]: https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+/// [ZIP-203]: https://zips.z.cash/zip-0203
 pub fn coinbase_expiry_height(
     block_height: &Height,
     coinbase: &Transaction,
@@ -351,8 +351,8 @@ pub fn coinbase_expiry_height(
 /// Returns `Ok(())` if the expiry height for a non coinbase transaction is
 /// valid according to specifications [7.1] and [ZIP-203].
 ///
-/// [7.1]: <https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus>
-/// [ZIP-203]: <https://zips.z.cash/zip-0203>
+/// [7.1]: https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+/// [ZIP-203]: https://zips.z.cash/zip-0203
 pub fn non_coinbase_expiry_height(
     block_height: &Height,
     transaction: &Transaction,

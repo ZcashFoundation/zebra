@@ -35,7 +35,7 @@ impl From<[u8; 32]> for NoteCommitment {
 impl From<Note> for NoteCommitment {
     /// NoteCommit_rcm^Sprout(a_pk, v, rho)
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#concretesproutnotecommit
+    /// <https://zips.z.cash/protocol/protocol.pdf#concretesproutnotecommit>
     fn from(note: Note) -> NoteCommitment {
         let leading_byte: u8 = 0xB0;
         let mut hasher = Sha256::default();

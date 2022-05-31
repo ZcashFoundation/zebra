@@ -42,7 +42,7 @@ impl SeedRandomness {
 /// for the actual output note. When creating a dummy note, its _rho_ is chosen
 /// as a random Pallas point's x-coordinate.
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#orcharddummynotes
+/// <https://zips.z.cash/protocol/nu5.pdf#orcharddummynotes>
 #[derive(Clone, Debug)]
 pub struct Rho(pub(crate) pallas::Base);
 

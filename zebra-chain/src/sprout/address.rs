@@ -21,7 +21,7 @@ mod magics {
 
 /// Sprout Shielded Payment Addresses
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#sproutpaymentaddrencoding
+/// <https://zips.z.cash/protocol/protocol.pdf#sproutpaymentaddrencoding>
 #[derive(Copy, Clone)]
 pub struct SproutShieldedAddress {
     network: Network,

@@ -399,7 +399,7 @@ pub enum Request {
     /// Returns
     ///
     /// [`Response::BlockHashes(Vec<block::Hash>)`](Response::BlockHashes).
-    /// See https://en.bitcoin.it/wiki/Protocol_documentation#getblocks
+    /// See <https://en.bitcoin.it/wiki/Protocol_documentation#getblocks>
     FindBlockHashes {
         /// Hashes of known blocks, ordered from highest height to lowest height.
         known_blocks: Vec<block::Hash>,
@@ -422,7 +422,7 @@ pub enum Request {
     /// Returns
     ///
     /// [`Response::BlockHeaders(Vec<block::Header>)`](Response::BlockHeaders).
-    /// See https://en.bitcoin.it/wiki/Protocol_documentation#getheaders
+    /// See <https://en.bitcoin.it/wiki/Protocol_documentation#getheaders>
     FindBlockHeaders {
         /// Hashes of known blocks, ordered from highest height to lowest height.
         known_blocks: Vec<block::Hash>,

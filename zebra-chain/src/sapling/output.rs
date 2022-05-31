@@ -41,7 +41,7 @@ pub struct Output {
 
 /// Wrapper for `Output` serialization in a `V4` transaction.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#outputencoding
+/// <https://zips.z.cash/protocol/protocol.pdf#outputencoding>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputInTransactionV4(pub Output);
 

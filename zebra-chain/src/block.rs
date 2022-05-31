@@ -185,7 +185,7 @@ impl Block {
     /// Positive values are added to the corresponding chain value pool.
     /// Negative values are removed from the corresponding pool.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
     /// `utxos` must contain the [`Utxo`]s of every input in this block,
     /// including UTXOs created by earlier transactions in this block.

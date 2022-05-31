@@ -83,7 +83,7 @@ pub enum VerifyBlockError {
 /// We re-use some `zcashd` C++ script code via `zebra-script` and `zcash_script`.
 ///
 /// See:
-/// https://github.com/zcash/zcash/blob/bad7f7eadbbb3466bebe3354266c7f69f607fcfd/src/consensus/consensus.h#L30
+/// <https://github.com/zcash/zcash/blob/bad7f7eadbbb3466bebe3354266c7f69f607fcfd/src/consensus/consensus.h#L30>
 pub const MAX_BLOCK_SIGOPS: u64 = 20_000;
 
 impl<S, V> BlockVerifier<S, V>
