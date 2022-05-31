@@ -67,7 +67,7 @@ tokio = { version = "1.18.2", features = ["time", "rt-multi-thread", "macros", "
 tower = { version = "0.4.12", features = ["hedge", "limit"] }
 pin-project = "1.0.10"
 
-color-eyre = { version = "0.6.1", features = ["issue-url"] }
+color-eyre = { version = "0.6.1", default_features = false, features = ["issue-url"] }
 thiserror = "1.0.31"
 
 tracing-flame = "0.2.0"
@@ -126,6 +126,9 @@ tonic = "0.7.2"
 
 proptest = "0.10.1"
 proptest-derive = "0.3.0"
+
+# enable span traces and track caller in tests
+color-eyre = { version = "0.6.1", features = ["issue-url"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-consensus = { path = "../zebra-consensus/", features = ["proptest-impl"] }
