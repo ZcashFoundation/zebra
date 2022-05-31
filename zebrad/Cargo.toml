@@ -20,8 +20,8 @@ default = ["release_max_level_info"]
 
 # TODO: rename to just "sentry"?
 enable-sentry = ["sentry", "sentry-tracing"]
-
 flamegraph = ["tracing-flame"]
+journald = ["tracing-journald"]
 
 # Production features that modify dependency behaviour
 
@@ -92,7 +92,7 @@ color-eyre = { version = "0.6.1", default_features = false, features = ["issue-u
 thiserror = "1.0.31"
 
 tracing-flame = { version = "0.2.0", optional = true }
-tracing-journald = "0.3.0"
+tracing-journald = { version = "0.3.0", optional = true }
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 tracing-error = "0.2.0"
 tracing-futures = "0.2.5"

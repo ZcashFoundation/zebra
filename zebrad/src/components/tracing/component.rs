@@ -1,6 +1,6 @@
 //! The Abscissa component for Zebra's `tracing` implementation.
 
-use abscissa_core::{Component, FrameworkError, FrameworkErrorKind, Shutdown};
+use abscissa_core::{Component, FrameworkError, Shutdown};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
     fmt::Formatter, layer::SubscriberExt, reload::Handle, util::SubscriberInitExt, EnvFilter,
@@ -95,7 +95,10 @@ impl Tracing {
         #[cfg(feature = "flamegraph")]
         let subscriber = subscriber.with(flamelayer);
 
+        #[cfg(feature = "journald")]
         let journaldlayer = if config.use_journald {
+            use abscissa_core::FrameworkErrorKind;
+
             let layer = tracing_journald::layer()
                 .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?;
 
@@ -111,6 +114,7 @@ impl Tracing {
         } else {
             None
         };
+        #[cfg(feature = "journald")]
         let subscriber = subscriber.with(journaldlayer);
 
         #[cfg(feature = "enable-sentry")]
@@ -145,7 +149,14 @@ impl Tracing {
         }
 
         if config.use_journald {
-            info!(?filter, "installed journald tracing layer");
+            if cfg!(feature = "journald") {
+                info!("installed journald tracing layer");
+            } else {
+                warn!(
+                    "unable to activate configured journald tracing: \
+                     enable the 'journald' feature when compiling zebrad",
+                );
+            }
         }
 
         #[cfg(feature = "enable-sentry")]
@@ -223,7 +234,10 @@ impl<A: abscissa_core::Application> Component<A> for Tracing {
     fn before_shutdown(&self, _kind: Shutdown) -> Result<(), FrameworkError> {
         #[cfg(feature = "flamegraph")]
         if let Some(ref grapher) = self.flamegrapher {
+            use abscissa_core::FrameworkErrorKind;
+
             info!("writing flamegraph");
+
             grapher
                 .write_flamegraph()
                 .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?
