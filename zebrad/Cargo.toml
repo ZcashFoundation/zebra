@@ -21,6 +21,9 @@ enable-sentry = ["sentry", "sentry-tracing"]
 
 # Production features that modify dependency behaviour
 
+# Enable additional error debugging in release builds
+error-debug = ["color-eyre/track-caller", "color-eyre/capture-spantrace"]
+
 # Remove verbose logging at compile-time in release or all builds.
 #
 # Release builds are defined as "cfg(not(debug_assertions))".
