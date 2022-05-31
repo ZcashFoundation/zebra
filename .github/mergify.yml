@@ -7,7 +7,7 @@ queue_rules:
     speculative_checks: 1
     batch_size: 5
     # Wait a short time to embark hotfixes together in a merge train
-    batch_max_wait_time "2 minutes"
+    batch_max_wait_time: "2 minutes"
     conditions:
       # Mergify automatically applies status check, approval, and conversation rules,
       # which are the same as the GitHub main branch protection rules
