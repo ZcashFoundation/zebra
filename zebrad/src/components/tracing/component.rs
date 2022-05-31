@@ -37,7 +37,9 @@ impl Tracing {
         let use_color =
             config.force_use_color || (config.use_color && atty::is(atty::Stream::Stdout));
 
-        // Construct a format subscriber with the supplied global logging filter, and enable reloading.
+        // Construct a format subscriber with the supplied global logging filter,
+        // and optionally enable reloading.
+        //
         // TODO: when fmt::Subscriber supports per-layer filtering, always enable this code
         #[cfg(not(all(feature = "tokio-console", tokio_unstable)))]
         let (subscriber, filter_handle) = {
@@ -45,13 +47,22 @@ impl Tracing {
 
             let logger = FmtSubscriber::builder()
                 .with_ansi(use_color)
-                .with_env_filter(&filter)
-                .with_filter_reloading();
+                .with_env_filter(&filter);
 
-            let filter_handle = logger.reload_handle();
+            // Enable reloading if that feature is selected.
+            #[cfg(feature = "filter-reload")]
+            let (filter_handle, logger) = {
+                let logger = logger.with_filter_reloading();
+
+                (Some(logger.reload_handle()), logger)
+            };
+
+            #[cfg(not(feature = "filter-reload"))]
+            let filter_handle = None;
+
             let subscriber = logger.finish().with(ErrorLayer::default());
 
-            (subscriber, Some(filter_handle))
+            (subscriber, filter_handle)
         };
 
         // Construct a tracing registry with the supplied per-layer logging filter,
