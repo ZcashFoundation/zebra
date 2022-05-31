@@ -17,7 +17,11 @@ default-run = "zebrad"
 default = ["release_max_level_info"]
 
 # Production features that activate extra dependencies
+
+# TODO: rename to just "sentry"?
 enable-sentry = ["sentry", "sentry-tracing"]
+
+flamegraph = ["tracing-flame"]
 
 # Production features that modify dependency behaviour
 
@@ -87,7 +91,7 @@ pin-project = "1.0.10"
 color-eyre = { version = "0.6.1", default_features = false, features = ["issue-url"] }
 thiserror = "1.0.31"
 
-tracing-flame = "0.2.0"
+tracing-flame = { version = "0.2.0", optional = true }
 tracing-journald = "0.3.0"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 tracing-error = "0.2.0"

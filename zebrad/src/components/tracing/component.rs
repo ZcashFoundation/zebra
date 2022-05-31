@@ -8,6 +8,7 @@ use tracing_subscriber::{
 
 use crate::{application::app_version, config::TracingSection};
 
+#[cfg(feature = "flamegraph")]
 use super::flame;
 
 /// Abscissa component for initializing the `tracing` subsystem
@@ -21,6 +22,7 @@ pub struct Tracing {
     initial_filter: String,
 
     /// The installed flame graph collector, if enabled.
+    #[cfg(feature = "flamegraph")]
     flamegrapher: Option<flame::Grapher>,
 }
 
@@ -82,6 +84,7 @@ impl Tracing {
         // Add optional layers based on dynamic and compile-time configs
 
         // Add a flamegraph
+        #[cfg(feature = "flamegraph")]
         let (flamelayer, flamegrapher) = if let Some(path) = flame_root {
             let (flamelayer, flamegrapher) = flame::layer(path);
 
@@ -89,6 +92,7 @@ impl Tracing {
         } else {
             (None, None)
         };
+        #[cfg(feature = "flamegraph")]
         let subscriber = subscriber.with(flamelayer);
 
         let journaldlayer = if config.use_journald {
@@ -127,14 +131,26 @@ impl Tracing {
             LOG_STATIC_MAX_LEVEL = ?log::STATIC_MAX_LEVEL,
             "started tracing component",
         );
+
         if flame_root.is_some() {
-            info!("installed flamegraph tracing layer");
+            if cfg!(feature = "flamegraph") {
+                info!(flamegraph = ?flame_root, "installed flamegraph tracing layer");
+            } else {
+                warn!(
+                    flamegraph = ?flame_root,
+                    "unable to activate configured flamegraph: \
+                     enable the 'flamegraph' feature when compiling zebrad",
+                );
+            }
         }
+
         if config.use_journald {
             info!(?filter, "installed journald tracing layer");
         }
+
         #[cfg(feature = "enable-sentry")]
         info!("installed sentry tracing layer");
+
         #[cfg(all(feature = "tokio-console", tokio_unstable))]
         info!(
             TRACING_STATIC_MAX_LEVEL = ?tracing::level_filters::STATIC_MAX_LEVEL,
@@ -145,6 +161,7 @@ impl Tracing {
         Ok(Self {
             filter_handle,
             initial_filter: filter,
+            #[cfg(feature = "flamegraph")]
             flamegrapher,
         })
     }
@@ -204,12 +221,14 @@ impl<A: abscissa_core::Application> Component<A> for Tracing {
     }
 
     fn before_shutdown(&self, _kind: Shutdown) -> Result<(), FrameworkError> {
+        #[cfg(feature = "flamegraph")]
         if let Some(ref grapher) = self.flamegrapher {
             info!("writing flamegraph");
             grapher
                 .write_flamegraph()
                 .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?
         }
+
         Ok(())
     }
 }
