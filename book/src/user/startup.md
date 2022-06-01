@@ -77,6 +77,7 @@ add_initial_peers: zebra_network::config: resolved seed peer IP addresses seed="
 ...
 add_initial_peers: zebra_network::peer_set::initialize: limiting the initial peers list from 112 to 25
 ```
+**DNS Seeder**: A DNS server which returns IP addresses of full nodes on the Zcash network to assist in peer discovery. [Zcash Foundation dnsseeder](https://github.com/ZcashFoundation/dnsseeder)  
 
 #### Connect to Initial Peers
 
