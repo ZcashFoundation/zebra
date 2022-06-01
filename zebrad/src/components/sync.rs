@@ -853,11 +853,11 @@ where
     fn update_metrics(&mut self) {
         metrics::gauge!(
             "sync.prospective_tips.len",
-            self.prospective_tips.len() as f64
+            self.prospective_tips.len() as f64,
         );
         metrics::gauge!(
             "sync.downloads.in_flight",
-            self.downloads.in_flight() as f64
+            self.downloads.in_flight() as f64,
         );
     }
 

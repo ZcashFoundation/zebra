@@ -363,7 +363,7 @@ jobs:
       # disk description.
       #
       # The regex used to grep the sync height is provided by ${{ inputs.height_grep_text }},
-      # this allows to dynamically change the height as needed by different situations or 
+      # this allows to dynamically change the height as needed by different situations or
       # based on the logs output from different tests
       #
       # Passes the sync height to subsequent steps using $SYNC_HEIGHT env variable

@@ -532,14 +532,14 @@ impl Storage {
     fn update_rejected_metrics(&mut self) {
         metrics::gauge!(
             "mempool.rejected.transaction.ids",
-            self.rejected_transaction_count() as _
+            self.rejected_transaction_count() as f64,
         );
         // This is just an approximation.
         // TODO: make it more accurate #2869
         let item_size = size_of::<(transaction::Hash, SameEffectsTipRejectionError)>();
         metrics::gauge!(
             "mempool.rejected.transaction.ids.bytes",
-            (self.rejected_transaction_count() * item_size) as _
+            (self.rejected_transaction_count() * item_size) as f64,
         );
     }
 }

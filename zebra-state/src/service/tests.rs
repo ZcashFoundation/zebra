@@ -107,10 +107,8 @@ async fn test_populated_state_responds_correctly(
 
                 let from_coinbase = transaction.is_coinbase();
                 for (index, output) in transaction.outputs().iter().cloned().enumerate() {
-                    let outpoint = transparent::OutPoint {
-                        hash: transaction_hash,
-                        index: index as _,
-                    };
+                    let outpoint = transparent::OutPoint::from_usize(transaction_hash, index);
+
                     let utxo = transparent::Utxo {
                         output,
                         height,
