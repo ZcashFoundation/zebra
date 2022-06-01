@@ -74,9 +74,9 @@ pub const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     "error parsing JSON",
     "error reading JSON response",
     "error with",
-    // We expect these errors when lightwalletd reaches the end of the zebrad cached state
-    // "error requesting block: 0: Block not found",
-    // "error zcashd getblock rpc",
+    // Block error messages
+    "error requesting block: 0: Block not found",
+    "error zcashd getblock rpc",
     "received overlong message",
     "received unexpected height block",
     "Reorg exceeded max",
