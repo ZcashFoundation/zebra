@@ -1,6 +1,8 @@
 queue_rules:
   - name: hotfix
-    allow_inplace_checks: False
+    # Allow to update/rebase the original pull request if possible to check its mergeability,
+    # and it does not create a draft PR if not needed
+    allow_inplace_checks: True
     allow_checks_interruption: False
     speculative_checks: 1
     batch_size: 5
@@ -13,7 +15,7 @@ queue_rules:
       - base=main
 
   - name: high
-    allow_inplace_checks: False
+    allow_inplace_checks: True
     allow_checks_interruption: True
     speculative_checks: 1
     batch_size: 5
@@ -23,7 +25,7 @@ queue_rules:
       - base=main
 
   - name: low
-    allow_inplace_checks: False
+    allow_inplace_checks: True
     allow_checks_interruption: True
     speculative_checks: 1
     batch_size: 5
@@ -35,6 +37,11 @@ queue_rules:
 pull_request_rules:
   - name: move to hotfix queue when CI passes with 1 review and not WIP targeting main
     conditions:
+      # This queue handles a PR if:
+      # - it targets main
+      # - is not in draft
+      # - does not include the do-not-merge label
+      # - is labeled with Critical priority
       - base=main
       - -draft
       - label!=do-not-merge
@@ -46,6 +53,11 @@ pull_request_rules:
 
   - name: move to high queue when CI passes with 1 review and not WIP targeting main
     conditions:
+      # This queue handles a PR if:
+      # - it targets main
+      # - is not in draft
+      # - does not include the do-not-merge label
+      # - is labeled with High or Medium priority
       - base=main
       - -draft
       - label!=do-not-merge
@@ -59,14 +71,17 @@ pull_request_rules:
 
   - name: move to low queue when CI passes with 1 review and not WIP targeting main
     conditions:
+      # We don't need to check priority labels here, because the rules are evaluated in order:
+      # https://docs.mergify.com/configuration/#pull-request-rules
+      #
+      # This queue handles a PR if:
+      # - it targets main
+      # - is not in draft
+      # - is labeled with Low or Optional priority, or does not have a priority label,
+      #   including automated dependabot PRs.
       - base=main
       - -draft
       - label!=do-not-merge
-      # This queue handles Low, Optional, and PRs with no priority label,
-      # including automated dependabot PRs.
-      #
-      # We don't need to check priority labels here, because the rules are evaluated in order:
-      # https://docs.mergify.com/configuration/#pull-request-rules
     actions:
       queue:
         name: low
