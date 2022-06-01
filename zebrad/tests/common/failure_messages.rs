@@ -80,7 +80,6 @@ pub const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     "received overlong message",
     "received unexpected height block",
     "Reorg exceeded max",
-    "unable to issue RPC call",
     // Missing fields for each specific RPC
     //
     // get_block_chain_info
