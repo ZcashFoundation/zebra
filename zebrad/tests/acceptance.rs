@@ -1042,14 +1042,20 @@ fn lightwalletd_full_sync() -> Result<()> {
 ///
 /// Runs the tests in this order:
 /// - launch lightwalletd with empty states,
-/// - if `ZEBRA_CACHED_STATE_DIR` and `LIGHTWALLETD_DATA_DIR` are set: run a quick update sync,
-/// - if `ZEBRA_CACHED_STATE_DIR` is set: run a full sync.
+/// - if `ZEBRA_CACHED_STATE_DIR` is set:
+///   - run a full sync
+/// - if `ZEBRA_CACHED_STATE_DIR` and `LIGHTWALLETD_DATA_DIR` are set:
+///   - run a quick update sync,
+///   - run a send transaction gRPC test,
+///   - run read-only gRPC tests.
+///
+/// The gRPC tests only run when the `lightwalletd-grpc-tests` is on.
 ///
 /// These tests don't work on Windows, so they are always skipped on that platform.
-#[test]
+#[tokio::test]
 #[ignore]
 #[cfg(not(target_os = "windows"))]
-fn lightwalletd_test_suite() -> Result<()> {
+async fn lightwalletd_test_suite() -> Result<()> {
     lightwalletd_integration_test(LaunchWithEmptyState)?;
 
     // Only runs when ZEBRA_CACHED_STATE_DIR is set.
@@ -1060,6 +1066,14 @@ fn lightwalletd_test_suite() -> Result<()> {
 
     // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
     lightwalletd_integration_test(UpdateCachedState)?;
+
+    // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set,
+    // and the compile-time gRPC feature is on.
+    #[cfg(feature = "lightwalletd-grpc-tests")]
+    {
+        common::lightwalletd::send_transaction_test::run().await?;
+        common::lightwalletd::wallet_grpc_test::run().await?;
+    }
 
     Ok(())
 }
@@ -1533,9 +1547,12 @@ async fn fully_synced_rpc_test() -> Result<()> {
 /// Test sending transactions using a lightwalletd instance connected to a zebrad instance.
 ///
 /// See [`common::lightwalletd::send_transaction_test`] for more information.
+///
+/// This test doesn't work on Windows, so it is always skipped on that platform.
 #[cfg(feature = "lightwalletd-grpc-tests")]
 #[tokio::test]
 #[ignore]
+#[cfg(not(target_os = "windows"))]
 async fn sending_transactions_using_lightwalletd() -> Result<()> {
     common::lightwalletd::send_transaction_test::run().await
 }
@@ -1543,9 +1560,12 @@ async fn sending_transactions_using_lightwalletd() -> Result<()> {
 /// Test all the rpc methods a wallet connected to lightwalletd can call.
 ///
 /// See [`common::lightwalletd::wallet_grpc_test`] for more information.
+///
+/// This test doesn't work on Windows, so it is always skipped on that platform.
 #[cfg(feature = "lightwalletd-grpc-tests")]
 #[tokio::test]
 #[ignore]
+#[cfg(not(target_os = "windows"))]
 async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
     common::lightwalletd::wallet_grpc_test::run().await
 }
