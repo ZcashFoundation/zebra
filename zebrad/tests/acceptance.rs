@@ -1106,7 +1106,12 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         return Ok(());
     }
 
-    tracing::info!(?test_type, "running lightwalletd & zebrad integration test");
+    tracing::info!(
+        ?test_type,
+        ?config,
+        ?lightwalletd_state_path,
+        "running lightwalletd & zebrad integration test",
+    );
 
     // Get the lists of process failure logs
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
