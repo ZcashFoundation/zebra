@@ -53,8 +53,8 @@ use common::{
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
         LARGE_CHECKPOINT_TIMEOUT, MEDIUM_CHECKPOINT_TEST_HEIGHT, STOP_AT_HEIGHT_REGEX,
-        STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX_TMP_STOP_EARLY, TINY_CHECKPOINT_TEST_HEIGHT,
-        TINY_CHECKPOINT_TIMEOUT,
+        STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX, SYNC_FINISHED_REGEX_TMP_STOP_EARLY,
+        TINY_CHECKPOINT_TEST_HEIGHT, TINY_CHECKPOINT_TIMEOUT,
     },
 };
 
@@ -1122,10 +1122,11 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
     if test_type.needs_zebra_cached_state() {
-        zebrad.expect_stdout_line_matches(r"loaded Zebra state cache tip=.*Height\([0-9]{7}\)")?;
+        zebrad
+            .expect_stdout_line_matches(r"loaded Zebra state cache .*tip.*=.*Height\([0-9]{7}\)")?;
     } else {
         // Timeout the test if we're somehow accidentally using a cached state
-        zebrad.expect_stdout_line_matches("loaded Zebra state cache tip=None")?;
+        zebrad.expect_stdout_line_matches("loaded Zebra state cache .*tip.*=.*None")?;
     }
 
     // Wait until `zebrad` has opened the RPC endpoint
@@ -1201,13 +1202,13 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
 
     if matches!(test_type, UpdateCachedState | FullSyncFromGenesis { .. }) {
         // Wait for Zebra to sync its cached state to the chain tip
-        zebrad.expect_stdout_line_matches(regex::escape("sync_percent=100"))?;
+        zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
         // Wait for lightwalletd to sync to Zebra's tip
         lightwalletd.expect_stdout_line_matches(regex::escape("Ingestor waiting for block"))?;
 
         // Check Zebra is still at the tip (also clears and prints Zebra's logs)
-        zebrad.expect_stdout_line_matches(regex::escape("sync_percent=100"))?;
+        zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
         // lightwalletd doesn't log anything when we've reached the tip.
         // But when it gets near the tip, it starts using the mempool.

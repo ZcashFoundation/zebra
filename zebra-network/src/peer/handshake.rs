@@ -678,7 +678,7 @@ where
         // the value is the remote version of the most recent rejected handshake from each peer
         metrics::gauge!(
             "zcash.net.peers.version.obsolete",
-            remote_version.0.into(),
+            remote_version.0 as f64,
             "remote_ip" => their_addr.to_string(),
         );
 
@@ -709,7 +709,7 @@ where
         // the value is the remote version of the most recent connected handshake from each peer
         metrics::gauge!(
             "zcash.net.peers.version.connected",
-            remote_version.0.into(),
+            remote_version.0 as f64,
             "remote_ip" => their_addr.to_string(),
         );
     }

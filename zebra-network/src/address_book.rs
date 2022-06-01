@@ -519,7 +519,7 @@ impl AddressBook {
         metrics::gauge!("candidate_set.gossiped", m.never_attempted_gossiped as f64);
         metrics::gauge!(
             "candidate_set.alternate",
-            m.never_attempted_alternate as f64
+            m.never_attempted_alternate as f64,
         );
         metrics::gauge!("candidate_set.failed", m.failed as f64);
         metrics::gauge!("candidate_set.pending", m.attempt_pending as f64);
@@ -529,7 +529,7 @@ impl AddressBook {
         // TODO: rename to address_book.responded.stopped_responding
         metrics::gauge!(
             "candidate_set.disconnected",
-            m.recently_stopped_responding as f64
+            m.recently_stopped_responding as f64,
         );
 
         std::mem::drop(_guard);

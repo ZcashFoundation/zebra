@@ -237,7 +237,7 @@ where
             );
             metrics::gauge!(
                 "mempool.currently.queued.transactions",
-                self.pending.len() as _
+                self.pending.len() as f64,
             );
 
             return Err(MempoolError::AlreadyQueued);
@@ -252,7 +252,7 @@ where
             );
             metrics::gauge!(
                 "mempool.currently.queued.transactions",
-                self.pending.len() as _
+                self.pending.len() as f64,
             );
 
             return Err(MempoolError::FullQueue);
@@ -370,7 +370,7 @@ where
         );
         metrics::gauge!(
             "mempool.currently.queued.transactions",
-            self.pending.len() as _
+            self.pending.len() as f64,
         );
         metrics::counter!("mempool.queued.transactions.total", 1);
 
@@ -411,7 +411,7 @@ where
         assert!(self.cancel_handles.is_empty());
         metrics::gauge!(
             "mempool.currently.queued.transactions",
-            self.pending.len() as _
+            self.pending.len() as f64,
         );
     }
 
@@ -456,6 +456,6 @@ where
     ZS::Future: Send,
 {
     fn drop(self: Pin<&mut Self>) {
-        metrics::gauge!("mempool.currently.queued.transactions", 0 as _);
+        metrics::gauge!("mempool.currently.queued.transactions", 0 as f64);
     }
 }
