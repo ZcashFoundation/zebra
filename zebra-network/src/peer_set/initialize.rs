@@ -681,7 +681,7 @@ where
             handshakes
                 .len()
                 .checked_sub(1)
-                .expect("the pool always contains an unresolved future") as f64
+                .expect("the pool always contains an unresolved future") as f64,
         );
 
         let crawler_action = tokio::select! {

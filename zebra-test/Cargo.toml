@@ -21,12 +21,12 @@ tokio = { version = "1.18.2", features = ["full"] }
 tower = { version = "0.4.12", features = ["util"] }
 futures = "0.3.21"
 
-color-eyre = "0.5.11"
+color-eyre = "0.6.1"
 owo-colors = "3.4.0"
 spandoc = "0.2.2"
 thiserror = "1.0.31"
-tracing-subscriber = "0.2.25"
-tracing-error = "0.1.2"
+tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
+tracing-error = "0.2.0"
 tracing = "0.1.31"
 
 [dev-dependencies]

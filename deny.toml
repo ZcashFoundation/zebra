@@ -36,17 +36,14 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # ticket #2983: criterion dependencies
+    # wait for criterion to de-duplicate itertools transitive dependencies
     { name = "criterion", version = "=0.3.5" },
 
-    # ticket #3000: tower-fallback dependencies
+    # ticket #3000: upgrade tower-fallback dependencies
     { name = "pin-project", version = "=0.4.29" },
 
-    # ticket #3315: ordered-map dependencies that should be dev-dependencies
+    # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
-
-    # ticket #2984: owo-colors dependencies
-    { name = "color-eyre", version = "=0.5.11" },
 
     # wait for structopt upgrade (or upgrade to clap 3)
     { name = "heck", version = "=0.3.3" },
@@ -64,20 +61,18 @@ skip-tree = [
     # wait for curve25519-dalek to upgrade
     { name = "digest", version = "=0.9.0" },
 
-    # Wait for inferno -> num-format to upgrade
+    # wait for inferno -> num-format to upgrade
     { name = "arrayvec", version = "=0.4.12" },
 
-    # upgrade sentry, metrics-exporter-prometheus, reqwest, hyper,
-    # which needs #2953: upgrade tracing to the latest major version
-    #
-    # also wait for tower-test and tokio-test to upgrade
+    # wait for tokio-test -> tokio-stream to upgrade
     { name = "tokio-util", version = "=0.6.9" },
-    { name = "tracing-subscriber", version = "=0.1.6" },
 
     # upgrade abscissa and arti
+    { name = "darling", version = "=0.10.2" },
     { name = "darling", version = "=0.12.4" },
-    { name = "darling", version = "=0.13.4" },
+    { name = "tracing-subscriber", version = "=0.1.6" },
 
+    # wait for primitive-types to upgrade
     { name = "proc-macro-crate", version = "=0.1.5" },
 ]
 

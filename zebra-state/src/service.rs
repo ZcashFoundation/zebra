@@ -301,13 +301,16 @@ impl StateService {
         if let Some(tip_block_height) = tip_block_height {
             metrics::gauge!(
                 "state.full_verifier.committed.block.height",
-                tip_block_height.0 as _
+                tip_block_height.0 as f64,
             );
 
             // This height gauge is updated for both fully verified and checkpoint blocks.
             // These updates can't conflict, because the state makes sure that blocks
             // are committed in order.
-            metrics::gauge!("zcash.chain.verified.block.height", tip_block_height.0 as _);
+            metrics::gauge!(
+                "zcash.chain.verified.block.height",
+                tip_block_height.0 as f64,
+            );
         }
 
         tracing::trace!("finished processing queued block");

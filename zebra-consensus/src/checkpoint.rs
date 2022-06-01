@@ -347,7 +347,7 @@ where
         }
         metrics::gauge!(
             "checkpoint.queued.continuous.height",
-            pending_height.0 as f64
+            pending_height.0 as f64,
         );
 
         // Now find the start of the checkpoint range
@@ -369,7 +369,7 @@ where
         if let Some(block::Height(target_checkpoint)) = target_checkpoint {
             metrics::gauge!(
                 "checkpoint.processing.next.height",
-                target_checkpoint as f64
+                target_checkpoint as f64,
             );
         } else {
             // Use the start height if there is no potential next checkpoint
@@ -578,7 +578,7 @@ where
                 .keys()
                 .next_back()
                 .expect("queued has at least one entry")
-                .0 as f64
+                .0 as f64,
         );
 
         let is_checkpoint = self.checkpoint_list.contains(height);
@@ -767,7 +767,7 @@ where
 
         let block_count = rev_valid_blocks.len();
         tracing::info!(?block_count, ?current_range, "verified checkpoint range");
-        metrics::counter!("checkpoint.verified.block.count", block_count as _);
+        metrics::counter!("checkpoint.verified.block.count", block_count as u64);
 
         // All the blocks we've kept are valid, so let's verify them
         // in height order.

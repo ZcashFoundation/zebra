@@ -15,7 +15,7 @@ tracing = "0.1.31"
 tracing-futures = "0.2.5"
 
 [dev-dependencies]
-color-eyre = "0.6.0"
+color-eyre = "0.6.1"
 ed25519-zebra = "3.0.0"
 rand = { version = "0.8.5", package = "rand" }
 tokio = { version = "1.18.2", features = ["full"] }
