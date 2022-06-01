@@ -103,7 +103,7 @@
 //!
 //! Please refer to the documentation of each test for more information.
 
-use std::{collections::HashSet, convert::TryInto, env, path::PathBuf};
+use std::{collections::HashSet, env, path::PathBuf};
 
 use color_eyre::{
     eyre::{Result, WrapErr},
@@ -866,6 +866,7 @@ fn full_sync_testnet() -> Result<()> {
     full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES")
 }
 
+#[cfg(feature = "prometheus")]
 #[tokio::test]
 async fn metrics_endpoint() -> Result<()> {
     use hyper::Client;
@@ -921,6 +922,7 @@ async fn metrics_endpoint() -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "filter-reload")]
 #[tokio::test]
 async fn tracing_endpoint() -> Result<()> {
     use hyper::{Body, Client, Request};
