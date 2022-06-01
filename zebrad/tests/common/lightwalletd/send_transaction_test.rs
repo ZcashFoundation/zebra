@@ -161,10 +161,7 @@ async fn load_transactions_from_a_future_block(
     let full_sync_path =
         perform_full_sync_starting_from(network, partial_sync_path.as_ref()).await?;
 
-    tracing::info!(
-        ?full_sync_path,
-        "loading transactions...",
-    );
+    tracing::info!(?full_sync_path, "loading transactions...");
 
     let transactions =
         load_transactions_from_block_after(partial_sync_height, network, full_sync_path.as_ref())

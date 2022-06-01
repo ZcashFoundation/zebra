@@ -121,10 +121,7 @@ pub async fn run() -> Result<()> {
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
 
     // End of the setup and start the tests
-    tracing::info!(
-        ?lightwalletd_rpc_port,
-        "sending gRPC queries...",
-    );
+    tracing::info!(?lightwalletd_rpc_port, "sending gRPC queries...");
 
     // Call `GetLatestBlock`
     let block_tip = rpc_client
