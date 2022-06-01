@@ -9,7 +9,7 @@ use zebra_chain::serialization::SerializationError;
 
 use crate::protocol::external::InventoryHash;
 
-/// A wrapper around [`Arc<PeerError>`] that implements `Error`.
+/// A wrapper around `Arc<PeerError>` that implements `Error`.
 #[derive(Error, Debug, Clone)]
 #[error(transparent)]
 pub struct SharedPeerError(Arc<TracedError<PeerError>>);

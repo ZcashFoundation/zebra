@@ -41,7 +41,7 @@ pub fn test_cmd(command_path: &str, tempdir: &Path) -> Result<Command> {
 
 // TODO: split these extensions into their own module
 
-/// Wrappers for `Command` methods to integrate with `zebra_test`.
+/// Wrappers for `Command` methods to integrate with [`zebra_test`].
 pub trait CommandExt {
     /// wrapper for `status` fn on `Command` that constructs informative error
     /// reports
@@ -687,7 +687,7 @@ impl<T> TestChild<T> {
 
     /// Checks each line in `lines` against a regex set, and returns Ok if a line matches.
     ///
-    /// `TestChild::expect_line_matching` wrapper for strings, `Regex`es,
+    /// [`TestChild::expect_line_matching`] wrapper for strings, [`Regex`]es,
     /// and [`RegexSet`]s.
     pub fn expect_line_matching_regex_set<L, R>(
         &mut self,
@@ -708,7 +708,7 @@ impl<T> TestChild<T> {
 
     /// Checks each line in `lines` against a regex set, and returns Ok if a line matches.
     ///
-    /// `TestChild::expect_line_matching` wrapper for regular expression iterators.
+    /// [`TestChild::expect_line_matching`] wrapper for regular expression iterators.
     pub fn expect_line_matching_regex_iter<L, I>(
         &mut self,
         lines: &mut L,

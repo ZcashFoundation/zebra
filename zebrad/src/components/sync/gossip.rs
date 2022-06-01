@@ -1,4 +1,4 @@
-//! A task that gossips newly verified `block::Hash`es to peers.
+//! A task that gossips newly verified [`block::Hash`]es to peers.
 
 use thiserror::Error;
 use tokio::sync::watch;
@@ -26,9 +26,9 @@ pub enum BlockGossipError {
     PeerSetReadiness(zn::BoxError),
 }
 
-/// Run continuously, gossiping newly verified `block::Hash`es to peers.
+/// Run continuously, gossiping newly verified [`block::Hash`]es to peers.
 ///
-/// Once the state has reached the chain tip, broadcast the `block::Hash`es
+/// Once the state has reached the chain tip, broadcast the [`block::Hash`]es
 /// of newly verified blocks to all ready peers.
 ///
 /// Blocks are only gossiped if they are:
