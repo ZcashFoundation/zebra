@@ -1178,7 +1178,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     // getblockchaininfo
     if test_type.needs_zebra_cached_state() {
         lightwalletd.expect_stdout_line_matches(
-            "Got sapling height 419200 block height [0-9]{7} chain main branchID e9ff75a6",
+            "Got sapling height 419200 block height [0-9]{7} chain main branchID [0-9a-f]{8}",
         )?;
     } else {
         // Timeout the test if we're somehow accidentally using a cached state in our temp dir
@@ -1211,12 +1211,14 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     //
     // Until the Sapling activation block has been downloaded,
     // lightwalletd will keep retrying getblock.
-    if test_type.needs_zebra_cached_state() {
-        lightwalletd.expect_stdout_line_matches(regex::escape("Ingestor adding block to cache"))?;
-    } else {
-        lightwalletd.expect_stdout_line_matches(regex::escape(
-            "Waiting for zcashd height to reach Sapling activation height (419200)",
-        ))?;
+    if !test_type.allow_lightwalletd_cached_state() {
+        if test_type.needs_zebra_cached_state() {
+            lightwalletd.expect_stdout_line_matches("[Aa]dding block to cache")?;
+        } else {
+            lightwalletd.expect_stdout_line_matches(regex::escape(
+                "Waiting for zcashd height to reach Sapling activation height (419200)",
+            ))?;
+        }
     }
 
     if matches!(test_type, UpdateCachedState | FullSyncFromGenesis { .. }) {
@@ -1224,17 +1226,22 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
         // Wait for lightwalletd to sync to Zebra's tip
-        lightwalletd.expect_stdout_line_matches(regex::escape("Ingestor waiting for block"))?;
+        lightwalletd.expect_stdout_line_matches("[Ww]aiting for block")?;
 
         // Check Zebra is still at the tip (also clears and prints Zebra's logs)
         zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
         // lightwalletd doesn't log anything when we've reached the tip.
         // But when it gets near the tip, it starts using the mempool.
-        lightwalletd.expect_stdout_line_matches(regex::escape(
-            "Block hash changed, clearing mempool clients",
-        ))?;
-        lightwalletd.expect_stdout_line_matches(regex::escape("Adding new mempool txid"))?;
+        //
+        // adityapk00/lightwalletd logs mempool changes, but zcash/lightwalletd doesn't.
+        #[cfg(adityapk00_lightwalletd)]
+        {
+            lightwalletd.expect_stdout_line_matches(regex::escape(
+                "Block hash changed, clearing mempool clients",
+            ))?;
+            lightwalletd.expect_stdout_line_matches(regex::escape("Adding new mempool txid"))?;
+        }
     }
 
     // Cleanup both processes
