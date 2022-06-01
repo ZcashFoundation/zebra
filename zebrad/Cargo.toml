@@ -84,7 +84,7 @@ metrics = "0.18.1"
 metrics-exporter-prometheus = { version = "0.9.0", default-features = false, features = ["http-listener"] }
 
 dirs = "4.0.0"
-inferno = { version = "0.11.3", default-features = false }
+inferno = { version = "0.11.4", default-features = false }
 atty = "0.2.14"
 
 num-integer = "0.1.45"
