@@ -309,10 +309,17 @@ impl LightwalletdTestType {
         match env::var_os(LIGHTWALLETD_DATA_DIR) {
             Some(path) => Some(path.into()),
             None => {
-                tracing::info!(
-                    "skipped {test_name:?} {self:?} lightwalletd test, \
-                     set the {LIGHTWALLETD_DATA_DIR:?} environment variable to run the test",
-                );
+                if self.needs_lightwalletd_cached_state() {
+                    tracing::info!(
+                        "skipped {test_name:?} {self:?} lightwalletd test, \
+                         set the {LIGHTWALLETD_DATA_DIR:?} environment variable to run the test",
+                    );
+                } else if self.allow_lightwalletd_cached_state() {
+                    tracing::info!(
+                        "running {test_name:?} {self:?} lightwalletd test without cached state, \
+                         set the {LIGHTWALLETD_DATA_DIR:?} environment variable to run with cached state",
+                    );
+                }
 
                 None
             }
