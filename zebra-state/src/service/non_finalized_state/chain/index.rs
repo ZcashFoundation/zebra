@@ -21,15 +21,18 @@ use super::{RevertPosition, UpdateWith};
 pub struct TransparentTransfers {
     /// The partial chain balance for a transparent address.
     ///
-    /// TODO:
-    /// - to avoid [`ReadStateService`] response inconsistencies when a block has just been finalized,
-    ///   revert UTXO receives and spends that are at a height less than or equal to the finalized tip.
+    /// TODO: To avoid [`ReadStateService`](crate::service::ReadStateService)
+    /// response inconsistencies when a block has just been finalized, revert
+    /// UTXO receives and spends that are at a height less than or equal to the
+    /// finalized tip.
     balance: Amount<NegativeAllowed>,
 
     /// The partial list of transactions that spent or received UTXOs to a transparent address.
     ///
-    /// Since transactions can only be added to this set, it does not need special handling
-    /// for [`ReadStateService`] response inconsistencies.
+    /// Since transactions can only be added to this set, it does not need
+    /// special handling for
+    /// [`ReadStateService`](crate::service::ReadStateService) response
+    /// inconsistencies.
     ///
     /// The `getaddresstxids` RPC needs these transaction IDs to be sorted in chain order.
     tx_ids: MultiSet<transaction::Hash>,
@@ -39,9 +42,10 @@ pub struct TransparentTransfers {
     /// The `getaddressutxos` RPC doesn't need these transaction IDs to be sorted in chain order,
     /// but it might in future. So Zebra does it anyway.
     ///
-    /// TODO:
-    /// - to avoid [`ReadStateService`] response inconsistencies when a block has just been finalized,
-    ///   combine the created UTXOs, combine the spent UTXOs, and then remove spent from created
+    /// TODO: To avoid [`ReadStateService`](crate::service::ReadStateService)
+    /// response inconsistencies when a block has just been finalized, combine
+    /// the created UTXOs, combine the spent UTXOs, and then remove spent from
+    /// created
     ///
     /// Optional:
     /// - store `Utxo`s in the chain, and just store the created locations for this address
@@ -210,16 +214,21 @@ impl TransparentTransfers {
         self.balance
     }
 
-    /// Returns the [`transaction::Hash`]es of the transactions that sent or received
-    /// transparent transfers to this address, in this partial chain, filtered by `query_height_range`.
+    /// Returns the [`transaction::Hash`]es of the transactions that sent or
+    /// received transparent transfers to this address, in this partial chain,
+    /// filtered by `query_height_range`.
     ///
     /// The transactions are returned in chain order.
     ///
-    /// `chain_tx_by_hash` should be the `tx_by_hash` field from the [`Chain`] containing this index.
+    /// `chain_tx_by_hash` should be the `tx_by_hash` field from the
+    /// [`Chain`][1] containing this index.
     ///
     /// # Panics
     ///
-    /// If `chain_tx_by_hash` is missing some transaction hashes from this index.
+    /// If `chain_tx_by_hash` is missing some transaction hashes from this
+    /// index.
+    ///
+    /// [1]: super::super::Chain
     pub fn tx_ids(
         &self,
         chain_tx_by_hash: &HashMap<transaction::Hash, TransactionLocation>,
@@ -270,7 +279,7 @@ impl Default for TransparentTransfers {
     }
 }
 
-/// Returns the transaction location for an [`OrderedUtxo`].
+/// Returns the transaction location for an [`transparent::OrderedUtxo`].
 pub fn transaction_location(ordered_utxo: &transparent::OrderedUtxo) -> TransactionLocation {
     TransactionLocation::from_usize(ordered_utxo.utxo.height, ordered_utxo.tx_index_in_block)
 }

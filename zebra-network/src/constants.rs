@@ -53,7 +53,7 @@ use zebra_chain::{
 ///
 /// Since the inbound peer limit is higher than the outbound peer limit,
 /// Zebra can be connected to a majority of peers
-/// that it has *not* chosen from its [`AddressBook`].
+/// that it has *not* chosen from its [`crate::AddressBook`].
 ///
 /// Inbound peer connections are initiated by the remote peer,
 /// so inbound peer selection is not controlled by the local node.
@@ -149,25 +149,28 @@ pub const MAX_RECENT_PEER_AGE: Duration32 = Duration32::from_days(3);
 /// Using a prime number makes sure that heartbeats don't synchronise with crawls.
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(59);
 
-/// The minimum time between successive calls to [`CandidateSet::next()`][Self::next].
+/// The minimum time between successive calls to
+/// [`CandidateSet::next`][peer_set::CandidateSet::next].
 ///
 /// ## Security
 ///
 /// Zebra resists distributed denial of service attacks by making sure that new peer connections
-/// are initiated at least `MIN_PEER_CONNECTION_INTERVAL` apart.
+/// are initiated at least [`MIN_PEER_CONNECTION_INTERVAL`] apart.
 pub const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(25);
 
-/// The minimum time between successive calls to [`CandidateSet::update()`][Self::update].
+/// The minimum time between successive calls to
+/// [`CandidateSet::update`][peer_set::CandidateSet::update].
 ///
 /// Using a prime number makes sure that peer address crawls don't synchronise with other crawls.
 ///
 /// ## Security
 ///
 /// Zebra resists distributed denial of service attacks by making sure that requests for more
-/// peer addresses are sent at least `MIN_PEER_GET_ADDR_INTERVAL` apart.
+/// peer addresses are sent at least [`MIN_PEER_GET_ADDR_INTERVAL`] apart.
 pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(31);
 
-/// The combined timeout for all the requests in [`CandidateSet::update()`][Self::update].
+/// The combined timeout for all the requests in
+/// [`CandidateSet::update`][peer_set::CandidateSet::update].
 ///
 /// `zcashd` doesn't respond to most `getaddr` requests,
 /// so this timeout needs to be short.
@@ -339,8 +342,8 @@ mod tests {
     use super::*;
 
     /// This assures that the `Duration` value we are computing for
-    /// MIN_PEER_RECONNECTION_DELAY actually matches the other const values it
-    /// relies on.
+    /// [`MIN_PEER_RECONNECTION_DELAY`] actually matches the other const values
+    /// it relies on.
     #[test]
     fn ensure_live_peer_duration_value_matches_others() {
         zebra_test::init();

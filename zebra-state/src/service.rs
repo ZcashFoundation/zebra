@@ -2,14 +2,18 @@
 //!
 //! Zebra provides cached state access via two main services:
 //! - [`StateService`]: a read-write service that waits for queued blocks.
-//! - [`ReadStateService`]: a read-only service that answers from the most recent committed block.
+//! - [`ReadStateService`]: a read-only service that answers from the most
+//!   recent committed block.
 //!
 //! Most users should prefer [`ReadStateService`], unless they need to wait for
-//! verified blocks to be committed. (For example, the syncer and mempool tasks.)
+//! verified blocks to be committed. (For example, the syncer and mempool
+//! tasks.)
 //!
 //! Zebra also provides access to the best chain tip via:
-//! - [`LatestChainTip`]: a read-only channel that contains the latest committed tip.
-//! - [`ChainTipChange`]: a read-only channel that can asynchronously await chain tip changes.
+//! - [`LatestChainTip`]: a read-only channel that contains the latest committed
+//!   tip.
+//! - [`ChainTipChange`]: a read-only channel that can asynchronously await
+//!   chain tip changes.
 
 use std::{
     convert,
@@ -95,7 +99,7 @@ pub type QueuedFinalized = (
 /// to delay the next ObtainTips until all queued blocks have been committed.
 ///
 /// But most state users can ignore any queued blocks, and get faster read responses
-/// using the [`ReadOnlyStateService`].
+/// using the [`ReadStateService`].
 #[derive(Debug)]
 pub(crate) struct StateService {
     /// The finalized chain state, including its on-disk database.
@@ -317,11 +321,16 @@ impl StateService {
         rsp_rx
     }
 
-    /// Update the [`LatestChainTip`], [`ChainTipChange`], and [`LatestChain`] channels
-    /// with the latest non-finalized [`ChainTipBlock`] and [`Chain`].
+    /// TODO: Update the reference to [`LatestChain`] below.
     ///
-    /// Returns the latest non-finalized chain tip height,
-    /// or `None` if the non-finalized state is empty.
+    /// Update the [`LatestChainTip`], [`ChainTipChange`], and [`LatestChain`]
+    /// channels with the latest non-finalized [`ChainTipBlock`] and
+    /// [`Chain`][1].
+    ///
+    /// Returns the latest non-finalized chain tip height, or `None` if the
+    /// non-finalized state is empty.
+    ///
+    /// [1]: non_finalized_state::Chain
     #[instrument(level = "debug", skip(self))]
     fn update_latest_chain_channels(&mut self) -> Option<block::Height> {
         let best_chain = self.mem.best_chain();
@@ -502,8 +511,8 @@ impl StateService {
             .or_else(|| self.disk.db().height(hash))
     }
 
-    /// Return the [`Utxo`] pointed to by `outpoint`, if it exists in any chain,
-    /// or in any pending block.
+    /// Return the [`transparent::Utxo`] pointed to by `outpoint`, if it exists
+    /// in any chain, or in any pending block.
     ///
     /// Some of the returned UTXOs may be invalid, because:
     /// - they are not in the best chain, or
