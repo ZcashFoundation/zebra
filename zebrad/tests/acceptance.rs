@@ -1042,14 +1042,20 @@ fn lightwalletd_full_sync() -> Result<()> {
 ///
 /// Runs the tests in this order:
 /// - launch lightwalletd with empty states,
-/// - if `ZEBRA_CACHED_STATE_DIR` and `LIGHTWALLETD_DATA_DIR` are set: run a quick update sync,
-/// - if `ZEBRA_CACHED_STATE_DIR` is set: run a full sync.
+/// - if `ZEBRA_CACHED_STATE_DIR` is set:
+///   - run a full sync
+/// - if `ZEBRA_CACHED_STATE_DIR` and `LIGHTWALLETD_DATA_DIR` are set:
+///   - run a quick update sync,
+///   - run a send transaction gRPC test,
+///   - run read-only gRPC tests.
+///
+/// The gRPC tests only run when the `lightwalletd-grpc-tests` is on.
 ///
 /// These tests don't work on Windows, so they are always skipped on that platform.
-#[test]
+#[tokio::test]
 #[ignore]
 #[cfg(not(target_os = "windows"))]
-fn lightwalletd_test_suite() -> Result<()> {
+async fn lightwalletd_test_suite() -> Result<()> {
     lightwalletd_integration_test(LaunchWithEmptyState)?;
 
     // Only runs when ZEBRA_CACHED_STATE_DIR is set.
@@ -1060,6 +1066,14 @@ fn lightwalletd_test_suite() -> Result<()> {
 
     // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
     lightwalletd_integration_test(UpdateCachedState)?;
+
+    // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set,
+    // and the compile-time gRPC feature is on.
+    #[cfg(feature = "lightwalletd-grpc-tests")]
+    {
+        common::lightwalletd::send_transaction_test::run().await?;
+        common::lightwalletd::wallet_grpc_test::run().await?;
+    }
 
     Ok(())
 }
@@ -1106,7 +1120,12 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         return Ok(());
     }
 
-    tracing::info!(?test_type, "running lightwalletd & zebrad integration test");
+    tracing::info!(
+        ?test_type,
+        ?config,
+        ?lightwalletd_state_path,
+        "running lightwalletd & zebrad integration test",
+    );
 
     // Get the lists of process failure logs
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
@@ -1159,7 +1178,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     // getblockchaininfo
     if test_type.needs_zebra_cached_state() {
         lightwalletd.expect_stdout_line_matches(
-            "Got sapling height 419200 block height [0-9]{7} chain main branchID e9ff75a6",
+            "Got sapling height 419200 block height [0-9]{7} chain main branchID [0-9a-f]{8}",
         )?;
     } else {
         // Timeout the test if we're somehow accidentally using a cached state in our temp dir
@@ -1192,12 +1211,14 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     //
     // Until the Sapling activation block has been downloaded,
     // lightwalletd will keep retrying getblock.
-    if test_type.needs_zebra_cached_state() {
-        lightwalletd.expect_stdout_line_matches(regex::escape("Ingestor adding block to cache"))?;
-    } else {
-        lightwalletd.expect_stdout_line_matches(regex::escape(
-            "Waiting for zcashd height to reach Sapling activation height (419200)",
-        ))?;
+    if !test_type.allow_lightwalletd_cached_state() {
+        if test_type.needs_zebra_cached_state() {
+            lightwalletd.expect_stdout_line_matches("[Aa]dding block to cache")?;
+        } else {
+            lightwalletd.expect_stdout_line_matches(regex::escape(
+                "Waiting for zcashd height to reach Sapling activation height (419200)",
+            ))?;
+        }
     }
 
     if matches!(test_type, UpdateCachedState | FullSyncFromGenesis { .. }) {
@@ -1205,17 +1226,22 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
         // Wait for lightwalletd to sync to Zebra's tip
-        lightwalletd.expect_stdout_line_matches(regex::escape("Ingestor waiting for block"))?;
+        lightwalletd.expect_stdout_line_matches("[Ww]aiting for block")?;
 
         // Check Zebra is still at the tip (also clears and prints Zebra's logs)
         zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
         // lightwalletd doesn't log anything when we've reached the tip.
         // But when it gets near the tip, it starts using the mempool.
-        lightwalletd.expect_stdout_line_matches(regex::escape(
-            "Block hash changed, clearing mempool clients",
-        ))?;
-        lightwalletd.expect_stdout_line_matches(regex::escape("Adding new mempool txid"))?;
+        //
+        // adityapk00/lightwalletd logs mempool changes, but zcash/lightwalletd doesn't.
+        #[cfg(adityapk00_lightwalletd)]
+        {
+            lightwalletd.expect_stdout_line_matches(regex::escape(
+                "Block hash changed, clearing mempool clients",
+            ))?;
+            lightwalletd.expect_stdout_line_matches(regex::escape("Adding new mempool txid"))?;
+        }
     }
 
     // Cleanup both processes
@@ -1528,9 +1554,12 @@ async fn fully_synced_rpc_test() -> Result<()> {
 /// Test sending transactions using a lightwalletd instance connected to a zebrad instance.
 ///
 /// See [`common::lightwalletd::send_transaction_test`] for more information.
+///
+/// This test doesn't work on Windows, so it is always skipped on that platform.
 #[cfg(feature = "lightwalletd-grpc-tests")]
 #[tokio::test]
 #[ignore]
+#[cfg(not(target_os = "windows"))]
 async fn sending_transactions_using_lightwalletd() -> Result<()> {
     common::lightwalletd::send_transaction_test::run().await
 }
@@ -1538,9 +1567,12 @@ async fn sending_transactions_using_lightwalletd() -> Result<()> {
 /// Test all the rpc methods a wallet connected to lightwalletd can call.
 ///
 /// See [`common::lightwalletd::wallet_grpc_test`] for more information.
+///
+/// This test doesn't work on Windows, so it is always skipped on that platform.
 #[cfg(feature = "lightwalletd-grpc-tests")]
 #[tokio::test]
 #[ignore]
+#[cfg(not(target_os = "windows"))]
 async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
     common::lightwalletd::wallet_grpc_test::run().await
 }
