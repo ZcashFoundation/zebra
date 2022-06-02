@@ -1460,7 +1460,7 @@ impl PartialOrd for Chain {
 }
 
 impl PartialEq for Chain {
-    /// Chain equality for [`NonFinalizedState::chain_set`][2], using proof of
+    /// Chain equality for [`NonFinalizedState::chain_set`][1], using proof of
     /// work, then the tip block hash as a tie-breaker.
     ///
     /// # Panics

@@ -150,7 +150,7 @@ pub const MAX_RECENT_PEER_AGE: Duration32 = Duration32::from_days(3);
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(59);
 
 /// The minimum time between successive calls to
-/// [`CandidateSet::next`][peer_set::CandidateSet::next].
+/// [`CandidateSet::next`][crate::peer_set::CandidateSet::next].
 ///
 /// ## Security
 ///
@@ -159,7 +159,7 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(59);
 pub const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(25);
 
 /// The minimum time between successive calls to
-/// [`CandidateSet::update`][peer_set::CandidateSet::update].
+/// [`CandidateSet::update`][crate::peer_set::CandidateSet::update].
 ///
 /// Using a prime number makes sure that peer address crawls don't synchronise with other crawls.
 ///
@@ -170,7 +170,7 @@ pub const MIN_PEER_CONNECTION_INTERVAL: Duration = Duration::from_millis(25);
 pub const MIN_PEER_GET_ADDR_INTERVAL: Duration = Duration::from_secs(31);
 
 /// The combined timeout for all the requests in
-/// [`CandidateSet::update`][peer_set::CandidateSet::update].
+/// [`CandidateSet::update`][crate::peer_set::CandidateSet::update].
 ///
 /// `zcashd` doesn't respond to most `getaddr` requests,
 /// so this timeout needs to be short.

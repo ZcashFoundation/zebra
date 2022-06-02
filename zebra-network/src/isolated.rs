@@ -44,7 +44,7 @@ mod tests;
 /// - `network`: the Zcash [`Network`] used for this connection.
 ///
 /// - `data_stream`: an existing data stream. This can be a non-anonymised TCP connection,
-///                  or a Tor client [`arti_client::DataStream`].
+///                  or a Tor client `arti_client::DataStream`.
 ///
 /// - `user_agent`: a valid BIP14 user-agent, e.g., the empty string.
 pub fn connect_isolated<PeerTransport>(
@@ -123,6 +123,9 @@ where
 ///
 /// Transactions sent over this connection can be linked to the sending and receiving IP address
 /// by passive internet observers.
+///
+/// TODO: Refactor [`connect_isolated_run_tor`](tor::connect_isolated_run_tor)
+/// below since the reference doesn't exist.
 ///
 /// Prefer [`connect_isolated_run_tor`](tor::connect_isolated_run_tor) if available.
 pub fn connect_isolated_tcp_direct(
