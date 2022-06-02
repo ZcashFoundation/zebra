@@ -84,7 +84,7 @@ metrics = "0.18.1"
 metrics-exporter-prometheus = { version = "0.9.0", default-features = false, features = ["http-listener"] }
 
 dirs = "4.0.0"
-inferno = { version = "0.11.3", default-features = false }
+inferno = { version = "0.11.4", default-features = false }
 atty = "0.2.14"
 
 num-integer = "0.1.45"
@@ -98,7 +98,7 @@ sentry = { version = "0.26.0", default-features = false, features = ["backtrace"
 #
 # zebrad uses tracing for logging,
 # we only use `log` to set and print the static log levels in transitive dependencies
-log = "0.4.14"
+log = "0.4.17"
 
 # test feature proptest-impl
 proptest = { version = "0.10.1", optional = true }
