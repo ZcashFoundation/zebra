@@ -24,8 +24,16 @@
 //! ## Large/full sync tests
 //!
 //! This file has sync tests that are marked as ignored because they take too much time to run.
-//! Some of them require environment variables or directories to be present.
-//! Here are some examples on how to run each of them:
+//! Some of them require environment variables or directories to be present:
+//!
+//! - `FULL_SYNC_MAINNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
+//! will allow this test to run or give up. Value for the Mainnet full sync tests.
+//! - `FULL_SYNC_TESTNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
+//! will allow this test to run or give up. Value for the Testnet ful  sync tests.
+//! - `/zebrad-cache` directory: For some sync tests, this needs to be created in
+//! the file system, the created directory should have write permissions.
+//!
+//! Here are some examples on how to run each of the tests:
 //!
 //! ```console
 //! $ cargo test sync_large_checkpoints_mainnet -- --ignored --nocapture
@@ -43,15 +51,6 @@
 //! $ cargo test full_sync_testnet -- --ignored --nocapture
 //! ```
 //!
-//! ### Notes
-//!
-//! - `FULL_SYNC_MAINNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
-//! will allow this test to run or give up. Value for the Mainnet full sync tests.
-//! - `FULL_SYNC_TESTNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
-//! will allow this test to run or give up. Value for the Testnet ful  sync tests.
-//! - `/zebrad-cache` directory: For some sync tests, this needs to be created in
-//! the file system, the created directory should have write permissions.
-//!
 //! Please refer to the documentation of each test for more information.
 //!
 //! ## Lightwalletd tests
@@ -61,8 +60,14 @@
 //! repo is <https://github.com/zcash/lightwalletd> but Zecwallet Lite uses a custom fork: <https://github.com/adityapk00/lightwalletd>.
 //! The custom fork from adityapk00 is the one Zebra use for this tests:
 //!
-//! Zebra lightwalletd tests are not all marked as ignored but none will not run unless
-//! at least the `ZEBRA_TEST_LIGHTWALLETD` environment variable is present.
+//! Zebra lightwalletd tests are not all marked as ignored but none will run unless
+//! at least the `ZEBRA_TEST_LIGHTWALLETD` environment variable is present:
+//!
+//! - `ZEBRA_TEST_LIGHTWALLETD` env variable: Needs to be present to run any of the lightwalletd tests.
+//! - `ZEBRA_CACHED_STATE_DIR` env var: The path to a zebra blockchain database.
+//! - `LIGHTWALLETD_DATA_DIR` env variable. The path to a lightwalletd database.
+//! - `--features lightwalletd-grpc-tests` cargo flag. The flag given to cargo to build the source code of the running test.
+//!
 //! Here are some examples of running each test:
 //!
 //! ```console
@@ -96,15 +101,8 @@
 //! $ cargo test lightwalletd_wallet_grpc_tests --features lightwalletd-grpc-tests -- --ignored --nocapture
 //! ```
 //!
-//! ### Notes
-//!
-//! - `ZEBRA_TEST_LIGHTWALLETD` env variable: Needs to be present to run any of the lightwalletd tests.
-//! - `ZEBRA_CACHED_STATE_DIR` env var: The path to a zebra blockchain database.
-//! - `LIGHTWALLETD_DATA_DIR` env variable. The path to a lightwalletd database.
-//! - `--features lightwalletd-grpc-tests` cargo flag. The flag given to cargo to build the source code of the running test.
-//!
 //! Please refer to the documentation of each test for more information.
-//!
+
 use std::{collections::HashSet, convert::TryInto, env, path::PathBuf};
 
 use color_eyre::{
