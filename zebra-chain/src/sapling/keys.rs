@@ -1055,7 +1055,7 @@ impl TryFrom<[u8; 32]> for EphemeralPublicKey {
     /// # Consensus
     ///
     /// > Check that a Output description's cv and epk are not of small order,
-    /// > i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]epk MUST NOT be 𝒪_J.
+    /// > i.e. \[h_J\]cv MUST NOT be 𝒪_J and \[h_J\]epk MUST NOT be 𝒪_J.
     ///
     /// [1]: https://zips.z.cash/protocol/protocol.pdf#outputdesc
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
@@ -1106,7 +1106,7 @@ impl TryFrom<redjubjub::VerificationKey<SpendAuth>> for ValidatingKey {
     /// # Consensus
     ///
     /// > Check that a Spend description's cv and rk are not of small order,
-    /// > i.e. [h_J]cv MUST NOT be 𝒪_J and [h_J]rk MUST NOT be 𝒪_J.
+    /// > i.e. \[h_J\]cv MUST NOT be 𝒪_J and \[h_J\]rk MUST NOT be 𝒪_J.
     ///
     /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
     fn try_from(key: redjubjub::VerificationKey<SpendAuth>) -> Result<Self, Self::Error> {

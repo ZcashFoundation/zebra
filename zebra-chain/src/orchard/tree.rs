@@ -287,8 +287,9 @@ pub struct NoteCommitmentTree {
     /// serialized with the tree). This is particularly important since we decided
     /// to instantiate the trees from the genesis block, for simplicity.
     ///
-    /// We use a [`RwLock`] for this cache, because it is only written once per tree update.
-    /// Each tree has its own cached root, a new lock is created for each clone.
+    /// We use a [`RwLock`](std::sync::RwLock) for this cache, because it is
+    /// only written once per tree update. Each tree has its own cached root, a
+    /// new lock is created for each clone.
     cached_root: std::sync::RwLock<Option<Root>>,
 }
 

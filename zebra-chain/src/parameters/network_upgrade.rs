@@ -305,7 +305,8 @@ impl NetworkUpgrade {
     /// Returns `true` if `height` is the activation height of any network upgrade
     /// on `network`.
     ///
-    /// Use [`activation_height`] to get the specific network upgrade.
+    /// Use [`NetworkUpgrade::activation_height`] to get the specific network
+    /// upgrade.
     pub fn is_activation_height(network: Network, height: block::Height) -> bool {
         NetworkUpgrade::activation_list(network).contains_key(&height)
     }
@@ -331,8 +332,8 @@ impl NetworkUpgrade {
 
     /// Returns the target block spacing for the network upgrade.
     ///
-    /// Based on `PRE_BLOSSOM_POW_TARGET_SPACING` and
-    /// `POST_BLOSSOM_POW_TARGET_SPACING` from the Zcash specification.
+    /// Based on [`PRE_BLOSSOM_POW_TARGET_SPACING`] and
+    /// [`POST_BLOSSOM_POW_TARGET_SPACING`] from the Zcash specification.
     pub fn target_spacing(&self) -> Duration {
         let spacing_seconds = match self {
             Genesis | BeforeOverwinter | Overwinter | Sapling => PRE_BLOSSOM_POW_TARGET_SPACING,
@@ -344,7 +345,7 @@ impl NetworkUpgrade {
 
     /// Returns the target block spacing for `network` and `height`.
     ///
-    /// See [`target_spacing()`] for details.
+    /// See [`NetworkUpgrade::target_spacing`] for details.
     pub fn target_spacing_for_height(network: Network, height: block::Height) -> Duration {
         NetworkUpgrade::current(network, height).target_spacing()
     }
@@ -425,7 +426,7 @@ impl NetworkUpgrade {
 
     /// Returns the averaging window timespan for `network` and `height`.
     ///
-    /// See [`averaging_window_timespan()`] for details.
+    /// See [`NetworkUpgrade::averaging_window_timespan`] for details.
     pub fn averaging_window_timespan_for_height(
         network: Network,
         height: block::Height,

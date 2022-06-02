@@ -104,7 +104,7 @@ pub fn pedersen_hash(domain: [u8; 8], M: &BitVec<u8, Lsb0>) -> jubjub::Fq {
 /// commitment tree.  It takes as input a Pedersen commitment P, and hashes it
 /// with another input x.
 ///
-/// MixingPedersenHash(P, x) := P + [x]FindGroupHash^J^(r)("Zcash_J_", "")
+/// MixingPedersenHash(P, x) := P + \[x\]FindGroupHash^J^(r)("Zcash_J_", "")
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#concretemixinghash>
 #[allow(non_snake_case)]
@@ -118,7 +118,7 @@ pub fn mixing_pedersen_hash(P: jubjub::ExtendedPoint, x: jubjub::Fr) -> jubjub::
 /// construction, and adding a randomized point on the Jubjub curve.
 ///
 /// WindowedPedersenCommit_r (s) := \
-///   PedersenHashToPoint("Zcash_PH", s) + [r]FindGroupHash^J^(r)("Zcash_PH", "r")
+///   PedersenHashToPoint("Zcash_PH", s) + \[r\]FindGroupHash^J^(r)("Zcash_PH", "r")
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit>
 pub fn windowed_pedersen_commitment(r: jubjub::Fr, s: &BitVec<u8, Lsb0>) -> jubjub::ExtendedPoint {

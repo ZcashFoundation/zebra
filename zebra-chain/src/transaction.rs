@@ -230,7 +230,7 @@ impl Transaction {
 
     /// Does this transaction have shielded inputs?
     ///
-    /// See [`has_transparent_or_shielded_inputs`] for details.
+    /// See [`Self::has_transparent_or_shielded_inputs`] for details.
     pub fn has_shielded_inputs(&self) -> bool {
         self.joinsplit_count() > 0
             || self.sapling_spends_per_anchor().count() > 0
@@ -248,7 +248,7 @@ impl Transaction {
 
     /// Does this transaction have shielded outputs?
     ///
-    /// See [`has_transparent_or_shielded_outputs`] for details.
+    /// See [`Self::has_transparent_or_shielded_outputs`] for details.
     pub fn has_shielded_outputs(&self) -> bool {
         self.joinsplit_count() > 0
             || self.sapling_outputs().count() > 0
@@ -1197,11 +1197,13 @@ impl Transaction {
     }
 
     /// Return a list of sprout value balances,
-    /// the changes in the transaction value pool due to each sprout [`JoinSplit`].
+    /// the changes in the transaction value pool due to each sprout `JoinSplit`.
     ///
     /// Each value balance is the sprout `vpub_new` field, minus the `vpub_old` field.
     ///
-    /// See `sprout_value_balance` for details.
+    /// See [`sprout_value_balance`][svb] for details.
+    ///
+    /// [svb]: crate::transaction::Transaction::sprout_value_balance
     fn sprout_joinsplit_value_balances(
         &self,
     ) -> impl Iterator<Item = ValueBalance<NegativeAllowed>> + '_ {
@@ -1238,7 +1240,7 @@ impl Transaction {
     }
 
     /// Return the sprout value balance,
-    /// the change in the transaction value pool due to sprout [`JoinSplit`]s.
+    /// the change in the transaction value pool due to sprout `JoinSplit`s.
     ///
     /// The sum of all sprout `vpub_new` fields, minus the sum of all `vpub_old` fields.
     ///
@@ -1319,8 +1321,8 @@ impl Transaction {
         }
     }
 
-    /// Return the orchard value balance,
-    /// the change in the transaction value pool due to orchard [`Action`]s.
+    /// Return the orchard value balance, the change in the transaction value
+    /// pool due to [`orchard::Action`]s.
     ///
     /// Returns the `valueBalanceOrchard` field in this transaction.
     ///

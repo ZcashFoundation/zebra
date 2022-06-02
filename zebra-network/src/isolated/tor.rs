@@ -16,7 +16,7 @@ mod tests;
 lazy_static::lazy_static! {
     /// The shared isolated [`TorClient`] instance.
     ///
-    /// TODO: turn this into a tower service that takes a hostname, and returns an `arti_client::DataStream`
+    /// TODO: turn this into a tower service that takes a hostname, and returns an [`arti_client::DataStream`]
     ///       (or a task that updates a watch channel when it's done?)
     pub static ref SHARED_TOR_CLIENT: Arc<Mutex<Option<TorClient<TokioRuntimeHandle>>>> =
         Arc::new(Mutex::new(None));

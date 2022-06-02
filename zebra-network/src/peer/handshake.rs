@@ -1,4 +1,4 @@
-//! Initial [`Handshake`s] with Zebra peers over a `PeerTransport`.
+//! Initial [`Handshake`]s with Zebra peers over a [`PeerTransport`].
 
 use std::{
     cmp::min,
@@ -747,7 +747,8 @@ pub struct HandshakeRequest<PeerTransport>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    /// The tokio [`TcpStream`] or Tor [`DataStream`] to the peer.
+    /// The tokio [`TcpStream`](tokio::net::TcpStream) or Tor
+    /// [`DataStream`](arti_client::DataStream) to the peer.
     pub data_stream: PeerTransport,
 
     /// The address of the peer, and other related information.

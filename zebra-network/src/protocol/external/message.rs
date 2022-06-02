@@ -83,12 +83,14 @@ pub enum Message {
         start_height: block::Height,
 
         /// Whether the remote peer should announce relayed
-        /// transactions or not, see [BIP 0037](https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki)
+        /// transactions or not, see [BIP 0037].
         ///
-        /// Zebra does not implement the bloom filters in BIP 0037.
+        /// Zebra does not implement the bloom filters in [BIP 0037].
         /// Instead, it only relays:
         /// - newly verified best chain block hashes and mempool transaction IDs,
         /// - after it reaches the chain tip.
+        ///
+        /// [BIP 0037]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
         relay: bool,
     },
 
@@ -277,6 +279,7 @@ pub enum Message {
     /// This was defined in [BIP35], which is included in Zcash.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#mempool)
+    ///
     /// [BIP35]: https://github.com/bitcoin/bips/blob/master/bip-0035.mediawiki
     Mempool,
 
@@ -287,6 +290,7 @@ pub enum Message {
     /// Zebra currently ignores this message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#filterload.2C_filteradd.2C_filterclear.2C_merkleblock)
+    ///
     /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
     FilterLoad {
         /// The filter itself is simply a bit field of arbitrary
@@ -312,6 +316,7 @@ pub enum Message {
     /// Zebra currently ignores this message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#filterload.2C_filteradd.2C_filterclear.2C_merkleblock)
+    ///
     /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
     FilterAdd {
         /// The data element to add to the current filter.
@@ -330,6 +335,7 @@ pub enum Message {
     /// Zebra currently ignores this message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#filterload.2C_filteradd.2C_filterclear.2C_merkleblock)
+    ///
     /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
     FilterClear,
 }

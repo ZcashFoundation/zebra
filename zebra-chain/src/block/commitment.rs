@@ -66,7 +66,7 @@ pub enum Commitment {
     /// need to verify the chain history root from `Canopy + 1 block` onwards,
     /// using a new history tree based on the `Canopy` activation block.
     ///
-    /// NU5 and later upgrades use the [`ChainHistoryBlockTxAuthCommitment`]
+    /// NU5 and later upgrades use the [`Commitment::ChainHistoryBlockTxAuthCommitment`]
     /// variant.
     ///
     /// TODO: this field is verified during contextual verification
@@ -85,7 +85,7 @@ pub enum Commitment {
     /// This commitment supports the FlyClient protocol and non-malleable
     /// transaction IDs. See ZIP-221 and ZIP-244 for details.
     ///
-    /// See also the [`ChainHistoryRoot`] variant.
+    /// See also the [`Commitment::ChainHistoryRoot`] variant.
     ///
     /// TODO: this field is verified during contextual verification
     ChainHistoryBlockTxAuthCommitment(ChainHistoryBlockTxAuthCommitmentHash),

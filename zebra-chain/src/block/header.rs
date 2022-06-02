@@ -53,9 +53,9 @@ pub struct Header {
     /// Zcash blocks contain different kinds of commitments to their contents,
     /// depending on the network and height.
     ///
-    /// The interpretation of this field has been changed multiple times, without
-    /// incrementing the block [`version`]. Therefore, this field cannot be
-    /// parsed without the network and height. Use
+    /// The interpretation of this field has been changed multiple times,
+    /// without incrementing the block [`version`](Self::version). Therefore,
+    /// this field cannot be parsed without the network and height. Use
     /// [`Block::commitment`](super::Block::commitment) to get the parsed
     /// [`Commitment`](super::Commitment).
     pub commitment_bytes: [u8; 32],

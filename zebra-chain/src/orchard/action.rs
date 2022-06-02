@@ -91,12 +91,12 @@ impl ZcashDeserialize for Action {
             // https://zips.z.cash/protocol/protocol.pdf#concreteorchardkeyagreement
             // See [`keys::EphemeralPublicKey::zcash_deserialize`].
             ephemeral_key: keys::EphemeralPublicKey::zcash_deserialize(&mut reader)?,
-            // Type is `Sym.C`, i.e. `𝔹^Y^{[N]}`, i.e. arbitrary-sized byte arrays
+            // Type is `Sym.C`, i.e. `𝔹^Y^{\[N\]}`, i.e. arbitrary-sized byte arrays
             // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
             // 580 bytes in https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
             // See [`note::EncryptedNote::zcash_deserialize`].
             enc_ciphertext: note::EncryptedNote::zcash_deserialize(&mut reader)?,
-            // Type is `Sym.C`, i.e. `𝔹^Y^{[N]}`, i.e. arbitrary-sized byte arrays
+            // Type is `Sym.C`, i.e. `𝔹^Y^{\[N\]}`, i.e. arbitrary-sized byte arrays
             // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
             // 80 bytes in https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
             // See [`note::WrappedNoteKey::zcash_deserialize`].

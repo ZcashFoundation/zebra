@@ -72,6 +72,7 @@ impl PreparedBlock {
     /// with fake zero-valued spent UTXOs.
     ///
     /// Only for use in tests.
+    #[cfg(test)]
     pub fn test_with_zero_spent_utxos(&self) -> ContextuallyValidBlock {
         ContextuallyValidBlock::test_with_zero_spent_utxos(self)
     }
@@ -80,6 +81,7 @@ impl PreparedBlock {
     /// using a fake chain value pool change.
     ///
     /// Only for use in tests.
+    #[cfg(test)]
     pub fn test_with_chain_pool_change(
         &self,
         fake_chain_value_pool_change: ValueBalance<NegativeAllowed>,
@@ -91,13 +93,14 @@ impl PreparedBlock {
     /// with no chain value pool change.
     ///
     /// Only for use in tests.
+    #[cfg(test)]
     pub fn test_with_zero_chain_pool_change(&self) -> ContextuallyValidBlock {
         ContextuallyValidBlock::test_with_zero_chain_pool_change(self)
     }
 }
 
 impl ContextuallyValidBlock {
-    /// Create a block that's ready for non-finalized [`Chain`] contextual validation,
+    /// Create a block that's ready for non-finalized `Chain` contextual validation,
     /// using a [`PreparedBlock`] and fake zero-valued spent UTXOs.
     ///
     /// Only for use in tests.
