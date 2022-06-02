@@ -42,7 +42,7 @@ where
 pub struct CommitmentRandomness(pallas::Scalar);
 
 impl From<SeedRandomness> for CommitmentRandomness {
-    /// rcm = ToScalar^Orchard((PRF^expand_rseed ([5]))
+    /// rcm = ToScalar^Orchard((PRF^expand_rseed (\[5\]))
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardsend>
     fn from(rseed: SeedRandomness) -> Self {

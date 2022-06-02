@@ -111,6 +111,9 @@ impl OrderedUtxo {
 /// A restriction that must be checked before spending a transparent output of a
 /// coinbase transaction.
 ///
+/// TODO: fix the comment below because
+/// [`CoinbaseSpendRestriction::check_spend`] doesn't exist.
+///
 /// See [`CoinbaseSpendRestriction::check_spend`] for the consensus rules.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
@@ -138,7 +141,7 @@ pub fn utxos_from_ordered_utxos(
         .collect()
 }
 
-/// Compute an index of [`Output`]s, given an index of [`Utxo`]s.
+/// Compute an index of [`transparent::Output`]s, given an index of [`Utxo`]s.
 pub fn outputs_from_utxos(
     utxos: HashMap<transparent::OutPoint, Utxo>,
 ) -> HashMap<transparent::OutPoint, transparent::Output> {

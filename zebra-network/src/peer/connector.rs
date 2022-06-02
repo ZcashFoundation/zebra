@@ -20,7 +20,7 @@ use crate::{
     BoxError, Request, Response,
 };
 
-/// A wrapper around [`peer::Handshake`] that opens a TCP connection before
+/// A wrapper around [`Handshake`] that opens a TCP connection before
 /// forwarding to the inner handshake service. Writing this as its own
 /// [`tower::Service`] lets us apply unified timeout policies, etc.
 pub struct Connector<S, C = NoChainTip>

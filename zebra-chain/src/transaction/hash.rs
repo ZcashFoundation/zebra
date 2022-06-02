@@ -1,29 +1,32 @@
 //! Transaction identifiers for Zcash.
 //!
 //! Zcash has two different transaction identifiers, with different widths:
-//! * [`Hash`]: a 32-byte transaction ID, which uniquely identifies mined transactions
+//! * [`struct@Hash`]: a 32-byte transaction ID, which uniquely identifies mined transactions
 //!   (transactions that have been committed to the blockchain in blocks), and
 //! * [`WtxId`]: a 64-byte witnessed transaction ID, which uniquely identifies unmined transactions
 //!   (transactions that are sent by wallets or stored in node mempools).
 //!
 //! Transaction version 5 uses both these unique identifiers:
-//! * [`Hash`] uniquely identifies the effects of a v5 transaction (spends and outputs),
+//! * [`struct@Hash`] uniquely identifies the effects of a v5 transaction (spends and outputs),
 //!   so it uniquely identifies the transaction's data after it has been mined into a block;
 //! * [`WtxId`] uniquely identifies the effects and authorizing data of a v5 transaction
 //!   (signatures, proofs, and scripts), so it uniquely identifies the transaction's data
 //!   outside a block. (For example, transactions produced by Zcash wallets, or in node mempools.)
 //!
-//! Transaction versions 1-4 are uniquely identified by legacy [`Hash`] transaction IDs,
+//! Transaction versions 1-4 are uniquely identified by legacy [`struct@Hash`] transaction IDs,
 //! whether they have been mined or not. So Zebra, and the Zcash network protocol,
 //! don't use witnessed transaction IDs for them.
 //!
 //! There is no unique identifier that only covers the effects of a v1-4 transaction,
 //! so their legacy IDs are malleable, if submitted with different authorizing data.
-//! So the same spends and outputs can have a completely different [`Hash`].
+//! So the same spends and outputs can have a completely different [`struct@Hash`].
 //!
-//! Zebra's [`UnminedTxId`] and [`UnminedTx`] enums provide the correct unique ID for
-//! unmined transactions. They can be used to handle transactions regardless of version,
-//! and get the [`WtxId`] or [`Hash`] when required.
+//! Zebra's [`UnminedTxId`][1] and [`UnminedTx`][1] enums provide the correct
+//! unique ID for unmined transactions. They can be used to handle transactions
+//! regardless of version, and get the [`WtxId`] or [`struct@Hash`] when
+//! required.
+//!
+//! [1]: crate::transaction::UnminedTx
 
 use std::{
     convert::{TryFrom, TryInto},

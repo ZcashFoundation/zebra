@@ -39,7 +39,7 @@ pub struct Config {
     ///
     /// If a specific listener address is configured, Zebra will advertise
     /// it to other nodes. But by default, Zebra uses an unspecified address
-    /// ("0.0.0.0" or "[::]"), which is not advertised to other nodes.
+    /// ("0.0.0.0" or "\[::\]"), which is not advertised to other nodes.
     ///
     /// Zebra does not currently support:
     /// - [Advertising a different external IP address #1890](https://github.com/ZcashFoundation/zebra/issues/1890), or

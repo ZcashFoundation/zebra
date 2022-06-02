@@ -89,7 +89,7 @@ pub struct PreparedBlock {
     /// The height of the block.
     pub height: block::Height,
     /// New transparent outputs created in this block, indexed by
-    /// [`Outpoint`](transparent::Outpoint).
+    /// [`OutPoint`](transparent::OutPoint).
     ///
     /// Each output is tagged with its transaction index in the block.
     /// (The outputs of earlier transactions in a block can be spent by later
@@ -112,7 +112,7 @@ pub struct PreparedBlock {
 /// A contextually validated block, ready to be committed directly to the finalized state with
 /// no checks, if it becomes the root of the best non-finalized chain.
 ///
-/// Used by the state service and non-finalized [`Chain`].
+/// Used by the state service and non-finalized `Chain`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContextuallyValidBlock {
     /// The block to commit to the state.
@@ -125,7 +125,7 @@ pub struct ContextuallyValidBlock {
     pub(crate) height: block::Height,
 
     /// New transparent outputs created in this block, indexed by
-    /// [`Outpoint`](transparent::Outpoint).
+    /// [`OutPoint`](transparent::OutPoint).
     ///
     /// Note: although these transparent outputs are newly created, they may not
     /// be unspent, since a later transaction in a block can spend outputs of an
@@ -135,7 +135,7 @@ pub struct ContextuallyValidBlock {
     pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
 
     /// The outputs spent by this block, indexed by the [`transparent::Input`]'s
-    /// [`Outpoint`](transparent::Outpoint).
+    /// [`OutPoint`](transparent::OutPoint).
     ///
     /// Note: these inputs can come from earlier transactions in this block,
     /// or earlier blocks in the chain.
@@ -164,7 +164,7 @@ pub struct FinalizedBlock {
     /// The height of the block.
     pub height: block::Height,
     /// New transparent outputs created in this block, indexed by
-    /// [`Outpoint`](transparent::Outpoint).
+    /// [`OutPoint`](transparent::OutPoint).
     ///
     /// Note: although these transparent outputs are newly created, they may not
     /// be unspent, since a later transaction in a block can spend outputs of an
@@ -188,15 +188,15 @@ impl From<&PreparedBlock> for PreparedBlock {
 // This allows moving work out of the single-threaded state service.
 
 impl ContextuallyValidBlock {
-    /// Create a block that's ready for non-finalized [`Chain`] contextual validation,
+    /// Create a block that's ready for non-finalized `Chain` contextual validation,
     /// using a [`PreparedBlock`] and the UTXOs it spends.
     ///
     /// When combined, `prepared.new_outputs` and `spent_utxos` must contain
-    /// the [`Utxo`]s spent by every transparent input in this block,
+    /// the [`Utxo`](transparent::Utxo)s spent by every transparent input in this block,
     /// including UTXOs created by earlier transactions in this block.
     ///
     /// Note: a [`ContextuallyValidBlock`] isn't actually contextually valid until
-    /// [`Chain::update_chain_state_with`] returns success.
+    /// `Chain::update_chain_state_with` returns success.
     pub fn with_block_and_spent_utxos(
         prepared: PreparedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
@@ -282,7 +282,8 @@ impl From<ContextuallyValidBlock> for FinalizedBlock {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// A query about or modification to the chain state, via the [`StateService`].
+/// A query about or modification to the chain state, via the
+/// [`StateService`](crate::service::StateService).
 pub enum Request {
     /// Performs contextual validation of the given block, committing it to the
     /// state if successful.
@@ -370,8 +371,9 @@ pub enum Request {
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
 
-    /// Request a UTXO identified by the given Outpoint, waiting until it becomes
-    /// available if it is unknown.
+    /// Request a UTXO identified by the given
+    /// [`OutPoint`](transparent::OutPoint), waiting until it becomes available
+    /// if it is unknown.
     ///
     /// This request is purely informational, and there are no guarantees about
     /// whether the UTXO remains unspent or is on the best chain, or any chain.
@@ -432,7 +434,8 @@ pub enum Request {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// A read-only query about the chain state, via the [`ReadStateService`].
+/// A read-only query about the chain state, via the
+/// [`ReadStateService`](crate::service::ReadStateService).
 pub enum ReadRequest {
     /// Looks up a block by hash or height in the current best chain.
     ///
@@ -455,7 +458,8 @@ pub enum ReadRequest {
 
     /// Looks up the balance of a set of transparent addresses.
     ///
-    /// Returns an [`Amount`] with the total balance of the set of addresses.
+    /// Returns an [`Amount`](zebra_chain::amount::Amount) with the total
+    /// balance of the set of addresses.
     AddressBalance(HashSet<transparent::Address>),
 
     /// Looks up a Sapling note commitment tree either by a hash or height.
