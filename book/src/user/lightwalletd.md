@@ -115,7 +115,7 @@ Please make sure you have zebrad running (with RPC endpoint and up to date block
 With the cert in `./` and an empty `zcash.conf` we can start the sync with:
 
 ```console
-lightwalletd --zcash-conf-path ~/.config/zebra/zcash.conf --data-dir ~/.cache/lightwalletd --log-file /dev/stdout
+lightwalletd --zcash-conf-path ~/.config/zcash.conf --data-dir ~/.cache/lightwalletd --log-file /dev/stdout
 ```
 
 By default lightwalletd service will listen on `127.0.0.1:9067`
