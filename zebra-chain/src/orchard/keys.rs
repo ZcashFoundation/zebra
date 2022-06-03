@@ -697,7 +697,7 @@ impl TryFrom<FullViewingKey> for IncomingViewingKey {
     /// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
     #[allow(non_snake_case)]
     fn try_from(fvk: FullViewingKey) -> Result<Self, Self::Error> {
-        let mut M: BitVec<Lsb0, u8> = BitVec::new();
+        let mut M: BitVec<u8, Lsb0> = BitVec::new();
 
         // I2LEBSP_l^Orchard_base(ak)︁
         let ak_bytes =
