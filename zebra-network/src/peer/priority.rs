@@ -40,11 +40,9 @@ pub struct PeerPreference {
 /// Use the [`PeerPreference`] [`Ord`] implementation to sort preferred peers first.
 pub fn peer_preference(
     peer_addr: &SocketAddr,
-    _network: Network,
+    network: impl Into<Option<Network>>,
 ) -> Result<PeerPreference, &'static str> {
-    if !address_is_valid_for_outbound_connections(peer_addr) {
-        return Err("invalid address: can not be used for outbound connections");
-    }
+    address_is_valid_for_outbound_connections(peer_addr, network)?;
 
     Ok(PeerPreference {
         public_address: Preferred,
@@ -57,14 +55,41 @@ pub fn peer_preference(
 ///
 /// Since the addresses in the address book are unique, this check can be
 /// used to permanently reject entire [`MetaAddr`]s.
-fn address_is_valid_for_outbound_connections(peer_addr: &SocketAddr) -> bool {
+fn address_is_valid_for_outbound_connections(
+    peer_addr: &SocketAddr,
+    network: impl Into<Option<Network>>,
+) -> Result<(), &'static str> {
     if peer_addr.ip().is_unspecified() {
-        return false;
+        return Err("invalid peer IP address: unspecified addresses can not be used for outbound connections");
     }
 
+    // 0 is an invalid outbound port.
     if peer_addr.port() == 0 {
-        return false;
+        return Err(
+            "invalid peer port: unspecified ports can not be used for outbound connections",
+        );
     }
 
-    true
+    // Ignore ports used by similar networks: Flux/ZelCash and misconfigured Zcash.
+    if let Some(network) = network.into() {
+        if peer_addr.port() == network.default_port() {
+            return Ok(());
+        }
+
+        if peer_addr.port() == 8232 {
+            return Err(
+                "invalid peer port: port is for Mainnet, but this node is configured for Testnet",
+            );
+        } else if peer_addr.port() == 18232 {
+            return Err(
+                "invalid peer port: port is for Testnet, but this node is configured for Mainnet",
+            );
+        } else if [16125, 26125].contains(&peer_addr.port()) {
+            // 16125/26125 is used by Flux/ZelCash, which uses the same network magic numbers as Zcash,
+            // so we have to reject it by port
+            return Err("invalid peer port: port is for a non-Zcash network");
+        }
+    }
+
+    Ok(())
 }
