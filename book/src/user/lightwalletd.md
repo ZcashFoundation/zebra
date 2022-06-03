@@ -81,19 +81,14 @@ For implementing zebra as a service please see [here](https://github.com/ZcashFo
 ## Download and build lightwalletd
 [#download-and-build-lightwalletd]: #download-and-build-lightwalletd
 
-While you synchronize Zebra you can install lightwalletd. There are several versions of lightwalletd in different repositories:
+While you synchronize Zebra you can install [lightwalletd](https://github.com/zcash/lightwalletd).
 
-- [The original version](https://github.com/zcash/lightwalletd)
-- [The version used by zecwallet-lite and zecwallet-cli](https://github.com/adityapk00/lightwalletd)
-
-Most of the testing related to Zebra and lightwalletd was done with the zecwallet version in the [adityapk00](https://github.com/adityapk00) repository.
-
-Before installing lightwalletd, you need to have `go` in place. Please visit the [go install page](https://go.dev/doc/install) with download and installation instructions.
+Before installing, you need to have `go` in place. Please visit the [go install page](https://go.dev/doc/install) with download and installation instructions.
 
 With go installed and in your path, download and install lightwalletd:
 
 ```console
-git clone https://github.com/adityapk00/lightwalletd
+git clone https://github.com/zcash/lightwalletd
 cd lightwalletd
 make
 make install
