@@ -50,7 +50,11 @@ impl AddressBookUpdater {
         // based on the maximum number of inbound and outbound peers.
         let (worker_tx, mut worker_rx) = mpsc::channel(config.peerset_total_connection_limit());
 
-        let address_book = AddressBook::new(local_listener, span!(Level::TRACE, "address book"));
+        let address_book = AddressBook::new(
+            local_listener,
+            config.network,
+            span!(Level::TRACE, "address book"),
+        );
         let address_metrics = address_book.address_metrics_watcher();
         let address_book = Arc::new(std::sync::Mutex::new(address_book));
 

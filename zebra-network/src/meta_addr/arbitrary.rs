@@ -1,8 +1,10 @@
+//! Randomised test data generation for MetaAddr.
+
 use std::net::SocketAddr;
 
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 
-use zebra_chain::serialization::DateTime32;
+use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
 use crate::protocol::external::arbitrary::canonical_socket_addr_strategy;
 
@@ -97,7 +99,7 @@ impl MetaAddrChange {
                 if change
                     .into_new_meta_addr()
                     .expect("unexpected invalid alternate change")
-                    .last_known_info_is_valid_for_outbound()
+                    .last_known_info_is_valid_for_outbound(Mainnet)
                 {
                     Some(change)
                 } else {

@@ -1,3 +1,5 @@
+//! Fixed test vectors for CandidateSet.
+
 use std::{
     convert::TryInto,
     net::{IpAddr, SocketAddr},
@@ -10,15 +12,16 @@ use chrono::{DateTime, Duration, Utc};
 use tokio::time::{self, Instant};
 use tracing::Span;
 
-use zebra_chain::serialization::DateTime32;
+use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
-use super::super::{validate_addrs, CandidateSet};
 use crate::{
     constants::{GET_ADDR_FANOUT, MIN_PEER_GET_ADDR_INTERVAL},
     types::{MetaAddr, PeerServices},
     AddressBook, Request, Response,
 };
+
+use super::super::{validate_addrs, CandidateSet};
 
 /// Test that offset is applied when all addresses have `last_seen` times in the future.
 #[test]
@@ -136,7 +139,11 @@ fn candidate_set_updates_are_rate_limited() {
     let runtime = zebra_test::init_async();
     let _guard = runtime.enter();
 
-    let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
+    let address_book = AddressBook::new(
+        SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        Mainnet,
+        Span::none(),
+    );
     let mut peer_service = MockService::build().for_unit_tests();
     let mut candidate_set = CandidateSet::new(
         Arc::new(std::sync::Mutex::new(address_book)),
@@ -177,7 +184,11 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
     let runtime = zebra_test::init_async();
     let _guard = runtime.enter();
 
-    let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
+    let address_book = AddressBook::new(
+        SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        Mainnet,
+        Span::none(),
+    );
     let mut peer_service = MockService::build().for_unit_tests();
     let mut candidate_set = CandidateSet::new(
         Arc::new(std::sync::Mutex::new(address_book)),
