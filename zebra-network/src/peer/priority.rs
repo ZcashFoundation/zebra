@@ -41,6 +41,7 @@ impl AttributePreference {
     }
 
     /// Returns `true` for `Preferred` attributes.
+    #[allow(dead_code)]
     pub fn is_preferred(&self) -> bool {
         match self {
             Preferred => true,

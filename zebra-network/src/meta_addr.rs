@@ -374,6 +374,11 @@ impl MetaAddr {
         self.addr
     }
 
+    /// Return the address preference level for this `MetaAddr`.
+    pub fn peer_preference(&self) -> Result<PeerPreference, &'static str> {
+        PeerPreference::new(&self.addr, None)
+    }
+
     /// Returns the time of the last successful interaction with this peer.
     ///
     /// Initially set to the unverified "last seen time" gossiped by the remote
@@ -855,7 +860,7 @@ impl Ord for MetaAddr {
     /// `MetaAddr`s are sorted in approximate reconnection attempt order, but
     /// with `Responded` peers sorted first as a group.
     ///
-    /// This order should not be used for reconnection attempts: use
+    /// But this order should not be used for reconnection attempts: use
     /// [`reconnection_peers`][rp] instead.
     ///
     /// See [`CandidateSet`] for more details.
@@ -867,6 +872,10 @@ impl Ord for MetaAddr {
 
         // First, try states that are more likely to work
         let more_reliable_state = self.last_connection_state.cmp(&other.last_connection_state);
+
+        // Then, try addresses that are more likely to be valid.
+        // Currently, this prefers addresses with canonical Zcash ports.
+        let more_likely_valid = self.peer_preference().cmp(&other.peer_preference());
 
         // # Security and Correctness
         //
@@ -936,6 +945,7 @@ impl Ord for MetaAddr {
         let port_tie_breaker = self.addr.port().cmp(&other.addr.port());
 
         more_reliable_state
+            .then(more_likely_valid)
             .then(older_attempt)
             .then(older_failure)
             .then(older_response)
