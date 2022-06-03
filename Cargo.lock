@@ -5346,7 +5346,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.21"
+version = "0.2.22"
 dependencies = [
  "futures-core",
  "pin-project 0.4.29",
@@ -6307,7 +6307,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 dependencies = [
  "displaydoc",
  "hex",
