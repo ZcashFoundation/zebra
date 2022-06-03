@@ -15,7 +15,7 @@ pub enum AttributePreference {
     Preferred,
 
     /// This peer is possibly a valid Zcash network peer.
-    _Acceptable,
+    Acceptable,
 }
 
 /// A level of preference for a peer.
@@ -26,13 +26,27 @@ pub enum AttributePreference {
 /// private addresses and canonical ports.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct PeerPreference {
-    /// Does the peer have a publicly routable IP address?
-    ///
-    /// TODO: make private addresses an error unless a debug config is set (#3117)
-    public_address: AttributePreference,
-
     /// Is the peer using the canonical Zcash port for the configured [`Network`]?
     canonical_port: AttributePreference,
+}
+
+impl AttributePreference {
+    /// Returns `Preferred` if `is_preferred` is true.
+    pub fn preferred_from(is_preferred: bool) -> Self {
+        if is_preferred {
+            Preferred
+        } else {
+            Acceptable
+        }
+    }
+
+    /// Returns `true` for `Preferred` attributes.
+    pub fn is_preferred(&self) -> bool {
+        match self {
+            Preferred => true,
+            Acceptable => false,
+        }
+    }
 }
 
 /// Return a preference for the peer at `peer_addr` on `network`.
@@ -44,10 +58,12 @@ pub fn peer_preference(
 ) -> Result<PeerPreference, &'static str> {
     address_is_valid_for_outbound_connections(peer_addr, network)?;
 
-    Ok(PeerPreference {
-        public_address: Preferred,
-        canonical_port: Preferred,
-    })
+    // This check only prefers the configured network,
+    // because the address book and initial peer connections reject the port used by the other network.
+    let canonical_port =
+        AttributePreference::preferred_from([8232, 18232].contains(&peer_addr.port()));
+
+    Ok(PeerPreference { canonical_port })
 }
 
 /// Is the [`SocketAddr`] we have for this peer valid for outbound
@@ -59,6 +75,8 @@ fn address_is_valid_for_outbound_connections(
     peer_addr: &SocketAddr,
     network: impl Into<Option<Network>>,
 ) -> Result<(), &'static str> {
+    // TODO: make private IP addresses an error unless a debug config is set (#3117)
+
     if peer_addr.ip().is_unspecified() {
         return Err("invalid peer IP address: unspecified addresses can not be used for outbound connections");
     }
