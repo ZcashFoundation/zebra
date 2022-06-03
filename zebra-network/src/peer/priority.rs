@@ -39,7 +39,7 @@ pub struct PeerPreference {
 ///
 /// Use the [`PeerPreference`] [`Ord`] implementation to sort preferred peers first.
 pub fn peer_preference(
-    peer_addr: SocketAddr,
+    peer_addr: &SocketAddr,
     _network: Network,
 ) -> Result<PeerPreference, &'static str> {
     if !address_is_valid_for_outbound_connections(peer_addr) {
@@ -57,7 +57,7 @@ pub fn peer_preference(
 ///
 /// Since the addresses in the address book are unique, this check can be
 /// used to permanently reject entire [`MetaAddr`]s.
-fn address_is_valid_for_outbound_connections(peer_addr: SocketAddr) -> bool {
+fn address_is_valid_for_outbound_connections(peer_addr: &SocketAddr) -> bool {
     if peer_addr.ip().is_unspecified() {
         return false;
     }
