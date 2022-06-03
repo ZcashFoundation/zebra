@@ -28,4 +28,4 @@ pub use error::{ErrorSlot, HandshakeError, PeerError, SharedPeerError};
 pub use handshake::{ConnectedAddr, Handshake, HandshakeRequest};
 pub use load_tracked_client::LoadTrackedClient;
 pub use minimum_peer_version::MinimumPeerVersion;
-pub use priority::{peer_preference, AttributePreference, PeerPreference};
+pub use priority::{AttributePreference, PeerPreference};

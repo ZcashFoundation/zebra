@@ -34,10 +34,7 @@ use crate::{
     address_book_updater::AddressBookUpdater,
     constants,
     meta_addr::{MetaAddr, MetaAddrChange},
-    peer::{
-        self, peer_preference, HandshakeRequest, MinimumPeerVersion, OutboundConnectorRequest,
-        PeerPreference,
-    },
+    peer::{self, HandshakeRequest, MinimumPeerVersion, OutboundConnectorRequest, PeerPreference},
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
     AddressBook, BoxError, Config, Request, Response,
 };
@@ -392,19 +389,18 @@ async fn limit_initial_peers(
     // Filter out invalid initial peers, and prioritise valid peers for initial connections.
     // (This treats initial peers the same way we treat gossiped peers.)
     for peer_addr in all_peers {
-        let preference = peer_preference(&peer_addr, config.network);
+        let preference = PeerPreference::new(&peer_addr, config.network);
 
-        if preference.is_ok() {
-            preferred_peers
-                .entry(preference.unwrap())
+        match preference {
+            Ok(preference) => preferred_peers
+                .entry(preference)
                 .or_default()
-                .push(peer_addr);
-        } else {
-            warn!(
+                .push(peer_addr),
+            Err(error) => warn!(
                 ?peer_addr,
-                error = ?preference.unwrap_err(),
+                ?error,
                 "invalid initial peer from DNS seeder or configured IP address",
-            );
+            ),
         }
     }
 
