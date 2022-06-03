@@ -110,7 +110,7 @@ Please make sure you have zebrad running (with RPC endpoint and up to date block
 
 - For production setups `lightwalletd` requires a `cert.pem`. For more information on how to do this please [see here](https://github.com/zcash/lightwalletd#production-usage).
 
-- `lightwalletd` can run without the certificate (with the `-no-tls-very-insecure` flag) however this is not recommended for production environments.
+- `lightwalletd` can run without the certificate (with the `--no-tls-very-insecure` flag) however this is not recommended for production environments.
 
 With the cert in `./` and an empty `zcash.conf` we can start the sync with:
 
