@@ -208,7 +208,7 @@ pub trait Rpc {
     /// # Notes
     ///
     /// Only the multi-argument format is used by lightwalletd and this is what we currently support:
-    /// https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102
+    /// <https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102>
     #[rpc(name = "getaddresstxids")]
     fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest)
         -> BoxFuture<Result<Vec<String>>>;
@@ -224,7 +224,7 @@ pub trait Rpc {
     /// # Notes
     ///
     /// lightwalletd always uses the multi-address request, without chaininfo:
-    /// https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L402
+    /// <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L402>
     #[rpc(name = "getaddressutxos")]
     fn get_address_utxos(
         &self,

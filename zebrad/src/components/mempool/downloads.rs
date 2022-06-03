@@ -53,14 +53,14 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// Controls how long we wait for a transaction download request to complete.
 ///
-/// This is currently equal to [`crate::components::sync::BLOCK_DOWNLOAD_TIMEOUT`] for
+/// This is currently equal to [`BLOCK_DOWNLOAD_TIMEOUT`] for
 /// consistency, even though parts of the rationale used for defining the value
 /// don't apply here (e.g. we can drop transactions hashes when the queue is full).
 pub(crate) const TRANSACTION_DOWNLOAD_TIMEOUT: Duration = BLOCK_DOWNLOAD_TIMEOUT;
 
 /// Controls how long we wait for a transaction verify request to complete.
 ///
-/// This is currently equal to [`crate::components::sync::BLOCK_VERIFY_TIMEOUT`] for
+/// This is currently equal to [`BLOCK_VERIFY_TIMEOUT`] for
 /// consistency.
 ///
 /// This timeout may lead to denial of service, which will be handled in
@@ -237,7 +237,7 @@ where
             );
             metrics::gauge!(
                 "mempool.currently.queued.transactions",
-                self.pending.len() as _
+                self.pending.len() as f64,
             );
 
             return Err(MempoolError::AlreadyQueued);
@@ -252,7 +252,7 @@ where
             );
             metrics::gauge!(
                 "mempool.currently.queued.transactions",
-                self.pending.len() as _
+                self.pending.len() as f64,
             );
 
             return Err(MempoolError::FullQueue);
@@ -370,7 +370,7 @@ where
         );
         metrics::gauge!(
             "mempool.currently.queued.transactions",
-            self.pending.len() as _
+            self.pending.len() as f64,
         );
         metrics::counter!("mempool.queued.transactions.total", 1);
 
@@ -411,7 +411,7 @@ where
         assert!(self.cancel_handles.is_empty());
         metrics::gauge!(
             "mempool.currently.queued.transactions",
-            self.pending.len() as _
+            self.pending.len() as f64,
         );
     }
 
@@ -456,6 +456,6 @@ where
     ZS::Future: Send,
 {
     fn drop(self: Pin<&mut Self>) {
-        metrics::gauge!("mempool.currently.queued.transactions", 0 as _);
+        metrics::gauge!("mempool.currently.queued.transactions", 0 as f64);
     }
 }

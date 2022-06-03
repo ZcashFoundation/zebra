@@ -8,7 +8,7 @@ use super::super::keys::find_group_hash;
 ///
 /// Expects i to be 1-indexed from the loop it's called in.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
+/// <https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash>
 #[allow(non_snake_case)]
 fn I_i(domain: [u8; 8], i: u32) -> jubjub::ExtendedPoint {
     find_group_hash(domain, &(i - 1).to_le_bytes())
@@ -18,7 +18,7 @@ fn I_i(domain: [u8; 8], i: u32) -> jubjub::ExtendedPoint {
 ///
 /// Σ j={0,k-1}: (1 - 2x₂)⋅(1 + x₀ + 2x₁)⋅2^(4⋅j)
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
+/// <https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash>
 #[allow(non_snake_case)]
 fn M_i(segment: &BitSlice<u8, Lsb0>) -> jubjub::Fr {
     let mut m_i = jubjub::Fr::zero();
@@ -66,7 +66,7 @@ fn M_i(segment: &BitSlice<u8, Lsb0>) -> jubjub::Fr {
 /// Sapling incremental Merkle tree (§ 5.4.1.3 'MerkleCRH^Sapling Hash
 /// Function').
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
+/// <https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash>
 #[allow(non_snake_case)]
 pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<u8, Lsb0>) -> jubjub::ExtendedPoint {
     let mut result = jubjub::ExtendedPoint::identity();
@@ -92,7 +92,7 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<u8, Lsb0>) -> jubjub::
 ///
 /// This is technically returning 255 (l_MerkleSapling) bits, not 256.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash
+/// <https://zips.z.cash/protocol/protocol.pdf#concretepedersenhash>
 #[allow(non_snake_case)]
 pub fn pedersen_hash(domain: [u8; 8], M: &BitVec<u8, Lsb0>) -> jubjub::Fq {
     jubjub::AffinePoint::from(pedersen_hash_to_point(domain, M)).get_u()
@@ -104,9 +104,9 @@ pub fn pedersen_hash(domain: [u8; 8], M: &BitVec<u8, Lsb0>) -> jubjub::Fq {
 /// commitment tree.  It takes as input a Pedersen commitment P, and hashes it
 /// with another input x.
 ///
-/// MixingPedersenHash(P, x) := P + [x]FindGroupHash^J^(r)("Zcash_J_", "")
+/// MixingPedersenHash(P, x) := P + \[x\]FindGroupHash^J^(r)("Zcash_J_", "")
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretemixinghash
+/// <https://zips.z.cash/protocol/protocol.pdf#concretemixinghash>
 #[allow(non_snake_case)]
 pub fn mixing_pedersen_hash(P: jubjub::ExtendedPoint, x: jubjub::Fr) -> jubjub::ExtendedPoint {
     const J: [u8; 8] = *b"Zcash_J_";
@@ -118,9 +118,9 @@ pub fn mixing_pedersen_hash(P: jubjub::ExtendedPoint, x: jubjub::Fr) -> jubjub::
 /// construction, and adding a randomized point on the Jubjub curve.
 ///
 /// WindowedPedersenCommit_r (s) := \
-///   PedersenHashToPoint("Zcash_PH", s) + [r]FindGroupHash^J^(r)("Zcash_PH", "r")
+///   PedersenHashToPoint("Zcash_PH", s) + \[r\]FindGroupHash^J^(r)("Zcash_PH", "r")
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
+/// <https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit>
 pub fn windowed_pedersen_commitment(r: jubjub::Fr, s: &BitVec<u8, Lsb0>) -> jubjub::ExtendedPoint {
     const D: [u8; 8] = *b"Zcash_PH";
 

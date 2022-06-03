@@ -97,7 +97,7 @@ impl ShieldedData {
     /// of the value commitments in the Action descriptions of the transaction, and
     /// the balancing value.
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#orchardbalance
+    /// <https://zips.z.cash/protocol/protocol.pdf#orchardbalance>
     pub fn binding_verification_key(&self) -> redpallas::VerificationKeyBytes<Binding> {
         let cv: ValueCommitment = self.actions().map(|action| action.cv).sum();
         let cv_balance: ValueCommitment =
@@ -162,7 +162,7 @@ impl AuthorizedAction {
 /// Actions are 5 * 32 + 580 + 80 bytes so the total size of each Action is 820 bytes.
 /// [7.5 Action Description Encoding and Consensus][ps]
 ///
-/// [ps] https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus
+/// [ps]: <https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus>
 pub const ACTION_SIZE: u64 = 5 * 32 + 580 + 80;
 
 /// The size of a single Signature<SpendAuth>
@@ -170,7 +170,7 @@ pub const ACTION_SIZE: u64 = 5 * 32 + 580 + 80;
 /// Each Signature is 64 bytes.
 /// [7.1 Transaction Encoding and Consensus][ps]
 ///
-/// [ps] https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus
+/// [ps]: <https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus>
 pub const SPEND_AUTH_SIG_SIZE: u64 = 64;
 
 /// The size of a single AuthorizedAction

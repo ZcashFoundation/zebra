@@ -32,7 +32,7 @@ use pedersen_hashes::*;
 /// the uniform distribution on 𝔽_{r_𝕁} needed for Sapling commitment schemes'
 /// trapdoor generators.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#jubjub
+/// <https://zips.z.cash/protocol/protocol.pdf#jubjub>
 pub fn generate_trapdoor<T>(csprng: &mut T) -> jubjub::Fr
 where
     T: RngCore + CryptoRng,
@@ -96,7 +96,7 @@ impl NoteCommitment {
     /// NoteCommit^Sapling_rcm (g*_d , pk*_d , v) :=
     ///   WindowedPedersenCommit_rcm([1; 6] || I2LEBSP_64(v) || g*_d || pk*_d)
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit
+    /// <https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit>
     #[allow(non_snake_case)]
     pub fn new<T>(
         csprng: &mut T,
@@ -142,7 +142,7 @@ impl NoteCommitment {
 
     /// Hash Extractor for Jubjub (?)
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#concreteextractorjubjub
+    /// <https://zips.z.cash/protocol/protocol.pdf#concreteextractorjubjub>
     pub fn extract_u(&self) -> jubjub::Fq {
         self.0.get_u()
     }
@@ -154,7 +154,7 @@ impl NoteCommitment {
 /// type actually stored in Spend and Output descriptions, see
 /// [`NotSmallOrderValueCommitment`].
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
+/// <https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit>
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 pub struct ValueCommitment(#[serde(with = "serde_helpers::AffinePoint")] jubjub::AffinePoint);
 
@@ -199,8 +199,8 @@ impl From<jubjub::ExtendedPoint> for ValueCommitment {
 
 /// LEBS2OSP256(repr_J(cv))
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#spendencoding
-/// https://zips.z.cash/protocol/protocol.pdf#jubjub
+/// <https://zips.z.cash/protocol/protocol.pdf#spendencoding>
+/// <https://zips.z.cash/protocol/protocol.pdf#jubjub>
 impl From<ValueCommitment> for [u8; 32] {
     fn from(cm: ValueCommitment) -> [u8; 32] {
         cm.0.to_bytes()
@@ -243,8 +243,8 @@ impl std::iter::Sum for ValueCommitment {
 
 /// LEBS2OSP256(repr_J(cv))
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#spendencoding
-/// https://zips.z.cash/protocol/protocol.pdf#jubjub
+/// <https://zips.z.cash/protocol/protocol.pdf#spendencoding>
+/// <https://zips.z.cash/protocol/protocol.pdf#jubjub>
 impl TryFrom<[u8; 32]> for ValueCommitment {
     type Error = &'static str;
 
@@ -263,7 +263,7 @@ impl TryFrom<[u8; 32]> for ValueCommitment {
 impl ValueCommitment {
     /// Generate a new _ValueCommitment_.
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
+    /// <https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit>
     pub fn randomized<T>(csprng: &mut T, value: Amount) -> Self
     where
         T: RngCore + CryptoRng,
@@ -275,7 +275,7 @@ impl ValueCommitment {
 
     /// Generate a new _ValueCommitment_ from an existing _rcv_ on a _value_.
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit
+    /// <https://zips.z.cash/protocol/protocol.pdf#concretehomomorphiccommit>
     #[allow(non_snake_case)]
     pub fn new(rcv: jubjub::Fr, value: Amount) -> Self {
         let v = jubjub::Fr::from(value);
@@ -298,8 +298,8 @@ impl ValueCommitment {
 ///
 /// This is denoted by `cv` in the specification.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#spenddesc
-/// https://zips.z.cash/protocol/protocol.pdf#outputdesc
+/// <https://zips.z.cash/protocol/protocol.pdf#spenddesc>
+/// <https://zips.z.cash/protocol/protocol.pdf#outputdesc>
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 pub struct NotSmallOrderValueCommitment(ValueCommitment);
 
@@ -312,11 +312,11 @@ impl TryFrom<ValueCommitment> for NotSmallOrderValueCommitment {
     ///
     /// # Consensus
     ///
-    /// > cv and rk [MUST NOT be of small order][1], i.e. [h_J]cv MUST NOT be 𝒪_J
-    /// > and [h_J]rk MUST NOT be 𝒪_J.
+    /// > cv and rk [MUST NOT be of small order][1], i.e. \[h_J\]cv MUST NOT be 𝒪_J
+    /// > and \[h_J\]rk MUST NOT be 𝒪_J.
     ///
-    /// > cv and epk [MUST NOT be of small order][2], i.e. [h_J]cv MUST NOT be 𝒪_J
-    /// > and [ℎ_J]epk MUST NOT be 𝒪_J.
+    /// > cv and epk [MUST NOT be of small order][2], i.e. \[h_J\]cv MUST NOT be 𝒪_J
+    /// > and \[ℎ_J\]epk MUST NOT be 𝒪_J.
     ///
     /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
     /// [2]: https://zips.z.cash/protocol/protocol.pdf#outputdesc

@@ -54,8 +54,8 @@ pub async fn run() -> Result<()> {
     // so `UpdateCachedState` can be used as our test type
     let test_type = UpdateCachedState;
 
-    let cached_state_path = test_type.zebrad_state_path("send_transaction_tests".to_string());
-    if cached_state_path.is_none() {
+    let zebrad_state_path = test_type.zebrad_state_path("send_transaction_tests".to_string());
+    if zebrad_state_path.is_none() {
         return Ok(());
     }
 
@@ -67,11 +67,30 @@ pub async fn run() -> Result<()> {
 
     let network = Network::Mainnet;
 
+    tracing::info!(
+        ?network,
+        ?test_type,
+        ?zebrad_state_path,
+        ?lightwalletd_state_path,
+        "running gRPC send transaction test using lightwalletd & zebrad",
+    );
+
     let (transactions, partial_sync_path) =
-        load_transactions_from_a_future_block(network, cached_state_path.unwrap()).await?;
+        load_transactions_from_a_future_block(network, zebrad_state_path.unwrap()).await?;
+
+    tracing::info!(
+        transaction_count = ?transactions.len(),
+        ?partial_sync_path,
+        "got transactions to send",
+    );
 
     let (_zebrad, zebra_rpc_address) =
         spawn_zebrad_for_rpc_without_initial_peers(Network::Mainnet, partial_sync_path, test_type)?;
+
+    tracing::info!(
+        ?zebra_rpc_address,
+        "spawned disconnected zebrad with shorter chain",
+    );
 
     let (_lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(
         zebra_rpc_address,
@@ -80,7 +99,17 @@ pub async fn run() -> Result<()> {
         true,
     )?;
 
+    tracing::info!(
+        ?lightwalletd_rpc_port,
+        "spawned lightwalletd connected to zebrad",
+    );
+
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
+
+    tracing::info!(
+        transaction_count = ?transactions.len(),
+        "connected gRPC client to lightwalletd, sending transactions...",
+    );
 
     for transaction in transactions {
         let expected_response = wallet_grpc::SendResponse {
@@ -146,13 +175,27 @@ pub async fn run() -> Result<()> {
 /// synchronized chain.
 async fn load_transactions_from_a_future_block(
     network: Network,
-    cached_state_path: PathBuf,
+    zebrad_state_path: PathBuf,
 ) -> Result<(Vec<Arc<Transaction>>, TempDir)> {
+    tracing::info!(
+        ?network,
+        ?zebrad_state_path,
+        "preparing partial sync, copying files...",
+    );
+
     let (partial_sync_path, partial_sync_height) =
-        prepare_partial_sync(network, cached_state_path).await?;
+        prepare_partial_sync(network, zebrad_state_path).await?;
+
+    tracing::info!(
+        ?partial_sync_height,
+        ?partial_sync_path,
+        "performing full sync...",
+    );
 
     let full_sync_path =
         perform_full_sync_starting_from(network, partial_sync_path.as_ref()).await?;
+
+    tracing::info!(?full_sync_path, "loading transactions...");
 
     let transactions =
         load_transactions_from_block_after(partial_sync_height, network, full_sync_path.as_ref())
@@ -167,9 +210,9 @@ async fn load_transactions_from_a_future_block(
 /// height of the partially synchronized chain.
 async fn prepare_partial_sync(
     network: Network,
-    cached_zebra_state: PathBuf,
+    zebrad_state_path: PathBuf,
 ) -> Result<(TempDir, block::Height)> {
-    let partial_sync_path = copy_state_directory(cached_zebra_state).await?;
+    let partial_sync_path = copy_state_directory(zebrad_state_path).await?;
     let tip_height =
         load_tip_height_from_state_directory(network, partial_sync_path.as_ref()).await?;
 
@@ -183,15 +226,15 @@ async fn prepare_partial_sync(
 ///
 /// # Panics
 ///
-/// If the specified `state_path` contains a chain state that's not synchronized to a tip that's
+/// If the specified `zebrad_state_path` contains a chain state that's not synchronized to a tip that's
 /// after `height`.
 async fn load_transactions_from_block_after(
     height: block::Height,
     network: Network,
-    state_path: &Path,
+    zebrad_state_path: &Path,
 ) -> Result<Vec<Arc<Transaction>>> {
     let (_read_write_state_service, mut state, latest_chain_tip, _chain_tip_change) =
-        start_state_service_with_cache_dir(network, state_path).await?;
+        start_state_service_with_cache_dir(network, zebrad_state_path).await?;
 
     let tip_height = latest_chain_tip
         .best_tip_height()

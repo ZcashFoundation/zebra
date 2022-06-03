@@ -278,7 +278,8 @@ impl Transaction {
     ///
     /// # Panics
     ///
-    /// If any spent [`Output`] is missing from `outpoints`.
+    /// If any spent [`transparent::Output`] is missing from
+    /// [`transparent::OutPoint`]s.
     //
     // TODO: take some extra arbitrary flags, which select between zero and non-zero
     //       remaining value in each chain value pool
@@ -420,7 +421,8 @@ impl Transaction {
     ///
     /// # Panics
     ///
-    /// If any spent [`Output`] is missing from `outpoints`.
+    /// If any spent [`transparent::Output`] is missing from
+    /// [`transparent::OutPoint`]s.
     //
     // TODO: split this method up, after we've implemented chain value balance adjustments
     //

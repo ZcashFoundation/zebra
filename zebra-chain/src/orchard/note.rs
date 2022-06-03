@@ -42,7 +42,7 @@ impl SeedRandomness {
 /// for the actual output note. When creating a dummy note, its _rho_ is chosen
 /// as a random Pallas point's x-coordinate.
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#orcharddummynotes
+/// <https://zips.z.cash/protocol/nu5.pdf#orcharddummynotes>
 #[derive(Clone, Debug)]
 pub struct Rho(pub(crate) pallas::Base);
 
@@ -83,7 +83,7 @@ impl From<Psi> for [u8; 32] {
 }
 
 impl From<SeedRandomness> for Psi {
-    /// rcm = ToScalar^Orchard((PRF^expand_rseed ([9]))
+    /// rcm = ToScalar^Orchard((PRF^expand_rseed (\[9\]))
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardsend>
     fn from(rseed: SeedRandomness) -> Self {

@@ -135,7 +135,7 @@ pub enum Response {
         /// > The remaining value in the transparent transaction value pool
         /// > of a coinbase transaction is destroyed.
         ///
-        /// https://zips.z.cash/protocol/protocol.pdf#transactions
+        /// <https://zips.z.cash/protocol/protocol.pdf#transactions>
         miner_fee: Option<Amount<NonNegative>>,
 
         /// The number of legacy signature operations in this transaction's

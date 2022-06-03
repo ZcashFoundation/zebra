@@ -261,12 +261,12 @@ impl VerifiedSet {
     fn update_metrics(&mut self) {
         metrics::gauge!(
             "zcash.mempool.size.transactions",
-            self.transaction_count() as _
+            self.transaction_count() as f64,
         );
         metrics::gauge!(
             "zcash.mempool.size.bytes",
-            self.transactions_serialized_size as _
+            self.transactions_serialized_size as f64,
         );
-        metrics::gauge!("zcash.mempool.cost.bytes", self.total_cost as _);
+        metrics::gauge!("zcash.mempool.cost.bytes", self.total_cost as f64);
     }
 }

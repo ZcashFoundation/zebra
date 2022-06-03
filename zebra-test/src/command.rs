@@ -328,7 +328,7 @@ impl<T> TestChild<T> {
     /// To never match any log lines, use `RegexSet::empty()`.
     ///
     /// This method is a [`TestChild::with_failure_regexes`] wrapper for
-    /// strings, [`Regex`]es, and [`RegexSet`]s.
+    /// strings, `Regex`es, and [`RegexSet`]s.
     ///
     /// # Panics
     ///
@@ -944,7 +944,7 @@ impl<T> TestOutput<T> {
     /// Checks each line in the output of a command, using a closure to determine
     /// if the line is valid.
     ///
-    /// See [`output_check`] for details.
+    /// See [`Self::output_check`] for details.
     #[instrument(skip(self, line_predicate, output))]
     pub fn any_output_line<P>(
         &self,
@@ -975,7 +975,7 @@ impl<T> TestOutput<T> {
 
     /// Tests if any lines in the output of a command contain `s`.
     ///
-    /// See [`any_output_line`] for details.
+    /// See [`Self::any_output_line`] for details.
     #[instrument(skip(self, output))]
     pub fn any_output_line_contains(
         &self,

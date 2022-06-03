@@ -259,7 +259,7 @@ pub(crate) fn sighash(
 ///
 /// If passed a pre-v5 transaction.
 ///
-/// [ZIP-244]: https://zips.z.cash/zip-0244.
+/// [ZIP-244]: https://zips.z.cash/zip-0244
 pub(crate) fn auth_digest(trans: &Transaction) -> AuthDigest {
     let alt_tx: zp_tx::Transaction = trans
         .try_into()

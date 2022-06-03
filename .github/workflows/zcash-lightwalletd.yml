@@ -2,7 +2,8 @@ name: zcash-lightwalletd
 
 on:
   workflow_dispatch:
-  
+
+  # Update the lightwalletd image when related changes merge to the `zebra/main` branch
   push:
     branches:
       - 'main'
@@ -10,7 +11,7 @@ on:
       # rebuild lightwalletd whenever the related Zebra code changes
       #
       # TODO: this code isn't compiled in this docker image
-      #       rebuild whenever the actual code at adityapk00/lightwalletd/master changes
+      #       rebuild whenever the actual code at zcash/lightwalletd/master changes
       - 'zebra-rpc/**'
       - 'zebrad/tests/acceptance.rs'
       - 'zebrad/src/config.rs'
@@ -20,9 +21,6 @@ on:
       - '.github/workflows/zcash-lightwalletd.yml'
 
   # Update the lightwalletd image when each related PR changes
-  #
-  # TODO: after NU5 mainnet activation and wallet orchard features are stable,
-  #       consider just rebuilding the image on `main` merges
   pull_request:
     branches:
       - main
@@ -52,7 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3.0.2
         with:
-          repository: adityapk00/lightwalletd
+          repository: zcash/lightwalletd
           ref: 'master'
           persist-credentials: false
 

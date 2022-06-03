@@ -47,7 +47,7 @@ use crate::transaction::{self, Transaction};
 /// >       1 2 3 4 5 6     1 2 3 4 5 6 5 6
 /// > ```
 /// >
-/// > for transaction lists [1,2,3,4,5,6] and [1,2,3,4,5,6,5,6] (where 5 and
+/// > for transaction lists \[1,2,3,4,5,6\] and \[1,2,3,4,5,6,5,6\] (where 5 and
 /// > 6 are repeated) result in the same root hash A (because the hash of both
 /// > of (F) and (F,F) is C).
 /// >

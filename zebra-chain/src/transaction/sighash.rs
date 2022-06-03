@@ -9,7 +9,7 @@ use crate::primitives::zcash_primitives::sighash;
 static ZIP143_EXPLANATION: &str = "Invalid transaction version: after Overwinter activation transaction versions 1 and 2 are rejected";
 
 bitflags::bitflags! {
-    /// The different SigHash types, as defined in https://zips.z.cash/zip-0143
+    /// The different SigHash types, as defined in <https://zips.z.cash/zip-0143>
     pub struct HashType: u32 {
         /// Sign all the outputs
         const ALL = 0b0000_0001;
@@ -23,7 +23,7 @@ bitflags::bitflags! {
 }
 
 /// A Signature Hash (or SIGHASH) as specified in
-/// https://zips.z.cash/protocol/protocol.pdf#sighash
+/// <https://zips.z.cash/protocol/protocol.pdf#sighash>
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct SigHash(pub [u8; 32]);
 

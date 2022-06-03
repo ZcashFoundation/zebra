@@ -1,4 +1,4 @@
-//! Initial [`Handshake`s] with Zebra peers over a `PeerTransport`.
+//! Initial [`Handshake`]s with Zebra peers over a [`PeerTransport`].
 
 use std::{
     cmp::min,
@@ -678,7 +678,7 @@ where
         // the value is the remote version of the most recent rejected handshake from each peer
         metrics::gauge!(
             "zcash.net.peers.version.obsolete",
-            remote_version.0.into(),
+            remote_version.0 as f64,
             "remote_ip" => their_addr.to_string(),
         );
 
@@ -709,7 +709,7 @@ where
         // the value is the remote version of the most recent connected handshake from each peer
         metrics::gauge!(
             "zcash.net.peers.version.connected",
-            remote_version.0.into(),
+            remote_version.0 as f64,
             "remote_ip" => their_addr.to_string(),
         );
     }
@@ -747,7 +747,8 @@ pub struct HandshakeRequest<PeerTransport>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    /// The tokio [`TcpStream`] or Tor [`DataStream`] to the peer.
+    /// The tokio [`TcpStream`](tokio::net::TcpStream) or Tor
+    /// [`DataStream`](arti_client::DataStream) to the peer.
     pub data_stream: PeerTransport,
 
     /// The address of the peer, and other related information.

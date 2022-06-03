@@ -110,8 +110,8 @@ pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 
 /// The default peer address crawler interval.
 ///
-/// This should be at least [`HANDSHAKE_TIMEOUT`](constants::HANDSHAKE_TIMEOUT)
-/// lower than all other crawler intervals.
+/// This should be at least [`HANDSHAKE_TIMEOUT`] lower than all other crawler
+/// intervals.
 ///
 /// This makes the following sequence of events more likely:
 /// 1. a peer address crawl,
@@ -194,13 +194,13 @@ pub const GET_ADDR_FANOUT: usize = 1;
 /// `addr`:
 /// > The number of IP address entries up to a maximum of 1,000.
 ///
-/// https://developer.bitcoin.org/reference/p2p_networking.html#addr
+/// <https://developer.bitcoin.org/reference/p2p_networking.html#addr>
 ///
 /// `addrv2`:
 /// > One message can contain up to 1,000 addresses.
 /// > Clients MUST reject messages with more addresses.
 ///
-/// https://zips.z.cash/zip-0155#specification
+/// <https://zips.z.cash/zip-0155#specification>
 pub const MAX_ADDRS_IN_MESSAGE: usize = 1000;
 
 /// The fraction of addresses Zebra sends in response to a `Peers` request.
@@ -281,23 +281,13 @@ lazy_static! {
     ///
     /// If peer versions are too old, we will disconnect from them.
     ///
-    /// The minimum network protocol version typically changes after Mainnet and/or
+    /// The minimum network protocol version typically changes after Mainnet and
     /// Testnet network upgrades.
     pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<Network, Version> = {
         let mut hash_map = HashMap::new();
 
-        // TODO: update to Nu5 when there are enough Nu5 mainnet nodes deployed (#4117)
-        hash_map.insert(Mainnet, Version::min_specified_for_upgrade(Mainnet, Canopy));
-
-        // This is the `zcashd` network protocol version:
-        // - after the first NU5 testnet activation, and
-        // - after updating to the second NU5 testnet activation consensus rules,
-        // - but before setting the second NU5 testnet activation height.
-        //
-        // TODO: update to:
-        // Version::min_specified_for_upgrade(Mainnet, Nu5)
-        // when there are enough Nu5 testnet nodes deployed (#4116)
-        hash_map.insert(Testnet, Version(170_040));
+        hash_map.insert(Mainnet, Version::min_specified_for_upgrade(Mainnet, Nu5));
+        hash_map.insert(Testnet, Version::min_specified_for_upgrade(Testnet, Nu5));
 
         hash_map
     };
@@ -316,8 +306,8 @@ lazy_static! {
 /// [6.1.3.3 Efficient Resource Usage] from [RFC 1123: Requirements for Internet Hosts]
 /// suggest no less than 5 seconds for resolving timeout.
 ///
-/// [RFC 1123: Requirements for Internet Hosts] https://tools.ietf.org/rfcmarkup?doc=1123
-/// [6.1.3.3  Efficient Resource Usage] https://tools.ietf.org/rfcmarkup?doc=1123#page-77
+/// [RFC 1123: Requirements for Internet Hosts] <https://tools.ietf.org/rfcmarkup?doc=1123>
+/// [6.1.3.3  Efficient Resource Usage] <https://tools.ietf.org/rfcmarkup?doc=1123#page-77>
 pub const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Magic numbers used to identify different Zcash networks.

@@ -38,7 +38,7 @@ rand_core = "0.6.3"
 ripemd = "0.1.1"
 
 serde = { version = "1.0.137", features = ["serde_derive", "rc"] }
-serde_with = "1.13.0"
+serde_with = "1.14.0"
 serde-big-array = "0.4.1"
 # Matches version used by hdwallet
 secp256k1 = { version = "0.21.3", features = ["serde"] }
@@ -71,7 +71,7 @@ redjubjub = "0.5.0"
 zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
-color-eyre = "0.6.0"
+color-eyre = "0.6.1"
 criterion = { version = "0.3.5", features = ["html_reports"] }
 itertools = "0.10.3"
 spandoc = "0.2.2"
