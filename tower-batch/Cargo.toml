@@ -1,6 +1,6 @@
 [package]
 name = "tower-batch"
-version = "0.2.25"
+version = "0.2.26"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT"
 edition = "2021"
