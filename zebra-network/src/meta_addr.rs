@@ -12,6 +12,7 @@ use zebra_chain::serialization::DateTime32;
 
 use crate::{
     constants,
+    peer::peer_preference,
     protocol::{external::canonical_socket_addr, types::PeerServices},
 };
 
@@ -529,8 +530,8 @@ impl MetaAddr {
     ///
     /// Since the addresses in the address book are unique, this check can be
     /// used to permanently reject entire [`MetaAddr`]s.
-    pub fn address_is_valid_for_outbound(&self) -> bool {
-        !self.addr.ip().is_unspecified() && self.addr.port() != 0
+    pub fn address_is_valid_for_outbound(&self, network: Network) -> bool {
+        peer_preference(self.addr, network).is_ok()
     }
 
     /// Is the last known information for this peer valid for outbound
