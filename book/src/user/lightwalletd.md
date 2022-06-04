@@ -81,19 +81,14 @@ For implementing zebra as a service please see [here](https://github.com/ZcashFo
 ## Download and build lightwalletd
 [#download-and-build-lightwalletd]: #download-and-build-lightwalletd
 
-While you synchronize Zebra you can install lightwalletd. There are several versions of lightwalletd in different repositories:
+While you synchronize Zebra you can install [lightwalletd](https://github.com/zcash/lightwalletd).
 
-- [The original version](https://github.com/zcash/lightwalletd)
-- [The version used by zecwallet-lite and zecwallet-cli](https://github.com/adityapk00/lightwalletd)
-
-Most of the testing related to Zebra and lightwalletd was done with the zecwallet version in the [adityapk00](https://github.com/adityapk00) repository.
-
-Before installing lightwalletd, you need to have `go` in place. Please visit the [go install page](https://go.dev/doc/install) with download and installation instructions.
+Before installing, you need to have `go` in place. Please visit the [go install page](https://go.dev/doc/install) with download and installation instructions.
 
 With go installed and in your path, download and install lightwalletd:
 
 ```console
-git clone https://github.com/adityapk00/lightwalletd
+git clone https://github.com/zcash/lightwalletd
 cd lightwalletd
 make
 make install
@@ -110,12 +105,12 @@ Please make sure you have zebrad running (with RPC endpoint and up to date block
 
 - For production setups `lightwalletd` requires a `cert.pem`. For more information on how to do this please [see here](https://github.com/zcash/lightwalletd#production-usage).
 
-- `lightwalletd` can run without the certificate (with the `-no-tls-very-insecure` flag) however this is not recommended for production environments.
+- `lightwalletd` can run without the certificate (with the `--no-tls-very-insecure` flag) however this is not recommended for production environments.
 
 With the cert in `./` and an empty `zcash.conf` we can start the sync with:
 
 ```console
-lightwalletd --zcash-conf-path ~/.config/zebra/zcash.conf --data-dir ~/.cache/lightwalletd --log-file /dev/stdout
+lightwalletd --zcash-conf-path ~/.config/zcash.conf --data-dir ~/.cache/lightwalletd --log-file /dev/stdout
 ```
 
 By default lightwalletd service will listen on `127.0.0.1:9067`
