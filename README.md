@@ -42,7 +42,7 @@ The original Zcash node is named `zcashd` and is developed by the Electric Coin
 Company as a fork of the original Bitcoin node. Zebra, on the other hand, is
 an independent Zcash node implementation developed from scratch. Since they
 implement the same protocol, `zcashd` and Zebra nodes can communicate with each
-other and maintain the Zcash network interoperability.
+other and maintain the Zcash network together.
 
 If you just want to send and receive Zcash then you don't need to use Zebra
 directly. You can download a Zcash wallet application which will handle that
