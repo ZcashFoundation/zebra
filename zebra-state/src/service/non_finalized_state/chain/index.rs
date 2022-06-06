@@ -20,11 +20,6 @@ use super::{RevertPosition, UpdateWith};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransparentTransfers {
     /// The partial chain balance for a transparent address.
-    ///
-    /// TODO: To avoid [`ReadStateService`](crate::service::ReadStateService)
-    /// response inconsistencies when a block has just been finalized, revert
-    /// UTXO receives and spends that are at a height less than or equal to the
-    /// finalized tip.
     balance: Amount<NegativeAllowed>,
 
     /// The partial list of transactions that spent or received UTXOs to a transparent address.
@@ -42,12 +37,7 @@ pub struct TransparentTransfers {
     /// The `getaddressutxos` RPC doesn't need these transaction IDs to be sorted in chain order,
     /// but it might in future. So Zebra does it anyway.
     ///
-    /// TODO: To avoid [`ReadStateService`](crate::service::ReadStateService)
-    /// response inconsistencies when a block has just been finalized, combine
-    /// the created UTXOs, combine the spent UTXOs, and then remove spent from
-    /// created
-    ///
-    /// Optional:
+    /// Optional TODOs:
     /// - store `Utxo`s in the chain, and just store the created locations for this address
     /// - if we add an OutputLocation to UTXO, remove this OutputLocation,
     ///   and use the inner OutputLocation to sort Utxos in chain order

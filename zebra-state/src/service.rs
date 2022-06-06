@@ -321,9 +321,7 @@ impl StateService {
         rsp_rx
     }
 
-    /// TODO: Update the reference to [`LatestChain`] below.
-    ///
-    /// Update the [`LatestChainTip`], [`ChainTipChange`], and [`LatestChain`]
+    /// Update the [`LatestChainTip`], [`ChainTipChange`], and `best_chain_sender`
     /// channels with the latest non-finalized [`ChainTipBlock`] and
     /// [`Chain`][1].
     ///
