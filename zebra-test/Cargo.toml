@@ -1,6 +1,6 @@
 [package]
 name = "zebra-test"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -11,7 +11,7 @@ edition = "2021"
 hex = "0.4.3"
 indexmap = "1.8.2"
 lazy_static = "1.4.0"
-insta = "1.14.0"
+insta = "1.14.1"
 proptest = "0.10.1"
 once_cell = "1.12.0"
 rand = { version = "0.8.5", package = "rand" }

@@ -126,13 +126,16 @@ After you have the version increments and the updated changelog:
       comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.0-release?expand=1&template=release-checklist.md)).
       - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.
       - [ ] Also add the list of not-bumped crates as a comment (can use the same comment as the previous one).
-- [ ] While the PR is being reviewed, turn on [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches) to stop other PRs merging
+- [ ] Turn on [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches).
+- [ ] Once the PR is ready to be merged, unfreeze it
+      [here](https://www.mergefreeze.com/installations/3676/branches). Do not
+      unfreeze the whole repository.
 
 ### Create the Release
 
-- [ ] Once the release PR has been approved and merged, create a new release
-      using the draft release as a base, by clicking the Edit icon
-      in the [draft release](https://github.com/ZcashFoundation/zebra/releases).
+- [ ] Once the PR has been merged, create a new release using the draft release
+      as a base, by clicking the Edit icon in the [draft
+      release](https://github.com/ZcashFoundation/zebra/releases).
 - [ ] Set the release title to `Zebra ` followed by the version tag, for example:
       `Zebra 1.0.0-alpha.0`
 - [ ] Copy the final changelog of this release to the release description
@@ -146,7 +149,9 @@ After you have the version increments and the updated changelog:
 
 - [ ] After tagging the release, test that the exact `cargo install` command in
       `README.md` works (`--git` behaves a bit differently to `--path`)
-- [ ] Turn off [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches) to start merging PRs again
+- [ ] Turn off [Merge
+      Freeze](https://www.mergefreeze.com/installations/3676/branches) for the
+      whole repository.
 
 If the build fails after tagging:
 1. fix the build

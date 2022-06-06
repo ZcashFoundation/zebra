@@ -4,6 +4,90 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-beta.11](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.11) - 2022-06-03
+
+This release cleans up a lot of tech dept accumulated in the previous
+development and improves the documentation.
+
+### Added
+
+- Log the tracing level when it is set or reloaded (#4515)
+
+#### CI
+
+- Add a codespell linting action (#4482)
+- Add grpc tests to CI (#4453)
+- Require network names in cached state disk names (#4392)
+
+#### RPC
+
+- Add support for `verbosity=1` in getblock (#4511)
+- Add `z_gettreestate` gRPC tests (#4455)
+
+#### Documentation
+
+- Explain what Zebra does when it starts up (#4502)
+- Add a lightwalletd tutorial (#4526)
+
+### Changed
+
+- Immediately disconnect from pre-NU5 nodes (#4538)
+- Upgrade tracing-subscriber and related dependencies (#4517)
+- Disable debug logging at compile time in release builds (#4516)
+- Activate the mempool after 2 syncer runs at the chain tip, rather than 4 (#4501)
+- Run coverage on stable (#4465)
+- Allow more time for tests to end gracefully (#4469)
+- Do not create draft PRs if not needed (#4540)
+
+#### Rust Dependencies
+
+- Bump inferno from 0.11.3 to 0.11.4 (#4534)
+- Bump insta from 1.14.0 to 1.14.1 (#4542)
+- Bump log from 0.4.14 to 0.4.17 (#4530)
+- Bump serde_with from 1.13.0 to 1.14.0 (#4532)
+- Bump indexmap from 1.8.1 to 1.8.2 (#4531)
+- Bump vergen from 7.1.0 to 7.2.0 (#4521)
+- Bump prost from 0.10.3 to 0.10.4 (#4490)
+- Bump regex from 1.5.5 to 1.5.6 (#4463)
+- Bump once_cell from 1.11.0 to 1.12.0 (#4462)
+- Bump once_cell from 1.10.0 to 1.11.0 (#4447)
+
+
+#### CI Dependencies
+
+- Bump tj-actions/changed-files from 20 to 21 (#4510)
+- Bump google-github-actions/auth from 0.7.3 to 0.8.0 (#4478)
+- Bump tj-actions/changed-files from 21 to 22 (#4541)
+- Bump w9jds/firebase-action from 2.1.0 to 2.1.2 (#4431)
+- Bump reviewdog/action-actionlint from 1.24.0 to 1.25.0 (#4432)
+- Bump reviewdog/action-actionlint from 1.25.0 to 1.25.1 (#4479)
+
+### Fixed
+
+- Index spending transaction IDs for each address (#4355)
+- Resolve various clippy warnings (#4473)
+
+#### Documentation
+
+- Fix various doc warnings (#4514)
+- Fix the syntax of links in comments (#4494)
+
+#### CI
+
+- Test RPCs with zcash/lightwalletd, to fix post-NU5 failures in adityapk00/lightwalletd (#4553)
+- Add lightwalletd gRPC, clippy, rustfmt patch jobs (#4518)
+- Permanently fix unreliable sync finished log regex (#4504)
+- Always run patch jobs that depend on cached cloud disks (#4496)
+- Temporarily finish full sync at 99% (#4457)
+- Increase clippy timeout (#4472)
+- Set a network env variable to be used in get-available-disks (#4477)
+- Temporarily stop full sync at 97%, but send transactions at 100% (#4483)
+- Mount the `lwd-cache` dir to the lightwalletd-full-sync (#4486)
+- Require cached state for the send transactions test (#4487)
+- Make reusable workflow job names match patch job names (#4466)
+- Update docker patch jobs for recent changes (#4460)
+
+
 ## [Zebra 1.0.0-beta.10](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.10) - 2022-05-19
 
 Zebra's latest beta continues adding support for `lightwalletd` RPC methods and continues with the testing of each of these features. Also, this beta sets the NU5 mainnet activation height.
@@ -32,7 +116,7 @@ Zebra's latest beta continues adding support for `lightwalletd` RPC methods and 
 
 #### Rust Dependencies
 
-- orchard, redjubjub, jubjub, group, bls12_381, bitvec, halo2, jubjub, primitive_types, 
+- orchard, redjubjub, jubjub, group, bls12_381, bitvec, halo2, jubjub, primitive_types,
   librustzcash, zcash_history, zcash_encoding, bellman, zcash_script, incrementalmerkletree (#4405)
 - vergen from 7.0.0 to 7.1.0 (#4420)
 - tokio-util from 0.7.1 to 0.7.2 (#4406)
