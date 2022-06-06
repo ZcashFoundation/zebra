@@ -105,6 +105,10 @@ fn address_is_valid_for_outbound_connections(
             return Err(
                 "invalid peer port: port is for Testnet, but this node is configured for Mainnet",
             );
+        } else if peer_addr.port() == 18344 {
+            return Err(
+                "invalid peer port: port is for Regtest, but Zebra does not support that network",
+            );
         } else if [16125, 26125].contains(&peer_addr.port()) {
             // 16125/26125 is used by Flux/ZelCash, which uses the same network magic numbers as Zcash,
             // so we have to reject it by port
