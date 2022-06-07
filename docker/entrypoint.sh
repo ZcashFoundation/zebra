@@ -20,8 +20,12 @@ case "$1" in
         # but we might not actually run any gRPC tests.
         if [[ "$RUN_ALL_TESTS" -eq "1" ]]; then
             # Run all the available tests for the current environment.
-            # If the lightwalletd environmental variables are set, we will also run those tests.
-            cargo test --locked --release --features lightwalletd-grpc-tests --workspace -- --nocapture --include-ignored
+            # If the lightwalletd environmental variables are set, this command will also run those tests.
+            #
+            # We can't use `--nocapture` with this test, because it produces thousands of lines of output.
+            # This causes rendering issues in GitHub actions in some browsers, even though the raw logs are fine. 
+            # It also sometimes makes the restart_stop_at_height test time out on GitHub runners.
+            cargo test --locked --release --features lightwalletd-grpc-tests --workspace -- --include-ignored
 
         # For these tests, we activate the gRPC feature to avoid recompiling `zebrad`,
         # but we don't actually run any gRPC tests.
