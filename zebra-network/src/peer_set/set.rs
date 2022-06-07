@@ -164,14 +164,23 @@ where
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
+    // Peer Tracking: New Peers
+    //
     /// Provides new and deleted peer [`Change`]s to the peer set,
     /// via the [`Discover`] trait implementation.
     discover: D,
 
+    /// A channel that asks the peer crawler task to connect to more peers.
+    demand_signal: mpsc::Sender<MorePeers>,
+
+    // Peer Tracking: Ready Peers
+    //
     /// Connected peers that are ready to receive requests from Zebra,
     /// or send requests to Zebra.
     ready_services: HashMap<D::Key, D::Service>,
 
+    // Request Routing
+    //
     /// A preselected ready service.
     ///
     /// # Correctness
@@ -188,6 +197,8 @@ where
     /// Used to route inventory requests to peers that are likely to have it.
     inventory_registry: InventoryRegistry,
 
+    // Peer Tracking: Busy Peers
+    //
     /// Connected peers that are handling a Zebra request,
     /// or Zebra is handling one of their requests.
     unready_services: FuturesUnordered<UnreadyService<D::Key, D::Service, Request>>,
@@ -195,9 +206,22 @@ where
     /// Channels used to cancel the request that an unready service is doing.
     cancel_handles: HashMap<D::Key, oneshot::Sender<CancelClientWork>>,
 
-    /// A channel that asks the peer crawler task to connect to more peers.
-    demand_signal: mpsc::Sender<MorePeers>,
+    // Peer Validation
+    //
+    /// An endpoint to see the minimum peer protocol version in real time.
+    ///
+    /// The minimum version depends on the block height, and [`MinimumPeerVersion`] listens for
+    /// height changes and determines the correct minimum version.
+    minimum_peer_version: MinimumPeerVersion<C>,
 
+    /// The configured limit for inbound and outbound connections.
+    ///
+    /// The peer set panics if this size is exceeded.
+    /// If that happens, our connection limit code has a bug.
+    peerset_total_connection_limit: usize,
+
+    // Background Tasks
+    //
     /// Channel for passing ownership of tokio JoinHandles from PeerSet's background tasks
     ///
     /// The join handles passed into the PeerSet are used populate the `guards` member
@@ -209,6 +233,8 @@ where
     /// the `PeerSet` propagate errors from background tasks back to the user
     guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxError>>>,
 
+    // Metrics and Logging
+    //
     /// Address book metrics watch channel.
     ///
     /// Used for logging diagnostics.
@@ -216,18 +242,6 @@ where
 
     /// The last time we logged a message about the peer set size
     last_peer_log: Option<Instant>,
-
-    /// The configured limit for inbound and outbound connections.
-    ///
-    /// The peer set panics if this size is exceeded.
-    /// If that happens, our connection limit code has a bug.
-    peerset_total_connection_limit: usize,
-
-    /// An endpoint to see the minimum peer protocol version in real time.
-    ///
-    /// The minimum version depends on the block height, and [`MinimumPeerVersion`] listens for
-    /// height changes and determines the correct minimum version.
-    minimum_peer_version: MinimumPeerVersion<C>,
 }
 
 impl<D, C> Drop for PeerSet<D, C>
@@ -269,16 +283,23 @@ where
         minimum_peer_version: MinimumPeerVersion<C>,
     ) -> Self {
         Self {
-            // Ready peers
+            // New peers
             discover,
+            demand_signal,
+
+            // Ready peers
             ready_services: HashMap::new(),
+            // Request Routing
             preselected_p2c_peer: None,
             inventory_registry: InventoryRegistry::new(inv_stream),
 
-            // Unready peers
+            // Busy peers
             unready_services: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
-            demand_signal,
+
+            // Peer validation
+            minimum_peer_version,
+            peerset_total_connection_limit: config.peerset_total_connection_limit(),
 
             // Background tasks
             handle_rx,
@@ -287,10 +308,6 @@ where
             // Metrics
             last_peer_log: None,
             address_metrics,
-            peerset_total_connection_limit: config.peerset_total_connection_limit(),
-
-            // Real-time parameters
-            minimum_peer_version,
         }
     }
 
