@@ -68,7 +68,7 @@ where
     type Bytes = T::Bytes;
 
     fn as_bytes(&self) -> Self::Bytes {
-        T::as_bytes(&*self)
+        T::as_bytes(self)
     }
 }
 
