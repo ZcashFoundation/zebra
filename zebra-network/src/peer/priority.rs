@@ -1,4 +1,4 @@
-//! Priorising outbound peer connections based on peer attributes.
+//! Prioritizing outbound peer connections based on peer attributes.
 
 use std::net::SocketAddr;
 
@@ -9,9 +9,19 @@ use AttributePreference::*;
 /// A level of preference for a peer attribute.
 ///
 /// Invalid peer attributes are represented as errors.
+///
+/// Outbound peer connections are initiated in the sorted [order](std::ops::Ord) of this type.
+///
+/// The derived order depends on the order of the variants in the enum.
+/// The variants are sorted in the order they are listed.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum AttributePreference {
     /// This peer is more likely to be a valid Zcash network peer.
+    ///
+    /// # Correctness
+    ///
+    /// This variant must be declared as the first enum variant,
+    /// so that `Preferred` peers sort before `Acceptable` peers.
     Preferred,
 
     /// This peer is possibly a valid Zcash network peer.
@@ -22,8 +32,8 @@ pub enum AttributePreference {
 ///
 /// Outbound peer connections are initiated in the sorted [order](std::ops::Ord) of this type.
 ///
-/// In particular, public addresses and non-canonical ports are preferred to
-/// private addresses and canonical ports.
+/// The derived order depends on the order of the fields in the struct.
+/// The first field determines the overall order, then later fields sort equal first field values.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct PeerPreference {
     /// Is the peer using the canonical Zcash port for the configured [`Network`]?
