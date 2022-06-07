@@ -386,6 +386,14 @@ async fn limit_initial_peers(
     let all_peers: HashSet<SocketAddr> = config.initial_peers().await;
     let mut preferred_peers: BTreeMap<PeerPreference, Vec<SocketAddr>> = BTreeMap::new();
 
+    let all_peers_count = all_peers.len();
+    if all_peers_count > config.peerset_initial_target_size {
+        info!(
+            "limiting the initial peers list from {} to {}",
+            all_peers_count, config.peerset_initial_target_size,
+        );
+    }
+
     // Filter out invalid initial peers, and prioritise valid peers for initial connections.
     // (This treats initial peers the same way we treat gossiped peers.)
     for peer_addr in all_peers {
@@ -404,15 +412,7 @@ async fn limit_initial_peers(
         }
     }
 
-    let peers_count = preferred_peers.len();
-    if peers_count > config.peerset_initial_target_size {
-        info!(
-            "limiting the initial peers list from {} to {}",
-            peers_count, config.peerset_initial_target_size
-        );
-    }
-
-    // Send every initial peer to the address book.
+    // Send every initial peer to the address book, in preferred order.
     // (This treats initial peers the same way we treat gossiped peers.)
     for peer in preferred_peers.values().flatten() {
         let peer_addr = MetaAddr::new_initial_peer(*peer);
