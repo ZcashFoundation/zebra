@@ -57,6 +57,13 @@ pub struct Config {
     ///
     /// Set to `None` by default: Zebra continues syncing indefinitely.
     pub debug_stop_at_height: Option<u32>,
+
+    /// Whether to delete the old database directories when present.
+    ///
+    /// Set to `true` by default. If this is set to `false`,
+    /// no check for old database versions will be made and nothing will be
+    /// deleted.
+    pub delete_old_database: bool,
 }
 
 fn gen_temp_path(prefix: &str) -> PathBuf {
@@ -108,6 +115,7 @@ impl Default for Config {
             cache_dir,
             ephemeral: false,
             debug_stop_at_height: None,
+            delete_old_database: true,
         }
     }
 }
