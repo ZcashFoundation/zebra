@@ -51,7 +51,7 @@ pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = Duration::from_secs(20 * 60)
 ///
 /// `lightwalletd` takes about half an hour to fully sync,
 /// and Zebra needs time to activate its mempool.
-pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = Duration::from_secs(45 * 60);
+pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = Duration::from_secs(90 * 60);
 
 /// Extension trait for methods on `tempfile::TempDir` for using it as a test
 /// directory for `zebrad`.
