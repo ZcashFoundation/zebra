@@ -50,7 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3.0.2
         with:
-          repository: zcash/lightwalletd
+          repository: adityapk00/lightwalletd
           ref: 'master'
           persist-credentials: false
 
