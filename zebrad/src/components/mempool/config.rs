@@ -39,9 +39,7 @@ pub struct Config {
     ///
     /// This corresponds to `mempoolevictionmemoryminutes` from
     /// [ZIP-401](https://zips.z.cash/zip-0401#specification).
-    ///
-    // Note: Durations become a TOML table, so they must be the final item in the config
-    //       We'll replace them with a more user-friendly format in #2847
+    #[serde(with = "humantime_serde")]
     pub eviction_memory_time: Duration,
 }
 
