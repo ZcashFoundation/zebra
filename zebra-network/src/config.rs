@@ -299,7 +299,7 @@ impl<'de> Deserialize<'de> for Config {
             initial_mainnet_peers: HashSet<String>,
             initial_testnet_peers: HashSet<String>,
             peerset_initial_target_size: usize,
-            #[serde(alias = "new_peer_interval")]
+            #[serde(alias = "new_peer_interval", with = "humantime_serde")]
             crawl_new_peer_interval: Duration,
         }
 
