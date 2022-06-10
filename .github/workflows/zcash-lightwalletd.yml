@@ -11,7 +11,7 @@ on:
       # rebuild lightwalletd whenever the related Zebra code changes
       #
       # TODO: this code isn't compiled in this docker image
-      #       rebuild whenever the actual code at zcash/lightwalletd/master changes
+      #       rebuild whenever the actual code at lightwalletd/master changes
       - 'zebra-rpc/**'
       - 'zebrad/tests/acceptance.rs'
       - 'zebrad/src/config.rs'

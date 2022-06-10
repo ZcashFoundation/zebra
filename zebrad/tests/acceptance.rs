@@ -501,7 +501,9 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
 /// Test if `zebrad` can sync the first checkpoint on testnet.
 ///
 /// The first checkpoint contains a single genesis block.
-#[test]
+// TODO: disable because testnet is not currently reliable
+// #[test]
+#[allow(dead_code)]
 fn sync_one_checkpoint_testnet() -> Result<()> {
     sync_until(
         TINY_CHECKPOINT_TEST_HEIGHT,
