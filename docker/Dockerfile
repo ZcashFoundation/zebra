@@ -92,7 +92,7 @@ FROM deps AS tests
 # TODO: do not hardcode the user /root/ even though is a safe assumption
 # Pre-download Zcash Sprout, Sapling parameters and Lightwalletd binary
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
-COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd:pr-4584 /lightwalletd /usr/local/bin
+COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /lightwalletd /usr/local/bin
 
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
 # and build it to cache all possible sentry and test dependencies.
