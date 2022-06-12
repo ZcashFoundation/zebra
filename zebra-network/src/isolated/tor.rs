@@ -96,9 +96,9 @@ async fn new_tor_stream(hostname: String) -> Result<DataStream, BoxError> {
     Ok(tor_stream)
 }
 
-/// Returns a new tor client instance, and updates [`SHARED_TOR_CLIENT`].
+/// Returns a new tor client instance, and updates [`struct@SHARED_TOR_CLIENT`].
 ///
-/// If there is a bootstrap error, [`SHARED_TOR_CLIENT`] is not modified.
+/// If there is a bootstrap error, [`struct@SHARED_TOR_CLIENT`] is not modified.
 async fn new_tor_client() -> Result<TorClient<TokioRuntimeHandle>, BoxError> {
     let runtime = tokio::runtime::Handle::current();
     let runtime = TokioRuntimeHandle::new(runtime);
@@ -117,7 +117,7 @@ async fn new_tor_client() -> Result<TorClient<TokioRuntimeHandle>, BoxError> {
     Ok(tor_client)
 }
 
-/// Returns an isolated tor client instance by cloning [`SHARED_TOR_CLIENT`].
+/// Returns an isolated tor client instance by cloning [`struct@SHARED_TOR_CLIENT`].
 ///
 /// If [`new_tor_client`] has not run successfully yet, returns `None`.
 fn cloned_tor_client() -> Option<TorClient<TokioRuntimeHandle>> {
