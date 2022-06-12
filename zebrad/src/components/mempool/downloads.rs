@@ -12,15 +12,19 @@
 //!
 //! # Correctness
 //!
-//! The mempool downloader doesn't send verified transactions to the [`Mempool`] service.
-//! So Zebra must spawn a task that regularly polls the downloader for ready transactions.
-//! (To ensure that transactions propagate across the entire network in each 75s block interval,
-//! the polling interval should be around 5-10 seconds.)
+//! The mempool downloader doesn't send verified transactions to the [`Mempool`]
+//! service. So Zebra must spawn a task that regularly polls the downloader for
+//! ready transactions. (To ensure that transactions propagate across the entire
+//! network in each 75s block interval, the polling interval should be around
+//! 5-10 seconds.)
 //!
 //! Polling the downloader from [`Mempool::poll_ready`] is not sufficient.
 //! [`Service::poll_ready`] is only called when there is a service request.
 //! But we want to download and gossip transactions,
 //! even when there are no other service requests.
+//!
+//! [`Mempool`]: super::Mempool
+//! [`Mempool::poll_ready`]: super::Mempool::poll_ready
 use std::{
     collections::{HashMap, HashSet},
     pin::Pin,

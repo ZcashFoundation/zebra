@@ -7,9 +7,11 @@ use std::fmt;
 
 use tokio::sync::mpsc;
 
-/// A signal sent by a [`Connection`] when it closes.
+/// A signal sent by a [`Connection`][1] when it closes.
 ///
 /// Used to count the number of open connections.
+///
+/// [1]: crate::peer::Connection
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ConnectionClosed;
 

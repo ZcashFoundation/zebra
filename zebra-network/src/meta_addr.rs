@@ -90,6 +90,8 @@ impl Ord for PeerAddrState {
     /// order, ignoring liveness.
     ///
     /// See [`CandidateSet`] and [`MetaAddr::cmp`] for more details.
+    ///
+    /// [`CandidateSet`]: super::peer_set::CandidateSet
     fn cmp(&self, other: &Self) -> Ordering {
         use Ordering::*;
         match (self, other) {
@@ -854,11 +856,12 @@ impl Ord for MetaAddr {
     /// with `Responded` peers sorted first as a group.
     ///
     /// This order should not be used for reconnection attempts: use
-    /// [`reconnection_peers`][rp] instead.
+    /// [`reconnection_peers`] instead.
     ///
     /// See [`CandidateSet`] for more details.
     ///
-    /// [rp]: crate::AddressBook::reconnection_peers
+    /// [`CandidateSet`]: super::peer_set::CandidateSet
+    /// [`reconnection_peers`]: crate::AddressBook::reconnection_peers
     fn cmp(&self, other: &Self) -> Ordering {
         use std::net::IpAddr::{V4, V6};
         use Ordering::*;
