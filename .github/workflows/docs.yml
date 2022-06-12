@@ -47,7 +47,7 @@ jobs:
           mdbook build book/
 
       - name: Deploy Zebra book to firebase
-        uses: w9jds/firebase-action@v2.1.2
+        uses: w9jds/firebase-action@v2.2.0
         with:
           args: deploy
         env:
@@ -63,7 +63,7 @@ jobs:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
       - name: Deploy external docs to firebase
-        uses: w9jds/firebase-action@v2.1.2
+        uses: w9jds/firebase-action@v2.2.0
         with:
           args: deploy
         env:
@@ -77,7 +77,7 @@ jobs:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
       - name: Deploy internal docs to firebase
-        uses: w9jds/firebase-action@v2.1.2
+        uses: w9jds/firebase-action@v2.2.0
         with:
           args: deploy
         env:
