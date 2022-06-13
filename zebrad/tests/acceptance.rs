@@ -501,7 +501,9 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
 /// Test if `zebrad` can sync the first checkpoint on testnet.
 ///
 /// The first checkpoint contains a single genesis block.
-#[test]
+// TODO: disabled because testnet is not currently reliable
+// #[test]
+#[allow(dead_code)]
 fn sync_one_checkpoint_testnet() -> Result<()> {
     sync_until(
         TINY_CHECKPOINT_TEST_HEIGHT,
@@ -523,7 +525,8 @@ fn restart_stop_at_height() -> Result<()> {
     zebra_test::init();
 
     restart_stop_at_height_for_network(Network::Mainnet, TINY_CHECKPOINT_TEST_HEIGHT)?;
-    restart_stop_at_height_for_network(Network::Testnet, TINY_CHECKPOINT_TEST_HEIGHT)?;
+    // TODO: disabled because testnet is not currently reliable
+    // restart_stop_at_height_for_network(Network::Testnet, TINY_CHECKPOINT_TEST_HEIGHT)?;
 
     Ok(())
 }
