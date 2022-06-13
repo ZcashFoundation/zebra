@@ -1,0 +1,42 @@
+name: Delete GCP resources
+
+on:
+  schedule:
+    - cron: "0 0 1 * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - "!main"
+
+jobs:
+  delete-resources:
+    name: Delete old GCP resources
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.8.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Deletes the instances that has been recently deployed in the actual commit after all
+      # previous jobs have run, no matter the outcome of the job.
+      - name: Delete test instance
+        run: |
+          TEMPLATES=$(gcloud compute instance-templates list --sort-by=creationTimestamp  --filter="creationTimestamp < $(date --date='30 days ago' + %y%m%d)" --format='value(NAME)')
+
+          for TEMPLATE in $TEMPLATES
+          do
+            gcloud compute instance-templates ${TEMPLATE}
+          done
