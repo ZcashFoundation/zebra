@@ -33,7 +33,7 @@ jobs:
       # Deletes all the instances template older than 30 days
       - name: Delete old instance templates
         run: |
-          TEMPLATES=$(gcloud compute instance-templates list --sort-by=creationTimestamp  --filter="creationTimestamp < $(date --date='30 days ago' + %y%m%d)" --format='value(NAME)')
+          TEMPLATES=$(gcloud compute instance-templates list --sort-by=creationTimestamp  --filter="creationTimestamp < $(date --date='30 days ago' '+%Y%m%d')" --format='value(NAME)')
 
           for TEMPLATE in $TEMPLATES
           do
