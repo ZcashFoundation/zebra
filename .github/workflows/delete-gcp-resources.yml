@@ -5,8 +5,8 @@ on:
     - cron: "0 0 1 * *"
   workflow_dispatch:
   push:
-    branches:
-      - "!main"
+    # branches:
+    #   - "!main"
 
 jobs:
   delete-resources:
@@ -30,9 +30,8 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Deletes the instances that has been recently deployed in the actual commit after all
-      # previous jobs have run, no matter the outcome of the job.
-      - name: Delete test instance
+      # Deletes all the instances template older than 30 days
+      - name: Delete old instance templates
         run: |
           TEMPLATES=$(gcloud compute instance-templates list --sort-by=creationTimestamp  --filter="creationTimestamp < $(date --date='30 days ago' + %y%m%d)" --format='value(NAME)')
 
