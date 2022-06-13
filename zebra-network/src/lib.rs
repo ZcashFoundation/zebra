@@ -16,11 +16,11 @@
 //! [`tower::Service`] representing "the network", which load-balances
 //! outbound [`Request`]s over available peers.
 //!
-//! Unlike the underlying legacy network protocol, Zebra's [`PeerSet`]
-//! [`tower::Service`] guarantees that each `Request` future will resolve to
-//! the correct `Response`, rather than an unrelated `Response` message.
+//! Unlike the underlying legacy network protocol, Zebra's `PeerSet`
+//! [`tower::Service`] guarantees that each `Request` future will resolve to the
+//! correct `Response`, rather than an unrelated `Response` message.
 //!
-//! Each peer connection is handled by a distinct [`Connection`] task.
+//! Each peer connection is handled by a distinct [`peer::Connection`] task.
 //! The Zcash network protocol is bidirectional, so Zebra interprets incoming
 //! Zcash messages as either:
 //! - [`Response`]s to previously sent outbound [`Request`]s, or
@@ -84,7 +84,7 @@
 //!
 //! ### Connection Pool
 //!
-//! [`PeerSet`] Network Service:
+//! `PeerSet` Network Service:
 //!  * provides an interface for other services and tasks running within this node
 //!    to make requests to remote peers ("the rest of the network")
 //!    * accepts [`Request`]s from the local node
@@ -102,7 +102,8 @@
 //! Peer Inventory Service:
 //!  * tracks gossiped `inv` advertisements for each peer
 //!  * tracks missing inventory for each peer
-//!  * used by the [`PeerSet`] to route block and transaction requests to peers that have the requested data
+//!  * used by the `PeerSet` to route block and transaction requests
+//!    to peers that have the requested data
 //!
 //! ### Peer Discovery
 //!
