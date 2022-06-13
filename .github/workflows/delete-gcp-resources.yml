@@ -37,5 +37,5 @@ jobs:
 
           for TEMPLATE in $TEMPLATES
           do
-            gcloud compute instance-templates delete ${TEMPLATE}
+            gcloud compute instance-templates delete ${TEMPLATE} --quiet || continue
           done
