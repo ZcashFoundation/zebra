@@ -73,6 +73,7 @@ jobs:
           images: |
             ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}
           # generate Docker tags based on the following events/attributes
+          # set latest tag for default branch
           tags: |
             type=schedule
             type=ref,event=branch
@@ -81,6 +82,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Set up QEMU
         id: qemu
