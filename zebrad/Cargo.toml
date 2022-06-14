@@ -122,7 +122,7 @@ semver = "1.0.9"
 serde_json = { version = "1.0.81", features = ["preserve_order"] }
 tempfile = "3.3.0"
 tokio = { version = "1.19.2", features = ["full", "test-util"] }
-tokio-stream = "0.1.8"
+tokio-stream = "0.1.9"
 
 # test feature lightwalletd-grpc-tests
 prost = "0.10.4"
