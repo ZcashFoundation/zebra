@@ -128,7 +128,7 @@ impl OutputLocation {
         }
     }
 
-    /// Creates an output location from an [`Outpoint`],
+    /// Creates an output location from an [`transparent::OutPoint`],
     /// and the [`TransactionLocation`] of its transaction.
     ///
     /// The [`TransactionLocation`] is provided separately,
@@ -304,12 +304,16 @@ impl AddressUnspentOutput {
         }
     }
 
-    /// Create an [`AddressUnspentOutput`] which starts iteration for the supplied address.
-    /// Used to look up the first output with [`ReadDisk::zs_next_key_value_from`].
+    /// Create an [`AddressUnspentOutput`] which starts iteration for the
+    /// supplied address. Used to look up the first output with
+    /// [`ReadDisk::zs_next_key_value_from`][1].
     ///
-    /// The unspent output location is before all unspent output locations in the index.
-    /// It is always invalid, due to the genesis consensus rules. But this is not an issue
-    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
+    /// The unspent output location is before all unspent output locations in
+    /// the index. It is always invalid, due to the genesis consensus rules. But
+    /// this is not an issue since [`ReadDisk::zs_next_key_value_from`][1] will
+    /// fetch the next existing (valid) value.
+    ///
+    /// [1]: super::super::disk_db::ReadDisk::zs_next_key_value_from
     pub fn address_iterator_start(address_location: AddressLocation) -> AddressUnspentOutput {
         // Iterating from the lowest possible output location gets us the first output.
         let zero_output_location = OutputLocation::from_usize(Height(0), 0, 0);
@@ -320,11 +324,15 @@ impl AddressUnspentOutput {
         }
     }
 
-    /// Update the unspent output location to the next possible output for the supplied address.
-    /// Used to look up the next output with [`ReadDisk::zs_next_key_value_from`].
+    /// Update the unspent output location to the next possible output for the
+    /// supplied address. Used to look up the next output with
+    /// [`ReadDisk::zs_next_key_value_from`][1].
     ///
-    /// The updated unspent output location may be invalid, which is not an issue
-    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
+    /// The updated unspent output location may be invalid, which is not an
+    /// issue since [`ReadDisk::zs_next_key_value_from`][1] will fetch the next
+    /// existing (valid) value.
+    ///
+    /// [1]: super::super::disk_db::ReadDisk::zs_next_key_value_from
     pub fn address_iterator_next(&mut self) {
         // Iterating from the next possible output location gets us the next output,
         // even if it is in a later block or transaction.
@@ -394,14 +402,19 @@ impl AddressTransaction {
         }
     }
 
-    /// Create an [`AddressTransaction`] which starts iteration for the supplied address.
-    /// Starts at the first UTXO, or at the `query_start` height, whichever is greater.
+    /// Create an [`AddressTransaction`] which starts iteration for the supplied
+    /// address. Starts at the first UTXO, or at the `query_start` height,
+    /// whichever is greater.
     ///
-    /// Used to look up the first transaction with [`ReadDisk::zs_next_key_value_from`].
+    /// Used to look up the first transaction with
+    /// [`ReadDisk::zs_next_key_value_from`][1].
     ///
-    /// The transaction location might be invalid, if it is based on the `query_start` height.
-    /// But this is not an issue, since [`ReadDisk::zs_next_key_value_from`]
-    /// will fetch the next existing (valid) value.
+    /// The transaction location might be invalid, if it is based on the
+    /// `query_start` height. But this is not an issue, since
+    /// [`ReadDisk::zs_next_key_value_from`][1] will fetch the next existing
+    /// (valid) value.
+    ///
+    /// [1]: super::super::disk_db::ReadDisk::zs_next_key_value_from
     pub fn address_iterator_start(
         address_location: AddressLocation,
         query_start: Height,
@@ -421,11 +434,15 @@ impl AddressTransaction {
         }
     }
 
-    /// Update the transaction location to the next possible transaction for the supplied address.
-    /// Used to look up the next output with [`ReadDisk::zs_next_key_value_from`].
+    /// Update the transaction location to the next possible transaction for the
+    /// supplied address. Used to look up the next output with
+    /// [`ReadDisk::zs_next_key_value_from`][1].
     ///
     /// The updated transaction location may be invalid, which is not an issue
-    /// since [`ReadDisk::zs_next_key_value_from`] will fetch the next existing (valid) value.
+    /// since [`ReadDisk::zs_next_key_value_from`][1] will fetch the next
+    /// existing (valid) value.
+    ///
+    /// [1]: super::super::disk_db::ReadDisk::zs_next_key_value_from
     pub fn address_iterator_next(&mut self) {
         // Iterating from the next possible output location gets us the next output,
         // even if it is in a later block or transaction.

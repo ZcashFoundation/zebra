@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 
 /// The maximum value of an on-disk serialized [`Height`].
 ///
-/// This allows us to store [`OutputLocation`]s in 8 bytes,
-/// which makes database searches more efficient.
+/// This allows us to store [`OutputLocation`](crate::OutputLocation)s in
+/// 8 bytes, which makes database searches more efficient.
 ///
 /// # Consensus
 ///
