@@ -18,7 +18,10 @@ use crate::Request;
 use crate::{service::read::AddressUtxos, TransactionLocation};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// A response to a [`StateService`] [`Request`].
+/// A response to a [`StateService`][1] [`Request`][2].
+///
+/// [1]: crate::service::StateService
+/// [2]: crate::Request
 pub enum Response {
     /// Response to [`Request::CommitBlock`] indicating that a block was
     /// successfully committed to the state.
@@ -50,7 +53,8 @@ pub enum Response {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// A response to a read-only [`ReadStateService`](crate::ReadStateService)'s
+/// A response to a read-only
+/// [`ReadStateService`](crate::service::ReadStateService)'s
 /// [`ReadRequest`](crate::ReadRequest).
 pub enum ReadResponse {
     /// Response to [`ReadRequest::Block`](crate::ReadRequest::Block) with the
@@ -72,13 +76,18 @@ pub enum ReadResponse {
     /// specified Orchard note commitment tree.
     OrchardTree(Option<Arc<orchard::tree::NoteCommitmentTree>>),
 
-    /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses.
+    /// Response to
+    /// [`ReadRequest::AddressBalance`](crate::ReadRequest::AddressBalance) with
+    /// the total balance of the addresses.
     AddressBalance(Amount<NonNegative>),
 
-    /// Response to [`ReadRequest::TransactionIdsByAddresses`] with the obtained transaction ids,
-    /// in the order they appear in blocks.
+    /// Response to
+    /// [`ReadRequest::TransactionIdsByAddresses`](crate::ReadRequest::TransactionIdsByAddresses)
+    /// with the obtained transaction ids, in the order they appear in blocks.
     AddressesTransactionIds(BTreeMap<TransactionLocation, transaction::Hash>),
 
-    /// Response to [`ReadRequest::UtxosByAddresses`] with found utxos and transaction data.
+    /// Response to
+    /// [`ReadRequest::UtxosByAddresses`](crate::ReadRequest::UtxosByAddresses)
+    /// with found utxos and transaction data.
     Utxos(AddressUtxos),
 }

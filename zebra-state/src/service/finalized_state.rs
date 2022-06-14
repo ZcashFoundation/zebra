@@ -3,7 +3,8 @@
 //! Zebra's database is implemented in 4 layers:
 //! - [`FinalizedState`]: queues, validates, and commits blocks, using...
 //! - [`ZebraDb`]: reads and writes [`zebra_chain`] types to the database, using...
-//! - [`DiskDb`]: reads and writes format-specific types to the database, using...
+//! - [`DiskDb`](disk_db::DiskDb): reads and writes format-specific types
+//!   to the database, using...
 //! - [`disk_format`]: converts types to raw database bytes.
 //!
 //! These layers allow us to split [`zebra_chain`] types for efficient database storage.
@@ -136,7 +137,7 @@ impl FinalizedState {
     ///
     /// Returns the highest finalized tip block committed from the queue,
     /// or `None` if no blocks were committed in this call.
-    /// (Use [`tip_block`] to get the finalized tip, regardless of when it was committed.)
+    /// (Use `tip_block` to get the finalized tip, regardless of when it was committed.)
     pub fn queue_and_commit_finalized(
         &mut self,
         queued: QueuedFinalized,
@@ -182,9 +183,9 @@ impl FinalizedState {
     /// Commit a finalized block to the state.
     ///
     /// It's the caller's responsibility to ensure that blocks are committed in
-    /// order. This function is called by [`queue`], which ensures order.
-    /// It is intentionally not exposed as part of the public API of the
-    /// [`FinalizedState`].
+    /// order. This function is called by [`Self::queue_and_commit_finalized`],
+    /// which ensures order. It is intentionally not exposed as part of the
+    /// public API of the [`FinalizedState`].
     fn commit_finalized(&mut self, queued_block: QueuedFinalized) -> Result<FinalizedBlock, ()> {
         let (finalized, rsp_tx) = queued_block;
         let result = self.commit_finalized_direct(finalized.clone(), "CommitFinalized request");

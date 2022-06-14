@@ -1,6 +1,6 @@
 [package]
 name = "zebra-network"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -18,6 +18,7 @@ byteorder = "1.4.3"
 bytes = "1.1.0"
 chrono = "0.4.19"
 hex = "0.4.3"
+humantime-serde = "1.1.1"
 lazy_static = "1.4.0"
 ordered-map = "0.4.2"
 pin-project = "1.0.10"
@@ -27,9 +28,9 @@ serde = { version = "1.0.137", features = ["serde_derive"] }
 thiserror = "1.0.31"
 
 futures = "0.3.21"
-tokio = { version = "1.18.2", features = ["net", "time", "tracing", "macros", "rt-multi-thread"] }
-tokio-stream = { version = "0.1.8", features = ["sync", "time"] }
-tokio-util = { version = "0.7.2", features = ["codec"] }
+tokio = { version = "1.19.2", features = ["net", "time", "tracing", "macros", "rt-multi-thread"] }
+tokio-stream = { version = "0.1.9", features = ["sync", "time"] }
+tokio-util = { version = "0.7.3", features = ["codec"] }
 tower = { version = "0.4.12", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
 metrics = "0.18.1"
@@ -52,7 +53,7 @@ proptest = "0.10.1"
 proptest-derive = "0.3.0"
 
 static_assertions = "1.1.0"
-tokio = { version = "1.18.2", features = ["test-util"] }
+tokio = { version = "1.19.2", features = ["test-util"] }
 toml = "0.5.9"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }

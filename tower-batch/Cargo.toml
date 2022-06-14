@@ -1,6 +1,6 @@
 [package]
 name = "tower-batch"
-version = "0.2.25"
+version = "0.2.26"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT"
 edition = "2021"
@@ -9,7 +9,7 @@ edition = "2021"
 futures = "0.3.21"
 futures-core = "0.3.21"
 pin-project = "1.0.10"
-tokio = { version = "1.18.2", features = ["time", "sync", "tracing", "macros"] }
+tokio = { version = "1.19.2", features = ["time", "sync", "tracing", "macros"] }
 tower = { version = "0.4.12", features = ["util", "buffer"] }
 tracing = "0.1.31"
 tracing-futures = "0.2.5"
@@ -18,7 +18,7 @@ tracing-futures = "0.2.5"
 color-eyre = "0.6.1"
 ed25519-zebra = "3.0.0"
 rand = { version = "0.8.5", package = "rand" }
-tokio = { version = "1.18.2", features = ["full"] }
+tokio = { version = "1.19.2", features = ["full"] }
 tokio-test = "0.4.2"
 tower-fallback = { path = "../tower-fallback/" }
 tower-test = "0.4.0"

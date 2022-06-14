@@ -26,7 +26,7 @@ mod tests;
 /// Creates a Zcash peer connection using the provided data stream.
 /// This connection is completely isolated from all other node state.
 ///
-/// The connection pool returned by [`init`](zebra_network::init)
+/// The connection pool returned by [`init`](crate::init)
 /// should be used for all requests that
 /// don't require isolated state or use of an existing TCP connection. However,
 /// this low-level API is useful for custom network crawlers or Tor connections.
@@ -44,7 +44,7 @@ mod tests;
 /// - `network`: the Zcash [`Network`] used for this connection.
 ///
 /// - `data_stream`: an existing data stream. This can be a non-anonymised TCP connection,
-///                  or a Tor client [`DataStream`].
+///                  or a Tor client `arti_client::DataStream`.
 ///
 /// - `user_agent`: a valid BIP14 user-agent, e.g., the empty string.
 pub fn connect_isolated<PeerTransport>(
@@ -124,7 +124,7 @@ where
 /// Transactions sent over this connection can be linked to the sending and receiving IP address
 /// by passive internet observers.
 ///
-/// Prefer [`connect_isolated_run_tor`](tor::connect_isolated_run_tor) if available.
+/// Prefer [`connect_isolated_tor`](tor::connect_isolated_tor) if available.
 pub fn connect_isolated_tcp_direct(
     network: Network,
     addr: SocketAddr,

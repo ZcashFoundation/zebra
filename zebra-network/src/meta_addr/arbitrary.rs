@@ -1,8 +1,10 @@
+//! Randomised test data generation for MetaAddr.
+
 use std::net::SocketAddr;
 
 use proptest::{arbitrary::any, collection::vec, prelude::*};
 
-use zebra_chain::serialization::DateTime32;
+use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
 use crate::protocol::external::arbitrary::canonical_socket_addr_strategy;
 
@@ -10,21 +12,28 @@ use super::{MetaAddr, MetaAddrChange, PeerServices};
 
 /// The largest number of random changes we want to apply to a [`MetaAddr`].
 ///
-/// This should be at least twice the number of [`PeerAddrState`]s, so the tests
-/// can cover multiple transitions through every state.
+/// This should be at least twice the number of [`PeerAddrState`][1]s, so the
+/// tests can cover multiple transitions through every state.
+///
+/// [1]: super::PeerAddrState
 #[allow(dead_code)]
 pub const MAX_ADDR_CHANGE: usize = 15;
 
-/// The largest number of random addresses we want to add to an [`AddressBook`].
+/// The largest number of random addresses we want to add to an [`AddressBook`][2].
 ///
-/// This should be at least the number of [`PeerAddrState`]s, so the tests can
-/// cover interactions between addresses in different states.
+/// This should be at least the number of [`PeerAddrState`][1]s, so the tests
+/// can cover interactions between addresses in different states.
+///
+/// [1]: super::PeerAddrState
+/// [2]: crate::AddressBook
 #[allow(dead_code)]
 pub const MAX_META_ADDR: usize = 8;
 
 impl MetaAddr {
     /// Create a strategy that generates [`MetaAddr`]s in the
-    /// [`PeerAddrState::NeverAttemptedGossiped`] state.
+    /// [`NeverAttemptedGossiped`][1] state.
+    ///
+    /// [1]: super::PeerAddrState::NeverAttemptedGossiped
     pub fn gossiped_strategy() -> BoxedStrategy<Self> {
         (
             canonical_socket_addr_strategy(),
@@ -38,7 +47,9 @@ impl MetaAddr {
     }
 
     /// Create a strategy that generates [`MetaAddr`]s in the
-    /// [`PeerAddrState::NeverAttemptedAlternate`] state.
+    /// [`NeverAttemptedAlternate`][1] state.
+    ///
+    /// [1]: super::PeerAddrState::NeverAttemptedAlternate
     pub fn alternate_strategy() -> BoxedStrategy<Self> {
         (canonical_socket_addr_strategy(), any::<PeerServices>())
             .prop_map(|(socket_addr, untrusted_services)| {
@@ -84,9 +95,11 @@ impl MetaAddrChange {
     /// Create a strategy that generates [`MetaAddrChange`]s which are ready for
     /// outbound connections.
     ///
-    /// Currently, all generated changes are the [`NewAlternate`] variant.
-    /// TODO: Generate all [`MetaAddrChange`] variants, and give them ready fields.
-    ///       (After PR #2276 merges.)
+    /// Currently, all generated changes are the [`NewAlternate`][1] variant.
+    /// TODO: Generate all [`MetaAddrChange`] variants, and give them ready
+    /// fields. (After PR #2276 merges.)
+    ///
+    /// [1]: super::NewAlternate
     pub fn ready_outbound_strategy() -> BoxedStrategy<Self> {
         canonical_socket_addr_strategy()
             .prop_filter_map("failed MetaAddr::is_valid_for_outbound", |addr| {
@@ -97,7 +110,7 @@ impl MetaAddrChange {
                 if change
                     .into_new_meta_addr()
                     .expect("unexpected invalid alternate change")
-                    .last_known_info_is_valid_for_outbound()
+                    .last_known_info_is_valid_for_outbound(Mainnet)
                 {
                     Some(change)
                 } else {

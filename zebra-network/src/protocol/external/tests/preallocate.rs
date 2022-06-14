@@ -4,9 +4,12 @@ use std::convert::TryInto;
 
 use proptest::prelude::*;
 
-use zebra_chain::serialization::{
-    arbitrary::max_allocation_is_big_enough, TrustedPreallocate, ZcashSerialize,
-    MAX_PROTOCOL_MESSAGE_LEN,
+use zebra_chain::{
+    parameters::Network::*,
+    serialization::{
+        arbitrary::max_allocation_is_big_enough, TrustedPreallocate, ZcashSerialize,
+        MAX_PROTOCOL_MESSAGE_LEN,
+    },
 };
 
 use crate::{
@@ -75,7 +78,7 @@ proptest! {
         zebra_test::init();
 
         // We require sanitization before serialization
-        let addr = addr.sanitize();
+        let addr = addr.sanitize(Mainnet);
         prop_assume!(addr.is_some());
 
         let addr: AddrV1 = addr.unwrap().into();
@@ -94,7 +97,7 @@ proptest! {
         zebra_test::init();
 
         // We require sanitization before serialization
-        let addr = addr.sanitize();
+        let addr = addr.sanitize(Mainnet);
         prop_assume!(addr.is_some());
 
         let addr: AddrV1 = addr.unwrap().into();
@@ -126,7 +129,7 @@ proptest! {
         zebra_test::init();
 
         // We require sanitization before serialization
-        let addr = addr.sanitize();
+        let addr = addr.sanitize(Mainnet);
         prop_assume!(addr.is_some());
 
         let addr: AddrV2 = addr.unwrap().into();
@@ -145,7 +148,7 @@ proptest! {
         zebra_test::init();
 
         // We require sanitization before serialization
-        let addr = addr.sanitize();
+        let addr = addr.sanitize(Mainnet);
         prop_assume!(addr.is_some());
 
         let addr: AddrV2 = addr.unwrap().into();

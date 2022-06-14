@@ -1,12 +1,14 @@
 //! Shared state reading code.
 //!
-//! Used by [`StateService`](crate::StateService) and
-//! [`ReadStateService`](crate::ReadStateService) to read from the best
-//! [`Chain`] in the
-//! [`NonFinalizedState`](crate::service::non_finalized_state::NonFinalizedState),
-//! and the database in the
-//! [`FinalizedState`](crate::service::finalized_state::FinalizedState).
-
+//! Used by [`StateService`][1] and [`ReadStateService`][2] to read from the
+//! best [`Chain`][5] in the [`NonFinalizedState`][3], and the database in the
+//! [`FinalizedState`][4].
+//!
+//! [1]: super::StateService
+//! [2]: super::ReadStateService
+//! [3]: super::non_finalized_state::NonFinalizedState
+//! [4]: super::finalized_state::FinalizedState
+//! [5]: super::Chain
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     ops::RangeInclusive,

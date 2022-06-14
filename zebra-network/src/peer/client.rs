@@ -76,8 +76,8 @@ pub(crate) struct ClientRequest {
     /// The actual network request for the peer.
     pub request: Request,
 
-    /// The response [`Message`] channel, included because `peer::Client::call` returns a
-    /// future that may be moved around before it resolves.
+    /// The response `Message` channel, included because `peer::Client::call`
+    /// returns a future that may be moved around before it resolves.
     pub tx: oneshot::Sender<Result<Response, SharedPeerError>>,
 
     /// Used to register missing inventory in responses on `tx`,

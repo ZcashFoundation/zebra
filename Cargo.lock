@@ -2033,9 +2033,9 @@ checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "humantime-serde"
-version = "1.0.1"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac34a56cfd4acddb469cc7fff187ed5ac36f498ba085caf8bbc725e3ff474058"
+checksum = "57a3db5ea5923d99402c94e9feb261dc5ee9b4efa158b0315f788cf549cc200c"
 dependencies = [
  "humantime",
  "serde",
@@ -2043,9 +2043,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.18"
+version = "0.14.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b26ae0a80afebe130861d90abf98e3814a4f28a4c6ffeb5ab8ebb2be311e0ef2"
+checksum = "42dc3c131584288d375f2d07f822b0cb012d8c6fb899a5b9fdb3cb7eb9b6004f"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -3966,7 +3966,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
 dependencies = [
- "semver 1.0.9",
+ "semver 1.0.10",
 ]
 
 [[package]]
@@ -4123,9 +4123,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cb243bdfdb5936c8dc3c45762a19d12ab4550cdc753bc247637d4ec35a040fd"
+checksum = "a41d061efea015927ac527063765e73601444cdc344ba855bc7bd44578b25e1c"
 
 [[package]]
 name = "semver-parser"
@@ -4747,9 +4747,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.18.2"
+version = "1.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4903bf0427cf68dddd5aa6a93220756f8be0c34fcfa9f5e6191e103e15a31395"
+checksum = "c51a52ed6686dd62c320f9b89299e9dfb46f730c7a48e635c19f21d116cb1439"
 dependencies = [
  "bytes",
  "libc",
@@ -4810,14 +4810,14 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.8"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50145484efff8818b5ccd256697f36863f587da82cf8b409c53adf1e840798e3"
+checksum = "df54d54117d6fdc4e4fea40fe1e4e566b3505700e148a6827e59b34b0d2600d9"
 dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
- "tokio-util 0.6.9",
+ "tokio-util 0.7.3",
 ]
 
 [[package]]
@@ -4850,9 +4850,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.2"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f988a1a1adc2fb21f9c12aa96441da33a1728193ae0b95d2be22dbd17fcb4e5c"
+checksum = "cc463cd8deddc3770d20f9852143d50bf6094e640b485cb2e189a2099085ff45"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4895,7 +4895,7 @@ dependencies = [
  "prost-derive",
  "tokio",
  "tokio-stream",
- "tokio-util 0.7.2",
+ "tokio-util 0.7.3",
  "tower",
  "tower-layer",
  "tower-service",
@@ -5318,7 +5318,7 @@ dependencies = [
  "rand 0.8.5",
  "slab",
  "tokio",
- "tokio-util 0.7.2",
+ "tokio-util 0.7.3",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -5326,7 +5326,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -5346,7 +5346,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.21"
+version = "0.2.22"
 dependencies = [
  "futures-core",
  "pin-project 0.4.29",
@@ -6133,7 +6133,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 dependencies = [
  "aes",
  "bech32",
@@ -6194,7 +6194,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 dependencies = [
  "bellman",
  "blake2b_simd 1.0.0",
@@ -6236,7 +6236,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 dependencies = [
  "arti-client",
  "bitflags",
@@ -6245,6 +6245,7 @@ dependencies = [
  "chrono",
  "futures",
  "hex",
+ "humantime-serde",
  "lazy_static",
  "metrics",
  "ordered-map",
@@ -6258,7 +6259,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tokio-util 0.7.2",
+ "tokio-util 0.7.3",
  "toml",
  "tor-rtcompat",
  "tower",
@@ -6271,14 +6272,14 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 dependencies = [
  "zebra-chain",
 ]
 
 [[package]]
 name = "zebra-rpc"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 dependencies = [
  "chrono",
  "futures",
@@ -6307,7 +6308,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 dependencies = [
  "displaydoc",
  "hex",
@@ -6320,7 +6321,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 dependencies = [
  "bincode",
  "chrono",
@@ -6355,7 +6356,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 dependencies = [
  "color-eyre",
  "futures",
@@ -6380,7 +6381,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 dependencies = [
  "color-eyre",
  "hex",
@@ -6395,7 +6396,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 dependencies = [
  "abscissa_core",
  "atty",
@@ -6405,6 +6406,7 @@ dependencies = [
  "futures",
  "gumdrop",
  "hex",
+ "humantime-serde",
  "hyper",
  "indexmap",
  "inferno",
@@ -6421,7 +6423,7 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "reqwest",
- "semver 1.0.9",
+ "semver 1.0.10",
  "sentry",
  "sentry-tracing",
  "serde",
