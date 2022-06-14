@@ -94,28 +94,30 @@ pub enum PeerError {
     /// or peers can download and verify the missing data.
     ///
     /// If the peer has some of the data, the request returns an [`Ok`] response,
-    /// with any `notfound` data is marked as [`Missing`][m].
+    /// with any `notfound` data is marked as [`Missing`][1].
     ///
-    /// [m] crate::protocol::external::InventoryResponse::Missing
+    /// [1]: crate::protocol::internal::InventoryResponse::Missing
     #[error("Remote peer could not find any of the items: {0:?}")]
     NotFoundResponse(Vec<InventoryHash>),
 
     /// We requested data, but all our ready peers are marked as recently
-    /// [`Missing`](InventoryResponse::Missing) that data in our local inventory registry.
+    /// [`Missing`][1] that data in our local inventory registry.
     ///
     /// This is a temporary error.
     ///
-    /// Peers with the inventory can finish their requests and become ready,
-    /// or other peers can download and verify the missing data.
+    /// Peers with the inventory can finish their requests and become ready, or
+    /// other peers can download and verify the missing data.
     ///
     /// # Correctness
     ///
-    /// This error is produced using Zebra's local inventory registry,
-    /// without contacting any peers.
+    /// This error is produced using Zebra's local inventory registry, without
+    /// contacting any peers.
     ///
-    /// Client responses containing this error must not be used to update the inventory registry.
-    /// This makes sure that we eventually expire our local cache of missing inventory,
-    /// and send requests to peers again.
+    /// Client responses containing this error must not be used to update the
+    /// inventory registry. This makes sure that we eventually expire our local
+    /// cache of missing inventory, and send requests to peers again.
+    ///
+    /// [1]: crate::protocol::internal::InventoryResponse::Missing
     #[error("All ready peers are registered as recently missing these items: {0:?}")]
     NotFoundRegistry(Vec<InventoryHash>),
 }
