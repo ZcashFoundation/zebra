@@ -3,7 +3,10 @@
     "list": [
       {
         "builtIn": 1,
-        "datasource": "-- Grafana --",
+        "datasource": {
+          "type": "datasource",
+          "uid": "grafana"
+        },
         "enable": true,
         "hide": true,
         "iconColor": "rgba(0, 211, 255, 1)",
@@ -19,13 +22,17 @@
     ]
   },
   "editable": true,
-  "gnetId": null,
+  "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": 6,
   "links": [],
+  "liveNow": false,
   "panels": [
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "qdDbj0Dnz"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -66,7 +73,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "8.1.7",
+      "pluginVersion": "8.5.5",
       "targets": [
         {
           "exemplar": true,
@@ -81,7 +88,10 @@
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "qdDbj0Dnz"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -132,25 +142,61 @@
         },
         "overrides": [
           {
-            "__systemRef": "hideSeriesFrom",
             "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "{instance=\"localhost:9999\", job=\"zebrad\"}"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
+              "id": "byName",
+              "options": "{instance=\"localhost:9999\", job=\"zebrad\"}"
             },
             "properties": [
               {
-                "id": "custom.hideFrom",
+                "id": "color",
                 "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RedPallas"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RedJubjub"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Ed25519"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
                 }
               }
             ]
@@ -171,32 +217,61 @@
           "placement": "bottom"
         },
         "tooltip": {
-          "mode": "single"
+          "mode": "single",
+          "sort": "none"
         }
       },
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "qdDbj0Dnz"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "rate(signatures_ed25519_validated{}[$__interval])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "Ed25519",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "qdDbj0Dnz"
+          },
+          "editorMode": "code",
           "exemplar": false,
           "expr": "rate(signatures_redjubjub_validated{}[$__interval])",
           "hide": false,
           "interval": "",
           "legendFormat": "RedJubjub",
-          "refId": "B"
+          "range": true,
+          "refId": "A"
         },
         {
-          "exemplar": true,
-          "expr": "rate(signatures_ed25519_validated{}[$__interval])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "qdDbj0Dnz"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "rate(signatures_redpallas_validated{}[$__interval])",
           "hide": false,
-          "interval": "",
-          "legendFormat": "Ed25519",
-          "refId": "A"
+          "legendFormat": "RedPallas",
+          "range": true,
+          "refId": "C"
         }
       ],
       "title": "Signatures validated",
       "type": "timeseries"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "qdDbj0Dnz"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -237,7 +312,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "8.1.7",
+      "pluginVersion": "8.5.5",
       "targets": [
         {
           "exemplar": true,
@@ -251,7 +326,10 @@
       "type": "stat"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "qdDbj0Dnz"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -300,7 +378,23 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Halo2"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -316,23 +410,43 @@
           "placement": "bottom"
         },
         "tooltip": {
-          "mode": "single"
+          "mode": "single",
+          "sort": "none"
         }
       },
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "qdDbj0Dnz"
+          },
           "exemplar": true,
           "expr": "rate(proofs_groth16_verified{}[$__interval])",
           "interval": "",
           "legendFormat": "Groth16",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "qdDbj0Dnz"
+          },
+          "editorMode": "code",
+          "expr": "rate(proofs_halo2_verified{}[$__interval])",
+          "hide": false,
+          "legendFormat": "Halo2",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "Proofs verified",
       "type": "timeseries"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "qdDbj0Dnz"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -428,7 +542,8 @@
           "placement": "bottom"
         },
         "tooltip": {
-          "mode": "single"
+          "mode": "single",
+          "sort": "none"
         }
       },
       "targets": [
@@ -452,7 +567,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "qdDbj0Dnz"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -531,6 +649,21 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Sprout"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
           }
         ]
       },
@@ -548,11 +681,28 @@
           "placement": "bottom"
         },
         "tooltip": {
-          "mode": "single"
+          "mode": "single",
+          "sort": "none"
         }
       },
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "qdDbj0Dnz"
+          },
+          "exemplar": true,
+          "expr": "rate(state_finalized_cumulative_sprout_nullifiers{}[$__interval])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "Sprout",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "qdDbj0Dnz"
+          },
           "exemplar": true,
           "expr": "rate(state_finalized_cumulative_sapling_nullifiers{}[$__interval])",
           "hide": false,
@@ -561,20 +711,16 @@
           "refId": "B"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "qdDbj0Dnz"
+          },
           "exemplar": true,
           "expr": "rate(state_finalized_cumulative_orchard_nullifiers{}[$__interval])",
           "hide": false,
           "instant": false,
           "interval": "",
           "legendFormat": "Orchard",
-          "refId": "A"
-        },
-        {
-          "exemplar": true,
-          "expr": "rate(state_finalized_cumulative_sprout_nullifiers{}[$__interval])",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "Sprout",
           "refId": "C"
         }
       ],
@@ -583,14 +729,14 @@
     }
   ],
   "refresh": "5s",
-  "schemaVersion": 30,
+  "schemaVersion": 36,
   "style": "dark",
   "tags": [],
   "templating": {
     "list": []
   },
   "time": {
-    "from": "now-3h",
+    "from": "now-12h",
     "to": "now"
   },
   "timepicker": {
@@ -610,5 +756,6 @@
   "timezone": "",
   "title": "🔎",
   "uid": "UXVRR1v7z",
-  "version": 18
+  "version": 23,
+  "weekStart": ""
 }

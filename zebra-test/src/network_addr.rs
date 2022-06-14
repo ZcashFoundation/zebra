@@ -2,7 +2,8 @@
 //! * addr (v1): [addr Bitcoin Reference](https://developer.bitcoin.org/reference/p2p_networking.html#addr)
 //! * addrv2: [ZIP-155](https://zips.z.cash/zip-0155#specification)
 //!
-//! These formats are deserialized into the [`zebra_network::Message::Addr`] variant.
+//! These formats are deserialized into the
+//! `zebra_network::protocol::external::Message::Addr` variant.
 
 use hex::FromHex;
 use lazy_static::lazy_static;
