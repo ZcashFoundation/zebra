@@ -195,12 +195,18 @@ impl ChainTipSender {
         // a read-lock being created and living beyond the `self.sender.send(..)` call. If that
         // happens, the `send` method will attempt to obtain a write-lock and will dead-lock.
         // Without the binding, the guard is dropped at the end of the expression.
-        let needs_update = match (new_tip.as_ref(), self.sender.borrow().as_ref()) {
+        let active_hash = self
+            .sender
+            .borrow()
+            .as_ref()
+            .map(|active_value| active_value.hash);
+
+        let needs_update = match (new_tip.as_ref(), active_hash) {
             // since the blocks have been contextually validated,
             // we know their hashes cover all the block data
-            (Some(new_tip), Some(active_value)) => new_tip.hash != active_value.hash,
+            (Some(new_tip), Some(active_hash)) => new_tip.hash != active_hash,
             (Some(_new_tip), None) => true,
-            (None, _active_value) => false,
+            (None, _active_value_hash) => false,
         };
 
         if needs_update {
