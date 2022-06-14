@@ -1,5 +1,5 @@
 //! Provides high-level access to database:
-//! - unspent [`transparent::Outputs`]s (UTXOs), and
+//! - unspent [`transparent::Output`]s (UTXOs), and
 //! - transparent address indexes.
 //!
 //! This module makes sure that:

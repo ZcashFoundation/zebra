@@ -372,8 +372,8 @@ impl ChainTip for LatestChainTip {
 /// Awaits changes and resets of the state's best chain tip,
 /// returning the latest [`TipAction`] once the state is updated.
 ///
-/// Each cloned instance separately tracks the last block data it provided.
-/// If the best chain fork has changed since the last [`tip_change`] on that instance,
+/// Each cloned instance separately tracks the last block data it provided. If
+/// the best chain fork has changed since the last tip change on that instance,
 /// it returns a [`Reset`].
 ///
 /// The chain tip data is based on:
@@ -411,16 +411,19 @@ pub enum TipAction {
     /// The chain tip was reset to a block with `height` and `hash`.
     ///
     /// Resets can happen for different reasons:
-    /// * a newly created or cloned [`ChainTipChange`], which is behind the current tip,
-    /// * extending the chain with a network upgrade activation block,
-    /// * switching to a different best [`Chain`], also known as a rollback, and
-    /// * receiving multiple blocks since the previous change.
+    /// - a newly created or cloned [`ChainTipChange`], which is behind the
+    ///   current tip,
+    /// - extending the chain with a network upgrade activation block,
+    /// - switching to a different best [`Chain`][1], also known as a rollback, and
+    /// - receiving multiple blocks since the previous change.
     ///
-    /// To keep the code and tests simple, Zebra performs the same reset actions,
-    /// regardless of the reset reason.
+    /// To keep the code and tests simple, Zebra performs the same reset
+    /// actions, regardless of the reset reason.
     ///
-    /// `Reset`s do not have the transaction hashes from the tip block,
-    /// because all transactions should be cleared by a reset.
+    /// `Reset`s do not have the transaction hashes from the tip block, because
+    /// all transactions should be cleared by a reset.
+    ///
+    /// [1]: super::non_finalized_state::Chain
     Reset {
         /// The block height of the tip, after the chain reset.
         height: block::Height,
@@ -470,7 +473,7 @@ impl ChainTipChange {
     /// - `Some(`[`TipAction`]`)` if there has been a change since the last time the method was called.
     /// - `None` if there has been no change.
     ///
-    /// See [`wait_for_tip_change`] for details.
+    /// See [`Self::wait_for_tip_change`] for details.
     #[instrument(
         skip(self),
         fields(
