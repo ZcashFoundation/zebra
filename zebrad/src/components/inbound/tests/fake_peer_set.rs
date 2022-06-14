@@ -17,7 +17,7 @@ use tracing::Span;
 use zebra_chain::{
     amount::Amount,
     block::Block,
-    parameters::Network,
+    parameters::Network::{self, *},
     serialization::ZcashDeserializeInto,
     transaction::{UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
@@ -692,10 +692,14 @@ async fn setup(
 ) {
     zebra_test::init();
 
-    let network = Network::Mainnet;
+    let network = Mainnet;
     let consensus_config = ConsensusConfig::default();
     let state_config = StateConfig::ephemeral();
-    let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
+    let address_book = AddressBook::new(
+        SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        Mainnet,
+        Span::none(),
+    );
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
     let (sync_status, mut recent_syncs) = SyncStatus::new();
     let (state, _read_only_state_service, latest_chain_tip, chain_tip_change) =

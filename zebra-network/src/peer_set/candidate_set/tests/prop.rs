@@ -10,14 +10,15 @@ use proptest::{collection::vec, prelude::*};
 use tokio::time::{sleep, timeout};
 use tracing::Span;
 
-use zebra_chain::serialization::DateTime32;
+use zebra_chain::{parameters::Network::*, serialization::DateTime32};
 
-use super::super::{validate_addrs, CandidateSet};
 use crate::{
     constants::MIN_PEER_CONNECTION_INTERVAL,
     meta_addr::{MetaAddr, MetaAddrChange},
     AddressBook, BoxError, Request, Response,
 };
+
+use super::super::{validate_addrs, CandidateSet};
 
 /// The maximum number of candidates for a "next peer" test.
 const MAX_TEST_CANDIDATES: u32 = 4;
@@ -64,7 +65,7 @@ proptest! {
         });
 
         // Since the address book is empty, there won't be any available peers
-        let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
+        let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Mainnet, Span::none());
 
         let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
 
@@ -102,7 +103,7 @@ proptest! {
             unreachable!("Mock peer service is never used");
         });
 
-        let mut address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Span::none());
+        let mut address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), Mainnet, Span::none());
         address_book.extend(peers);
 
         let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);

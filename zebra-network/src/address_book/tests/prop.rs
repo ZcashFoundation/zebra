@@ -6,7 +6,7 @@ use chrono::Utc;
 use proptest::{collection::vec, prelude::*};
 use tracing::Span;
 
-use zebra_chain::serialization::Duration32;
+use zebra_chain::{parameters::Network::*, serialization::Duration32};
 
 use crate::{
     constants::{MAX_ADDRS_IN_ADDRESS_BOOK, MAX_PEER_ACTIVE_FOR_GOSSIP},
@@ -29,6 +29,7 @@ proptest! {
 
         let address_book = AddressBook::new_with_addrs(
             local_listener,
+            Mainnet,
             MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
             addresses
@@ -57,6 +58,7 @@ proptest! {
 
         let address_book = AddressBook::new_with_addrs(
             local_listener,
+            Mainnet,
             MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
             addresses
@@ -94,6 +96,7 @@ proptest! {
 
         let mut address_book = AddressBook::new_with_addrs(
             local_listener,
+            Mainnet,
             addr_limit,
             Span::none(),
             initial_addrs.clone(),
@@ -115,6 +118,7 @@ proptest! {
 
         let mut address_book = AddressBook::new_with_addrs(
             local_listener,
+            Mainnet,
             addr_limit,
             Span::none(),
             initial_addrs,
