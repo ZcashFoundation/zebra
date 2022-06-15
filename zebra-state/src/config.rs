@@ -184,15 +184,7 @@ fn parse_dir_name(entry: DirEntry) -> Option<String> {
 ///
 /// Returns `None` if parsing fails, or the directory name is not in the expected format.
 fn parse_version_number(dir_name: String) -> Option<u32> {
-    if dir_name.len() >= 2 && dir_name.starts_with('v') {
-        if let Some(potential_version_number) = dir_name.strip_prefix('v') {
-            return Some(
-                potential_version_number
-                    .to_string()
-                    .parse()
-                    .unwrap_or(u32::MAX),
-            );
-        }
-    }
-    None
+    dir_name
+        .strip_prefix('v')
+        .and_then(|version| version.parse().ok())
 }
