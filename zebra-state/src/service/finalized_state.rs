@@ -3,7 +3,8 @@
 //! Zebra's database is implemented in 4 layers:
 //! - [`FinalizedState`]: queues, validates, and commits blocks, using...
 //! - [`ZebraDb`]: reads and writes [`zebra_chain`] types to the database, using...
-//! - [`DiskDb`]: reads and writes format-specific types to the database, using...
+//! - [`DiskDb`](disk_db::DiskDb): reads and writes format-specific types
+//!   to the database, using...
 //! - [`disk_format`]: converts types to raw database bytes.
 //!
 //! These layers allow us to split [`zebra_chain`] types for efficient database storage.
@@ -136,7 +137,7 @@ impl FinalizedState {
     ///
     /// Returns the highest finalized tip block committed from the queue,
     /// or `None` if no blocks were committed in this call.
-    /// (Use [`tip_block`] to get the finalized tip, regardless of when it was committed.)
+    /// (Use `tip_block` to get the finalized tip, regardless of when it was committed.)
     pub fn queue_and_commit_finalized(
         &mut self,
         queued: QueuedFinalized,
@@ -161,19 +162,19 @@ impl FinalizedState {
 
         if self.queued_by_prev_hash.is_empty() {
             self.max_queued_height = f64::NAN;
-        } else if self.max_queued_height.is_nan() || self.max_queued_height < height.0 as _ {
+        } else if self.max_queued_height.is_nan() || self.max_queued_height < height.0 as f64 {
             // if there are still blocks in the queue, then either:
             //   - the new block was lower than the old maximum, and there was a gap before it,
             //     so the maximum is still the same (and we skip this code), or
             //   - the new block is higher than the old maximum, and there is at least one gap
             //     between the finalized tip and the new maximum
-            self.max_queued_height = height.0 as _;
+            self.max_queued_height = height.0 as f64;
         }
 
         metrics::gauge!("state.checkpoint.queued.max.height", self.max_queued_height);
         metrics::gauge!(
             "state.checkpoint.queued.block.count",
-            self.queued_by_prev_hash.len() as f64
+            self.queued_by_prev_hash.len() as f64,
         );
 
         highest_queue_commit
@@ -182,9 +183,9 @@ impl FinalizedState {
     /// Commit a finalized block to the state.
     ///
     /// It's the caller's responsibility to ensure that blocks are committed in
-    /// order. This function is called by [`queue`], which ensures order.
-    /// It is intentionally not exposed as part of the public API of the
-    /// [`FinalizedState`].
+    /// order. This function is called by [`Self::queue_and_commit_finalized`],
+    /// which ensures order. It is intentionally not exposed as part of the
+    /// public API of the [`FinalizedState`].
     fn commit_finalized(&mut self, queued_block: QueuedFinalized) -> Result<FinalizedBlock, ()> {
         let (finalized, rsp_tx) = queued_block;
         let result = self.commit_finalized_direct(finalized.clone(), "CommitFinalized request");
@@ -193,13 +194,16 @@ impl FinalizedState {
             metrics::counter!("state.checkpoint.finalized.block.count", 1);
             metrics::gauge!(
                 "state.checkpoint.finalized.block.height",
-                finalized.height.0 as _
+                finalized.height.0 as f64,
             );
 
             // This height gauge is updated for both fully verified and checkpoint blocks.
             // These updates can't conflict, because the state makes sure that blocks
             // are committed in order.
-            metrics::gauge!("zcash.chain.verified.block.height", finalized.height.0 as _);
+            metrics::gauge!(
+                "zcash.chain.verified.block.height",
+                finalized.height.0 as f64,
+            );
             metrics::counter!("zcash.chain.verified.block.total", 1);
 
             Ok(finalized)
@@ -207,7 +211,7 @@ impl FinalizedState {
             metrics::counter!("state.checkpoint.error.block.count", 1);
             metrics::gauge!(
                 "state.checkpoint.error.block.height",
-                finalized.height.0 as _
+                finalized.height.0 as f64,
             );
 
             Err(())

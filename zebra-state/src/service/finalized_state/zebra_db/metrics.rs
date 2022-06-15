@@ -52,7 +52,7 @@ pub(crate) fn block_precommit_metrics(block: &Block, hash: block::Hash, height: 
     );
 
     metrics::counter!("state.finalized.block.count", 1);
-    metrics::gauge!("state.finalized.block.height", height.0 as _);
+    metrics::gauge!("state.finalized.block.height", height.0 as f64);
 
     metrics::counter!(
         "state.finalized.cumulative.transactions",

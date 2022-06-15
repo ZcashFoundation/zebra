@@ -41,7 +41,7 @@ pub fn app_config() -> config::Reader<ZebradApp> {
 /// Includes the git commit and the number of commits since the last version
 /// tag, if available.
 ///
-/// For details, see https://semver.org/
+/// For details, see <https://semver.org/>
 pub fn app_version() -> Version {
     const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
     let vergen_git_semver: Option<&str> = option_env!("VERGEN_GIT_SEMVER_LIGHTWEIGHT");

@@ -41,7 +41,7 @@ pub struct Output {
 
 /// Wrapper for `Output` serialization in a `V4` transaction.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#outputencoding
+/// <https://zips.z.cash/protocol/protocol.pdf#outputencoding>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputInTransactionV4(pub Output);
 
@@ -158,12 +158,12 @@ impl ZcashDeserialize for OutputInTransactionV4 {
             // https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
             // See [`keys::EphemeralPublicKey::zcash_deserialize`].
             ephemeral_key: keys::EphemeralPublicKey::zcash_deserialize(&mut reader)?,
-            // Type is `Sym.C`, i.e. `B^Y^{[N]}`, i.e. arbitrary-sized byte arrays
+            // Type is `Sym.C`, i.e. `B^Y^{\[N\]}`, i.e. arbitrary-sized byte arrays
             // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
             // 580 bytes in https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
             // See [`note::EncryptedNote::zcash_deserialize`].
             enc_ciphertext: note::EncryptedNote::zcash_deserialize(&mut reader)?,
-            // Type is `Sym.C`, i.e. `B^Y^{[N]}`, i.e. arbitrary-sized byte arrays.
+            // Type is `Sym.C`, i.e. `B^Y^{\[N\]}`, i.e. arbitrary-sized byte arrays.
             // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
             // 80 bytes in https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
             // See [`note::WrappedNoteKey::zcash_deserialize`].
@@ -221,12 +221,12 @@ impl ZcashDeserialize for OutputPrefixInTransactionV5 {
             // https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
             // See [`keys::EphemeralPublicKey::zcash_deserialize`].
             ephemeral_key: keys::EphemeralPublicKey::zcash_deserialize(&mut reader)?,
-            // Type is `Sym.C`, i.e. `B^Y^{[N]}`, i.e. arbitrary-sized byte arrays
+            // Type is `Sym.C`, i.e. `B^Y^{\[N\]}`, i.e. arbitrary-sized byte arrays
             // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
             // 580 bytes in https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
             // See [`note::EncryptedNote::zcash_deserialize`].
             enc_ciphertext: note::EncryptedNote::zcash_deserialize(&mut reader)?,
-            // Type is `Sym.C`, i.e. `B^Y^{[N]}`, i.e. arbitrary-sized byte arrays.
+            // Type is `Sym.C`, i.e. `B^Y^{\[N\]}`, i.e. arbitrary-sized byte arrays.
             // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
             // 80 bytes in https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
             // See [`note::WrappedNoteKey::zcash_deserialize`].
@@ -242,6 +242,7 @@ impl ZcashDeserialize for OutputPrefixInTransactionV5 {
 pub(crate) const OUTPUT_PREFIX_SIZE: u64 = 32 + 32 + 32 + 580 + 80;
 /// An output contains: a 32 byte cv, a 32 byte cmu, a 32 byte ephemeral key
 /// a 580 byte encCiphertext, an 80 byte outCiphertext, and a 192 byte zkproof
+///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
 pub(crate) const OUTPUT_SIZE: u64 = OUTPUT_PREFIX_SIZE + 192;
 

@@ -83,9 +83,11 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     /// Return the sprout value balance,
     /// the change in the transaction value pool due to sprout [`JoinSplit`]s.
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
-    /// See [`Transaction::sprout_value_balance`] for details.
+    /// See [`sprout_value_balance`][svb] for details.
+    ///
+    /// [svb]: crate::transaction::Transaction::sprout_value_balance
     pub fn value_balance(&self) -> Result<Amount<NegativeAllowed>, amount::Error> {
         self.joinsplit_value_balances().sum()
     }
@@ -93,14 +95,16 @@ impl<P: ZkSnarkProof> JoinSplitData<P> {
     /// Return a list of sprout value balances,
     /// the changes in the transaction value pool due to each sprout [`JoinSplit`].
     ///
-    /// See [`Transaction::sprout_value_balance`] for details.
+    /// See [`sprout_value_balance`][svb] for details.
+    ///
+    /// [svb]: crate::transaction::Transaction::sprout_value_balance
     pub fn joinsplit_value_balances(
         &self,
     ) -> Box<dyn Iterator<Item = Amount<NegativeAllowed>> + '_> {
         Box::new(self.joinsplits().map(JoinSplit::value_balance))
     }
 
-    /// Collect the Sprout note commitments  for this transaction, if it contains [`Output`]s,
+    /// Collect the Sprout note commitments  for this transaction, if it contains `Output`s,
     /// in the order they appear in the transaction.
     pub fn note_commitments(&self) -> impl Iterator<Item = &sprout::commitment::NoteCommitment> {
         self.joinsplits()

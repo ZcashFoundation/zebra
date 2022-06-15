@@ -37,7 +37,7 @@ pub mod index;
 
 #[derive(Debug, Clone)]
 pub struct Chain {
-    // The function `eq_internal_state` must be updated every time a field is added to `Chain`.
+    // The function `eq_internal_state` must be updated every time a field is added to [`Chain`].
     /// The configured network for this chain.
     network: Network,
 
@@ -50,35 +50,35 @@ pub struct Chain {
     /// An index of [`TransactionLocation`]s for each transaction hash in `blocks`.
     pub tx_by_hash: HashMap<transaction::Hash, TransactionLocation>,
 
-    /// The [`Utxo`]s created by `blocks`.
+    /// The [`transparent::Utxo`]s created by `blocks`.
     ///
     /// Note that these UTXOs may not be unspent.
     /// Outputs can be spent by later transactions or blocks in the chain.
     //
     // TODO: replace OutPoint with OutputLocation?
     pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    /// The [`OutPoint`]s spent by `blocks`,
+    /// The [`transparent::OutPoint`]s spent by `blocks`,
     /// including those created by earlier transactions or blocks in the chain.
     pub(crate) spent_utxos: HashSet<transparent::OutPoint>,
 
-    /// The Sprout note commitment tree of the tip of this `Chain`,
+    /// The Sprout note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
     /// The Sprout note commitment tree for each anchor.
     /// This is required for interstitial states.
     pub(crate) sprout_trees_by_anchor:
         HashMap<sprout::tree::Root, sprout::tree::NoteCommitmentTree>,
-    /// The Sapling note commitment tree of the tip of this `Chain`,
+    /// The Sapling note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
     /// The Sapling note commitment tree for each height.
     pub(crate) sapling_trees_by_height: BTreeMap<block::Height, sapling::tree::NoteCommitmentTree>,
-    /// The Orchard note commitment tree of the tip of this `Chain`,
+    /// The Orchard note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
     /// The Orchard note commitment tree for each height.
     pub(crate) orchard_trees_by_height: BTreeMap<block::Height, orchard::tree::NoteCommitmentTree>,
-    /// The ZIP-221 history tree of the tip of this `Chain`,
+    /// The ZIP-221 history tree of the tip of this [`Chain`],
     /// including all finalized blocks, and the non-finalized `blocks` in this chain.
     pub(crate) history_tree: HistoryTree,
 
@@ -112,7 +112,7 @@ pub struct Chain {
     /// because they are common to all non-finalized chains.
     pub(super) partial_cumulative_work: PartialCumulativeWork,
 
-    /// The chain value pool balances of the tip of this `Chain`,
+    /// The chain value pool balances of the tip of this [`Chain`],
     /// including the block value pool changes from all finalized blocks,
     /// and the non-finalized blocks in this chain.
     ///
@@ -222,7 +222,7 @@ impl Chain {
     /// If the block is invalid, drops this chain, and returns an error.
     ///
     /// Note: a [`ContextuallyValidBlock`] isn't actually contextually valid until
-    /// [`update_chain_state_with`] returns success.
+    /// [`Self::update_chain_tip_with`] returns success.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
     pub fn push(mut self, block: ContextuallyValidBlock) -> Result<Chain, ValidateContextError> {
         // update cumulative data members
@@ -291,7 +291,7 @@ impl Chain {
 
         // Rebuild the note commitment trees, starting from the finalized tip tree.
         // TODO: change to a more efficient approach by removing nodes
-        // from the tree of the original chain (in `pop_tip()`).
+        // from the tree of the original chain (in [`Self::pop_tip`]).
         // See https://github.com/ZcashFoundation/zebra/issues/2378
         for block in forked.blocks.values() {
             for transaction in block.block.transactions.iter() {
@@ -674,30 +674,31 @@ impl Chain {
 /// The revert position being performed on a chain.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 enum RevertPosition {
-    /// The chain root is being reverted via [`pop_root`],
-    /// when a block is finalized.
+    /// The chain root is being reverted via [`Chain::pop_root`], when a block
+    /// is finalized.
     Root,
 
-    /// The chain tip is being reverted via [`pop_tip`],
+    /// The chain tip is being reverted via [`Chain::pop_tip`],
     /// when a chain is forked.
     Tip,
 }
 
-/// Helper trait to organize inverse operations done on the `Chain` type.
+/// Helper trait to organize inverse operations done on the [`Chain`] type.
 ///
 /// Used to overload update and revert methods, based on the type of the argument,
 /// and the position of the removed block in the chain.
 ///
-/// This trait was motivated by the length of the `push`, `pop_root`, and `pop_tip` functions,
-/// and fear that it would be easy to introduce bugs when updating them,
-/// unless the code was reorganized to keep related operations adjacent to each other.
+/// This trait was motivated by the length of the `push`, [`Chain::pop_root`],
+/// and [`Chain::pop_tip`] functions, and fear that it would be easy to
+/// introduce bugs when updating them, unless the code was reorganized to keep
+/// related operations adjacent to each other.
 trait UpdateWith<T> {
     /// When `T` is added to the chain tip,
-    /// update `Chain` cumulative data members to add data that are derived from `T`.
+    /// update [`Chain`] cumulative data members to add data that are derived from `T`.
     fn update_chain_tip_with(&mut self, _: &T) -> Result<(), ValidateContextError>;
 
     /// When `T` is removed from `position` in the chain,
-    /// revert `Chain` cumulative data members to remove data that are derived from `T`.
+    /// revert [`Chain`] cumulative data members to remove data that are derived from `T`.
     fn revert_chain_with(&mut self, _: &T, position: RevertPosition);
 }
 
@@ -1268,7 +1269,7 @@ where
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             // Note commitments are not removed from the tree here because we
             // don't support that operation yet. Instead, we recreate the tree
-            // from the finalized tip in NonFinalizedState.
+            // from the finalized tip in `NonFinalizedState`.
 
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.sapling_nullifiers,
@@ -1348,9 +1349,9 @@ impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
     /// When forking from the tip, subtract the block's chain value pool change.
     ///
     /// When finalizing the root, leave the chain value pool balances unchanged.
-    /// [`chain_value_pools`] tracks the chain value pools for all finalized blocks,
-    /// and the non-finalized blocks in this chain.
-    /// So finalizing the root doesn't change the set of blocks it tracks.
+    /// [`Self::chain_value_pools`] tracks the chain value pools for all
+    /// finalized blocks, and the non-finalized blocks in this chain. So
+    /// finalizing the root doesn't change the set of blocks it tracks.
     ///
     /// # Panics
     ///
@@ -1373,13 +1374,15 @@ impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
 }
 
 impl Ord for Chain {
-    /// Chain order for the [`NonFinalizedState`]'s `chain_set`.
+    /// Chain order for the [`NonFinalizedState`][1]'s `chain_set`.
+    ///
     /// Chains with higher cumulative Proof of Work are [`Ordering::Greater`],
     /// breaking ties using the tip block hash.
     ///
-    /// Despite the consensus rules, Zebra uses the tip block hash as a tie-breaker.
-    /// Zebra blocks are downloaded in parallel, so download timestamps may not be unique.
-    /// (And Zebra currently doesn't track download times, because [`Block`]s are immutable.)
+    /// Despite the consensus rules, Zebra uses the tip block hash as a
+    /// tie-breaker. Zebra blocks are downloaded in parallel, so download
+    /// timestamps may not be unique. (And Zebra currently doesn't track
+    /// download times, because [`Block`](block::Block)s are immutable.)
     ///
     /// This departure from the consensus rules may delay network convergence,
     /// for as long as the greater hash belongs to the later mined block.
@@ -1403,7 +1406,7 @@ impl Ord for Chain {
     /// the vast majority of nodes should eventually agree on their best valid block chain
     /// up to that height."
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#blockchain
+    /// <https://zips.z.cash/protocol/protocol.pdf#blockchain>
     ///
     /// # Correctness
     ///
@@ -1414,10 +1417,13 @@ impl Ord for Chain {
     ///
     /// If two chains compare equal.
     ///
-    /// This panic enforces the `NonFinalizedState.chain_set` unique chain invariant.
+    /// This panic enforces the [`NonFinalizedState::chain_set`][2] unique chain invariant.
     ///
     /// If the chain set contains duplicate chains, the non-finalized state might
     /// handle new blocks or block finalization incorrectly.
+    ///
+    /// [1]: super::NonFinalizedState
+    /// [2]: super::NonFinalizedState::chain_set
     fn cmp(&self, other: &Self) -> Ordering {
         if self.partial_cumulative_work != other.partial_cumulative_work {
             self.partial_cumulative_work
@@ -1454,14 +1460,16 @@ impl PartialOrd for Chain {
 }
 
 impl PartialEq for Chain {
-    /// Chain equality for the [`NonFinalizedState`]'s `chain_set`,
-    /// using proof of work, then the tip block hash as a tie-breaker.
+    /// Chain equality for [`NonFinalizedState::chain_set`][1], using proof of
+    /// work, then the tip block hash as a tie-breaker.
     ///
     /// # Panics
     ///
     /// If two chains compare equal.
     ///
     /// See [`Chain::cmp`] for details.
+    ///
+    /// [1]: super::NonFinalizedState::chain_set
     fn eq(&self, other: &Self) -> bool {
         self.partial_cmp(other) == Some(Ordering::Equal)
     }

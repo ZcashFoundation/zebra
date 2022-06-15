@@ -102,9 +102,11 @@ impl<P: ZkSnarkProof> JoinSplit<P> {
     /// Return the sprout value balance,
     /// the change in the transaction value pool due to this sprout [`JoinSplit`].
     ///
-    /// https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions
+    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
-    /// See [`Transaction::sprout_value_balance`] for details.
+    /// See [`sprout_value_balance`][svb] for details.
+    ///
+    /// [svb]: crate::transaction::Transaction::sprout_value_balance
     pub fn value_balance(&self) -> Amount<NegativeAllowed> {
         let vpub_new = self
             .vpub_new
@@ -161,7 +163,7 @@ impl<P: ZkSnarkProof> ZcashDeserialize for JoinSplit<P> {
             // The type is validated when validating the proof, see
             // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
             zkproof: P::zcash_deserialize(&mut reader)?,
-            // Types are `Sym.C`, i.e. `B^Y^{[N]}`, i.e. arbitrary-sized byte arrays
+            // Types are `Sym.C`, i.e. `B^Y^{\[N\]}`, i.e. arbitrary-sized byte arrays
             // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
             // 601 bytes in https://zips.z.cash/protocol/protocol.pdf#joinsplitencodingandconsensus
             // See [`note::EncryptedNote::zcash_deserialize`].

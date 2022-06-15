@@ -83,9 +83,23 @@ pub async fn run() -> Result<()> {
     // This test is only for the mainnet
     let network = Network::Mainnet;
 
+    tracing::info!(
+        ?network,
+        ?test_type,
+        ?zebrad_state_path,
+        ?lightwalletd_state_path,
+        "running gRPC query tests using lightwalletd & zebrad, \
+         launching disconnected zebrad...",
+    );
+
     // Launch zebra using a predefined zebrad state path
     let (_zebrad, zebra_rpc_address) =
         spawn_zebrad_for_rpc_without_initial_peers(network, zebrad_state_path.unwrap(), test_type)?;
+
+    tracing::info!(
+        ?zebra_rpc_address,
+        "launching lightwalletd connected to zebrad...",
+    );
 
     // Launch lightwalletd
     let (_lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(
@@ -98,10 +112,16 @@ pub async fn run() -> Result<()> {
     // Give lightwalletd a few seconds to open its grpc port before connecting to it
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
+    tracing::info!(
+        ?lightwalletd_rpc_port,
+        "connecting gRPC client to lightwalletd...",
+    );
+
     // Connect to the lightwalletd instance
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
 
     // End of the setup and start the tests
+    tracing::info!(?lightwalletd_rpc_port, "sending gRPC queries...");
 
     // Call `GetLatestBlock`
     let block_tip = rpc_client

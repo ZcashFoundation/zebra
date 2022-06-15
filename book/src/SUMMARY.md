@@ -7,6 +7,7 @@
   - [Running Zebra](user/run.md)
   - [Tracing Zebra](user/tracing.md)
   - [Zebra Metrics](user/metrics.md)
+  - [Lightwalletd](user/lightwalletd.md)
 - [Developer Documentation](dev.md)
   - [Contribution Guide](CONTRIBUTING.md)
   - [Design Overview](dev/overview.md)

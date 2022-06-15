@@ -5,7 +5,7 @@ use proptest::prelude::*;
 use super::NetworkUpgrade;
 
 impl NetworkUpgrade {
-    /// Generates network upgrades with [`BranchId`]s
+    /// Generates network upgrades.
     pub fn branch_id_strategy() -> BoxedStrategy<NetworkUpgrade> {
         prop_oneof![
             Just(NetworkUpgrade::Overwinter),

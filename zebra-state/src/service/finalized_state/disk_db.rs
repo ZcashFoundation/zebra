@@ -1,7 +1,8 @@
 //! Provides low-level access to RocksDB using some database-specific types.
 //!
 //! This module makes sure that:
-//! - all disk writes happen inside a RocksDB transaction ([`WriteBatch`]), and
+//! - all disk writes happen inside a RocksDB transaction
+//!   ([`rocksdb::WriteBatch`]), and
 //! - format-specific invariants are maintained.
 //!
 //! # Correctness
@@ -345,7 +346,7 @@ impl DiskDb {
     ///
     /// On Windows, the default limit is 512 high-level I/O files, and 8192
     /// low-level I/O files:
-    /// https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/setmaxstdio?view=msvc-160#remarks
+    /// <https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/setmaxstdio?view=msvc-160#remarks>
     const MIN_OPEN_FILE_LIMIT: u64 = 512;
 
     /// The number of files used internally by Zebra.
@@ -356,7 +357,7 @@ impl DiskDb {
 
     /// The size of the database memtable RAM cache in megabytes.
     ///
-    /// https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning
+    /// <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning>
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
 
     /// Opens or creates the database at `config.path` for `network`,

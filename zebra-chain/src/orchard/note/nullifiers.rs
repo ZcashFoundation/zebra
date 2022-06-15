@@ -32,7 +32,7 @@ fn poseidon_hash(_x: pallas::Base, _y: pallas::Base) -> pallas::Base {
 /// PRF^nfOrchard: F_𝑞P × F_𝑞P → F_𝑞P
 ///
 /// Instantiated using the PoseidonHash hash function defined in [§5.4.1.10
-/// ‘PoseidonHash Function’][poseidon]:
+/// ‘PoseidonHash Function’][poseidonhash]:
 ///
 /// PRF^nfOrchard(nk*, ρ*) := PoseidonHash(nk*, ρ*)
 ///

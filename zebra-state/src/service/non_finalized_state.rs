@@ -422,7 +422,7 @@ impl NonFinalizedState {
     /// Update the metrics after `block` is committed
     fn update_metrics_for_committed_block(&self, height: block::Height, hash: block::Hash) {
         metrics::counter!("state.memory.committed.block.count", 1);
-        metrics::gauge!("state.memory.committed.block.height", height.0 as _);
+        metrics::gauge!("state.memory.committed.block.height", height.0 as f64);
 
         if self
             .best_chain()
@@ -436,7 +436,7 @@ impl NonFinalizedState {
             == hash
         {
             metrics::counter!("state.memory.best.committed.block.count", 1);
-            metrics::gauge!("state.memory.best.committed.block.height", height.0 as _);
+            metrics::gauge!("state.memory.best.committed.block.height", height.0 as f64);
         }
 
         self.update_metrics_for_chains();
@@ -444,7 +444,10 @@ impl NonFinalizedState {
 
     /// Update the metrics after `self.chain_set` is modified
     fn update_metrics_for_chains(&self) {
-        metrics::gauge!("state.memory.chain.count", self.chain_set.len() as _);
-        metrics::gauge!("state.memory.best.chain.length", self.best_chain_len() as _);
+        metrics::gauge!("state.memory.chain.count", self.chain_set.len() as f64);
+        metrics::gauge!(
+            "state.memory.best.chain.length",
+            self.best_chain_len() as f64,
+        );
     }
 }

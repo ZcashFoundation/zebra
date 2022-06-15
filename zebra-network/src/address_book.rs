@@ -8,6 +8,8 @@ use ordered_map::OrderedMap;
 use tokio::sync::watch;
 use tracing::Span;
 
+use zebra_chain::parameters::Network;
+
 use crate::{
     constants, meta_addr::MetaAddrChange, protocol::external::canonical_socket_addr,
     types::MetaAddr, PeerAddrState,
@@ -56,18 +58,22 @@ pub struct AddressBook {
     ///
     /// Some peers in this list might have open outbound or inbound connections.
     ///
-    /// We reverse the comparison order, because the standard library ([`BTreeMap`])
-    /// sorts in ascending order, but [`OrderedMap`] sorts in descending order.
+    /// We reverse the comparison order, because the standard library
+    /// ([`BTreeMap`](std::collections::BTreeMap)) sorts in ascending order, but
+    /// [`OrderedMap`] sorts in descending order.
     by_addr: OrderedMap<SocketAddr, MetaAddr, Reverse<MetaAddr>>,
+
+    /// The local listener address.
+    local_listener: SocketAddr,
+
+    /// The configured Zcash network.
+    network: Network,
 
     /// The maximum number of addresses in the address book.
     ///
     /// Always set to [`MAX_ADDRS_IN_ADDRESS_BOOK`](constants::MAX_ADDRS_IN_ADDRESS_BOOK),
     /// in release builds. Lower values are used during testing.
     addr_limit: usize,
-
-    /// The local listener address.
-    local_listener: SocketAddr,
 
     /// The span for operations on this address book.
     span: Span,
@@ -106,9 +112,10 @@ pub struct AddressMetrics {
 
 #[allow(clippy::len_without_is_empty)]
 impl AddressBook {
-    /// Construct an [`AddressBook`] with the given `local_listener` and
-    /// [`tracing::Span`].
-    pub fn new(local_listener: SocketAddr, span: Span) -> AddressBook {
+    /// Construct an [`AddressBook`] with the given `local_listener` on `network`.
+    ///
+    /// Uses the supplied [`tracing::Span`] for address book operations.
+    pub fn new(local_listener: SocketAddr, network: Network, span: Span) -> AddressBook {
         let constructor_span = span.clone();
         let _guard = constructor_span.enter();
 
@@ -121,8 +128,9 @@ impl AddressBook {
 
         let mut new_book = AddressBook {
             by_addr: OrderedMap::new(|meta_addr| Reverse(*meta_addr)),
-            addr_limit: constants::MAX_ADDRS_IN_ADDRESS_BOOK,
             local_listener: canonical_socket_addr(local_listener),
+            network,
+            addr_limit: constants::MAX_ADDRS_IN_ADDRESS_BOOK,
             span,
             address_metrics_tx,
             last_address_log: None,
@@ -132,7 +140,7 @@ impl AddressBook {
         new_book
     }
 
-    /// Construct an [`AddressBook`] with the given `local_listener`,
+    /// Construct an [`AddressBook`] with the given `local_listener`, `network`,
     /// `addr_limit`, [`tracing::Span`], and addresses.
     ///
     /// `addr_limit` is enforced by this method, and by [`AddressBook::update`].
@@ -146,6 +154,7 @@ impl AddressBook {
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn new_with_addrs(
         local_listener: SocketAddr,
+        network: Network,
         addr_limit: usize,
         span: Span,
         addrs: impl IntoIterator<Item = MetaAddr>,
@@ -156,7 +165,7 @@ impl AddressBook {
         let instant_now = Instant::now();
         let chrono_now = Utc::now();
 
-        let mut new_book = AddressBook::new(local_listener, span);
+        let mut new_book = AddressBook::new(local_listener, network, span);
         new_book.addr_limit = addr_limit;
 
         let addrs = addrs
@@ -165,7 +174,7 @@ impl AddressBook {
                 meta_addr.addr = canonical_socket_addr(meta_addr.addr);
                 meta_addr
             })
-            .filter(MetaAddr::address_is_valid_for_outbound)
+            .filter(|meta_addr| meta_addr.address_is_valid_for_outbound(network))
             .take(addr_limit)
             .map(|meta_addr| (meta_addr.addr, meta_addr));
 
@@ -214,7 +223,7 @@ impl AddressBook {
         // Then sanitize and shuffle
         let mut peers = peers
             .descending_values()
-            .filter_map(MetaAddr::sanitize)
+            .filter_map(|meta_addr| meta_addr.sanitize(self.network))
             // Security: remove peers that:
             //   - last responded more than three hours ago, or
             //   - haven't responded yet but were reported last seen more than three hours ago
@@ -285,7 +294,7 @@ impl AddressBook {
         if let Some(updated) = updated {
             // Ignore invalid outbound addresses.
             // (Inbound connections can be monitored via Zebra's metrics.)
-            if !updated.address_is_valid_for_outbound() {
+            if !updated.address_is_valid_for_outbound(self.network) {
                 return None;
             }
 
@@ -294,9 +303,7 @@ impl AddressBook {
             //
             // Otherwise, if we got the info directly from the peer,
             // store it in the address book, so we know not to reconnect.
-            //
-            // TODO: delete peers with invalid info when they get too old (#1873)
-            if !updated.last_known_info_is_valid_for_outbound()
+            if !updated.last_known_info_is_valid_for_outbound(self.network)
                 && updated.last_connection_state.is_never_attempted()
             {
                 return None;
@@ -407,7 +414,9 @@ impl AddressBook {
         // The peers are already stored in sorted order.
         self.by_addr
             .descending_values()
-            .filter(move |peer| peer.is_ready_for_connection_attempt(instant_now, chrono_now))
+            .filter(move |peer| {
+                peer.is_ready_for_connection_attempt(instant_now, chrono_now, self.network)
+            })
             .cloned()
     }
 
@@ -436,7 +445,9 @@ impl AddressBook {
 
         self.by_addr
             .descending_values()
-            .filter(move |peer| !peer.is_ready_for_connection_attempt(instant_now, chrono_now))
+            .filter(move |peer| {
+                !peer.is_ready_for_connection_attempt(instant_now, chrono_now, self.network)
+            })
             .cloned()
     }
 
@@ -519,7 +530,7 @@ impl AddressBook {
         metrics::gauge!("candidate_set.gossiped", m.never_attempted_gossiped as f64);
         metrics::gauge!(
             "candidate_set.alternate",
-            m.never_attempted_alternate as f64
+            m.never_attempted_alternate as f64,
         );
         metrics::gauge!("candidate_set.failed", m.failed as f64);
         metrics::gauge!("candidate_set.pending", m.attempt_pending as f64);
@@ -529,7 +540,7 @@ impl AddressBook {
         // TODO: rename to address_book.responded.stopped_responding
         metrics::gauge!(
             "candidate_set.disconnected",
-            m.recently_stopped_responding as f64
+            m.recently_stopped_responding as f64,
         );
 
         std::mem::drop(_guard);
@@ -610,8 +621,9 @@ impl Clone for AddressBook {
 
         AddressBook {
             by_addr: self.by_addr.clone(),
-            addr_limit: self.addr_limit,
             local_listener: self.local_listener,
+            network: self.network,
+            addr_limit: self.addr_limit,
             span: self.span.clone(),
             address_metrics_tx,
             last_address_log: None,

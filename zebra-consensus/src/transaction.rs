@@ -124,18 +124,21 @@ pub enum Response {
     Block {
         /// The witnessed transaction ID for this transaction.
         ///
-        /// [`Block`] responses can be uniquely identified by [`UnminedTxId::mined_id`],
-        /// because the block's authorizing data root will be checked during contextual validation.
+        /// [`Response::Block`] responses can be uniquely identified by
+        /// [`UnminedTxId::mined_id`], because the block's authorizing data root
+        /// will be checked during contextual validation.
         tx_id: UnminedTxId,
 
         /// The miner fee for this transaction.
+        ///
         /// `None` for coinbase transactions.
         ///
-        /// Consensus rule:
+        /// # Consensus
+        ///
         /// > The remaining value in the transparent transaction value pool
         /// > of a coinbase transaction is destroyed.
         ///
-        /// https://zips.z.cash/protocol/protocol.pdf#transactions
+        /// <https://zips.z.cash/protocol/protocol.pdf#transactions>
         miner_fee: Option<Amount<NonNegative>>,
 
         /// The number of legacy signature operations in this transaction's
@@ -151,8 +154,8 @@ pub enum Response {
         /// Mempool transactions always have a transaction fee,
         /// because coinbase transactions are rejected from the mempool.
         ///
-        /// [`Mempool`] responses are uniquely identified by the [`UnminedTxId`]
-        /// variant for their transaction version.
+        /// [`Response::Mempool`] responses are uniquely identified by the
+        /// [`UnminedTxId`] variant for their transaction version.
         transaction: VerifiedUnminedTx,
     },
 }

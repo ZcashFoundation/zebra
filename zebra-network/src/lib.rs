@@ -16,11 +16,11 @@
 //! [`tower::Service`] representing "the network", which load-balances
 //! outbound [`Request`]s over available peers.
 //!
-//! Unlike the underlying legacy network protocol, Zebra's [`PeerSet`]
-//! [`tower::Service`] guarantees that each `Request` future will resolve to
-//! the correct `Response`, rather than an unrelated `Response` message.
+//! Unlike the underlying legacy network protocol, Zebra's `PeerSet`
+//! [`tower::Service`] guarantees that each `Request` future will resolve to the
+//! correct `Response`, rather than an unrelated `Response` message.
 //!
-//! Each peer connection is handled by a distinct [`Connection`] task.
+//! Each peer connection is handled by a distinct [`peer::Connection`] task.
 //! The Zcash network protocol is bidirectional, so Zebra interprets incoming
 //! Zcash messages as either:
 //! - [`Response`]s to previously sent outbound [`Request`]s, or
@@ -47,11 +47,13 @@
 //!
 //! Inbound Zcash Listener Task:
 //!  * accepts inbound connections on the listener port
-//!  * initiates Zcash [`Handshake`]s, which creates [`Connection`] tasks for each inbound connection
+//!  * initiates Zcash [`peer::Handshake`]s, which creates [`peer::Connection`]
+//!    tasks for each inbound connection
 //!
 //! Outbound Zcash Connector Service:
 //!  * initiates outbound connections to peer addresses
-//!  * initiates Zcash [`Handshake`]s, which creates [`Connection`] tasks for each outbound connection
+//!  * initiates Zcash [`peer::Handshake`]s, which creates [`peer::Connection`]
+//!    tasks for each outbound connection
 //!
 //! Zebra uses direct TCP connections to share blocks and mempool transactions with other peers.
 //!
@@ -65,16 +67,16 @@
 //!
 //! [`peer::Client`] Service:
 //!  * provides an interface for outbound requests to an individual peer
-//!    * accepts [`Request`]s assigned to this peer by the [`PeerSet`]
-//!    * sends each request to the peer as Zcash [`Message`]
-//!    * waits for the inbound response [`Message`] from the peer, and returns it as a [`Response`]
+//!    * accepts [`Request`]s assigned to this peer by the `PeerSet`
+//!    * sends each request to the peer as Zcash [`Message`][1]
+//!    * waits for the inbound response [`Message`][1] from the peer, and returns it as a [`Response`]
 //!
 //! [`peer::Connection`] Service:
 //!  * manages connection state: awaiting a request, or handling an inbound or outbound response
 //!  * provides an interface for inbound requests from an individual peer
-//!    * accepts inbound Zcash [`Message`]s from this peer
+//!    * accepts inbound Zcash [`Message`][1]s from this peer
 //!    * handles each message as a [`Request`] to the inbound service
-//!    * sends the [`Response`] to the peer as Zcash [`Message`]s
+//!    * sends the [`Response`] to the peer as Zcash [`Message`][1]s
 //!  * drops peer connections if the inbound request queue is overloaded
 //!
 //! Since the Zcash network protocol is bidirectional,
@@ -82,7 +84,7 @@
 //!
 //! ### Connection Pool
 //!
-//! [`PeerSet`] Network Service:
+//! `PeerSet` Network Service:
 //!  * provides an interface for other services and tasks running within this node
 //!    to make requests to remote peers ("the rest of the network")
 //!    * accepts [`Request`]s from the local node
@@ -100,7 +102,8 @@
 //! Peer Inventory Service:
 //!  * tracks gossiped `inv` advertisements for each peer
 //!  * tracks missing inventory for each peer
-//!  * used by the [`PeerSet`] to route block and transaction requests to peers that have the requested data
+//!  * used by the `PeerSet` to route block and transaction requests
+//!    to peers that have the requested data
 //!
 //! ### Peer Discovery
 //!
@@ -113,8 +116,10 @@
 //!  * adds seed peer addresses to the [`AddressBook`]
 //!
 //! Peer Crawler Task:
-//!  * discovers new peer addresses by sending [`Addr`] requests to connected peers
+//!  * discovers new peer addresses by sending `Addr` requests to connected peers
 //!  * initiates new outbound peer connections in response to application demand
+//!
+//! [1]: protocol::external::Message
 
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]

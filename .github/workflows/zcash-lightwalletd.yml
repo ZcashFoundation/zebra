@@ -2,7 +2,8 @@ name: zcash-lightwalletd
 
 on:
   workflow_dispatch:
-  
+
+  # Update the lightwalletd image when related changes merge to the `zebra/main` branch
   push:
     branches:
       - 'main'
@@ -10,7 +11,7 @@ on:
       # rebuild lightwalletd whenever the related Zebra code changes
       #
       # TODO: this code isn't compiled in this docker image
-      #       rebuild whenever the actual code at adityapk00/lightwalletd/master changes
+      #       rebuild whenever the actual code at lightwalletd/master changes
       - 'zebra-rpc/**'
       - 'zebrad/tests/acceptance.rs'
       - 'zebrad/src/config.rs'
@@ -20,9 +21,6 @@ on:
       - '.github/workflows/zcash-lightwalletd.yml'
 
   # Update the lightwalletd image when each related PR changes
-  #
-  # TODO: after NU5 mainnet activation and wallet orchard features are stable,
-  #       consider just rebuilding the image on `main` merges
   pull_request:
     branches:
       - main
@@ -75,6 +73,7 @@ jobs:
           images: |
             ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}
           # generate Docker tags based on the following events/attributes
+          # set latest tag for default branch
           tags: |
             type=schedule
             type=ref,event=branch
@@ -83,6 +82,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Set up QEMU
         id: qemu

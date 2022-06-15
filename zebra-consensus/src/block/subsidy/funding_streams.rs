@@ -122,7 +122,7 @@ pub fn funding_stream_address(
 /// Given a funding stream address, create a script and check if it is the same
 /// as the given lock_script as described in [protocol specification §7.10][7.10]
 ///
-/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams.
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 pub fn check_script_form(lock_script: &Script, address: Address) -> bool {
     let mut address_hash = address
         .zcash_serialize_to_vec()

@@ -181,8 +181,8 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
     /// <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
     ///
     /// This rule is also implemented in
-    /// [`zebra_state::service::check::anchor`] and
-    /// [`zebra_chain::transaction::serialize`].
+    /// `zebra_state::service::check::anchors` and
+    /// `crate::transaction::serialize`.
     ///
     /// The "anchor encoding for v4 transactions" is implemented here.
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {

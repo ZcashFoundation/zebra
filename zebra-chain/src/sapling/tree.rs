@@ -48,7 +48,7 @@ pub(super) const MERKLE_DEPTH: usize = 32;
 /// where l = I2LEBSP_6(MerkleDepth^Sapling − 1 − layer) and
 /// left, right, and the output are all technically 255 bits (l_MerkleSapling), not 256.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#merklecrh
+/// <https://zips.z.cash/protocol/protocol.pdf#merklecrh>
 fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     let mut s = bitvec![u8, Lsb0;];
 
@@ -66,7 +66,7 @@ lazy_static! {
     ///
     /// The list is indexed by the layer number (0: root; MERKLE_DEPTH: leaf).
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#constants
+    /// <https://zips.z.cash/protocol/protocol.pdf#constants>
     pub(super) static ref EMPTY_ROOTS: Vec<[u8; 32]> = {
         // The empty leaf node. This is layer 32.
         let mut v = vec![NoteCommitmentTree::uncommitted()];
@@ -88,7 +88,7 @@ lazy_static! {
 /// The index of a note's commitment at the leafmost layer of its Note
 /// Commitment Tree.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#merkletree
+/// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
 pub struct Position(pub(crate) u64);
 
 /// Sapling note commitment tree root node hash.
@@ -292,7 +292,7 @@ pub struct NoteCommitmentTree {
     /// tree). This is particularly important since we decided to instantiate
     /// the trees from the genesis block, for simplicity.
     ///
-    /// We use a [`RwLock`] for this cache, because it is only written once per
+    /// We use a [`RwLock`](std::sync::RwLock) for this cache, because it is only written once per
     /// tree update. Each tree has its own cached root, a new lock is created
     /// for each clone.
     cached_root: std::sync::RwLock<Option<Root>>,
@@ -340,7 +340,8 @@ impl NoteCommitmentTree {
             .cached_root
             .write()
             .expect("a thread that previously held exclusive lock access panicked");
-        match *write_root {
+        let read_root = write_root.as_ref().cloned();
+        match read_root {
             // Another thread got write access first, return cached root.
             Some(root) => root,
             None => {
@@ -376,7 +377,8 @@ impl NoteCommitmentTree {
 }
 
 impl Clone for NoteCommitmentTree {
-    /// Clones the inner tree, and creates a new `RwLock` with the cloned root data.
+    /// Clones the inner tree, and creates a new [`RwLock`](std::sync::RwLock)
+    /// with the cloned root data.
     fn clone(&self) -> Self {
         let cached_root = *self
             .cached_root

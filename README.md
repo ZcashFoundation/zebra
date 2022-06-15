@@ -42,7 +42,7 @@ The original Zcash node is named `zcashd` and is developed by the Electric Coin
 Company as a fork of the original Bitcoin node. Zebra, on the other hand, is
 an independent Zcash node implementation developed from scratch. Since they
 implement the same protocol, `zcashd` and Zebra nodes can communicate with each
-other and maintain the Zcash network interoperably.
+other and maintain the Zcash network together.
 
 If you just want to send and receive Zcash then you don't need to use Zebra
 directly. You can download a Zcash wallet application which will handle that
@@ -106,7 +106,7 @@ for your platform:
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.10 zebrad`
+ 3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.11 zebrad`
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
@@ -171,7 +171,7 @@ If this is a problem for you, please
 [open a ticket.](https://github.com/ZcashFoundation/zebra/issues/new/choose)
 
 `zebrad`'s typical mainnet network usage is:
-- Initial sync: 30 GB download
+- Initial sync: 31 GB download
 - Ongoing updates: 10-100 MB upload and download per day, depending on peer requests
 
 Zebra also performs an initial sync every time its internal database version changes.
@@ -206,24 +206,14 @@ So Zebra's state should always be valid, unless your OS or disk hardware is corr
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
-- [Old state versions are not deleted](https://github.com/ZcashFoundation/zebra/issues/1213)
+- [Old state versions are not deleted #1213](https://github.com/ZcashFoundation/zebra/issues/1213)
   - When Zebra changes its state format, it does not delete the old state directory. You can delete old state directories if you need the space.
 - [No Windows support #3801](https://github.com/ZcashFoundation/zebra/issues/3801)
   - We used to test with Windows Server 2019, but not anymore; see issue for details
-- [In rare cases, Zebra panics on shutdown #1678](https://github.com/ZcashFoundation/zebra/issues/1678)
-  - See [#2209](https://github.com/ZcashFoundation/zebra/issues/2209) for an example.
-  - These panics can be ignored, unless they happen frequently.
-- [Interrupt handler does not work when a blocking task is running #1351](https://github.com/ZcashFoundation/zebra/issues/1351)
-  - Zebra should eventually exit once the task finishes. Or you can forcibly terminate the process.
 
 ## Future Work
 
-In 2022, we intend to start adding RPC support and start adding wallet integrations.
-This phased approach allows us to test Zebra's independent implementation of the
-consensus rules, before asking users to entrust it with their funds.
-
 Features:
-- RPC functionality
 - Wallet functionality
 
 Performance and Reliability:

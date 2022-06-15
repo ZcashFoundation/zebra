@@ -153,11 +153,11 @@ pub enum Request {
     /// how we interpret advertisements from zcashd, which sometimes advertises
     /// multiple transactions at once.
     ///
-    /// This is implemented by sending an `inv` message containing the
-    /// unmined transaction ID, allowing the remote peer to choose whether to download
+    /// This is implemented by sending an `inv` message containing the unmined
+    /// transaction ID, allowing the remote peer to choose whether to download
     /// it. Remote peers who choose to download the transaction will generate a
     /// [`Request::TransactionsById`] against the "inbound" service passed to
-    /// [`zebra_network::init`].
+    /// [`init`](crate::init).
     ///
     /// v4 transactions use a legacy transaction ID, and
     /// v5 transactions use a witnessed transaction ID.
@@ -178,7 +178,7 @@ pub enum Request {
     /// block hash, allowing the remote peer to choose whether to download
     /// it. Remote peers who choose to download the block will generate a
     /// [`Request::BlocksByHash`] against the "inbound" service passed to
-    /// [`zebra_network::init`].
+    /// [`init`](crate::init).
     ///
     /// The peer set routes this request specially, sending it to *half of*
     /// the available peers.

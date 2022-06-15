@@ -39,7 +39,7 @@ pub struct Config {
     ///
     /// If a specific listener address is configured, Zebra will advertise
     /// it to other nodes. But by default, Zebra uses an unspecified address
-    /// ("0.0.0.0" or "[::]"), which is not advertised to other nodes.
+    /// ("0.0.0.0" or "\[::\]"), which is not advertised to other nodes.
     ///
     /// Zebra does not currently support:
     /// - [Advertising a different external IP address #1890](https://github.com/ZcashFoundation/zebra/issues/1890), or
@@ -77,9 +77,7 @@ pub struct Config {
     /// - regularly, every time `crawl_new_peer_interval` elapses, and
     /// - if the peer set is busy, and there aren't any peer addresses for the
     ///   next connection attempt.
-    //
-    // Note: Durations become a TOML table, so they must be the final item in the config
-    //       We'll replace them with a more user-friendly format in #2847
+    #[serde(with = "humantime_serde")]
     pub crawl_new_peer_interval: Duration,
 }
 
@@ -301,7 +299,7 @@ impl<'de> Deserialize<'de> for Config {
             initial_mainnet_peers: HashSet<String>,
             initial_testnet_peers: HashSet<String>,
             peerset_initial_target_size: usize,
-            #[serde(alias = "new_peer_interval")]
+            #[serde(alias = "new_peer_interval", with = "humantime_serde")]
             crawl_new_peer_interval: Duration,
         }
 

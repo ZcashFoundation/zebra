@@ -253,7 +253,7 @@ impl From<SpendingKey> for SpendAuthorizingKey {
     /// Invokes Blake2b-512 as _PRF^expand_, t=6, to derive a
     /// `SpendAuthorizingKey` from a `SpendingKey`.
     ///
-    /// ask := ToScalar^Orchard(PRF^expand(sk, [6]))
+    /// ask := ToScalar^Orchard(PRF^expand(sk, \[6\]))
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
     /// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
@@ -380,7 +380,7 @@ impl From<[u8; 32]> for NullifierDerivingKey {
 }
 
 impl From<SpendingKey> for NullifierDerivingKey {
-    /// nk = ToBase^Orchard(PRF^expand_sk ([7]))
+    /// nk = ToBase^Orchard(PRF^expand_sk (\[7\]))
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
     fn from(sk: SpendingKey) -> Self {
@@ -429,7 +429,7 @@ impl fmt::Debug for IvkCommitRandomness {
 impl Eq for IvkCommitRandomness {}
 
 impl From<SpendingKey> for IvkCommitRandomness {
-    /// rivk = ToScalar^Orchard(PRF^expand_sk ([8]))
+    /// rivk = ToScalar^Orchard(PRF^expand_sk (\[8\]))
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
     fn from(sk: SpendingKey) -> Self {
@@ -962,7 +962,7 @@ impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
     /// This includes _KA^Orchard.DerivePublic(ivk, G_d)_, which is just a
     /// scalar mult _\[ivk\]G_d_.
     ///
-    ///  KA^Orchard.DerivePublic(sk, B) := [sk] B
+    ///  KA^Orchard.DerivePublic(sk, B) := \[sk\] B
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
     /// <https://zips.z.cash/protocol/nu5.pdf#concreteorchardkeyagreement>

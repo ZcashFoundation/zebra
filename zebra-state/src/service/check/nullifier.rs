@@ -10,7 +10,8 @@ use crate::{
 };
 
 /// Reject double-spends of nullifers:
-/// - one from this [`PreparedBlock`], and the other already committed to the [`FinalizedState`].
+/// - one from this [`PreparedBlock`], and the other already committed to the
+///   [`FinalizedState`](super::super::FinalizedState).
 ///
 /// (Duplicate non-finalized nullifiers are rejected during the chain update,
 /// see [`add_to_non_finalized_chain_unique`] for details.)
@@ -22,7 +23,7 @@ use crate::{
 /// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
 /// > even if they have the same bit pattern.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#nullifierset
+/// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
 #[tracing::instrument(skip(prepared, finalized_state))]
 pub(crate) fn no_duplicates_in_finalized_chain(
     prepared: &PreparedBlock,
@@ -50,12 +51,12 @@ pub(crate) fn no_duplicates_in_finalized_chain(
 }
 
 /// Reject double-spends of nullifers:
-/// - both within the same [`JoinSplit`] (sprout only),
-/// - from different [`JoinSplit`]s, [`sapling::Spend`]s or [`Action`]s
-///   in this [`Transaction`]'s shielded data, or
+/// - both within the same `JoinSplit` (sprout only),
+/// - from different `JoinSplit`s, [`sapling::Spend`][2]s or
+///   [`orchard::Action`][3]s in this [`Transaction`][1]'s shielded data, or
 /// - one from this shielded data, and another from:
-///   - a previous transaction in this [`Block`], or
-///   - a previous block in this non-finalized [`Chain`].
+///   - a previous transaction in this [`Block`][4], or
+///   - a previous block in this non-finalized [`Chain`][5].
 ///
 /// (Duplicate finalized nullifiers are rejected during service contextual validation,
 /// see [`no_duplicates_in_finalized_chain`] for details.)
@@ -67,13 +68,19 @@ pub(crate) fn no_duplicates_in_finalized_chain(
 /// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
 /// > even if they have the same bit pattern.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#nullifierset
+/// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
 ///
 /// We comply with the "disjoint" rule by storing the nullifiers for each
 /// pool in separate sets (also with different types), so that even if
 /// different pools have nullifiers with same bit pattern, they won't be
 /// considered the same when determining uniqueness. This is enforced by the
 /// callers of this function.
+///
+/// [1]: zebra_chain::transaction::Transaction
+/// [2]: zebra_chain::sapling::Spend
+/// [3]: zebra_chain::orchard::Action
+/// [4]: zebra_chain::block::Block
+/// [5]: super::super::Chain
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn add_to_non_finalized_chain_unique<'block, NullifierT>(
     chain_nullifiers: &mut HashSet<NullifierT>,
@@ -94,8 +101,8 @@ where
     Ok(())
 }
 
-/// Remove nullifiers that were previously added to this non-finalized [`Chain`]
-/// by this shielded data.
+/// Remove nullifiers that were previously added to this non-finalized
+/// [`Chain`][1] by this shielded data.
 ///
 /// "A note can change from being unspent to spent as a node’s view
 /// of the best valid block chain is extended by new transactions.
@@ -104,7 +111,7 @@ where
 /// to a different best valid block chain that does not contain
 /// the transaction in which a note was output"
 ///
-/// https://zips.z.cash/protocol/nu5.pdf#decryptivk
+/// <https://zips.z.cash/protocol/nu5.pdf#decryptivk>
 ///
 /// Note: reorganizations can also change the best chain to one
 /// where a note was unspent, rather than spent.
@@ -114,8 +121,10 @@ where
 /// Panics if any nullifier is missing from the chain when we try to remove it.
 ///
 /// Blocks with duplicate nullifiers are rejected by
-/// [`add_to_non_finalized_chain_unique`], so this shielded data should
-/// be the only shielded data that added this nullifier to this [`Chain`].
+/// [`add_to_non_finalized_chain_unique`], so this shielded data should be the
+/// only shielded data that added this nullifier to this [`Chain`][1].
+///
+/// [1]: super::super::Chain
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn remove_from_non_finalized_chain<'block, NullifierT>(
     chain_nullifiers: &mut HashSet<NullifierT>,

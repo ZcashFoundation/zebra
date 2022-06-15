@@ -12,7 +12,7 @@ use super::super::{
 ///
 /// PRF^nfSapling(ρ*) := BLAKE2s-256("Zcash_nf", nk* || ρ*)
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#concreteprfs
+/// <https://zips.z.cash/protocol/protocol.pdf#concreteprfs>
 fn prf_nf(nk: [u8; 32], rho: [u8; 32]) -> [u8; 32] {
     let hash = blake2s_simd::Params::new()
         .hash_length(32)
@@ -56,7 +56,7 @@ impl From<Nullifier> for [u8; 32] {
 impl From<Nullifier> for [jubjub::Fq; 2] {
     /// Add the nullifier through multiscalar packing
     ///
-    /// Informed by https://github.com/zkcrypto/bellman/blob/main/src/gadgets/multipack.rs
+    /// Informed by <https://github.com/zkcrypto/bellman/blob/main/src/gadgets/multipack.rs>
     fn from(n: Nullifier) -> Self {
         use std::ops::AddAssign;
 

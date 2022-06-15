@@ -1,16 +1,19 @@
 //! Unmined Zcash transaction identifiers and transactions.
 //!
-//! Transaction version 5 is uniquely identified by [`WtxId`] when unmined,
-//! and [`Hash`] in the blockchain. The effects of a v5 transaction (spends and outputs)
-//! are uniquely identified by the same [`Hash`] in both cases.
+//! Transaction version 5 is uniquely identified by [`WtxId`] when unmined, and
+//! [`struct@Hash`] in the blockchain. The effects of a v5 transaction
+//! (spends and outputs) are uniquely identified by the same
+//! [`struct@Hash`] in both cases.
 //!
-//! Transaction versions 1-4 are uniquely identified by legacy [`Hash`] transaction IDs,
-//! whether they have been mined or not. So Zebra, and the Zcash network protocol,
-//! don't use witnessed transaction IDs for them.
+//! Transaction versions 1-4 are uniquely identified by legacy
+//! [`struct@Hash`] transaction IDs, whether they have been mined or not.
+//! So Zebra, and the Zcash network protocol, don't use witnessed transaction
+//! IDs for them.
 //!
-//! Zebra's [`UnminedTxId`] and [`UnminedTx`] enums provide the correct unique ID for
-//! unmined transactions. They can be used to handle transactions regardless of version,
-//! and get the [`WtxId`] or [`Hash`] when required.
+//! Zebra's [`UnminedTxId`] and [`UnminedTx`] enums provide the correct unique
+//! ID for unmined transactions. They can be used to handle transactions
+//! regardless of version, and get the [`WtxId`] or [`struct@Hash`] when
+//! required.
 
 use std::{fmt, sync::Arc};
 
@@ -68,14 +71,14 @@ pub enum UnminedTxId {
     ///
     /// Used to uniquely identify unmined version 1-4 transactions.
     /// (After v1-4 transactions are mined, they can be uniquely identified
-    /// using the same [`transaction::Hash`].)
+    /// using the same [`struct@Hash`].)
     Legacy(Hash),
 
     /// A witnessed unmined transaction identifier.
     ///
     /// Used to uniquely identify unmined version 5 transactions.
     /// (After v5 transactions are mined, they can be uniquely identified
-    /// using only the [`transaction::Hash`] in their `WtxId.id`.)
+    /// using only the [`struct@Hash`] in their `WtxId.id`.)
     ///
     /// For more details, see [`WtxId`].
     Witnessed(WtxId),
@@ -125,12 +128,13 @@ impl fmt::Display for UnminedTxId {
 }
 
 impl UnminedTxId {
-    /// Create a new `UnminedTxId` using a v1-v4 legacy transaction ID.
+    /// Create a new [`UnminedTxId`] using a v1-v4 legacy transaction ID.
     ///
     /// # Correctness
     ///
     /// This method must only be used for v1-v4 transaction IDs.
-    /// [`Hash`] does not uniquely identify unmined v5 transactions.
+    /// [`struct@Hash`] does not uniquely identify unmined v5
+    /// transactions.
     pub fn from_legacy_id(legacy_tx_id: Hash) -> UnminedTxId {
         Legacy(legacy_tx_id)
     }
@@ -154,7 +158,7 @@ impl UnminedTxId {
     /// Returns a mutable reference to the unique ID
     /// that will be used if this transaction gets mined into a block.
     ///
-    /// See [mined_id] for details.
+    /// See [`Self::mined_id`] for details.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn mined_id_mut(&mut self) -> &mut Hash {
         match self {

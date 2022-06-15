@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "1.0.0-beta.10"
+version = "1.0.0-beta.11"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -27,9 +27,9 @@ serde = { version = "1.0.137", features = ["serde_derive"] }
 
 futures = "0.3.21"
 futures-util = "0.3.21"
-metrics = "0.17.1"
+metrics = "0.18.1"
 thiserror = "1.0.31"
-tokio = { version = "1.18.2", features = ["time", "sync", "tracing"] }
+tokio = { version = "1.19.2", features = ["time", "sync", "tracing"] }
 tower = { version = "0.4.12", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.31"
 tracing-futures = "0.2.5"
@@ -51,15 +51,15 @@ proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
 [dev-dependencies]
-color-eyre = "0.6.0"
+color-eyre = "0.6.1"
 hex = "0.4.3"
 proptest = "0.10.1"
 proptest-derive = "0.3.0"
 rand07 = { package = "rand", version = "0.7" }
 spandoc = "0.2.2"
-tokio = { version = "1.18.2", features = ["full"] }
-tracing-error = "0.1.2"
-tracing-subscriber = "0.2.25"
+tokio = { version = "1.19.2", features = ["full"] }
+tracing-error = "0.2.0"
+tracing-subscriber = "0.3.11"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }

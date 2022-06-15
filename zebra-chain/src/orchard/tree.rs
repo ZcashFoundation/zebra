@@ -48,8 +48,8 @@ pub(super) const MERKLE_DEPTH: usize = 32;
 /// l = I2LEBSP_10(MerkleDepth^Orchard − 1 − layer),  and left, right, and
 /// the output are the x-coordinates of Pallas affine points.
 ///
-/// https://zips.z.cash/protocol/protocol.pdf#orchardmerklecrh
-/// https://zips.z.cash/protocol/protocol.pdf#constants
+/// <https://zips.z.cash/protocol/protocol.pdf#orchardmerklecrh>
+/// <https://zips.z.cash/protocol/protocol.pdf#constants>
 fn merkle_crh_orchard(layer: u8, left: pallas::Base, right: pallas::Base) -> pallas::Base {
     let mut s = bitvec![u8, Lsb0;];
 
@@ -70,7 +70,7 @@ lazy_static! {
     ///
     /// The list is indexed by the layer number (0: root; MERKLE_DEPTH: leaf).
     ///
-    /// https://zips.z.cash/protocol/protocol.pdf#constants
+    /// <https://zips.z.cash/protocol/protocol.pdf#constants>
     pub(super) static ref EMPTY_ROOTS: Vec<pallas::Base> = {
         // The empty leaf node. This is layer 32.
         let mut v = vec![NoteCommitmentTree::uncommitted()];
@@ -287,8 +287,9 @@ pub struct NoteCommitmentTree {
     /// serialized with the tree). This is particularly important since we decided
     /// to instantiate the trees from the genesis block, for simplicity.
     ///
-    /// We use a [`RwLock`] for this cache, because it is only written once per tree update.
-    /// Each tree has its own cached root, a new lock is created for each clone.
+    /// We use a [`RwLock`](std::sync::RwLock) for this cache, because it is
+    /// only written once per tree update. Each tree has its own cached root, a
+    /// new lock is created for each clone.
     cached_root: std::sync::RwLock<Option<Root>>,
 }
 
@@ -334,7 +335,8 @@ impl NoteCommitmentTree {
             .cached_root
             .write()
             .expect("a thread that previously held exclusive lock access panicked");
-        match *write_root {
+        let read_root = write_root.as_ref().cloned();
+        match read_root {
             // Another thread got write access first, return cached root.
             Some(root) => root,
             None => {

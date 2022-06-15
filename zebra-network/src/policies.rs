@@ -5,7 +5,7 @@ use tower::retry::Policy;
 
 /// A very basic retry policy with a limited number of retry attempts.
 ///
-/// XXX Remove this when https://github.com/tower-rs/tower/pull/414 lands.
+/// XXX Remove this when <https://github.com/tower-rs/tower/pull/414> lands.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RetryLimit {
     remaining_tries: usize,
