@@ -30,7 +30,10 @@ pub fn spawn_lightwalletd_with_rpc_server(
     let lightwalletd_rpc_port = random_known_port();
     let lightwalletd_rpc_address = format!("127.0.0.1:{lightwalletd_rpc_port}");
 
-    let arguments = args!["--grpc-bind-addr": lightwalletd_rpc_address];
+    let arguments = args![
+        "--grpc-bind-addr": lightwalletd_rpc_address,
+        "--grpc-logging-insecure"
+    ];
 
     let (lightwalletd_failure_messages, lightwalletd_ignore_messages) =
         test_type.lightwalletd_failure_messages();
