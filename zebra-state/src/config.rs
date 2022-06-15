@@ -159,14 +159,14 @@ fn delete_old_databases(config: Config) {
 
     info!("checking for old database versions");
 
-    let cache_dir = config.cache_dir.join("state");
-    let cache_dir_entries = match read_cache_dir(&cache_dir) {
-        Some(cache_dir_entries) => cache_dir_entries,
+    let state_dir = config.cache_dir.join("state");
+    let state_dir_entries = match read_state_dir(&state_dir) {
+        Some(state_dir_entries) => state_dir_entries,
         None => return,
     };
 
-    for entry in cache_dir_entries.flatten() {
-        let deleted_state = check_and_delete_database(&entry);
+    for entry in state_dir_entries.flatten() {
+        let deleted_state = check_and_delete_database(&config, &entry);
 
         if let Some(deleted_state) = deleted_state {
             info!(?deleted_state, "deleted outdated state directory");
@@ -174,12 +174,12 @@ fn delete_old_databases(config: Config) {
     }
 }
 
-/// Checks that `cache_dir` exists, and that it can be read.
+/// Checks that `state_dir` exists, and that it can be read.
 ///
 /// Returns `None` if any operation fails.
-fn read_cache_dir(cache_dir: &Path) -> Option<ReadDir> {
-    if cache_dir.exists() {
-        if let Ok(read_dir) = cache_dir.read_dir() {
+fn read_state_dir(state_dir: &Path) -> Option<ReadDir> {
+    if state_dir.exists() {
+        if let Ok(read_dir) = state_dir.read_dir() {
             return Some(read_dir);
         }
     }
