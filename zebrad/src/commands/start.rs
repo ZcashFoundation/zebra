@@ -105,10 +105,9 @@ impl StartCmd {
         let config = app_config().clone();
         info!(?config);
 
-        if !config.state.ephemeral && config.state.delete_old_database {
-            info!("checking old database versions");
-            zebra_state::check_and_delete_old_databases(config.state.cache_dir.clone());
-        }
+        let mut old_databases_task_handle = tokio::spawn(
+            zebra_state::check_and_delete_old_databases(config.state.clone()).in_current_span(),
+        );
 
         info!("initializing node state");
         let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
@@ -234,6 +233,8 @@ impl StartCmd {
         // startup tasks
         let groth16_download_handle_fused = (&mut groth16_download_handle).fuse();
         pin!(groth16_download_handle_fused);
+        let old_databases_task_handle_fused = (&mut old_databases_task_handle).fuse();
+        pin!(old_databases_task_handle_fused);
 
         // Wait for tasks to finish
         let exit_status = loop {
@@ -292,6 +293,16 @@ impl StartCmd {
                             "unexpected panic in the Groth16 pre-download and check task. {}",
                             zebra_consensus::groth16::Groth16Parameters::failure_hint())
                         );
+
+                    exit_when_task_finishes = false;
+                    Ok(())
+                }
+
+                // The same for the old databases task, we expect it to finish while Zebra is running.
+                old_databases_result = &mut old_databases_task_handle_fused => {
+                    old_databases_result
+                        .unwrap_or_else(|_| panic!(
+                            "unexpected panic deleting old database directories"));
 
                     exit_when_task_finishes = false;
                     Ok(())
