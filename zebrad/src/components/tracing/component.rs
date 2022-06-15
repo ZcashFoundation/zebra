@@ -62,6 +62,11 @@ impl Tracing {
             use tracing_subscriber::{fmt, Layer};
 
             let subscriber = tracing_subscriber::registry();
+            // TODO: find out why crawl_and_dial and try_to_sync evade this filter,
+            //       and why they also don't get the global net/commit span
+            //
+            // Using `registry` as the base subscriber, the logs from most other functions get filtered.
+            // Using `FmtSubscriber` as the base subscriber, all the logs get filtered.
             let logger = fmt::Layer::new()
                 .with_ansi(use_color)
                 .with_filter(EnvFilter::from(&filter));
