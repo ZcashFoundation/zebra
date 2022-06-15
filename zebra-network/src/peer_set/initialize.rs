@@ -25,7 +25,6 @@ use tokio_stream::wrappers::IntervalStream;
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, util::BoxService, Service, ServiceExt,
 };
-use tracing::Span;
 use tracing_futures::Instrument;
 
 use zebra_chain::{chain_tip::ChainTip, parameters::Network};
@@ -179,7 +178,7 @@ where
         listen_handshaker,
         peerset_tx.clone(),
     );
-    let listen_guard = tokio::spawn(listen_fut.instrument(Span::current()));
+    let listen_guard = tokio::spawn(listen_fut.in_current_span());
 
     // 2. Initial peers, specified in the config.
     let initial_peers_fut = add_initial_peers(
@@ -188,7 +187,7 @@ where
         peerset_tx.clone(),
         address_book_updater,
     );
-    let initial_peers_join = tokio::spawn(initial_peers_fut.instrument(Span::current()));
+    let initial_peers_join = tokio::spawn(initial_peers_fut.in_current_span());
 
     // 3. Outgoing peers we connect to in response to load.
     let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
@@ -228,7 +227,7 @@ where
         peerset_tx,
         active_outbound_connections,
     );
-    let crawl_guard = tokio::spawn(crawl_fut.instrument(Span::current()));
+    let crawl_guard = tokio::spawn(crawl_fut.in_current_span());
 
     handle_tx
         .send(vec![listen_guard, crawl_guard, address_book_updater_guard])
@@ -646,15 +645,20 @@ enum CrawlerAction {
 ///
 /// Uses `active_outbound_connections` to limit the number of active outbound connections
 /// across both the initial peers and crawler. The limit is based on `config`.
-#[instrument(skip(
-    config,
-    demand_tx,
-    demand_rx,
-    candidates,
-    outbound_connector,
-    peerset_tx,
-    active_outbound_connections,
-))]
+#[instrument(
+    skip(
+        config,
+        demand_tx,
+        demand_rx,
+        candidates,
+        outbound_connector,
+        peerset_tx,
+        active_outbound_connections,
+    ),
+    fields(
+        new_peer_interval = ?config.crawl_new_peer_interval,
+    )
+)]
 async fn crawl_and_dial<C, S>(
     config: Config,
     mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
@@ -761,7 +765,8 @@ where
                         panic!("panic during handshaking with {:?}: {:?} ", candidate, e);
                     }
                 })
-                .instrument(Span::current());
+                .in_current_span();
+
                 handshakes.push(Box::pin(hs_join));
             }
             DemandCrawl => {
