@@ -335,6 +335,7 @@ impl StartCmd {
 
         // startup tasks
         groth16_download_handle.abort();
+        old_databases_task_handle.abort();
 
         exit_status
     }
