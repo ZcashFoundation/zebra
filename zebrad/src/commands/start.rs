@@ -105,7 +105,7 @@ impl StartCmd {
         let config = app_config().clone();
         info!(?config);
 
-        if config.state.delete_old_database {
+        if !config.state.ephemeral && config.state.delete_old_database {
             info!("checking old database versions");
             check_and_delete_old_databases(config.state.cache_dir.clone())?;
         }
