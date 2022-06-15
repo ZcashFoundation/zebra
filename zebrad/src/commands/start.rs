@@ -59,7 +59,7 @@
 //!    * answers RPC client requests using the State Service and Mempool Service
 //!    * submits client transactions to the node's mempool
 
-use std::{cmp::max, fs::remove_dir_all, ops::Add, path::PathBuf, time::Duration};
+use std::{cmp::max, ops::Add, time::Duration};
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use chrono::Utc;
@@ -107,7 +107,7 @@ impl StartCmd {
 
         if !config.state.ephemeral && config.state.delete_old_database {
             info!("checking old database versions");
-            check_and_delete_old_databases(config.state.cache_dir.clone())?;
+            zebra_state::check_and_delete_old_databases(config.state.cache_dir.clone());
         }
 
         info!("initializing node state");
@@ -605,59 +605,4 @@ impl config::Override<ZebradConfig> for StartCmd {
 
         Ok(config)
     }
-}
-
-/// Check if there are old database folders and delete them from the filesystem.
-///
-/// Iterate over the files and directories in the databases folder and delete if:
-/// - The state directory exists.
-/// - The entry is a directory.
-/// - The directory name has a lenght of at least 2 characters.
-/// - The directory name has a prefix `v`.
-/// - The directory name without the prefix can be parsed as an unsigned number.
-/// - The parsed number is lower than the hardcoded `DATABASE_FORMAT_VERSION`.
-fn check_and_delete_old_databases(cache_dir: PathBuf) -> Result<(), Report> {
-    let cache_dir = cache_dir.join("state");
-    if cache_dir.exists() {
-        for entry in (cache_dir.read_dir()?).flatten() {
-            if let Some(dir_name) = parse_dir_name(entry) {
-                if let Some(version_number) = parse_version_number(dir_name.clone()) {
-                    if version_number < zebra_state::constants::DATABASE_FORMAT_VERSION {
-                        let delete_path = cache_dir.join(dir_name);
-                        info!("deleting outdated state directory {:?}", delete_path,);
-                        if remove_dir_all(delete_path).is_err() {
-                            continue;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn parse_dir_name(entry: std::fs::DirEntry) -> Option<String> {
-    if let Ok(file_type) = entry.file_type() {
-        if file_type.is_dir() {
-            if let Ok(dir_name) = entry.file_name().into_string() {
-                return Some(dir_name);
-            }
-        }
-    }
-    None
-}
-
-fn parse_version_number(dir_name: String) -> Option<u32> {
-    if dir_name.len() >= 2 && dir_name.starts_with('v') {
-        if let Some(potential_version_number) = dir_name.strip_prefix('v') {
-            return Some(
-                potential_version_number
-                    .to_string()
-                    .parse()
-                    .unwrap_or(u32::MAX),
-            );
-        }
-    }
-    None
 }

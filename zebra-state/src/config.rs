@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::{
+    fs::{remove_dir_all, DirEntry, ReadDir},
+    path::PathBuf,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -118,4 +121,65 @@ impl Default for Config {
             delete_old_database: true,
         }
     }
+}
+
+/// Check if there are old database folders and delete them from the filesystem.
+///
+/// Iterate over the files and directories in the databases folder and delete if:
+/// - The state directory exists.
+/// - The entry is a directory.
+/// - The directory name has a lenght of at least 2 characters.
+/// - The directory name has a prefix `v`.
+/// - The directory name without the prefix can be parsed as an unsigned number.
+/// - The parsed number is lower than the hardcoded `DATABASE_FORMAT_VERSION`.
+pub fn check_and_delete_old_databases(cache_dir: PathBuf) {
+    let cache_dir = cache_dir.join("state");
+    if let Some(read_dir) = read_dir(cache_dir.clone()) {
+        for entry in read_dir.flatten() {
+            if let Some(dir_name) = parse_dir_name(entry) {
+                if let Some(version_number) = parse_version_number(dir_name.clone()) {
+                    if version_number < crate::constants::DATABASE_FORMAT_VERSION {
+                        let delete_path = cache_dir.join(dir_name);
+                        if remove_dir_all(delete_path.clone()).is_ok() {
+                            info!("deleted outdated state directory {:?}", delete_path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn read_dir(cache_dir: PathBuf) -> Option<ReadDir> {
+    if cache_dir.exists() {
+        if let Ok(read_dir) = cache_dir.read_dir() {
+            return Some(read_dir);
+        }
+    }
+    None
+}
+
+fn parse_dir_name(entry: DirEntry) -> Option<String> {
+    if let Ok(file_type) = entry.file_type() {
+        if file_type.is_dir() {
+            if let Ok(dir_name) = entry.file_name().into_string() {
+                return Some(dir_name);
+            }
+        }
+    }
+    None
+}
+
+fn parse_version_number(dir_name: String) -> Option<u32> {
+    if dir_name.len() >= 2 && dir_name.starts_with('v') {
+        if let Some(potential_version_number) = dir_name.strip_prefix('v') {
+            return Some(
+                potential_version_number
+                    .to_string()
+                    .parse()
+                    .unwrap_or(u32::MAX),
+            );
+        }
+    }
+    None
 }
