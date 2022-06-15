@@ -10,7 +10,8 @@ use AttributePreference::*;
 ///
 /// Invalid peer attributes are represented as errors.
 ///
-/// Outbound peer connections are initiated in the sorted [order](std::ops::Ord) of this type.
+/// Outbound peer connections are initiated in the sorted [order](std::cmp::Ord)
+/// of this type.
 ///
 /// The derived order depends on the order of the variants in the enum.
 /// The variants are sorted in the order they are listed.
@@ -30,7 +31,8 @@ pub enum AttributePreference {
 
 /// A level of preference for a peer.
 ///
-/// Outbound peer connections are initiated in the sorted [order](std::ops::Ord) of this type.
+/// Outbound peer connections are initiated in the sorted [order](std::cmp::Ord)
+/// of this type.
 ///
 /// The derived order depends on the order of the fields in the struct.
 /// The first field determines the overall order, then later fields sort equal first field values.
@@ -84,6 +86,8 @@ impl PeerPreference {
 ///
 /// Since the addresses in the address book are unique, this check can be
 /// used to permanently reject entire [`MetaAddr`]s.
+///
+/// [`MetaAddr`]: crate::meta_addr::MetaAddr
 fn address_is_valid_for_outbound_connections(
     peer_addr: &SocketAddr,
     network: impl Into<Option<Network>>,

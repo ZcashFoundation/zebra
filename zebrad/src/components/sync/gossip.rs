@@ -1,4 +1,6 @@
 //! A task that gossips newly verified [`block::Hash`]es to peers.
+//!
+//! [`block::Hash`]: zebra_chain::block::Hash
 
 use thiserror::Error;
 use tokio::sync::watch;
@@ -37,6 +39,8 @@ pub enum BlockGossipError {
 ///
 /// In particular, if a lot of blocks are committed at the same time,
 /// gossips will be disabled or skipped until the state reaches the latest tip.
+///
+/// [`block::Hash`]: zebra_chain::block::Hash
 pub async fn gossip_best_tip_block_hashes<ZN>(
     mut sync_status: SyncStatus,
     mut chain_state: ChainTipChange,

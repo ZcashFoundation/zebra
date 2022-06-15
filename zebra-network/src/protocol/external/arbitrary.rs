@@ -29,7 +29,7 @@ impl InventoryHash {
             .boxed()
     }
 
-    /// Generate a proptest strategy for [`InventotryHash::Block`] hashes.
+    /// Generate a proptest strategy for [`InventoryHash::Block`] hashes.
     pub fn block_strategy() -> BoxedStrategy<Self> {
         (any::<[u8; 32]>())
             .prop_map(block::Hash)
@@ -126,14 +126,19 @@ impl Arbitrary for Version {
 
 /// Returns a random canonical Zebra `SocketAddr`.
 ///
-/// See [`canonical_ip_addr`](super::addr::canonical_ip_addr) for details.
+/// See [`canonical_ip_addr`] for details.
+///
+/// [`canonical_ip_addr`]: super::addr::canonical::canonical_ip_addr
 pub fn canonical_socket_addr_strategy() -> impl Strategy<Value = SocketAddr> {
     any::<SocketAddr>().prop_map(canonical_socket_addr)
 }
 
-/// Returns a random `SocketAddrV6` for use in `addr` (v1) Zcash network messages.
+/// Returns a random `SocketAddrV6` for use in `addr` (v1) Zcash network
+/// messages.
 ///
-/// See [`canonical_ip_addr`](super::addr::canonical_ip_addr) for details.
+/// See [`canonical_ip_addr`] for details.
+///
+/// [`canonical_ip_addr`]: super::addr::canonical::canonical_ip_addr
 pub fn addr_v1_ipv6_mapped_socket_addr_strategy() -> impl Strategy<Value = SocketAddrV6> {
     any::<SocketAddr>().prop_map(ipv6_mapped_socket_addr)
 }
