@@ -1,7 +1,7 @@
 //! Cached state configuration for Zebra.
 
 use std::{
-    fs::{remove_dir_all, DirEntry, ReadDir},
+    fs::{canonicalize, remove_dir_all, DirEntry, ReadDir},
     path::{Path, PathBuf},
 };
 
@@ -190,19 +190,38 @@ fn read_state_dir(state_dir: &Path) -> Option<ReadDir> {
 /// See [`check_and_delete_old_databases`] for details.
 ///
 /// If the directory was deleted, returns its path.
-fn check_and_delete_database(entry: &DirEntry) -> Option<PathBuf> {
+fn check_and_delete_database(config: &Config, entry: &DirEntry) -> Option<PathBuf> {
     let dir_name = parse_dir_name(entry)?;
     let version_number = parse_version_number(&dir_name)?;
 
-    if version_number < crate::constants::DATABASE_FORMAT_VERSION {
-        let delete_path = entry.path();
-
-        remove_dir_all(delete_path.clone())
-            .ok()
-            .map(|()| delete_path)
-    } else {
-        None
+    if version_number >= crate::constants::DATABASE_FORMAT_VERSION {
+        return None;
     }
+
+    let outdated_path = entry.path();
+
+    // # Correctness
+    //
+    // Check that the path we're about to delete is inside the cache directory.
+    // If the user has symlinked the outdated state directory to a non-cache directory,
+    // we don't want to delete it, because it might contain other files.
+    //
+    // We don't attempt to guard against malicious symlinks created by attackers
+    // (TOCTOU attacks). Zebra should not be run with elevated privileges.
+    let cache_path = canonicalize(&config.cache_dir).ok()?;
+    let outdated_path = canonicalize(outdated_path).ok()?;
+
+    if !outdated_path.starts_with(&cache_path) {
+        info!(
+            skipped_path = ?outdated_path,
+            ?cache_path,
+            "skipped cleanup of outdated state directory: state is outside cache directory",
+        );
+
+        return None;
+    }
+
+    remove_dir_all(&outdated_path).ok().map(|()| outdated_path)
 }
 
 /// Check if `entry` is a directory with a valid UTF-8 name.
