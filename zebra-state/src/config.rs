@@ -2,7 +2,7 @@
 
 use std::{
     fs::{remove_dir_all, DirEntry, ReadDir},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use serde::{Deserialize, Serialize};
@@ -158,19 +158,18 @@ fn delete_old_databases(config: Config) {
     }
 
     info!("checking for old database versions");
+
     let cache_dir = config.cache_dir.join("state");
-    if let Some(read_dir) = read_dir(cache_dir.clone()) {
-        for entry in read_dir.flatten() {
-            if let Some(dir_name) = parse_dir_name(entry) {
-                if let Some(version_number) = parse_version_number(dir_name.clone()) {
-                    if version_number < crate::constants::DATABASE_FORMAT_VERSION {
-                        let delete_path = cache_dir.join(dir_name);
-                        if remove_dir_all(delete_path.clone()).is_ok() {
-                            info!("deleted outdated state directory {:?}", delete_path);
-                        }
-                    }
-                }
-            }
+    let cache_dir_entries = match read_cache_dir(&cache_dir) {
+        Some(cache_dir_entries) => cache_dir_entries,
+        None => return,
+    };
+
+    for entry in cache_dir_entries.flatten() {
+        let deleted_state = check_and_delete_database(&entry);
+
+        if let Some(deleted_state) = deleted_state {
+            info!(?deleted_state, "deleted outdated state directory");
         }
     }
 }
@@ -178,7 +177,7 @@ fn delete_old_databases(config: Config) {
 /// Checks that `cache_dir` exists, and that it can be read.
 ///
 /// Returns `None` if any operation fails.
-fn read_dir(cache_dir: PathBuf) -> Option<ReadDir> {
+fn read_cache_dir(cache_dir: &Path) -> Option<ReadDir> {
     if cache_dir.exists() {
         if let Ok(read_dir) = cache_dir.read_dir() {
             return Some(read_dir);
@@ -187,10 +186,30 @@ fn read_dir(cache_dir: PathBuf) -> Option<ReadDir> {
     None
 }
 
+/// Check if `entry` is an old database directory, and delete it from the filesystem.
+/// See [`check_and_delete_old_databases`] for details.
+///
+/// If the directory was deleted, returns its path.
+fn check_and_delete_database(entry: &DirEntry) -> Option<PathBuf> {
+    let dir_name = parse_dir_name(entry)?;
+    let version_number = parse_version_number(&dir_name)?;
+
+    if version_number < crate::constants::DATABASE_FORMAT_VERSION {
+        let delete_path = entry.path();
+
+        remove_dir_all(delete_path.clone())
+            .ok()
+            .map(|()| delete_path)
+    } else {
+        None
+    }
+}
+
 /// Check if `entry` is a directory with a valid UTF-8 name.
+/// (State directory names are guaranteed to be UTF-8.)
 ///
 /// Returns `None` if any operation fails.
-fn parse_dir_name(entry: DirEntry) -> Option<String> {
+fn parse_dir_name(entry: &DirEntry) -> Option<String> {
     if let Ok(file_type) = entry.file_type() {
         if file_type.is_dir() {
             if let Ok(dir_name) = entry.file_name().into_string() {
@@ -204,7 +223,7 @@ fn parse_dir_name(entry: DirEntry) -> Option<String> {
 /// Parse the state version number from `dir_name`.
 ///
 /// Returns `None` if parsing fails, or the directory name is not in the expected format.
-fn parse_version_number(dir_name: String) -> Option<u32> {
+fn parse_version_number(dir_name: &str) -> Option<u32> {
     dir_name
         .strip_prefix('v')
         .and_then(|version| version.parse().ok())
