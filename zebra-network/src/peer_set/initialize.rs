@@ -42,9 +42,10 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// The result of an outbound peer connection attempt or inbound connection handshake.
+/// The result of an outbound peer connection attempt or inbound connection
+/// handshake.
 ///
-/// This result comes from the [`Handshaker`].
+/// This result comes from the `Handshaker`.
 type DiscoveredPeer = Result<(SocketAddr, peer::Client), BoxError>;
 
 /// Initialize a peer set, using a network `config`, `inbound_service`,
@@ -65,7 +66,7 @@ type DiscoveredPeer = Result<(SocketAddr, peer::Client), BoxError>;
 /// cause the peer set to shrink when the inbound service is unable to keep up
 /// with the volume of inbound requests.
 ///
-/// Use [`NoChainTip`] to explicitly provide no chain tip receiver.
+/// Use [`NoChainTip`][1] to explicitly provide no chain tip receiver.
 ///
 /// In addition to returning a service for outbound requests, this method
 /// returns a shared [`AddressBook`] updated with last-seen timestamps for
@@ -77,6 +78,8 @@ type DiscoveredPeer = Result<(SocketAddr, peer::Client), BoxError>;
 ///
 /// If `config.config.peerset_initial_target_size` is zero.
 /// (zebra-network expects to be able to connect to at least one peer.)
+///
+/// [1]: zebra_chain::chain_tip::NoChainTip
 pub async fn init<S, C>(
     config: Config,
     inbound_service: S,

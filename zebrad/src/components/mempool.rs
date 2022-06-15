@@ -111,7 +111,7 @@ impl Drop for ActiveState {
 }
 
 impl ActiveState {
-    /// Returns the current state, leaving a [`Disabled`] in its place.
+    /// Returns the current state, leaving [`Self::Disabled`] in its place.
     fn take(&mut self) -> Self {
         std::mem::take(self)
     }

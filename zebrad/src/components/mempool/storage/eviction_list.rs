@@ -17,7 +17,9 @@ pub struct EvictionList {
     // The maximum size of `unique_entries`.
     max_size: usize,
     /// The mempool transaction eviction age limit.
-    /// Same as [`Config::eviction_memory_time`].
+    /// Same as [`Config::eviction_memory_time`][1].
+    ///
+    /// [1]: super::super::Config::eviction_memory_time
     eviction_memory_time: Duration,
 }
 

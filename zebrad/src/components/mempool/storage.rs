@@ -341,7 +341,8 @@ impl Storage {
     /// Returns the set of [`UnminedTx`]es with matching [`transaction::Hash`]es
     /// in the mempool.
     ///
-    /// This matches transactions with the same effects, regardless of [`AuthDigest`].
+    /// This matches transactions with the same effects, regardless of
+    /// [`transaction::AuthDigest`].
     pub fn transactions_same_effects(
         &self,
         tx_ids: HashSet<Hash>,
