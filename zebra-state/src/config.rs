@@ -127,17 +127,16 @@ impl Default for Config {
 ///
 /// Iterate over the files and directories in the databases folder and delete if:
 /// - The state directory exists.
-/// - The entry is a directory.
-/// - The directory name has a length of at least 2 characters.
-/// - The directory name has a prefix `v`.
-/// - The directory name without the prefix can be parsed as an unsigned number.
+/// - It has one or more sub-directories.
+/// - The sub-directory name has a prefix `v`.
+/// - The sub-directory name without the prefix can be parsed as a [`u32`].
 /// - The parsed number is lower than the hardcoded `DATABASE_FORMAT_VERSION`.
 pub async fn check_and_delete_old_databases(config: Config) {
     if config.ephemeral || !config.delete_old_database {
         return;
     }
 
-    info!("checking old database versions");
+    info!("checking for old database versions");
     let cache_dir = config.cache_dir.join("state");
     if let Some(read_dir) = read_dir(cache_dir.clone()) {
         for entry in read_dir.flatten() {
@@ -155,6 +154,9 @@ pub async fn check_and_delete_old_databases(config: Config) {
     }
 }
 
+/// Checks that `cache_dir` exists, and that it can be read.
+///
+/// Returns `None` if any operation fails.
 fn read_dir(cache_dir: PathBuf) -> Option<ReadDir> {
     if cache_dir.exists() {
         if let Ok(read_dir) = cache_dir.read_dir() {
@@ -164,6 +166,9 @@ fn read_dir(cache_dir: PathBuf) -> Option<ReadDir> {
     None
 }
 
+/// Check if `entry` is a directory with a valid UTF-8 name.
+///
+/// Returns `None` if any operation fails.
 fn parse_dir_name(entry: DirEntry) -> Option<String> {
     if let Ok(file_type) = entry.file_type() {
         if file_type.is_dir() {
@@ -175,6 +180,9 @@ fn parse_dir_name(entry: DirEntry) -> Option<String> {
     None
 }
 
+/// Parse the state version number from `dir_name`.
+///
+/// Returns `None` if parsing fails, or the directory name is not in the expected format.
 fn parse_version_number(dir_name: String) -> Option<u32> {
     if dir_name.len() >= 2 && dir_name.starts_with('v') {
         if let Some(potential_version_number) = dir_name.strip_prefix('v') {
