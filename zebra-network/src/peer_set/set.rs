@@ -55,8 +55,7 @@
 //! therefore automatically increased when the block height reaches a network upgrade's activation
 //! height. The helper type is then used to:
 //!
-//! - cancel handshakes to outdated peers, in
-//!   [`handshake::negotiate_version`][crate::peer::handshake::negotiate_version]
+//! - cancel handshakes to outdated peers, in `handshake::negotiate_version`
 //! - cancel requests to and disconnect from peers that have become outdated, in
 //!   [`PeerSet::push_unready`]
 //! - disconnect from peers that have just responded and became outdated, in
@@ -67,9 +66,9 @@
 //! ## Network Coalescence
 //!
 //! [ZIP-201] also specifies how Zcashd behaves [leading up to a activation
-//! height][network-coalescence]. Since Zcashd limits the number of connections to at most eight
-//! peers, it will gradually migrate its connections to up-to-date peers as it approaches the
-//! activation height.
+//! height][1]. Since Zcashd limits the number of connections to at most eight
+//! peers, it will gradually migrate its connections to up-to-date peers as it
+//! approaches the activation height.
 //!
 //! The motivation for this behavior is to avoid an abrupt partitioning the network, which can lead
 //! to isolated peers and increases the chance of an eclipse attack on some peers of the network.
@@ -80,14 +79,18 @@
 //! more costly to execute, and the probability of an abrupt network partition that isolates peers
 //! is lower.
 //!
-//! Even if a Zebra node is manually configured to connect to a smaller number of peers, the
-//! [`AddressBook`] is configured to hold a large number of peer addresses
-//! ([`MAX_ADDRS_IN_ADDRESS_BOOK`]). Since the address book prioritizes addresses it trusts (like
-//! those that it has successfully connected to before), the node should be able to recover and
-//! rejoin the network by itself, as long as the address book is populated with enough entries.
+//! Even if a Zebra node is manually configured to connect to a smaller number
+//! of peers, the [`AddressBook`][2] is configured to hold a large number of
+//! peer addresses ([`MAX_ADDRS_IN_ADDRESS_BOOK`][3]). Since the address book
+//! prioritizes addresses it trusts (like those that it has successfully
+//! connected to before), the node should be able to recover and rejoin the
+//! network by itself, as long as the address book is populated with enough
+//! entries.
 //!
+//! [1]: https://zips.z.cash/zip-0201#network-coalescence
+//! [2]: crate::AddressBook
+//! [3]: crate::constants::MAX_ADDRS_IN_ADDRESS_BOOK
 //! [ZIP-201]: https://zips.z.cash/zip-0201
-//! [network-coalescence]: https://zips.z.cash/zip-0201#network-coalescence
 
 use std::{
     collections::{HashMap, HashSet},
@@ -142,9 +145,12 @@ mod tests;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MorePeers;
 
-/// A signal sent by the [`PeerSet`] to cancel a [`Client`]'s current request or response.
+/// A signal sent by the [`PeerSet`] to cancel a [`Client`][1]'s current request
+/// or response.
 ///
-/// When it receives this signal, the [`Client`] stops processing and exits.
+/// When it receives this signal, the [`Client`][1] stops processing and exits.
+///
+/// [1]: crate::peer::Client
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CancelClientWork;
 
