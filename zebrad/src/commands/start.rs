@@ -620,27 +620,14 @@ fn check_and_delete_old_databases(cache_dir: PathBuf) -> Result<(), Report> {
     let cache_dir = cache_dir.join("state");
     if cache_dir.exists() {
         for entry in (cache_dir.read_dir()?).flatten() {
-            if entry.file_type()?.is_dir() {
-                let dir_name = entry
-                    .file_name()
-                    .into_string()
-                    .expect("conversion from osstring to string should work.");
-                if dir_name.len() >= 2 && dir_name.starts_with('v') {
-                    let potential_version_number_string = dir_name
-                        .strip_prefix('v')
-                        .expect("should not panic as we know there is a `v` prefix.")
-                        .to_string();
-                    let version_number: u32 =
-                        potential_version_number_string.parse().unwrap_or(u32::MAX);
+            if let Some(dir_name) = parse_dir_name(entry) {
+                if let Some(version_number) = parse_version_number(dir_name.clone()) {
                     if version_number < zebra_state::constants::DATABASE_FORMAT_VERSION {
                         let delete_path = cache_dir.join(dir_name);
-                        info!(
-                            "deleting {}",
-                            delete_path
-                                .to_str()
-                                .expect("path is valid, should not panic")
-                        );
-                        remove_dir_all(delete_path)?;
+                        info!("deleting outdated state directory {:?}", delete_path,);
+                        if remove_dir_all(delete_path).is_err() {
+                            continue;
+                        }
                     }
                 }
             }
@@ -648,4 +635,29 @@ fn check_and_delete_old_databases(cache_dir: PathBuf) -> Result<(), Report> {
     }
 
     Ok(())
+}
+
+fn parse_dir_name(entry: std::fs::DirEntry) -> Option<String> {
+    if let Ok(file_type) = entry.file_type() {
+        if file_type.is_dir() {
+            if let Ok(dir_name) = entry.file_name().into_string() {
+                return Some(dir_name);
+            }
+        }
+    }
+    None
+}
+
+fn parse_version_number(dir_name: String) -> Option<u32> {
+    if dir_name.len() >= 2 && dir_name.starts_with('v') {
+        if let Some(potential_version_number) = dir_name.strip_prefix('v') {
+            return Some(
+                potential_version_number
+                    .to_string()
+                    .parse()
+                    .unwrap_or(u32::MAX),
+            );
+        }
+    }
+    None
 }
