@@ -1,9 +1,13 @@
+//! Cached state configuration for Zebra.
+
 use std::{
     fs::{remove_dir_all, DirEntry, ReadDir},
     path::PathBuf,
 };
 
 use serde::{Deserialize, Serialize};
+use tokio::task::{spawn_blocking, JoinHandle};
+use tracing::Span;
 
 use zebra_chain::parameters::Network;
 
@@ -123,15 +127,32 @@ impl Default for Config {
     }
 }
 
-/// Check if there are old database folders and delete them from the filesystem.
+// Cleaning up old database versions
+
+/// Spawns a task that checks if there are old database folders,
+/// and deletes them from the filesystem.
 ///
-/// Iterate over the files and directories in the databases folder and delete if:
+/// Iterates over the files and directories in the databases folder and deletes them if:
 /// - The state directory exists.
 /// - It has one or more sub-directories.
 /// - The sub-directory name has a prefix `v`.
 /// - The sub-directory name without the prefix can be parsed as a [`u32`].
 /// - The parsed number is lower than the hardcoded `DATABASE_FORMAT_VERSION`.
-pub async fn check_and_delete_old_databases(config: Config) {
+pub fn check_and_delete_old_databases(config: Config) -> JoinHandle<()> {
+    let current_span = Span::current();
+
+    spawn_blocking(move || {
+        current_span.in_scope(|| {
+            delete_old_databases(config);
+            info!("finished old database version cleanup task");
+        })
+    })
+}
+
+/// Check if there are old database folders and delete them from the filesystem.
+///
+/// See [`check_and_delete_old_databases`] for details.
+fn delete_old_databases(config: Config) {
     if config.ephemeral || !config.delete_old_database {
         return;
     }
