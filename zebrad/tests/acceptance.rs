@@ -1358,8 +1358,11 @@ fn zebra_tracing_conflict() -> Result<()> {
 /// Start 2 zebrad nodes using the same RPC listener port, but different
 /// state directories and Zcash listener ports. The first node should get
 /// exclusive use of the port. The second node will panic.
+///
+/// This test is sometimes unreliable on Windows, and hangs on macOS.
+/// We believe this is a CI infrastructure issue, not a platform-specific issue.
 #[test]
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn zebra_rpc_conflict() -> Result<()> {
     zebra_test::init();
 
