@@ -128,24 +128,25 @@ impl Default for Config {
 /// Iterate over the files and directories in the databases folder and delete if:
 /// - The state directory exists.
 /// - The entry is a directory.
-/// - The directory name has a lenght of at least 2 characters.
+/// - The directory name has a length of at least 2 characters.
 /// - The directory name has a prefix `v`.
 /// - The directory name without the prefix can be parsed as an unsigned number.
 /// - The parsed number is lower than the hardcoded `DATABASE_FORMAT_VERSION`.
 pub async fn check_and_delete_old_databases(config: Config) {
-    if !config.ephemeral && config.delete_old_database {
-        info!("checking old database versions");
+    if config.ephemeral || !config.delete_old_database {
+        return;
+    }
 
-        let cache_dir = config.cache_dir.join("state");
-        if let Some(read_dir) = read_dir(cache_dir.clone()) {
-            for entry in read_dir.flatten() {
-                if let Some(dir_name) = parse_dir_name(entry) {
-                    if let Some(version_number) = parse_version_number(dir_name.clone()) {
-                        if version_number < crate::constants::DATABASE_FORMAT_VERSION {
-                            let delete_path = cache_dir.join(dir_name);
-                            if remove_dir_all(delete_path.clone()).is_ok() {
-                                info!("deleted outdated state directory {:?}", delete_path);
-                            }
+    info!("checking old database versions");
+    let cache_dir = config.cache_dir.join("state");
+    if let Some(read_dir) = read_dir(cache_dir.clone()) {
+        for entry in read_dir.flatten() {
+            if let Some(dir_name) = parse_dir_name(entry) {
+                if let Some(version_number) = parse_version_number(dir_name.clone()) {
+                    if version_number < crate::constants::DATABASE_FORMAT_VERSION {
+                        let delete_path = cache_dir.join(dir_name);
+                        if remove_dir_all(delete_path.clone()).is_ok() {
+                            info!("deleted outdated state directory {:?}", delete_path);
                         }
                     }
                 }
