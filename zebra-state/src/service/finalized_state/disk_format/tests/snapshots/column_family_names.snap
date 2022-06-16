@@ -1,10 +1,11 @@
 ---
 source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
+assertion_line: 72
 expression: cf_names
 ---
 [
   "balance_by_transparent_addr",
-  "block_by_height",
+  "block_header_by_height",
   "default",
   "hash_by_height",
   "hash_by_tx_loc",

@@ -82,7 +82,7 @@ impl ZebraDb {
     // TODO: move this method to the start of the section
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         // Blocks
-        let block_header_by_height = self.db.cf_handle("block_by_height").unwrap();
+        let block_header_by_height = self.db.cf_handle("block_header_by_height").unwrap();
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
 
         let height =
@@ -412,7 +412,7 @@ impl DiskWriteBatch {
         finalized: &FinalizedBlock,
     ) -> Result<(), BoxError> {
         // Blocks
-        let block_header_by_height = db.cf_handle("block_by_height").unwrap();
+        let block_header_by_height = db.cf_handle("block_header_by_height").unwrap();
         let hash_by_height = db.cf_handle("hash_by_height").unwrap();
         let height_by_hash = db.cf_handle("height_by_hash").unwrap();
 

@@ -1107,8 +1107,9 @@ Implemented by querying:
   block that chain's `blocks` (to get the block containing the transaction
   data)
 - (finalized) the `tx_by_hash` tree (to get the block that contains the
-  transaction) and then `block_by_height` tree (to get the block containing
-  the transaction data), if the transaction is not in any non-finalized chain
+  transaction) and then `block_header_by_height` tree (to get the block
+  containing the transaction data), if the transaction is not in any
+  non-finalized chain
 
 ### `Request::Block(block::Hash)`
 [request-block]: #request-block
@@ -1125,8 +1126,9 @@ Implemented by querying:
 
 - (non-finalized) the `height_by_hash` of each chain starting with the best
   chain, then find block that chain's `blocks` (to get the block data)
-- (finalized) the `height_by_hash` tree (to get the block height) and then
-    the `block_by_height` tree (to get the block data), if the block is not in any non-finalized chain
+- (finalized) the `height_by_hash` tree (to get the block height) and then the
+  `block_header_by_height` tree (to get the block data), if the block is not in
+  any non-finalized chain
 
 ### `Request::AwaitSpendableUtxo { outpoint: OutPoint, spend_height: Height, spend_restriction: SpendRestriction }`
 
