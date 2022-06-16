@@ -41,7 +41,7 @@ pub fn test_cmd(command_path: &str, tempdir: &Path) -> Result<Command> {
 
 // TODO: split these extensions into their own module
 
-/// Wrappers for `Command` methods to integrate with [`zebra_test`].
+/// Wrappers for `Command` methods to integrate with [`zebra_test`](crate).
 pub trait CommandExt {
     /// wrapper for `status` fn on `Command` that constructs informative error
     /// reports
@@ -637,7 +637,7 @@ impl<T> TestChild<T> {
     /// if a line matches.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
-    /// See `expect_line_matching` for details.
+    /// See [`Self::expect_line_matching_regex_set`] for details.
     #[instrument(skip(self))]
     pub fn expect_stdout_line_matches<R>(&mut self, success_regex: R) -> Result<&mut Self>
     where
@@ -663,7 +663,7 @@ impl<T> TestChild<T> {
     /// if a line matches.
     ///
     /// Kills the child on error, or after the configured timeout has elapsed.
-    /// See `expect_line_matching` for details.
+    /// See [`Self::expect_line_matching_regex_set`] for details.
     #[instrument(skip(self))]
     pub fn expect_stderr_line_matches<R>(&mut self, success_regex: R) -> Result<&mut Self>
     where
@@ -687,8 +687,8 @@ impl<T> TestChild<T> {
 
     /// Checks each line in `lines` against a regex set, and returns Ok if a line matches.
     ///
-    /// [`TestChild::expect_line_matching`] wrapper for strings, [`Regex`]es,
-    /// and [`RegexSet`]s.
+    /// [`Self::expect_line_matching_regexes`] wrapper for strings,
+    /// [`Regex`](regex::Regex)es, and [`RegexSet`]s.
     pub fn expect_line_matching_regex_set<L, R>(
         &mut self,
         lines: &mut L,
@@ -708,7 +708,7 @@ impl<T> TestChild<T> {
 
     /// Checks each line in `lines` against a regex set, and returns Ok if a line matches.
     ///
-    /// [`TestChild::expect_line_matching`] wrapper for regular expression iterators.
+    /// [`Self::expect_line_matching_regexes`] wrapper for regular expression iterators.
     pub fn expect_line_matching_regex_iter<L, I>(
         &mut self,
         lines: &mut L,

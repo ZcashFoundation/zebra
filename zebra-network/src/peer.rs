@@ -1,4 +1,4 @@
-//! Peer handling.
+//! Peer connection handling.
 
 mod client;
 mod connection;
@@ -7,6 +7,7 @@ mod error;
 mod handshake;
 mod load_tracked_client;
 mod minimum_peer_version;
+mod priority;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use client::tests::ClientTestHarness;
@@ -27,3 +28,4 @@ pub use error::{ErrorSlot, HandshakeError, PeerError, SharedPeerError};
 pub use handshake::{ConnectedAddr, Handshake, HandshakeRequest};
 pub use load_tracked_client::LoadTrackedClient;
 pub use minimum_peer_version::MinimumPeerVersion;
+pub use priority::{AttributePreference, PeerPreference};

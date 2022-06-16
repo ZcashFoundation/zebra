@@ -5,7 +5,10 @@ use std::time::Instant;
 use chrono::Utc;
 use tracing::Span;
 
-use zebra_chain::serialization::{DateTime32, Duration32};
+use zebra_chain::{
+    parameters::Network::*,
+    serialization::{DateTime32, Duration32},
+};
 
 use crate::{
     constants::MAX_ADDRS_IN_ADDRESS_BOOK, meta_addr::MetaAddr,
@@ -15,7 +18,7 @@ use crate::{
 /// Make sure an empty address book is actually empty.
 #[test]
 fn address_book_empty() {
-    let address_book = AddressBook::new("0.0.0.0:0".parse().unwrap(), Span::current());
+    let address_book = AddressBook::new("0.0.0.0:0".parse().unwrap(), Mainnet, Span::current());
 
     assert_eq!(
         address_book
@@ -44,6 +47,7 @@ fn address_book_peer_order() {
     let addrs = vec![meta_addr1, meta_addr2];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
+        Mainnet,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,
@@ -59,6 +63,7 @@ fn address_book_peer_order() {
     let addrs = vec![meta_addr2, meta_addr1];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
+        Mainnet,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,
@@ -77,6 +82,7 @@ fn address_book_peer_order() {
     let addrs = vec![meta_addr1, meta_addr2];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
+        Mainnet,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,
@@ -92,6 +98,7 @@ fn address_book_peer_order() {
     let addrs = vec![meta_addr2, meta_addr1];
     let address_book = AddressBook::new_with_addrs(
         "0.0.0.0:0".parse().unwrap(),
+        Mainnet,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,

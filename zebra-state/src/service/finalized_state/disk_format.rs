@@ -27,12 +27,15 @@ pub trait IntoDisk {
 
     /// Converts the current type into serialized raw bytes.
     ///
-    /// Used to convert keys to bytes in [`ReadDisk`],
-    /// and keys and values to bytes in [`WriteDisk`].
+    /// Used to convert keys to bytes in [`ReadDisk`][1],
+    /// and keys and values to bytes in [`WriteDisk`][2].
     ///
     /// # Panics
     ///
     /// - if the input data doesn't serialize correctly
+    ///
+    /// [1]: super::disk_db::ReadDisk
+    /// [2]: super::disk_db::WriteDisk
     fn as_bytes(&self) -> Self::Bytes;
 }
 
@@ -40,11 +43,13 @@ pub trait IntoDisk {
 pub trait FromDisk: Sized {
     /// Converts raw disk bytes back into the deserialized type.
     ///
-    /// Used to convert keys and values from bytes in [`ReadDisk`].
+    /// Used to convert keys and values from bytes in [`ReadDisk`][1].
     ///
     /// # Panics
     ///
     /// - if the input data doesn't deserialize correctly
+    ///
+    /// [1]: super::disk_db::ReadDisk
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self;
 }
 
@@ -68,7 +73,7 @@ where
     type Bytes = T::Bytes;
 
     fn as_bytes(&self) -> Self::Bytes {
-        T::as_bytes(&*self)
+        T::as_bytes(self)
     }
 }
 

@@ -307,7 +307,7 @@ impl PeerSetGuard {
         let local_listener = "127.0.0.1:1000"
             .parse()
             .expect("Invalid local listener address");
-        let address_book = AddressBook::new(local_listener, Span::none());
+        let address_book = AddressBook::new(local_listener, Network::Mainnet, Span::none());
 
         Arc::new(std::sync::Mutex::new(address_book))
     }

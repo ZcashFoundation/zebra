@@ -4,6 +4,23 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## Next Release: [Zebra 1.0.0-beta.12](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.12) - 2022-06-??
+
+This release contains some breaking changes which improve config usability, and increase compilation speed.
+
+### Breaking Changes
+
+#### Compile-Time Features
+
+- Most of Zebra's [tracing](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/tracing.md) and [metrics](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/metrics.md) features are off by default (#4539)
+- The `enable-sentry` feature has been renamed to `sentry` (#4623)
+
+#### Config
+
+- Times in `zebrad.config` change from seconds/nanoseconds to a [human-readable format](https://docs.rs/humantime/latest/humantime/) (#4587)
+
+TODO: insert changelog here
+
 ## [Zebra 1.0.0-beta.11](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.11) - 2022-06-03
 
 This release cleans up a lot of tech dept accumulated in the previous

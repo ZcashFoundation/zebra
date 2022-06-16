@@ -3,7 +3,11 @@
 // Portions of this submodule were adapted from tower-balance,
 // which is (c) 2019 Tower Contributors (MIT licensed).
 
-use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    net::SocketAddr,
+    sync::Arc,
+};
 
 use futures::{
     future::{self, FutureExt},
@@ -21,7 +25,6 @@ use tokio_stream::wrappers::IntervalStream;
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, util::BoxService, Service, ServiceExt,
 };
-use tracing::Span;
 use tracing_futures::Instrument;
 
 use zebra_chain::{chain_tip::ChainTip, parameters::Network};
@@ -30,7 +33,7 @@ use crate::{
     address_book_updater::AddressBookUpdater,
     constants,
     meta_addr::{MetaAddr, MetaAddrChange},
-    peer::{self, HandshakeRequest, MinimumPeerVersion, OutboundConnectorRequest},
+    peer::{self, HandshakeRequest, MinimumPeerVersion, OutboundConnectorRequest, PeerPreference},
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
     AddressBook, BoxError, Config, Request, Response,
 };
@@ -38,9 +41,10 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// The result of an outbound peer connection attempt or inbound connection handshake.
+/// The result of an outbound peer connection attempt or inbound connection
+/// handshake.
 ///
-/// This result comes from the [`Handshaker`].
+/// This result comes from the `Handshaker`.
 type DiscoveredPeer = Result<(SocketAddr, peer::Client), BoxError>;
 
 /// Initialize a peer set, using a network `config`, `inbound_service`,
@@ -61,7 +65,7 @@ type DiscoveredPeer = Result<(SocketAddr, peer::Client), BoxError>;
 /// cause the peer set to shrink when the inbound service is unable to keep up
 /// with the volume of inbound requests.
 ///
-/// Use [`NoChainTip`] to explicitly provide no chain tip receiver.
+/// Use [`NoChainTip`][1] to explicitly provide no chain tip receiver.
 ///
 /// In addition to returning a service for outbound requests, this method
 /// returns a shared [`AddressBook`] updated with last-seen timestamps for
@@ -73,6 +77,8 @@ type DiscoveredPeer = Result<(SocketAddr, peer::Client), BoxError>;
 ///
 /// If `config.config.peerset_initial_target_size` is zero.
 /// (zebra-network expects to be able to connect to at least one peer.)
+///
+/// [1]: zebra_chain::chain_tip::NoChainTip
 pub async fn init<S, C>(
     config: Config,
     inbound_service: S,
@@ -172,7 +178,7 @@ where
         listen_handshaker,
         peerset_tx.clone(),
     );
-    let listen_guard = tokio::spawn(listen_fut.instrument(Span::current()));
+    let listen_guard = tokio::spawn(listen_fut.in_current_span());
 
     // 2. Initial peers, specified in the config.
     let initial_peers_fut = add_initial_peers(
@@ -181,7 +187,7 @@ where
         peerset_tx.clone(),
         address_book_updater,
     );
-    let initial_peers_join = tokio::spawn(initial_peers_fut.instrument(Span::current()));
+    let initial_peers_join = tokio::spawn(initial_peers_fut.in_current_span());
 
     // 3. Outgoing peers we connect to in response to load.
     let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
@@ -197,10 +203,6 @@ where
     // because zcashd rate-limits `addr`/`addrv2` messages per connection,
     // and if we only have one initial peer,
     // we need to ensure that its `Response::Addr` is used by the crawler.
-    //
-    // TODO: cache the most recent `Response::Addr` returned by each peer.
-    //       If the request times out, return the cached response to the caller.
-
     info!(
         ?active_initial_peer_count,
         "sending initial request for peers"
@@ -225,7 +227,7 @@ where
         peerset_tx,
         active_outbound_connections,
     );
-    let crawl_guard = tokio::spawn(crawl_fut.instrument(Span::current()));
+    let crawl_guard = tokio::spawn(crawl_fut.in_current_span());
 
     handle_tx
         .send(vec![listen_guard, crawl_guard, address_book_updater_guard])
@@ -383,36 +385,62 @@ async fn limit_initial_peers(
     config: &Config,
     address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> HashSet<SocketAddr> {
-    let all_peers = config.initial_peers().await;
-    let peers_count = all_peers.len();
+    let all_peers: HashSet<SocketAddr> = config.initial_peers().await;
+    let mut preferred_peers: BTreeMap<PeerPreference, Vec<SocketAddr>> = BTreeMap::new();
 
-    // # Correctness
-    //
-    // We can't exit early if we only have a few peers,
-    // because we still need to shuffle the connection order.
-
-    if all_peers.len() > config.peerset_initial_target_size {
+    let all_peers_count = all_peers.len();
+    if all_peers_count > config.peerset_initial_target_size {
         info!(
             "limiting the initial peers list from {} to {}",
-            peers_count, config.peerset_initial_target_size
+            all_peers_count, config.peerset_initial_target_size,
         );
     }
 
-    // Split out the `initial_peers` that will be shuffled and returned.
-    let mut initial_peers: Vec<SocketAddr> = all_peers.iter().cloned().collect();
-    let (initial_peers, _unused_peers) =
-        initial_peers.partial_shuffle(&mut rand::thread_rng(), config.peerset_initial_target_size);
-
-    // Send every initial peer to the address book.
+    // Filter out invalid initial peers, and prioritise valid peers for initial connections.
     // (This treats initial peers the same way we treat gossiped peers.)
-    for peer in all_peers {
-        let peer_addr = MetaAddr::new_initial_peer(peer);
+    for peer_addr in all_peers {
+        let preference = PeerPreference::new(&peer_addr, config.network);
+
+        match preference {
+            Ok(preference) => preferred_peers
+                .entry(preference)
+                .or_default()
+                .push(peer_addr),
+            Err(error) => warn!(
+                ?peer_addr,
+                ?error,
+                "invalid initial peer from DNS seeder or configured IP address",
+            ),
+        }
+    }
+
+    // Send every initial peer to the address book, in preferred order.
+    // (This treats initial peers the same way we treat gossiped peers.)
+    for peer in preferred_peers.values().flatten() {
+        let peer_addr = MetaAddr::new_initial_peer(*peer);
         // `send` only waits when the channel is full.
         // The address book updater runs in its own thread, so we will only wait for a short time.
         let _ = address_book_updater.send(peer_addr).await;
     }
 
-    initial_peers.iter().copied().collect()
+    // Split out the `initial_peers` that will be shuffled and returned,
+    // choosing preferred peers first.
+    let mut initial_peers: HashSet<SocketAddr> = HashSet::new();
+    for better_peers in preferred_peers.values() {
+        let mut better_peers = better_peers.clone();
+        let (chosen_peers, _unused_peers) = better_peers.partial_shuffle(
+            &mut rand::thread_rng(),
+            config.peerset_initial_target_size - initial_peers.len(),
+        );
+
+        initial_peers.extend(chosen_peers.iter());
+
+        if initial_peers.len() >= config.peerset_initial_target_size {
+            break;
+        }
+    }
+
+    initial_peers
 }
 
 /// Open a peer connection listener on `config.listen_addr`,
@@ -617,15 +645,20 @@ enum CrawlerAction {
 ///
 /// Uses `active_outbound_connections` to limit the number of active outbound connections
 /// across both the initial peers and crawler. The limit is based on `config`.
-#[instrument(skip(
-    config,
-    demand_tx,
-    demand_rx,
-    candidates,
-    outbound_connector,
-    peerset_tx,
-    active_outbound_connections,
-))]
+#[instrument(
+    skip(
+        config,
+        demand_tx,
+        demand_rx,
+        candidates,
+        outbound_connector,
+        peerset_tx,
+        active_outbound_connections,
+    ),
+    fields(
+        new_peer_interval = ?config.crawl_new_peer_interval,
+    )
+)]
 async fn crawl_and_dial<C, S>(
     config: Config,
     mut demand_tx: futures::channel::mpsc::Sender<MorePeers>,
@@ -732,7 +765,8 @@ where
                         panic!("panic during handshaking with {:?}: {:?} ", candidate, e);
                     }
                 })
-                .instrument(Span::current());
+                .in_current_span();
+
                 handshakes.push(Box::pin(hs_join));
             }
             DemandCrawl => {
