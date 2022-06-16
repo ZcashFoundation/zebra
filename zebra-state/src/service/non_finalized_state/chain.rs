@@ -48,7 +48,7 @@ pub struct Chain {
     pub height_by_hash: HashMap<block::Hash, block::Height>,
 
     /// An index of [`TransactionLocation`]s for each transaction hash in `blocks`.
-    pub tx_by_hash: HashMap<transaction::Hash, TransactionLocation>,
+    pub tx_loc_by_hash: HashMap<transaction::Hash, TransactionLocation>,
 
     /// The [`transparent::Utxo`]s created by `blocks`.
     ///
@@ -135,7 +135,7 @@ impl Chain {
             network,
             blocks: Default::default(),
             height_by_hash: Default::default(),
-            tx_by_hash: Default::default(),
+            tx_loc_by_hash: Default::default(),
             created_utxos: Default::default(),
             sprout_note_commitment_tree,
             sapling_note_commitment_tree,
@@ -177,7 +177,7 @@ impl Chain {
         // blocks, heights, hashes
         self.blocks == other.blocks &&
             self.height_by_hash == other.height_by_hash &&
-            self.tx_by_hash == other.tx_by_hash &&
+            self.tx_loc_by_hash == other.tx_loc_by_hash &&
 
             // transparent UTXOs
             self.created_utxos == other.created_utxos &&
@@ -354,7 +354,7 @@ impl Chain {
         &self,
         hash: transaction::Hash,
     ) -> Option<(&Arc<Transaction>, block::Height)> {
-        self.tx_by_hash.get(&hash).map(|tx_loc| {
+        self.tx_loc_by_hash.get(&hash).map(|tx_loc| {
             (
                 &self.blocks[&tx_loc.height].block.transactions[tx_loc.index.as_usize()],
                 tx_loc.height,
@@ -624,7 +624,9 @@ impl Chain {
         query_height_range: RangeInclusive<Height>,
     ) -> BTreeMap<TransactionLocation, transaction::Hash> {
         self.partial_transparent_indexes(addresses)
-            .flat_map(|transfers| transfers.tx_ids(&self.tx_by_hash, query_height_range.clone()))
+            .flat_map(|transfers| {
+                transfers.tx_ids(&self.tx_loc_by_hash, query_height_range.clone())
+            })
             .collect()
     }
 
@@ -645,7 +647,7 @@ impl Chain {
             network: self.network,
             blocks: self.blocks.clone(),
             height_by_hash: self.height_by_hash.clone(),
-            tx_by_hash: self.tx_by_hash.clone(),
+            tx_loc_by_hash: self.tx_loc_by_hash.clone(),
             created_utxos: self.created_utxos.clone(),
             spent_utxos: self.spent_utxos.clone(),
             sprout_note_commitment_tree,
@@ -782,10 +784,10 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
                 ),
             };
 
-            // add key `transaction.hash` and value `(height, tx_index)` to `tx_by_hash`
+            // add key `transaction.hash` and value `(height, tx_index)` to `tx_loc_by_hash`
             let transaction_location = TransactionLocation::from_usize(height, transaction_index);
             let prior_pair = self
-                .tx_by_hash
+                .tx_loc_by_hash
                 .insert(transaction_hash, transaction_location);
             assert_eq!(
                 prior_pair, None,
@@ -925,9 +927,9 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             // reset the utxos this consumed
             self.revert_chain_with(&(inputs, transaction_hash, spent_outputs), position);
 
-            // remove `transaction.hash` from `tx_by_hash`
+            // remove `transaction.hash` from `tx_loc_by_hash`
             assert!(
-                self.tx_by_hash.remove(transaction_hash).is_some(),
+                self.tx_loc_by_hash.remove(transaction_hash).is_some(),
                 "transactions must be present if block was added to chain"
             );
 

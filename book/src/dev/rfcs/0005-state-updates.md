@@ -272,7 +272,7 @@ The `Chain` type is defined by the following struct and API:
 struct Chain {
     blocks: BTreeMap<block::Height, Arc<Block>>,
     height_by_hash: HashMap<block::Hash, block::Height>,
-    tx_by_hash: HashMap<transaction::Hash, (block::Height, usize)>,
+    tx_loc_by_hash: HashMap<transaction::Hash, TransactionLocation>,
 
     created_utxos: HashSet<transparent::OutPoint>,
     spent_utxos: HashSet<transparent::OutPoint>,
@@ -293,7 +293,7 @@ Push a block into a chain as the new tip
     - Add the block's hash to `height_by_hash`
     - Add work to `self.partial_cumulative_work`
     - For each `transaction` in `block`
-      - Add key: `transaction.hash` and value: `(height, tx_index)` to `tx_by_hash`
+      - Add key: `transaction.hash` and value: `(height, tx_index)` to `tx_loc_by_hash`
       - Add created utxos to `self.created_utxos`
       - Add spent utxos to `self.spent_utxos`
       - Add nullifiers to the appropriate `self.<version>_nullifiers`
@@ -310,7 +310,7 @@ Remove the lowest height block of the non-finalized portion of a chain.
     - Remove the block's hash from `self.height_by_hash`
     - Subtract work from `self.partial_cumulative_work`
     - For each `transaction` in `block`
-      - Remove `transaction.hash` from `tx_by_hash`
+      - Remove `transaction.hash` from `tx_loc_by_hash`
       - Remove created utxos from `self.created_utxos`
       - Remove spent utxos from `self.spent_utxos`
       - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
@@ -340,7 +340,7 @@ Remove the highest height block of the non-finalized portion of a chain.
     - Remove the corresponding hash from `self.height_by_hash`
     - Subtract work from `self.partial_cumulative_work`
     - for each `transaction` in `block`
-      - remove `transaction.hash` from `tx_by_hash`
+      - remove `transaction.hash` from `tx_loc_by_hash`
       - Remove created utxos from `self.created_utxos`
       - Remove spent utxos from `self.spent_utxos`
       - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
@@ -365,7 +365,7 @@ parent block is the tip of the finalized state. This implementation should be
 handled by `#[derive(Default)]`.
 
 1. initialise cumulative data members
-    - Construct an empty `self.blocks`, `height_by_hash`, `tx_by_hash`,
+    - Construct an empty `self.blocks`, `height_by_hash`, `tx_loc_by_hash`,
     `self.created_utxos`, `self.spent_utxos`, `self.<version>_anchors`,
     `self.<version>_nullifiers`
     - Zero `self.partial_cumulative_work`
@@ -1102,11 +1102,11 @@ Returns
 
 Implemented by querying:
 
-- (non-finalized) the `tx_by_hash` map (to get the block that contains the
+- (non-finalized) the `tx_loc_by_hash` map (to get the block that contains the
   transaction) of each chain starting with the best chain, and then find
   block that chain's `blocks` (to get the block containing the transaction
   data)
-- (finalized) the `tx_by_hash` tree (to get the block that contains the
+- (finalized) the `tx_loc_by_hash` tree (to get the block that contains the
   transaction) and then `block_header_by_height` tree (to get the block
   containing the transaction data), if the transaction is not in any
   non-finalized chain

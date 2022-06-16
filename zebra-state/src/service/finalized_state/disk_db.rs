@@ -374,8 +374,7 @@ impl DiskDb {
             // Transactions
             rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("hash_by_tx_loc", db_options.clone()),
-            // TODO: rename to tx_loc_by_hash (#3950)
-            rocksdb::ColumnFamilyDescriptor::new("tx_by_hash", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("tx_loc_by_hash", db_options.clone()),
             // Transparent
             rocksdb::ColumnFamilyDescriptor::new("balance_by_transparent_addr", db_options.clone()),
             // TODO: #3951

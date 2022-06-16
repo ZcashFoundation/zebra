@@ -592,7 +592,7 @@ fn different_blocks_different_chains() -> Result<()> {
                 // blocks, heights, hashes
                 chain1.blocks = chain2.blocks.clone();
                 chain1.height_by_hash = chain2.height_by_hash.clone();
-                chain1.tx_by_hash = chain2.tx_by_hash.clone();
+                chain1.tx_loc_by_hash = chain2.tx_loc_by_hash.clone();
 
                 // transparent UTXOs
                 chain1.created_utxos = chain2.created_utxos.clone();

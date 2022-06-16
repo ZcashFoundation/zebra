@@ -426,10 +426,12 @@ ancestors are downloaded.
 These optimisations can be delayed until after the initial implementation is
 complete, and covered by tests:
 
+<!-- TODO: address the three items below since #2455 is closed. -->
+
 - Should we stop storing heights for non-coinbase UTXOs? (#2455)
 
 - Should we avoid storing any extra data for UTXOs, and just lookup the coinbase
-  flag and height using `outpoint.hash` and `tx_by_hash`? (#2455)
+  flag and height using `outpoint.hash` and `tx_loc_by_hash`? (#2455)
 
 - The maturity check can be skipped for UTXOs from the finalized state,
 because Zebra only finalizes mature UTXOs. We could implement this

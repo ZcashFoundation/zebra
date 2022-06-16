@@ -167,7 +167,7 @@ impl ZebraDb {
     /// Returns the [`TransactionLocation`] for [`transaction::Hash`],
     /// if it exists in the finalized chain.
     pub fn transaction_location(&self, hash: transaction::Hash) -> Option<TransactionLocation> {
-        let tx_loc_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
+        let tx_loc_by_hash = self.db.cf_handle("tx_loc_by_hash").unwrap();
         self.db.zs_get(&tx_loc_by_hash, &hash)
     }
 
@@ -419,7 +419,7 @@ impl DiskWriteBatch {
         // Transactions
         let tx_by_loc = db.cf_handle("tx_by_loc").unwrap();
         let hash_by_tx_loc = db.cf_handle("hash_by_tx_loc").unwrap();
-        let tx_loc_by_hash = db.cf_handle("tx_by_hash").unwrap();
+        let tx_loc_by_hash = db.cf_handle("tx_loc_by_hash").unwrap();
 
         let FinalizedBlock {
             block,

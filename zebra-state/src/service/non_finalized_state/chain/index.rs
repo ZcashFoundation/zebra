@@ -210,24 +210,24 @@ impl TransparentTransfers {
     ///
     /// The transactions are returned in chain order.
     ///
-    /// `chain_tx_by_hash` should be the `tx_by_hash` field from the
+    /// `chain_tx_loc_by_hash` should be the `tx_loc_by_hash` field from the
     /// [`Chain`][1] containing this index.
     ///
     /// # Panics
     ///
-    /// If `chain_tx_by_hash` is missing some transaction hashes from this
+    /// If `chain_tx_loc_by_hash` is missing some transaction hashes from this
     /// index.
     ///
     /// [1]: super::super::Chain
     pub fn tx_ids(
         &self,
-        chain_tx_by_hash: &HashMap<transaction::Hash, TransactionLocation>,
+        chain_tx_loc_by_hash: &HashMap<transaction::Hash, TransactionLocation>,
         query_height_range: RangeInclusive<Height>,
     ) -> BTreeMap<TransactionLocation, transaction::Hash> {
         self.tx_ids
             .distinct_elements()
             .filter_map(|tx_hash| {
-                let tx_loc = *chain_tx_by_hash
+                let tx_loc = *chain_tx_loc_by_hash
                     .get(tx_hash)
                     .expect("all hashes are indexed");
 
