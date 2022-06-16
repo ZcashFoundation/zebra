@@ -122,8 +122,9 @@ jobs:
 
       - uses: actions-rs/toolchain@v1.0.6
         with:
+          profile: minimal
           toolchain: stable
-          components: docs
+          components: doc
           override: true
 
       - uses: Swatinem/rust-cache@v1
