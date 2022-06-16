@@ -664,7 +664,7 @@ impl TryFrom<[u8; 64]> for IncomingViewingKey {
         let dk = DiversifierKey::from(dk_bytes);
 
         let mut ivk_bytes = [0u8; 32];
-        ivk_bytes[..].copy_from_slice(&bytes[32..]);
+        ivk_bytes.copy_from_slice(&bytes[32..]);
 
         let possible_scalar = pallas::Scalar::from_repr(ivk_bytes);
 
