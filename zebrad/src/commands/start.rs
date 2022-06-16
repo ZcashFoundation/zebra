@@ -461,7 +461,7 @@ impl StartCmd {
                 // Work out the sync progress towards the estimated tip.
                 let sync_progress = f64::from(current_height.0) / f64::from(estimated_height.0);
                 let sync_percent = format!(
-                    "{:.frac$} %",
+                    "{:.frac$}%",
                     sync_progress * 100.0,
                     frac = SYNC_PERCENT_FRAC_DIGITS,
                 );
@@ -476,13 +476,19 @@ impl StartCmd {
                     last_state_change_time = now;
                 }
 
-                let time_since_last_state_block = last_state_change_time.signed_duration_since(now);
+                let time_since_last_state_block_chrono =
+                    now.signed_duration_since(last_state_change_time);
+                let time_since_last_state_block = humantime::format_duration(
+                    time_since_last_state_block_chrono
+                        .to_std()
+                        .unwrap_or_default(),
+                );
 
                 // TODO:
                 // - log progress, remaining blocks, and remaining time to next network upgrade
                 // - add some of this info to the metrics
 
-                if time_since_last_state_block > min_state_block_interval {
+                if time_since_last_state_block_chrono > min_state_block_interval {
                     // The state tip height hasn't increased for a long time.
                     //
                     // Block verification can fail if the local node's clock is wrong.
@@ -497,7 +503,7 @@ impl StartCmd {
                          state height has not increased for {} minutes. \
                          Hint: check your network connection, \
                          and your computer clock and time zone",
-                        time_since_last_state_block.num_minutes(),
+                        time_since_last_state_block_chrono.num_minutes(),
                     );
                 } else if is_syncer_stopped && remaining_sync_blocks > MIN_SYNC_WARNING_BLOCKS {
                     // We've stopped syncing blocks, but we estimate we're a long way from the tip.
