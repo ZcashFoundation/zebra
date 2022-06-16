@@ -26,7 +26,7 @@ tested its exact limits yet.
 
 ## Sentry Production Monitoring
 
-Compile Zebra with `--features enable-sentry` to monitor it using Sentry in production.
+Compile Zebra with `--features sentry` to monitor it using Sentry in production.
 
 ## Lightwalletd Test Requirements
 

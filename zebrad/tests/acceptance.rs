@@ -1388,6 +1388,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
 /// exclusive use of the port. The second node will panic with the Zcash metrics
 /// conflict hint added in #1535.
 #[test]
+#[cfg(feature = "prometheus")]
 fn zebra_metrics_conflict() -> Result<()> {
     zebra_test::init();
 
@@ -1416,6 +1417,7 @@ fn zebra_metrics_conflict() -> Result<()> {
 /// exclusive use of the port. The second node will panic with the Zcash tracing
 /// conflict hint added in #1535.
 #[test]
+#[cfg(feature = "filter-reload")]
 fn zebra_tracing_conflict() -> Result<()> {
     zebra_test::init();
 

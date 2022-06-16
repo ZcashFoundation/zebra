@@ -18,8 +18,7 @@ default = ["release_max_level_info"]
 
 # Production features that activate extra dependencies
 
-# TODO: rename to just "sentry"?
-enable-sentry = ["sentry", "sentry-tracing"]
+sentry = ["dep:sentry", "sentry-tracing"]
 flamegraph = ["tracing-flame", "inferno"]
 journald = ["tracing-journald"]
 filter-reload = ["hyper"]
@@ -106,7 +105,7 @@ atty = "0.2.14"
 num-integer = "0.1.45"
 rand = { version = "0.8.5", package = "rand" }
 
-# prod feature enable-sentry
+# prod feature sentry
 sentry-tracing = { version = "0.26.0", optional = true }
 sentry = { version = "0.26.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"], optional = true }
 

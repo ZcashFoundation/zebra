@@ -128,7 +128,7 @@ impl Tracing {
         #[cfg(feature = "journald")]
         let subscriber = subscriber.with(journaldlayer);
 
-        #[cfg(feature = "enable-sentry")]
+        #[cfg(feature = "sentry")]
         let subscriber = subscriber.with(sentry_tracing::layer());
 
         // spawn the console server in the background, and apply the console layer
@@ -170,7 +170,7 @@ impl Tracing {
             }
         }
 
-        #[cfg(feature = "enable-sentry")]
+        #[cfg(feature = "sentry")]
         info!("installed sentry tracing layer");
 
         #[cfg(all(feature = "tokio-console", tokio_unstable))]
