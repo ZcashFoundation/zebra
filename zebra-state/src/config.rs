@@ -132,11 +132,11 @@ impl Default for Config {
 /// Spawns a task that checks if there are old database folders,
 /// and deletes them from the filesystem.
 ///
-/// Iterates over the files and directories in the databases folder and deletes them if:
+/// Iterate over the files and directories in the databases folder and delete if:
 /// - The state directory exists.
-/// - It has one or more sub-directories.
-/// - The sub-directory name has a prefix `v`.
-/// - The sub-directory name without the prefix can be parsed as a [`u32`].
+/// - The entry is a directory.
+/// - The directory name has a prefix `v`.
+/// - The directory name without the prefix can be parsed as an unsigned number.
 /// - The parsed number is lower than the hardcoded `DATABASE_FORMAT_VERSION`.
 pub fn check_and_delete_old_databases(config: Config) -> JoinHandle<()> {
     let current_span = Span::current();
@@ -160,26 +160,23 @@ fn delete_old_databases(config: Config) {
     info!("checking for old database versions");
 
     let state_dir = config.cache_dir.join("state");
-    let state_dir_entries = match read_state_dir(&state_dir) {
-        Some(state_dir_entries) => state_dir_entries,
-        None => return,
-    };
+    if let Some(state_dir) = read_dir(&state_dir) {
+        for entry in state_dir.flatten() {
+            let deleted_state = check_and_delete_database(&config, &entry);
 
-    for entry in state_dir_entries.flatten() {
-        let deleted_state = check_and_delete_database(&config, &entry);
-
-        if let Some(deleted_state) = deleted_state {
-            info!(?deleted_state, "deleted outdated state directory");
+            if let Some(deleted_state) = deleted_state {
+                info!(?deleted_state, "deleted outdated state directory");
+            }
         }
     }
 }
 
-/// Checks that `state_dir` exists, and that it can be read.
+/// Return a `ReadDir` for `dir`, after checking that `dir` exists and can be read.
 ///
 /// Returns `None` if any operation fails.
-fn read_state_dir(state_dir: &Path) -> Option<ReadDir> {
-    if state_dir.exists() {
-        if let Ok(read_dir) = state_dir.read_dir() {
+fn read_dir(dir: &Path) -> Option<ReadDir> {
+    if dir.exists() {
+        if let Ok(read_dir) = dir.read_dir() {
             return Some(read_dir);
         }
     }
