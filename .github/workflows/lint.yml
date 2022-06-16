@@ -122,12 +122,10 @@ jobs:
 
       - uses: actions-rs/toolchain@v1.0.6
         with:
-          profile: minimal
           toolchain: stable
-          components: doc
+          profile: minimal
           override: true
 
-      - uses: Swatinem/rust-cache@v1
       - uses: actions-rs/cargo@v1.0.3
         with:
           command: doc
