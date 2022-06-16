@@ -20,6 +20,88 @@
 //! If it does not have any IPv4 interfaces, IPv4 localhost is not on `127.0.0.1`,
 //! or you have poor network connectivity,
 //! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
+//!
+//! ## Large/full sync tests
+//!
+//! This file has sync tests that are marked as ignored because they take too much time to run.
+//! Some of them require environment variables or directories to be present:
+//!
+//! - `FULL_SYNC_MAINNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
+//! will allow this test to run or give up. Value for the Mainnet full sync tests.
+//! - `FULL_SYNC_TESTNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
+//! will allow this test to run or give up. Value for the Testnet ful  sync tests.
+//! - `/zebrad-cache` directory: For some sync tests, this needs to be created in
+//! the file system, the created directory should have write permissions.
+//!
+//! Here are some examples on how to run each of the tests:
+//!
+//! ```console
+//! $ cargo test sync_large_checkpoints_mainnet -- --ignored --nocapture
+//!
+//! $ cargo test sync_large_checkpoints_mempool_mainnet -- --ignored --nocapture
+//!
+//! $ sudo mkdir /zebrad-cache
+//! $ sudo chmod 777 /zebrad-cache
+//! $ export FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600
+//! $ cargo test full_sync_mainnet -- --ignored --nocapture
+//!
+//! $ sudo mkdir /zebrad-cache
+//! $ sudo chmod 777 /zebrad-cache
+//! $ export FULL_SYNC_TESTNET_TIMEOUT_MINUTES=600
+//! $ cargo test full_sync_testnet -- --ignored --nocapture
+//! ```
+//!
+//! Please refer to the documentation of each test for more information.
+//!
+//! ## Lightwalletd tests
+//!
+//! The lightwalletd software is an interface service that uses zebrad or zcashd RPC methods to serve wallets or other applications with blockchain content in an efficient manner.
+//! There are several versions of lightwalled in the form of different forks. The original
+//! repo is <https://github.com/zcash/lightwalletd> but Zecwallet Lite uses a custom fork: <https://github.com/adityapk00/lightwalletd>.
+//! The custom fork from adityapk00 is the one Zebra use for this tests:
+//!
+//! Zebra lightwalletd tests are not all marked as ignored but none will run unless
+//! at least the `ZEBRA_TEST_LIGHTWALLETD` environment variable is present:
+//!
+//! - `ZEBRA_TEST_LIGHTWALLETD` env variable: Needs to be present to run any of the lightwalletd tests.
+//! - `ZEBRA_CACHED_STATE_DIR` env var: The path to a zebra blockchain database.
+//! - `LIGHTWALLETD_DATA_DIR` env variable. The path to a lightwalletd database.
+//! - `--features lightwalletd-grpc-tests` cargo flag. The flag given to cargo to build the source code of the running test.
+//!
+//! Here are some examples of running each test:
+//!
+//! ```console
+//! $ export ZEBRA_TEST_LIGHTWALLETD=true
+//! $ cargo test lightwalletd_integration -- --nocapture
+//!
+//! $ export ZEBRA_TEST_LIGHTWALLETD=true
+//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/chain"
+//! $ export LIGHTWALLETD_DATA_DIR="/path/to/lightwalletd/database"
+//! $ cargo test lightwalletd_update_sync -- --nocapture
+//!
+//! $ export ZEBRA_TEST_LIGHTWALLETD=true
+//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/chain"
+//! $ cargo test lightwalletd_full_sync -- --ignored --nocapture
+//!
+//! $ export ZEBRA_TEST_LIGHTWALLETD=true
+//! $ cargo test lightwalletd_test_suite -- --ignored --nocapture
+//!
+//! $ export ZEBRA_TEST_LIGHTWALLETD=true
+//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/chain"
+//! $ cargo test fully_synced_rpc_test -- --ignored --nocapture
+//!
+//! $ export ZEBRA_TEST_LIGHTWALLETD=true
+//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/chain"
+//! $ export LIGHTWALLETD_DATA_DIR="/path/to/lightwalletd/database"
+//! $ cargo test sending_transactions_using_lightwalletd --features lightwalletd-grpc-tests -- --ignored --nocapture
+//!
+//! $ export ZEBRA_TEST_LIGHTWALLETD=true
+//! $ export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/chain"
+//! $ export LIGHTWALLETD_DATA_DIR="/path/to/lightwalletd/database"
+//! $ cargo test lightwalletd_wallet_grpc_tests --features lightwalletd-grpc-tests -- --ignored --nocapture
+//! ```
+//!
+//! Please refer to the documentation of each test for more information.
 
 use std::{collections::HashSet, convert::TryInto, env, path::PathBuf};
 
@@ -501,7 +583,9 @@ fn sync_one_checkpoint_mainnet() -> Result<()> {
 /// Test if `zebrad` can sync the first checkpoint on testnet.
 ///
 /// The first checkpoint contains a single genesis block.
-#[test]
+// TODO: disabled because testnet is not currently reliable
+// #[test]
+#[allow(dead_code)]
 fn sync_one_checkpoint_testnet() -> Result<()> {
     sync_until(
         TINY_CHECKPOINT_TEST_HEIGHT,
@@ -523,7 +607,8 @@ fn restart_stop_at_height() -> Result<()> {
     zebra_test::init();
 
     restart_stop_at_height_for_network(Network::Mainnet, TINY_CHECKPOINT_TEST_HEIGHT)?;
-    restart_stop_at_height_for_network(Network::Testnet, TINY_CHECKPOINT_TEST_HEIGHT)?;
+    // TODO: disabled because testnet is not currently reliable
+    // restart_stop_at_height_for_network(Network::Testnet, TINY_CHECKPOINT_TEST_HEIGHT)?;
 
     Ok(())
 }
@@ -672,6 +757,7 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
 /// The timeout is specified using an environment variable, with the name configured by the
 /// `timeout_argument_name` parameter. The value of the environment variable must the number of
 /// minutes specified as an integer.
+#[allow(clippy::print_stderr)]
 fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
     let timeout_argument: Option<u64> = env::var(timeout_argument_name)
         .ok()
@@ -695,11 +781,10 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
             SYNC_FINISHED_REGEX_TMP_STOP_EARLY,
         )
     } else {
-        tracing::info!(
-            ?network,
-            "skipped full sync test, \
-             set the {:?} environmental variable to run the test",
-            timeout_argument_name,
+        eprintln!(
+            "Skipped full sync test for {}, \
+            set the {:?} environmental variable to run the test",
+            network, timeout_argument_name,
         );
 
         Ok(())
@@ -1355,8 +1440,11 @@ fn zebra_tracing_conflict() -> Result<()> {
 /// Start 2 zebrad nodes using the same RPC listener port, but different
 /// state directories and Zcash listener ports. The first node should get
 /// exclusive use of the port. The second node will panic.
+///
+/// This test is sometimes unreliable on Windows, and hangs on macOS.
+/// We believe this is a CI infrastructure issue, not a platform-specific issue.
 #[test]
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn zebra_rpc_conflict() -> Result<()> {
     zebra_test::init();
 
@@ -1512,7 +1600,6 @@ async fn fully_synced_rpc_test() -> Result<()> {
     let cached_state_path = test_type.zebrad_state_path("fully_synced_rpc_test".to_string());
 
     if cached_state_path.is_none() {
-        tracing::info!("skipping fully synced zebrad RPC test");
         return Ok(());
     };
 

@@ -136,12 +136,12 @@ After you have the version increments and the updated changelog:
 - [ ] Once the PR has been merged, create a new release using the draft release
       as a base, by clicking the Edit icon in the [draft
       release](https://github.com/ZcashFoundation/zebra/releases).
+- [ ] Set the tag name to the version tag, for example: `v1.0.0-alpha.0`
+- [ ] Set the release to target the `main` branch
 - [ ] Set the release title to `Zebra ` followed by the version tag, for example:
       `Zebra 1.0.0-alpha.0`
 - [ ] Copy the final changelog of this release to the release description
       (starting just _after_ the title `## [Zebra ...`)
-- [ ] Set the tag name to the version tag, for example: `v1.0.0-alpha.0`
-- [ ] Set the release to target the `main` branch
 - [ ] Mark the release as 'pre-release' (until we are no longer alpha/beta)
 - [ ] Publish the release
 

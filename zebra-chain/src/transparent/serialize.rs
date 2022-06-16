@@ -98,7 +98,7 @@ pub(crate) fn parse_coinbase_height(
     mut data: Vec<u8>,
 ) -> Result<(block::Height, CoinbaseData), SerializationError> {
     use block::Height;
-    match (data.get(0), data.len()) {
+    match (data.first(), data.len()) {
         // Blocks 1 through 16 inclusive encode block height with OP_N opcodes.
         (Some(op_n @ 0x51..=0x60), len) if len >= 1 => Ok((
             Height((op_n - 0x50) as u32),

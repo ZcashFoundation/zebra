@@ -15,11 +15,11 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// The [`CandidateSet`] manages outbound peer connection attempts.
-/// Successful connections become peers in the [`PeerSet`].
+/// The [`CandidateSet`] manages outbound peer connection attempts. Successful
+/// connections become peers in the [`PeerSet`](super::set::PeerSet).
 ///
 /// The candidate set divides the set of all possible outbound peers into
-/// disjoint subsets, using the [`PeerAddrState`]:
+/// disjoint subsets, using the [`PeerAddrState`](crate::PeerAddrState):
 ///
 /// 1. [`Responded`] peers, which we have had an outbound connection to.
 /// 2. [`NeverAttemptedGossiped`] peers, which we learned about from other peers
@@ -107,6 +107,13 @@ mod tests;
 ///  │  * update last_response to now()      │
 ///  └───────────────────────────────────────┘
 /// ```
+///
+/// [`Responded`]: crate::PeerAddrState::Responded
+/// [`Version`]: crate::protocol::external::types::Version
+/// [`NeverAttemptedGossiped`]: crate::PeerAddrState::NeverAttemptedGossiped
+/// [`NeverAttemptedAlternate`]: crate::PeerAddrState::NeverAttemptedAlternate
+/// [`Failed`]: crate::PeerAddrState::Failed
+/// [`AttemptPending`]: crate::PeerAddrState::AttemptPending
 // TODO:
 //   * show all possible transitions between Attempt/Responded/Failed,
 //     except Failed -> Responded is invalid, must go through Attempt
@@ -340,10 +347,10 @@ where
     ///
     /// ## Correctness
     ///
-    /// `AttemptPending` peers will become `Responded` if they respond, or
+    /// `AttemptPending` peers will become [`Responded`] if they respond, or
     /// become `Failed` if they time out or provide a bad response.
     ///
-    /// Live `Responded` peers will stay live if they keep responding, or
+    /// Live [`Responded`] peers will stay live if they keep responding, or
     /// become a reconnection candidate if they stop responding.
     ///
     /// ## Security
@@ -351,6 +358,8 @@ where
     /// Zebra resists distributed denial of service attacks by making sure that
     /// new peer connections are initiated at least
     /// [`MIN_PEER_CONNECTION_INTERVAL`][constants::MIN_PEER_CONNECTION_INTERVAL] apart.
+    ///
+    /// [`Responded`]: crate::PeerAddrState::Responded
     pub async fn next(&mut self) -> Option<MetaAddr> {
         // Correctness: To avoid hangs, computation in the critical section should be kept to a minimum.
         let address_book = self.address_book.clone();

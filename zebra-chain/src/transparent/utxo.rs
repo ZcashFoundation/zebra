@@ -111,10 +111,8 @@ impl OrderedUtxo {
 /// A restriction that must be checked before spending a transparent output of a
 /// coinbase transaction.
 ///
-/// TODO: fix the comment below because
-/// [`CoinbaseSpendRestriction::check_spend`] doesn't exist.
-///
-/// See [`CoinbaseSpendRestriction::check_spend`] for the consensus rules.
+/// See the function `transparent_coinbase_spend` in `zebra-state` for the
+/// consensus rules.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),

@@ -46,9 +46,10 @@ where
     ///
     /// # Performance
     ///
-    /// A single read lock is acquired to clone `T`, and then released after the clone.
-    /// To make this clone efficient, large or expensive `T` can be wrapped in an [`Arc`].
-    /// (Or individual fields can be wrapped in an `Arc`.)
+    /// A single read lock is acquired to clone `T`, and then released after the
+    /// clone. To make this clone efficient, large or expensive `T` can be
+    /// wrapped in an [`std::sync::Arc`]. (Or individual fields can be wrapped
+    /// in an [`std::sync::Arc`].)
     ///
     /// # Correctness
     ///

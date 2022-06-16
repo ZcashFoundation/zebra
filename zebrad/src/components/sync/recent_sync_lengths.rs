@@ -51,7 +51,10 @@ impl RecentSyncLengths {
     // rather than asking peers for the next blocks in the chain.
     // (And if genesis downloads kept failing, we could accidentally activate the mempool.)
 
-    /// Insert a sync length from [`ChainSync::obtain_tips`] at the front of the list.
+    /// Insert a sync length from [`ChainSync::obtain_tips`] at the front of the
+    /// list.
+    ///
+    /// [`ChainSync::obtain_tips`]: super::ChainSync::obtain_tips
     #[instrument(skip(self), fields(self.recent_lengths))]
     pub fn push_obtain_tips_length(&mut self, sync_length: usize) {
         // currently, we treat lengths from obtain and extend tips exactly the same,
@@ -62,7 +65,10 @@ impl RecentSyncLengths {
         self.update(sync_length)
     }
 
-    /// Insert a sync length from [`ChainSync::extend_tips`] at the front of the list.
+    /// Insert a sync length from [`ChainSync::extend_tips`] at the front of the
+    /// list.
+    ///
+    /// [`ChainSync::extend_tips`]: super::ChainSync::extend_tips
     #[instrument(skip(self), fields(self.recent_lengths))]
     pub fn push_extend_tips_length(&mut self, sync_length: usize) {
         self.update(sync_length)
