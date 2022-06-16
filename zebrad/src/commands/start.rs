@@ -37,6 +37,8 @@
 //!    * contextually verifies blocks
 //!    * handles in-memory storage of multiple non-finalized chains
 //!    * handles permanent storage of the best finalized chain
+//!  * Old State Version Cleanup Task
+//!    * deletes outdated state versions
 //!  * Block Gossip Task
 //!    * runs in the background and continuously queries the state for
 //!      newly committed blocks to be gossiped to peers
@@ -104,10 +106,6 @@ impl StartCmd {
     async fn start(&self) -> Result<(), Report> {
         let config = app_config().clone();
         info!(?config);
-
-        let mut old_databases_task_handle = tokio::spawn(
-            zebra_state::check_and_delete_old_databases(config.state.clone()).in_current_span(),
-        );
 
         info!("initializing node state");
         let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
@@ -215,6 +213,9 @@ impl StartCmd {
             Self::update_progress(config.network.network, latest_chain_tip, sync_status)
                 .in_current_span(),
         );
+
+        let mut old_databases_task_handle =
+            zebra_state::check_and_delete_old_databases(config.state.clone());
 
         info!("spawned initial Zebra tasks");
 
@@ -334,6 +335,7 @@ impl StartCmd {
 
         // startup tasks
         groth16_download_handle.abort();
+        old_databases_task_handle.abort();
 
         exit_status
     }
