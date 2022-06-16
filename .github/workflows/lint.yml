@@ -122,7 +122,6 @@ jobs:
 
       - uses: actions-rs/toolchain@v1.0.6
         with:
-          profile: minimal
           toolchain: stable
           components: docs
           override: true
