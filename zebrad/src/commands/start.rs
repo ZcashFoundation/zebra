@@ -89,6 +89,7 @@ use zebra_rpc::server::RpcServer;
 
 use crate::{
     application::app_version,
+    commands::humantime_seconds,
     components::{
         inbound::{self, InboundSetupData},
         mempool::{self, Mempool},
@@ -478,7 +479,7 @@ impl StartCmd {
 
                 let time_since_last_state_block_chrono =
                     now.signed_duration_since(last_state_change_time);
-                let time_since_last_state_block = humantime::format_duration(
+                let time_since_last_state_block = humantime_seconds(
                     time_since_last_state_block_chrono
                         .to_std()
                         .unwrap_or_default(),
