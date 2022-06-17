@@ -379,8 +379,7 @@ impl DiskDb {
             rocksdb::ColumnFamilyDescriptor::new("balance_by_transparent_addr", db_options.clone()),
             // TODO: #3951
             //rocksdb::ColumnFamilyDescriptor::new("tx_by_transparent_addr_loc", db_options.clone()),
-            // TODO: rename to utxo_by_out_loc (#3952)
-            rocksdb::ColumnFamilyDescriptor::new("utxo_by_outpoint", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("utxo_by_out_loc", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new(
                 "utxo_loc_by_transparent_addr_loc",
                 db_options.clone(),
