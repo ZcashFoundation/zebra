@@ -31,6 +31,7 @@ env:
 
 jobs:
   matrix:
+    name: Crates matrix
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
@@ -42,7 +43,7 @@ jobs:
           echo "::set-output name=matrix::$CRATES"
 
   test:
-    name: Test ${{ matrix.crate }} on ${{ matrix.os }}
+    name: Test ${{ matrix.crate.name }} crate on ${{ matrix.os }}
     needs: [ matrix ]
     runs-on: ${{ matrix.os }}
     strategy:
