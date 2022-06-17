@@ -63,8 +63,20 @@ jobs:
           profile: minimal
           override: true
 
-      - name: Build ${{ matrix.crate.name }} crate
+      - name: Build ${{ matrix.crate.name }} crate normally
         uses: actions-rs/cargo@v1.0.3
         with:
           command: build
           args: --package ${{ matrix.crate.name }}
+
+      - name: Build ${{ matrix.crate.name }} crate with all features
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: build
+          args: --package ${{ matrix.crate.name }} --all-features
+
+      - name: Build ${{ matrix.crate.name }} crate with no default features
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: build
+          args: --package ${{ matrix.crate.name }} --no-default-features

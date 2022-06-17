@@ -283,10 +283,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: EmbarkStudios/cargo-deny-action@v1
+      - name: Check ${{ matrix.checks }} with all features
+        uses: EmbarkStudios/cargo-deny-action@v1
         with:
           command: check ${{ matrix.checks }}
           args: --all-features --workspace
+
+      - name: Check ${{ matrix.checks }} with no default features
+        uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          command: check ${{ matrix.checks }}
+          args: --no-default-features --workspace
 
       # this check runs with optional features off
       # so we expect some warnings about "skip tree root was not found"
