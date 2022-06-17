@@ -1638,6 +1638,66 @@ async fn fully_synced_rpc_test() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn delete_old_databases() -> Result<()> {
+    use std::fs::create_dir;
+
+    zebra_test::init();
+
+    let mut config = default_test_config()?;
+    let run_dir = testdir()?;
+    let cache_dir = run_dir.path().join("state");
+
+    // create cache dir
+    create_dir(cache_dir.clone())?;
+
+    // create a v1 dir outside cache dir that should not be deleted
+    let outside_dir = run_dir.path().join("v1");
+    create_dir(&outside_dir)?;
+    assert!(outside_dir.as_path().exists());
+
+    // create a `v1` dir insidecache dir that should be deleted
+    let inside_dir = cache_dir.join("v1");
+    create_dir(&inside_dir)?;
+    assert!(inside_dir.as_path().exists());
+
+    // modify config with our cache dir and not ephimeral configuration
+    // (delete old databases function will not run when epehemeral = true)
+    config.state.cache_dir = cache_dir;
+    config.state.ephemeral = false;
+
+    // run zebra with our config
+    let mut child = run_dir
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+
+    // delete checker running
+    child.expect_stdout_line_matches("checking for old database versions".to_string())?;
+
+    // inside dir was deleted
+    child.expect_stdout_line_matches(format!(
+        "deleted outdated state directory deleted_state={:?}",
+        inside_dir
+    ))?;
+    assert!(!inside_dir.as_path().exists());
+
+    // outside dir was not deleted
+    assert!(outside_dir.as_path().exists());
+
+    // finish
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
+
 /// Test sending transactions using a lightwalletd instance connected to a zebrad instance.
 ///
 /// See [`common::lightwalletd::send_transaction_test`] for more information.
