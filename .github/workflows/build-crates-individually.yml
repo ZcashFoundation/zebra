@@ -1,0 +1,69 @@
+name: Build crates individually
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      # production code and test code
+      - '**/*.rs'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
+      - '.github/workflows/build-crates-individually.yml'
+  pull_request:
+    paths:
+      # production code and test code
+      - '**/*.rs'
+      # dependencies
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      # workflow definitions
+      - '.github/workflows/build-crates-individually.yml'
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: full
+  RUST_LIB_BACKTRACE: full
+  COLORBT_SHOW_HIDDEN: '1'
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v2
+      - id: set-matrix
+        run: |
+          CRATES=$(echo $(cat .github/workflows/scripts/crates.json) | sed 's/ //g' )
+          echo "::set-output name=matrix::$CRATES"
+
+  test:
+    name: Test ${{ matrix.crate }} on ${{ matrix.os }}
+    needs: [ matrix ]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ ubuntu-latest ]
+        crate: ${{ fromJson(needs.matrix.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Build ${{ matrix.crate.name }} crate
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: build
+          args: --package ${{ matrix.crate.name }}

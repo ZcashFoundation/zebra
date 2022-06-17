@@ -1,0 +1,15 @@
+[
+{"name":"tower-batch"},
+{"name":"tower-fallback"},
+{"name":"zebra-chain"},
+{"name":"zebra-client"},
+{"name":"zebra-consensus"},
+{"name":"zebra-network"},
+{"name":"zebra-node-services"},
+{"name":"zebra-rpc"},
+{"name":"zebra-script"},
+{"name":"zebra-state"},
+{"name":"zebra-test"},
+{"name":"zebra-utils"},
+{"name":"zebrad"}
+]
