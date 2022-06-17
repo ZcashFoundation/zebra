@@ -368,24 +368,24 @@ impl DiskDb {
 
         let column_families = vec![
             // Blocks
-            rocksdb::ColumnFamilyDescriptor::new("block_header_by_height", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("hash_by_height", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("height_by_hash", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new("block_header_by_height", db_options.clone()),
             // Transactions
             rocksdb::ColumnFamilyDescriptor::new("tx_by_loc", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("hash_by_tx_loc", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("tx_loc_by_hash", db_options.clone()),
             // Transparent
             rocksdb::ColumnFamilyDescriptor::new("balance_by_transparent_addr", db_options.clone()),
+            rocksdb::ColumnFamilyDescriptor::new(
+                "tx_loc_by_transparent_addr_loc",
+                db_options.clone(),
+            ),
             // TODO: #3951
             //rocksdb::ColumnFamilyDescriptor::new("tx_by_transparent_addr_loc", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("utxo_by_out_loc", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new(
                 "utxo_loc_by_transparent_addr_loc",
-                db_options.clone(),
-            ),
-            rocksdb::ColumnFamilyDescriptor::new(
-                "tx_loc_by_transparent_addr_loc",
                 db_options.clone(),
             ),
             // Sprout
