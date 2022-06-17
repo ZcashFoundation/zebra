@@ -42,6 +42,11 @@ jobs:
         with:
           mdbook-version: '0.4.18'
 
+      # TODO: actions-mdbook does not yet have an option to install mdbook-mermaid https://github.com/peaceiris/actions-mdbook/issues/426
+      - name: Install mdbook
+        run: |
+          cargo install mdbook-mermaid
+
       - name: Build Zebra book
         run: |
           mdbook build book/
