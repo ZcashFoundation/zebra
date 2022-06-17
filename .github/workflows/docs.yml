@@ -37,10 +37,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v1
 
-      - name: Install mdbook
-        run: |
-          cargo install mdbook
-          cargo install mdbook-mermaid
+      - name: Setup mdBook
+        uses: peaceiris/actions-mdbook@v1.1.14
+        with:
+          mdbook-version: '0.4.18'
 
       - name: Build Zebra book
         run: |
