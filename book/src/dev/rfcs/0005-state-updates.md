@@ -268,20 +268,90 @@ is completely empty.
 The `Chain` type is defined by the following struct and API:
 
 ```rust
-#[derive(Debug, Default, Clone)]
-struct Chain {
-    blocks: BTreeMap<block::Height, Arc<Block>>,
-    height_by_hash: HashMap<block::Hash, block::Height>,
-    tx_loc_by_hash: HashMap<transaction::Hash, TransactionLocation>,
+#[derive(Debug, Clone)]
+pub struct Chain {
+    // The function `eq_internal_state` must be updated every time a field is added to [`Chain`].
+    /// The configured network for this chain.
+    network: Network,
 
-    created_utxos: HashSet<transparent::OutPoint>,
-    spent_utxos: HashSet<transparent::OutPoint>,
-    sprout_anchors: HashSet<sprout::tree::Root>,
-    sapling_anchors: HashSet<sapling::tree::Root>,
-    sprout_nullifiers: HashSet<sprout::Nullifier>,
-    sapling_nullifiers: HashSet<sapling::Nullifier>,
-    orchard_nullifiers: HashSet<orchard::Nullifier>,
-    partial_cumulative_work: PartialCumulativeWork,
+    /// The contextually valid blocks which form this non-finalized partial chain, in height order.
+    pub(crate) blocks: BTreeMap<block::Height, ContextuallyValidBlock>,
+
+    /// An index of block heights for each block hash in `blocks`.
+    pub height_by_hash: HashMap<block::Hash, block::Height>,
+
+    /// An index of [`TransactionLocation`]s for each transaction hash in `blocks`.
+    pub tx_loc_by_hash: HashMap<transaction::Hash, TransactionLocation>,
+
+    /// The [`transparent::Utxo`]s created by `blocks`.
+    ///
+    /// Note that these UTXOs may not be unspent.
+    /// Outputs can be spent by later transactions or blocks in the chain.
+    //
+    // TODO: replace OutPoint with OutputLocation?
+    pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    /// The [`transparent::OutPoint`]s spent by `blocks`,
+    /// including those created by earlier transactions or blocks in the chain.
+    pub(crate) spent_utxos: HashSet<transparent::OutPoint>,
+
+    /// The Sprout note commitment tree of the tip of this [`Chain`],
+    /// including all finalized notes, and the non-finalized notes in this chain.
+    pub(super) sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+    /// The Sprout note commitment tree for each anchor.
+    /// This is required for interstitial states.
+    pub(crate) sprout_trees_by_anchor:
+        HashMap<sprout::tree::Root, sprout::tree::NoteCommitmentTree>,
+    /// The Sapling note commitment tree of the tip of this [`Chain`],
+    /// including all finalized notes, and the non-finalized notes in this chain.
+    pub(super) sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+    /// The Sapling note commitment tree for each height.
+    pub(crate) sapling_trees_by_height: BTreeMap<block::Height, sapling::tree::NoteCommitmentTree>,
+    /// The Orchard note commitment tree of the tip of this [`Chain`],
+    /// including all finalized notes, and the non-finalized notes in this chain.
+    pub(super) orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
+    /// The Orchard note commitment tree for each height.
+    pub(crate) orchard_trees_by_height: BTreeMap<block::Height, orchard::tree::NoteCommitmentTree>,
+    /// The ZIP-221 history tree of the tip of this [`Chain`],
+    /// including all finalized blocks, and the non-finalized `blocks` in this chain.
+    pub(crate) history_tree: HistoryTree,
+
+    /// The Sprout anchors created by `blocks`.
+    pub(crate) sprout_anchors: MultiSet<sprout::tree::Root>,
+    /// The Sprout anchors created by each block in `blocks`.
+    pub(crate) sprout_anchors_by_height: BTreeMap<block::Height, sprout::tree::Root>,
+    /// The Sapling anchors created by `blocks`.
+    pub(crate) sapling_anchors: MultiSet<sapling::tree::Root>,
+    /// The Sapling anchors created by each block in `blocks`.
+    pub(crate) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
+    /// The Orchard anchors created by `blocks`.
+    pub(crate) orchard_anchors: MultiSet<orchard::tree::Root>,
+    /// The Orchard anchors created by each block in `blocks`.
+    pub(crate) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
+
+    /// The Sprout nullifiers revealed by `blocks`.
+    pub(super) sprout_nullifiers: HashSet<sprout::Nullifier>,
+    /// The Sapling nullifiers revealed by `blocks`.
+    pub(super) sapling_nullifiers: HashSet<sapling::Nullifier>,
+    /// The Orchard nullifiers revealed by `blocks`.
+    pub(super) orchard_nullifiers: HashSet<orchard::Nullifier>,
+
+    /// Partial transparent address index data from `blocks`.
+    pub(super) partial_transparent_transfers: HashMap<transparent::Address, TransparentTransfers>,
+
+    /// The cumulative work represented by `blocks`.
+    ///
+    /// Since the best chain is determined by the largest cumulative work,
+    /// the work represented by finalized blocks can be ignored,
+    /// because they are common to all non-finalized chains.
+    pub(super) partial_cumulative_work: PartialCumulativeWork,
+
+    /// The chain value pool balances of the tip of this [`Chain`],
+    /// including the block value pool changes from all finalized blocks,
+    /// and the non-finalized blocks in this chain.
+    ///
+    /// When a new chain is created from the finalized tip,
+    /// it is initialized with the finalized tip chain value pool balances.
+    pub(crate) chain_value_pools: ValueBalance<NonNegative>,
 }
 ```
 
