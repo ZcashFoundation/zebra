@@ -352,7 +352,11 @@ where
             // use specific varieties of `RejectReason`.
             ccode: RejectReason::Other,
 
-            reason: e.source().unwrap().to_string(),
+            reason: if let Some(reason) = e.source() {
+                reason.to_string()
+            } else {
+                String::from("")
+            },
 
             // Allow this to be overridden but not populated by default, methinks.
             data: None,
