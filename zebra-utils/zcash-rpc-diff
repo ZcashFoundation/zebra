@@ -28,7 +28,7 @@ ZEBRAD_RPC_PORT=$1
 shift
 
 # Use an easily identified temp directory name,
-# but fall back to a generic name if `mktemp` is outdated.
+# but fall back to the default temp name if `mktemp` does not understand `--suffix`.
 ZCASH_RPC_TMP_DIR=$(mktemp --suffix=.rpc-diff -d 2>/dev/null || mktemp -d)
 
 ZEBRAD_RELEASE_INFO="$ZCASH_RPC_TMP_DIR/first-check-getinfo.json"
