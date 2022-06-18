@@ -36,21 +36,37 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3.0.2
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - uses: actions-rs/cargo@v1.0.3
       - id: set-matrix
+        name: Dinamically build crates JSON
         run: |
-          CRATES=$(echo $(cat .github/workflows/scripts/crates.json) | sed 's/ //g' )
-          echo "::set-output name=matrix::$CRATES"
+          TEMP_DIR=$(mktemp -d)
+          CRATES=$(cargo tree --depth 0 --edges no-normal,no-dev,no-build,no-proc-macro --format {p} --prefix none)
+          echo "$( echo '${CRATES}' | cut -d ' ' -f1 | sed '/^$/d' | awk '{ printf "\"%s\",\n", $0 }' | sed '$ s/.$//')" > $TEMP_DIR/crates.txt
+          MATRIX=$((
+            echo '{ "crates" : ['
+            echo "$(cat $TEMP_DIR/crates.txt)"
+            echo " ]}"
+          ) | jq -c .)
+          echo $MATRIX
+          echo $MATRIX | jq .
+          echo "::set-output name=matrix::$MATRIX"
 
   test:
-    name: Test ${{ matrix.crate.name }} crate on ${{ matrix.os }}
+    name: Test ${{ matrix.crate }} crate
     needs: [ matrix ]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: true
-      matrix:
-        os: [ ubuntu-latest ]
-        crate: ${{ fromJson(needs.matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v3.0.2
@@ -63,20 +79,20 @@ jobs:
           profile: minimal
           override: true
 
-      - name: Build ${{ matrix.crate.name }} crate normally
+      - name: Build ${{ matrix.crate }} crate normally
         uses: actions-rs/cargo@v1.0.3
         with:
           command: build
-          args: --package ${{ matrix.crate.name }}
+          args: --package ${{ matrix.crate }}
 
       - name: Build ${{ matrix.crate.name }} crate with all features
         uses: actions-rs/cargo@v1.0.3
         with:
           command: build
-          args: --package ${{ matrix.crate.name }} --all-features
+          args: --package ${{ matrix.crate }} --all-features
 
-      - name: Build ${{ matrix.crate.name }} crate with no default features
+      - name: Build ${{ matrix.crate }} crate with no default features
         uses: actions-rs/cargo@v1.0.3
         with:
           command: build
-          args: --package ${{ matrix.crate.name }} --no-default-features
+          args: --package ${{ matrix.crate }} --no-default-features
