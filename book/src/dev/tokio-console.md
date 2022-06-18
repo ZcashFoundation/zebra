@@ -4,7 +4,7 @@
 useful to lint runtime behavior, collect diagnostic data from processes, and debugging performance
 issues. ["it's like top(1) for tasks!"][top]
 
-## Setup
+### Setup
 
 Support for `tokio-console` is not enabled by default for zebrad. To activate this feature, run:
  ```sh
@@ -22,7 +22,12 @@ $ tokio-console
 
 The default options are used, so `tokio-console` should connect to the running `zebrad` without other configuration.
 
-## More
+### Example
+
+<img width="788" alt="image" src="https://user-images.githubusercontent.com/552961/174457604-53c6ffc6-64f6-4952-94c6-ac7eb37c3871.png">
+
+
+### More
 
 For more details, see the [`tokio` docs][enabling_tokio_instrumentation].
 
