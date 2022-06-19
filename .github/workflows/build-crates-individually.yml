@@ -60,9 +60,24 @@ jobs:
           echo $MATRIX | jq .
           echo "::set-output name=matrix::$MATRIX"
 
-  test:
-    name: Test ${{ matrix.crate }} crate
+  check-matrix:
+    runs-on: ubuntu-latest
     needs: [ matrix ]
+    steps:
+      - name: Install json2yaml
+        run: |
+          sudo npm install -g json2yaml
+
+      - name: Check matrix definition
+        run: |
+          matrix='${{ needs.matrix.outputs.matrix }}'
+          echo $matrix
+          echo $matrix | jq .
+          echo $matrix | json2yaml
+
+  build:
+    name: Build ${{ matrix.crate }} crate
+    needs: [ matrix, check-matrix ]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
