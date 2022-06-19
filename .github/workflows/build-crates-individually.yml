@@ -82,8 +82,8 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        crates: ${{ fromJson(needs.matrix.outputs.matrix) }}
         features: ['', '--all-features', '--no-default-features']
+        include: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v3.0.2
@@ -96,8 +96,8 @@ jobs:
           profile: minimal
           override: true
 
-      - name: Build ${{ matrix.crates.crate }} with features ${{ matrix.features }}
+      - name: Build ${{ matrix.crate }} with features ${{ matrix.features }}
         uses: actions-rs/cargo@v1.0.3
         with:
           command: build
-          args: --package ${{ matrix.crates.crate }} ${{ matrix.features }}
+          args: --package ${{ matrix.crate }} ${{ matrix.features }}

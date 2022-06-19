@@ -267,7 +267,7 @@ jobs:
           args: --locked --all-features --all-targets
 
   cargo-deny:
-    name: Check deny.toml ${{ matrix.checks }}
+    name: Check deny.toml ${{ matrix.checks }} ${{ matrix.features }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
