@@ -76,12 +76,14 @@ jobs:
           echo $matrix | json2yaml
 
   build:
-    name: Build ${{ matrix.crate }} crate
+    name: Build ${{ matrix.crates.crate }} crate
     needs: [ matrix, check-matrix ]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
-      matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
+      matrix:
+        crates: ${{ fromJson(needs.matrix.outputs.matrix) }}
+        features: ['', '--all-features', '--no-default-features']
 
     steps:
       - uses: actions/checkout@v3.0.2
@@ -94,20 +96,8 @@ jobs:
           profile: minimal
           override: true
 
-      - name: Build ${{ matrix.crate }} crate normally
+      - name: Build ${{ matrix.crates.crate }} with features ${{ matrix.features }}
         uses: actions-rs/cargo@v1.0.3
         with:
           command: build
-          args: --package ${{ matrix.crate }}
-
-      - name: Build ${{ matrix.crate.name }} crate with all features
-        uses: actions-rs/cargo@v1.0.3
-        with:
-          command: build
-          args: --package ${{ matrix.crate }} --all-features
-
-      - name: Build ${{ matrix.crate }} crate with no default features
-        uses: actions-rs/cargo@v1.0.3
-        with:
-          command: build
-          args: --package ${{ matrix.crate }} --no-default-features
+          args: --package ${{ matrix.crates.crate }} ${{ matrix.features }}
