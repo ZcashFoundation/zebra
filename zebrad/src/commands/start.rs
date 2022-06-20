@@ -37,6 +37,8 @@
 //!    * contextually verifies blocks
 //!    * handles in-memory storage of multiple non-finalized chains
 //!    * handles permanent storage of the best finalized chain
+//!  * Old State Version Cleanup Task
+//!    * deletes outdated state versions
 //!  * Block Gossip Task
 //!    * runs in the background and continuously queries the state for
 //!      newly committed blocks to be gossiped to peers
@@ -218,6 +220,9 @@ impl StartCmd {
                 .in_current_span(),
         );
 
+        let mut old_databases_task_handle =
+            zebra_state::check_and_delete_old_databases(config.state.clone());
+
         info!("spawned initial Zebra tasks");
 
         // TODO: put tasks into an ongoing FuturesUnordered and a startup FuturesUnordered?
@@ -235,6 +240,8 @@ impl StartCmd {
         // startup tasks
         let groth16_download_handle_fused = (&mut groth16_download_handle).fuse();
         pin!(groth16_download_handle_fused);
+        let old_databases_task_handle_fused = (&mut old_databases_task_handle).fuse();
+        pin!(old_databases_task_handle_fused);
 
         // Wait for tasks to finish
         let exit_status = loop {
@@ -297,6 +304,16 @@ impl StartCmd {
                     exit_when_task_finishes = false;
                     Ok(())
                 }
+
+                // The same for the old databases task, we expect it to finish while Zebra is running.
+                old_databases_result = &mut old_databases_task_handle_fused => {
+                    old_databases_result
+                        .unwrap_or_else(|_| panic!(
+                            "unexpected panic deleting old database directories"));
+
+                    exit_when_task_finishes = false;
+                    Ok(())
+                }
             };
 
             // Stop Zebra if a task finished and returned an error,
@@ -324,6 +341,7 @@ impl StartCmd {
 
         // startup tasks
         groth16_download_handle.abort();
+        old_databases_task_handle.abort();
 
         exit_status
     }
