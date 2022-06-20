@@ -1,6 +1,6 @@
 //! The Abscissa component for Zebra's `tracing` implementation.
 
-use abscissa_core::{Component, FrameworkError, FrameworkErrorKind, Shutdown};
+use abscissa_core::{Component, FrameworkError, Shutdown};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
     fmt::Formatter, layer::SubscriberExt, reload::Handle, util::SubscriberInitExt, EnvFilter,
@@ -8,6 +8,7 @@ use tracing_subscriber::{
 
 use crate::{application::app_version, config::TracingSection};
 
+#[cfg(feature = "flamegraph")]
 use super::flame;
 
 /// Abscissa component for initializing the `tracing` subsystem
@@ -21,6 +22,7 @@ pub struct Tracing {
     initial_filter: String,
 
     /// The installed flame graph collector, if enabled.
+    #[cfg(feature = "flamegraph")]
     flamegrapher: Option<flame::Grapher>,
 }
 
@@ -35,7 +37,9 @@ impl Tracing {
         let use_color =
             config.force_use_color || (config.use_color && atty::is(atty::Stream::Stdout));
 
-        // Construct a format subscriber with the supplied global logging filter, and enable reloading.
+        // Construct a format subscriber with the supplied global logging filter,
+        // and optionally enable reloading.
+        //
         // TODO: when fmt::Subscriber supports per-layer filtering, always enable this code
         #[cfg(not(all(feature = "tokio-console", tokio_unstable)))]
         let (subscriber, filter_handle) = {
@@ -43,13 +47,22 @@ impl Tracing {
 
             let logger = FmtSubscriber::builder()
                 .with_ansi(use_color)
-                .with_env_filter(&filter)
-                .with_filter_reloading();
+                .with_env_filter(&filter);
 
-            let filter_handle = logger.reload_handle();
+            // Enable reloading if that feature is selected.
+            #[cfg(feature = "filter-reload")]
+            let (filter_handle, logger) = {
+                let logger = logger.with_filter_reloading();
+
+                (Some(logger.reload_handle()), logger)
+            };
+
+            #[cfg(not(feature = "filter-reload"))]
+            let filter_handle = None;
+
             let subscriber = logger.finish().with(ErrorLayer::default());
 
-            (subscriber, Some(filter_handle))
+            (subscriber, filter_handle)
         };
 
         // Construct a tracing registry with the supplied per-layer logging filter,
@@ -82,6 +95,7 @@ impl Tracing {
         // Add optional layers based on dynamic and compile-time configs
 
         // Add a flamegraph
+        #[cfg(feature = "flamegraph")]
         let (flamelayer, flamegrapher) = if let Some(path) = flame_root {
             let (flamelayer, flamegrapher) = flame::layer(path);
 
@@ -89,9 +103,13 @@ impl Tracing {
         } else {
             (None, None)
         };
+        #[cfg(feature = "flamegraph")]
         let subscriber = subscriber.with(flamelayer);
 
+        #[cfg(feature = "journald")]
         let journaldlayer = if config.use_journald {
+            use abscissa_core::FrameworkErrorKind;
+
             let layer = tracing_journald::layer()
                 .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?;
 
@@ -107,9 +125,10 @@ impl Tracing {
         } else {
             None
         };
+        #[cfg(feature = "journald")]
         let subscriber = subscriber.with(journaldlayer);
 
-        #[cfg(feature = "enable-sentry")]
+        #[cfg(feature = "sentry")]
         let subscriber = subscriber.with(sentry_tracing::layer());
 
         // spawn the console server in the background, and apply the console layer
@@ -127,14 +146,33 @@ impl Tracing {
             LOG_STATIC_MAX_LEVEL = ?log::STATIC_MAX_LEVEL,
             "started tracing component",
         );
+
         if flame_root.is_some() {
-            info!("installed flamegraph tracing layer");
+            if cfg!(feature = "flamegraph") {
+                info!(flamegraph = ?flame_root, "installed flamegraph tracing layer");
+            } else {
+                warn!(
+                    flamegraph = ?flame_root,
+                    "unable to activate configured flamegraph: \
+                     enable the 'flamegraph' feature when compiling zebrad",
+                );
+            }
         }
+
         if config.use_journald {
-            info!(?filter, "installed journald tracing layer");
+            if cfg!(feature = "journald") {
+                info!("installed journald tracing layer");
+            } else {
+                warn!(
+                    "unable to activate configured journald tracing: \
+                     enable the 'journald' feature when compiling zebrad",
+                );
+            }
         }
-        #[cfg(feature = "enable-sentry")]
+
+        #[cfg(feature = "sentry")]
         info!("installed sentry tracing layer");
+
         #[cfg(all(feature = "tokio-console", tokio_unstable))]
         info!(
             TRACING_STATIC_MAX_LEVEL = ?tracing::level_filters::STATIC_MAX_LEVEL,
@@ -145,6 +183,7 @@ impl Tracing {
         Ok(Self {
             filter_handle,
             initial_filter: filter,
+            #[cfg(feature = "flamegraph")]
             flamegrapher,
         })
     }
@@ -204,12 +243,17 @@ impl<A: abscissa_core::Application> Component<A> for Tracing {
     }
 
     fn before_shutdown(&self, _kind: Shutdown) -> Result<(), FrameworkError> {
+        #[cfg(feature = "flamegraph")]
         if let Some(ref grapher) = self.flamegrapher {
+            use abscissa_core::FrameworkErrorKind;
+
             info!("writing flamegraph");
+
             grapher
                 .write_flamegraph()
                 .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?
         }
+
         Ok(())
     }
 }

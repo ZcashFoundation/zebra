@@ -103,7 +103,7 @@
 //!
 //! Please refer to the documentation of each test for more information.
 
-use std::{collections::HashSet, convert::TryInto, env, path::PathBuf};
+use std::{collections::HashSet, env, path::PathBuf};
 
 use color_eyre::{
     eyre::{Result, WrapErr},
@@ -866,6 +866,7 @@ fn full_sync_testnet() -> Result<()> {
     full_sync_test(Testnet, "FULL_SYNC_TESTNET_TIMEOUT_MINUTES")
 }
 
+#[cfg(feature = "prometheus")]
 #[tokio::test]
 async fn metrics_endpoint() -> Result<()> {
     use hyper::Client;
@@ -921,6 +922,7 @@ async fn metrics_endpoint() -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "filter-reload")]
 #[tokio::test]
 async fn tracing_endpoint() -> Result<()> {
     use hyper::{Body, Client, Request};
@@ -1386,6 +1388,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
 /// exclusive use of the port. The second node will panic with the Zcash metrics
 /// conflict hint added in #1535.
 #[test]
+#[cfg(feature = "prometheus")]
 fn zebra_metrics_conflict() -> Result<()> {
     zebra_test::init();
 
@@ -1414,6 +1417,7 @@ fn zebra_metrics_conflict() -> Result<()> {
 /// exclusive use of the port. The second node will panic with the Zcash tracing
 /// conflict hint added in #1535.
 #[test]
+#[cfg(feature = "filter-reload")]
 fn zebra_tracing_conflict() -> Result<()> {
     zebra_test::init();
 

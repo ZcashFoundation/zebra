@@ -60,6 +60,12 @@
 //!  * JSON-RPC Service
 //!    * answers RPC client requests using the State Service and Mempool Service
 //!    * submits client transactions to the node's mempool
+//!
+//! Zebra also has diagnostic support
+//! * [metrics](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/metrics.md)
+//! * [tracing](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/tracing.md)
+//!
+//! Some of the diagnostic features are optional, and need to be enabled at compile-time.
 
 use std::{cmp::max, ops::Add, time::Duration};
 

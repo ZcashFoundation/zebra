@@ -10,6 +10,7 @@ pub struct MetricsEndpoint {}
 
 impl MetricsEndpoint {
     /// Create the component.
+    #[cfg(feature = "prometheus")]
     pub fn new(config: &ZebradConfig) -> Result<Self, FrameworkError> {
         if let Some(addr) = config.metrics.endpoint_addr {
             info!("Trying to open metrics endpoint at {}...", addr);
@@ -38,6 +39,21 @@ impl MetricsEndpoint {
                 ),
             }
         }
+
+        Ok(Self {})
+    }
+
+    /// Create the component.
+    #[cfg(not(feature = "prometheus"))]
+    pub fn new(config: &ZebradConfig) -> Result<Self, FrameworkError> {
+        if let Some(addr) = config.metrics.endpoint_addr {
+            warn!(
+                ?addr,
+                "unable to activate configured metrics endpoint: \
+                 enable the 'prometheus' feature when compiling zebrad",
+            );
+        }
+
         Ok(Self {})
     }
 }
