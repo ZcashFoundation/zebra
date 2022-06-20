@@ -13,12 +13,6 @@ on:
       # workflow definitions
       - '.github/workflows/build-crates-individually.yml'
 
-env:
-  CARGO_INCREMENTAL: 0
-  RUST_BACKTRACE: full
-  RUST_LIB_BACKTRACE: full
-  COLORBT_SHOW_HIDDEN: '1'
-
 jobs:
   matrix:
     name: Crates matrix
@@ -69,7 +63,6 @@ jobs:
     needs: [ matrix, check-matrix ]
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     steps:
