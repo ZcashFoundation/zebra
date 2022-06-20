@@ -1660,13 +1660,13 @@ async fn delete_old_databases() -> Result<()> {
     create_dir(&outside_dir)?;
     assert!(outside_dir.as_path().exists());
 
-    // create a `v1` dir insidecache dir that should be deleted
+    // create a `v1` dir inside cache dir that should be deleted
     let inside_dir = cache_dir.join("v1");
     create_dir(&inside_dir)?;
     assert!(inside_dir.as_path().exists());
 
-    // modify config with our cache dir and not ephimeral configuration
-    // (delete old databases function will not run when epehemeral = true)
+    // modify config with our cache dir and not ephemeral configuration
+    // (delete old databases function will not run when ephemeral = true)
     config.state.cache_dir = cache_dir;
     config.state.ephemeral = false;
 
