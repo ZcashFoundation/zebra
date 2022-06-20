@@ -58,7 +58,7 @@ jobs:
         name: Dynamically build crates JSON
         run: |
           TEMP_DIR=$(mktemp -d)
-          $(cargo tree --depth 0 --edges no-normal,no-dev,no-build,no-proc-macro --format {p} --prefix none | cut -d ' ' -f1 | sed '/^$/d' | awk '{ printf "\"%s\",\n", $0 }' | sed '$ s/.$//') > $TEMP_DIR/crates.txt
+          "$(cargo tree --depth 0 --edges no-normal,no-dev,no-build,no-proc-macro --format {p} --prefix none | cut -d ' ' -f1 | sed '/^$/d' | awk '{ printf "\"%s\",\n", $0 }' | sed '$ s/.$//')" > $TEMP_DIR/crates.txt
           JSON_CRATES=$(cat $TEMP_DIR/crates.txt)
           MATRIX=$((
             echo '{ "crate" : ['
