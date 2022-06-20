@@ -1644,7 +1644,7 @@ async fn fully_synced_rpc_test() -> Result<()> {
 
 #[tokio::test]
 async fn delete_old_databases() -> Result<()> {
-    use std::fs::create_dir;
+    use std::fs::{canonicalize, create_dir};
 
     zebra_test::init();
 
@@ -1663,6 +1663,7 @@ async fn delete_old_databases() -> Result<()> {
     // create a `v1` dir inside cache dir that should be deleted
     let inside_dir = cache_dir.join("v1");
     create_dir(&inside_dir)?;
+    let canonicalized_inside_dir = canonicalize(inside_dir.clone()).ok().unwrap();
     assert!(inside_dir.as_path().exists());
 
     // modify config with our cache dir and not ephemeral configuration
@@ -1681,7 +1682,7 @@ async fn delete_old_databases() -> Result<()> {
     // inside dir was deleted
     child.expect_stdout_line_matches(format!(
         "deleted outdated state directory deleted_state={:?}",
-        inside_dir
+        canonicalized_inside_dir
     ))?;
     assert!(!inside_dir.as_path().exists());
 
