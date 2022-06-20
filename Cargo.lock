@@ -2204,16 +2204,16 @@ dependencies = [
 
 [[package]]
 name = "inferno"
-version = "0.11.4"
+version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a3cb215599901c8f491666421d44ffaed08d6872b4c7ced6f425683b951271e"
+checksum = "244ae9456c246081801028c893ee0e2b71be4f0380894e2cd53974c3beea0c64"
 dependencies = [
  "ahash",
  "atty",
  "itoa 1.0.1",
- "lazy_static",
  "log",
  "num-format",
+ "once_cell",
  "quick-xml",
  "rgb",
  "str_stack",
