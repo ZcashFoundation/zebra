@@ -45,13 +45,22 @@ jobs:
           override: true
 
       - uses: actions-rs/cargo@v1.0.3
+      # This step is meant to dynamically create a JSON containing the values of each crate
+      # available in this repo in the root directory. We use `cargo tree` to accomplish this task.
+      #
+      # The result from `cargo tree` is then transform to JSON values between double quotes, 
+      # and separated by commas, then added to a `crates.txt` and assigned to a $JSON_CRATES variable.
+      #
+      # A JSON object is created and assigned to a $MATRIX variable, which is use to create an output
+      # named `matrix`, which is then used as the input in following steps, 
+      # using ` ${{ fromJson(needs.matrix.outputs.matrix) }}`
       - id: set-matrix
-        name: Dinamically build crates JSON
+        name: Dynamically build crates JSON
         run: |
           TEMP_DIR=$(mktemp -d)
-          echo "$( cargo tree --depth 0 --edges no-normal,no-dev,no-build,no-proc-macro --format {p} --prefix none | cut -d ' ' -f1 | sed '/^$/d' | awk '{ printf "\"%s\",\n", $0 }' | sed '$ s/.$//')" > $TEMP_DIR/crates.txt
+          echo "$(cargo tree --depth 0 --edges no-normal,no-dev,no-build,no-proc-macro --format {p} --prefix none | cut -d ' ' -f1 | sed '/^$/d' | awk '{ printf "\"%s\",\n", $0 }' | sed '$ s/.$//')" > $TEMP_DIR/crates.txt
           JSON_CRATES=$(cat $TEMP_DIR/crates.txt)
-          MATRIX=$((
+          MATRIX=$($(
             echo '{ "crate" : ['
             echo "${JSON_CRATES}"
             echo " ]}"
@@ -76,14 +85,12 @@ jobs:
           echo $matrix | json2yaml
 
   build:
-    name: Build ${{ matrix.crates.crate }} crate
+    name: Build ${{ matrix.crate }} crate
     needs: [ matrix, check-matrix ]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
-      matrix:
-        features: ['', '--all-features', '--no-default-features']
-        include: ${{ fromJson(needs.matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v3.0.2
@@ -96,8 +103,24 @@ jobs:
           profile: minimal
           override: true
 
-      - name: Build ${{ matrix.crate }} with features ${{ matrix.features }}
+        # We could use `features: ['', '--all-features', '--no-default-features']` as a matrix argument,
+        # but it's faster to run these commands sequentially, so they can re-use the local cargo cache.
+        # 
+        # Some Zebra crates do not have any features, and most don't have any default features.
+      - name: Build ${{ matrix.crate }} crate with no default features
         uses: actions-rs/cargo@v1.0.3
         with:
           command: build
-          args: --package ${{ matrix.crate }} ${{ matrix.features }}
+          args: --package ${{ matrix.crate }} --no-default-features
+
+      - name: Build ${{ matrix.crate }} crate normally
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: build
+          args: --package ${{ matrix.crate }}
+
+      - name: Build ${{ matrix.crate }} crate with all features
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: build
+          args: --package ${{ matrix.crate }} --all-features
