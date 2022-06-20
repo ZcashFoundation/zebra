@@ -381,8 +381,6 @@ impl DiskDb {
                 "tx_loc_by_transparent_addr_loc",
                 db_options.clone(),
             ),
-            // TODO: #3951
-            //rocksdb::ColumnFamilyDescriptor::new("tx_by_transparent_addr_loc", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new("utxo_by_out_loc", db_options.clone()),
             rocksdb::ColumnFamilyDescriptor::new(
                 "utxo_loc_by_transparent_addr_loc",
