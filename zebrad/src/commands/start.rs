@@ -89,7 +89,6 @@ use zebra_rpc::server::RpcServer;
 
 use crate::{
     application::app_version,
-    commands::humantime_seconds,
     components::{
         inbound::{self, InboundSetupData},
         mempool::{self, Mempool},
