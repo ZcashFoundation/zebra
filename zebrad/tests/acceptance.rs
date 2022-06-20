@@ -1686,6 +1686,9 @@ async fn delete_old_databases() -> Result<()> {
     ))?;
     assert!(!inside_dir.as_path().exists());
 
+    // deleting old databases task ended
+    child.expect_stdout_line_matches("finished old database version cleanup task".to_string())?;
+
     // outside dir was not deleted
     assert!(outside_dir.as_path().exists());
 
