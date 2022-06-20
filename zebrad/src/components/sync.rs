@@ -30,6 +30,7 @@ use crate::{
 
 mod downloads;
 mod gossip;
+mod progress;
 mod recent_sync_lengths;
 mod status;
 
@@ -39,6 +40,7 @@ mod tests;
 use downloads::{AlwaysHedge, Downloads};
 
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
+pub use progress::show_block_chain_progress;
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
 
