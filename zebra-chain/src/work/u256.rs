@@ -3,6 +3,7 @@
 // it raises a lot of issues in the macro.
 #![allow(clippy::all)]
 #![allow(clippy::range_plus_one)]
+#![allow(clippy::fallible_impl_from)]
 
 use uint::construct_uint;
 

@@ -1,7 +1,7 @@
 //! Orchard key types.
 //!
 //! <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
-
+#![allow(clippy::fallible_impl_from)]
 #![allow(dead_code)]
 
 #[cfg(test)]
@@ -308,7 +308,9 @@ impl From<SpendValidatingKey> for [u8; 32] {
 
 impl From<SpendAuthorizingKey> for SpendValidatingKey {
     fn from(ask: SpendAuthorizingKey) -> Self {
-        let sk = redpallas::SigningKey::<SpendAuth>::try_from(<[u8; 32]>::from(ask)).unwrap();
+        let sk = redpallas::SigningKey::<SpendAuth>::try_from(<[u8; 32]>::from(ask)).expect(
+            "a scalar converted to byte array and then converted back to a scalar should not fail",
+        );
 
         Self(redpallas::VerificationKey::from(&sk))
     }

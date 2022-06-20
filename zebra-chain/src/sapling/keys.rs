@@ -8,6 +8,7 @@
 //! [ps]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 //! [3.1]: https://zips.z.cash/protocol/protocol.pdf#addressesandkeys
 #![allow(clippy::unit_arg)]
+#![allow(clippy::fallible_impl_from)]
 #![allow(dead_code)]
 
 #[cfg(test)]
@@ -507,7 +508,9 @@ impl From<AuthorizingKey> for [u8; 32] {
 
 impl From<SpendAuthorizingKey> for AuthorizingKey {
     fn from(ask: SpendAuthorizingKey) -> Self {
-        let sk = redjubjub::SigningKey::<SpendAuth>::try_from(<[u8; 32]>::from(ask)).unwrap();
+        let sk = redjubjub::SigningKey::<SpendAuth>::try_from(<[u8; 32]>::from(ask)).expect(
+            "a scalar converted to byte array and then converted back to a scalar should not fail",
+        );
         Self(redjubjub::VerificationKey::from(&sk))
     }
 }
