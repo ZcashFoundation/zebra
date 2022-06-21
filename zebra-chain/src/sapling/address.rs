@@ -60,7 +60,8 @@ impl fmt::Display for Address {
             _ => human_readable_parts::TESTNET,
         };
 
-        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).expect("hrp is valid")
+        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32)
+            .expect("hrp is valid")
     }
 }
 
@@ -71,7 +72,9 @@ impl std::str::FromStr for Address {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match bech32::decode(s) {
             Ok((hrp, bytes, Variant::Bech32)) => {
-                let mut decoded_bytes = io::Cursor::new(Vec::<u8>::from_base32(&bytes).expect("bytes are valid base32"));
+                let mut decoded_bytes = io::Cursor::new(
+                    Vec::<u8>::from_base32(&bytes).expect("bytes are valid base32"),
+                );
 
                 let mut diversifier_bytes = [0; 11];
                 decoded_bytes.read_exact(&mut diversifier_bytes)?;
