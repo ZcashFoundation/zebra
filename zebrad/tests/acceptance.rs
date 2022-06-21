@@ -119,6 +119,7 @@ use zebra_state::constants::LOCK_FILE_ERROR;
 
 use zebra_test::{args, command::ContextFrom, net::random_known_port, prelude::*};
 
+#[allow(clippy::unwrap_in_result)]
 mod common;
 
 use common::{
