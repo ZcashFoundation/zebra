@@ -57,6 +57,7 @@ pub struct TransparentTransfers {
 // A created UTXO
 //
 // TODO: replace arguments with a struct
+#[allow(clippy::unwrap_in_result)]
 impl
     UpdateWith<(
         // The location of the UTXO
@@ -70,6 +71,7 @@ impl
         &mut self,
         &(outpoint, created_utxo): &(&transparent::OutPoint, &transparent::OrderedUtxo),
     ) -> Result<(), ValidateContextError> {
+        // TODO: change this unwraps to expects or explain
         self.balance =
             (self.balance + created_utxo.utxo.output.value().constrain().unwrap()).unwrap();
 
@@ -94,6 +96,7 @@ impl
         &(outpoint, created_utxo): &(&transparent::OutPoint, &transparent::OrderedUtxo),
         _position: RevertPosition,
     ) {
+        // TODO: change this unwraps to expects or explain
         self.balance =
             (self.balance - created_utxo.utxo.output.value().constrain().unwrap()).unwrap();
 
@@ -118,6 +121,7 @@ impl
 // A transparent input
 //
 // TODO: replace arguments with a struct
+#[allow(clippy::unwrap_in_result)]
 impl
     UpdateWith<(
         // The transparent input data
@@ -139,6 +143,7 @@ impl
         ),
     ) -> Result<(), ValidateContextError> {
         // Spending a UTXO subtracts value from the balance
+        // TODO: change this unwraps to expects or explain
         self.balance =
             (self.balance - spent_output.utxo.output.value().constrain().unwrap()).unwrap();
 
@@ -166,6 +171,7 @@ impl
         ),
         _position: RevertPosition,
     ) {
+        // TODO: change this unwraps to expects or explain
         self.balance =
             (self.balance + spent_output.utxo.output.value().constrain().unwrap()).unwrap();
 
@@ -189,6 +195,7 @@ impl
     }
 }
 
+#[allow(clippy::unwrap_in_result)]
 impl TransparentTransfers {
     /// Returns true if there are no transfers for this address.
     pub fn is_empty(&self) -> bool {

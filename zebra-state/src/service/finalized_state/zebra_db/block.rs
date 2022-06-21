@@ -45,6 +45,7 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+#[allow(clippy::unwrap_in_result)]
 impl ZebraDb {
     // Read block methods
 
@@ -406,6 +407,7 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method does not currently return any errors.
+    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_block_header_transactions_batch(
         &mut self,
         db: &DiskDb,

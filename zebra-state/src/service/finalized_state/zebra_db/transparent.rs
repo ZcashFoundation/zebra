@@ -38,6 +38,7 @@ use crate::{
     BoxError, FinalizedBlock,
 };
 
+#[allow(clippy::unwrap_in_result)]
 impl ZebraDb {
     // Read transparent methods
 
@@ -353,6 +354,7 @@ impl ZebraDb {
     }
 }
 
+#[allow(clippy::unwrap_in_result)]
 impl DiskWriteBatch {
     /// Prepare a database batch containing `finalized.block`'s transparent transaction indexes,
     /// and return it (without actually writing anything).

@@ -112,6 +112,7 @@ impl Strategy for PreparedChain {
     type Tree = PreparedChainTree;
     type Value = <PreparedChainTree as ValueTree>::Value;
 
+    #[allow(clippy::unwrap_in_result)]
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
         let mut chain = self.chain.lock().unwrap();
         if chain.is_none() {
