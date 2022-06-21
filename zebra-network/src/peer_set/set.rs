@@ -587,6 +587,7 @@ where
     }
 
     /// Performs P2C on `ready_service_list` to randomly select a less-loaded ready service.
+    #[allow(clippy::unwrap_in_result)]
     fn select_p2c_peer_from_list(&self, ready_service_list: &HashSet<D::Key>) -> Option<D::Key> {
         match ready_service_list.len() {
             0 => None,
