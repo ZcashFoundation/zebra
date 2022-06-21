@@ -299,15 +299,11 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         let transfers = match shared_anchor {
             Some(shared_anchor) => sapling::TransferData::SpendsAndMaybeOutputs {
                 shared_anchor,
-                spends: spends
-                    .try_into()
-                    .expect("checked spends when parsing shared anchor"),
+                spends: spends.try_into()?,
                 maybe_outputs: outputs,
             },
             None => sapling::TransferData::JustOutputs {
-                outputs: outputs
-                    .try_into()
-                    .expect("checked spends or outputs and returned early"),
+                outputs: outputs.try_into()?,
             },
         };
 
@@ -447,6 +443,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
 }
 
 impl ZcashSerialize for Transaction {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Post-Sapling, transaction size is limited to MAX_BLOCK_BYTES.
         // (Strictly, the maximum transaction size is about 1.5 kB less,
@@ -819,12 +816,12 @@ impl ZcashDeserialize for Transaction {
                 let sapling_transfers = if !shielded_spends.is_empty() {
                     Some(sapling::TransferData::SpendsAndMaybeOutputs {
                         shared_anchor: FieldNotPresent,
-                        spends: shielded_spends.try_into().expect("checked for spends"),
+                        spends: shielded_spends.try_into()?,
                         maybe_outputs: shielded_outputs,
                     })
                 } else if !shielded_outputs.is_empty() {
                     Some(sapling::TransferData::JustOutputs {
-                        outputs: shielded_outputs.try_into().expect("checked for outputs"),
+                        outputs: shielded_outputs.try_into()?,
                     })
                 } else {
                     // # Consensus

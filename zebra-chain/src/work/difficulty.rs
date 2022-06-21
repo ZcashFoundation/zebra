@@ -178,6 +178,7 @@ impl CompactDifficulty {
     ///
     /// Returns None for negative, zero, and overflow values. (zcashd rejects
     /// these values, before comparing the hash.)
+    #[allow(clippy::unwrap_in_result)]
     pub fn to_expanded(self) -> Option<ExpandedDifficulty> {
         // The constants for this floating-point representation.
         // Alias the struct constants here, so the code is easier to read.
@@ -467,10 +468,7 @@ impl PartialOrd<ExpandedDifficulty> for block::Hash {
     fn partial_cmp(&self, other: &ExpandedDifficulty) -> Option<Ordering> {
         Some(
             // Use the canonical implementation, but reverse the order
-            other
-                .partial_cmp(self)
-                .expect("difficulties and hashes have a total order")
-                .reverse(),
+            other.partial_cmp(self)?.reverse(),
         )
     }
 }

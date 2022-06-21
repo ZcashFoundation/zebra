@@ -48,6 +48,7 @@ impl fmt::Debug for Address {
 }
 
 impl fmt::Display for Address {
+    #[allow(clippy::unwrap_in_result)]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut bytes = io::Cursor::new(Vec::new());
 
@@ -59,17 +60,18 @@ impl fmt::Display for Address {
             _ => human_readable_parts::TESTNET,
         };
 
-        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).unwrap()
+        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).expect("hrp is valid")
     }
 }
 
 impl std::str::FromStr for Address {
     type Err = SerializationError;
 
+    #[allow(clippy::unwrap_in_result)]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match bech32::decode(s) {
             Ok((hrp, bytes, Variant::Bech32)) => {
-                let mut decoded_bytes = io::Cursor::new(Vec::<u8>::from_base32(&bytes).unwrap());
+                let mut decoded_bytes = io::Cursor::new(Vec::<u8>::from_base32(&bytes).expect("bytes are valid base32"));
 
                 let mut diversifier_bytes = [0; 11];
                 decoded_bytes.read_exact(&mut diversifier_bytes)?;
@@ -83,7 +85,7 @@ impl std::str::FromStr for Address {
                     },
                     diversifier: keys::Diversifier::from(diversifier_bytes),
                     transmission_key: keys::TransmissionKey::try_from(transmission_key_bytes)
-                        .unwrap(),
+                        .expect("bytes are valid transmission key"),
                 })
             }
             _ => Err(SerializationError::Parse("bech32 decoding error")),

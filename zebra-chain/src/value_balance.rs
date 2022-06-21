@@ -298,9 +298,7 @@ impl ValueBalance<NonNegative> {
         self,
         chain_value_pool_change: ValueBalance<NegativeAllowed>,
     ) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
-        let mut chain_value_pool = self
-            .constrain::<NegativeAllowed>()
-            .expect("conversion from NonNegative to NegativeAllowed is always valid");
+        let mut chain_value_pool = self.constrain::<NegativeAllowed>()?;
         chain_value_pool = (chain_value_pool + chain_value_pool_change)?;
 
         chain_value_pool.constrain()
@@ -345,6 +343,7 @@ impl ValueBalance<NonNegative> {
     }
 
     /// From byte array
+    #[allow(clippy::unwrap_in_result)]
     pub fn from_bytes(bytes: [u8; 32]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let transparent = Amount::from_bytes(
             bytes[0..8]

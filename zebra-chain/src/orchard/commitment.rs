@@ -141,10 +141,11 @@ impl NoteCommitment {
 
         let rcm = CommitmentRandomness::from(note.rseed);
 
-        Some(NoteCommitment::from(
-            sinsemilla_commit(rcm.0, b"z.cash:Orchard-NoteCommit", &s)
-                .expect("valid orchard note commitment, not ⊥ "),
-        ))
+        Some(NoteCommitment::from(sinsemilla_commit(
+            rcm.0,
+            b"z.cash:Orchard-NoteCommit",
+            &s,
+        )?))
     }
 
     /// Extract the x coordinate of the note commitment.

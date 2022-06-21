@@ -243,11 +243,7 @@ impl TryFrom<usize> for CompactSizeMessage {
 
         // # Security
         // Defence-in-depth for memory DoS via preallocation.
-        if size
-            > MAX_PROTOCOL_MESSAGE_LEN
-                .try_into()
-                .expect("MAX_PROTOCOL_MESSAGE_LEN fits in u32")
-        {
+        if size > MAX_PROTOCOL_MESSAGE_LEN.try_into()? {
             // This could be invalid data from peers, so we return a parse error.
             Err(Parse("CompactSize larger than protocol message limit"))?;
         }
@@ -284,6 +280,7 @@ impl ZcashSerialize for CompactSizeMessage {
     ///
     /// If the value exceeds `MAX_PROTOCOL_MESSAGE_LEN`.
     #[inline]
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: std::io::Write>(&self, writer: W) -> Result<(), std::io::Error> {
         // # Security
         // Defence-in-depth for memory DoS via preallocation.

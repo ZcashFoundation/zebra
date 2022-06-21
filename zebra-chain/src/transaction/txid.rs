@@ -36,9 +36,7 @@ impl<'a> TxIdBuilder<'a> {
     /// In these cases it's simply the hash of the serialized transaction.
     fn txid_v1_to_v4(self) -> Result<Hash, io::Error> {
         let mut hash_writer = sha256d::Writer::default();
-        self.trans
-            .zcash_serialize(&mut hash_writer)
-            .expect("Transactions must serialize into the hash.");
+        self.trans.zcash_serialize(&mut hash_writer)?;
         Ok(Hash(hash_writer.finish()))
     }
 
