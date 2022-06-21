@@ -1,6 +1,13 @@
-use std::path::PathBuf;
+//! Cached state configuration for Zebra.
+
+use std::{
+    fs::{canonicalize, remove_dir_all, DirEntry, ReadDir},
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
+use tokio::task::{spawn_blocking, JoinHandle};
+use tracing::Span;
 
 use zebra_chain::parameters::Network;
 
@@ -57,6 +64,13 @@ pub struct Config {
     ///
     /// Set to `None` by default: Zebra continues syncing indefinitely.
     pub debug_stop_at_height: Option<u32>,
+
+    /// Whether to delete the old database directories when present.
+    ///
+    /// Set to `true` by default. If this is set to `false`,
+    /// no check for old database versions will be made and nothing will be
+    /// deleted.
+    pub delete_old_database: bool,
 }
 
 fn gen_temp_path(prefix: &str) -> PathBuf {
@@ -108,6 +122,125 @@ impl Default for Config {
             cache_dir,
             ephemeral: false,
             debug_stop_at_height: None,
+            delete_old_database: true,
         }
     }
+}
+
+// Cleaning up old database versions
+
+/// Spawns a task that checks if there are old database folders,
+/// and deletes them from the filesystem.
+///
+/// Iterate over the files and directories in the databases folder and delete if:
+/// - The state directory exists.
+/// - The entry is a directory.
+/// - The directory name has a prefix `v`.
+/// - The directory name without the prefix can be parsed as an unsigned number.
+/// - The parsed number is lower than the hardcoded `DATABASE_FORMAT_VERSION`.
+pub fn check_and_delete_old_databases(config: Config) -> JoinHandle<()> {
+    let current_span = Span::current();
+
+    spawn_blocking(move || {
+        current_span.in_scope(|| {
+            delete_old_databases(config);
+            info!("finished old database version cleanup task");
+        })
+    })
+}
+
+/// Check if there are old database folders and delete them from the filesystem.
+///
+/// See [`check_and_delete_old_databases`] for details.
+fn delete_old_databases(config: Config) {
+    if config.ephemeral || !config.delete_old_database {
+        return;
+    }
+
+    info!("checking for old database versions");
+
+    let state_dir = config.cache_dir.join("state");
+    if let Some(state_dir) = read_dir(&state_dir) {
+        for entry in state_dir.flatten() {
+            let deleted_state = check_and_delete_database(&config, &entry);
+
+            if let Some(deleted_state) = deleted_state {
+                info!(?deleted_state, "deleted outdated state directory");
+            }
+        }
+    }
+}
+
+/// Return a `ReadDir` for `dir`, after checking that `dir` exists and can be read.
+///
+/// Returns `None` if any operation fails.
+fn read_dir(dir: &Path) -> Option<ReadDir> {
+    if dir.exists() {
+        if let Ok(read_dir) = dir.read_dir() {
+            return Some(read_dir);
+        }
+    }
+    None
+}
+
+/// Check if `entry` is an old database directory, and delete it from the filesystem.
+/// See [`check_and_delete_old_databases`] for details.
+///
+/// If the directory was deleted, returns its path.
+fn check_and_delete_database(config: &Config, entry: &DirEntry) -> Option<PathBuf> {
+    let dir_name = parse_dir_name(entry)?;
+    let version_number = parse_version_number(&dir_name)?;
+
+    if version_number >= crate::constants::DATABASE_FORMAT_VERSION {
+        return None;
+    }
+
+    let outdated_path = entry.path();
+
+    // # Correctness
+    //
+    // Check that the path we're about to delete is inside the cache directory.
+    // If the user has symlinked the outdated state directory to a non-cache directory,
+    // we don't want to delete it, because it might contain other files.
+    //
+    // We don't attempt to guard against malicious symlinks created by attackers
+    // (TOCTOU attacks). Zebra should not be run with elevated privileges.
+    let cache_path = canonicalize(&config.cache_dir).ok()?;
+    let outdated_path = canonicalize(outdated_path).ok()?;
+
+    if !outdated_path.starts_with(&cache_path) {
+        info!(
+            skipped_path = ?outdated_path,
+            ?cache_path,
+            "skipped cleanup of outdated state directory: state is outside cache directory",
+        );
+
+        return None;
+    }
+
+    remove_dir_all(&outdated_path).ok().map(|()| outdated_path)
+}
+
+/// Check if `entry` is a directory with a valid UTF-8 name.
+/// (State directory names are guaranteed to be UTF-8.)
+///
+/// Returns `None` if any operation fails.
+fn parse_dir_name(entry: &DirEntry) -> Option<String> {
+    if let Ok(file_type) = entry.file_type() {
+        if file_type.is_dir() {
+            if let Ok(dir_name) = entry.file_name().into_string() {
+                return Some(dir_name);
+            }
+        }
+    }
+    None
+}
+
+/// Parse the state version number from `dir_name`.
+///
+/// Returns `None` if parsing fails, or the directory name is not in the expected format.
+fn parse_version_number(dir_name: &str) -> Option<u32> {
+    dir_name
+        .strip_prefix('v')
+        .and_then(|version| version.parse().ok())
 }
