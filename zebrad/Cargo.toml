@@ -86,7 +86,7 @@ toml = "0.5.9"
 
 futures = "0.3.21"
 tokio = { version = "1.19.2", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
-tower = { version = "0.4.12", features = ["hedge", "limit"] }
+tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.0.10"
 
 color-eyre = { version = "0.6.1", default_features = false, features = ["issue-url"] }

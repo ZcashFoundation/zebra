@@ -29,7 +29,7 @@ tempfile = "3.3.0"
 thiserror = "1.0.31"
 
 tokio = { version = "1.19.2", features = ["sync", "tracing"] }
-tower = { version = "0.4.12", features = ["buffer", "util"] }
+tower = { version = "0.4.13", features = ["buffer", "util"] }
 tracing = "0.1.31"
 
 zebra-chain = { path = "../zebra-chain" }
