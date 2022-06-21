@@ -152,6 +152,7 @@ impl CachedFfiTransaction {
     /// Verify if the script in the input at `input_index` of a transaction correctly
     /// spends the matching [`transparent::Output`] it refers to, with the [`ConsensusBranchId`]
     /// of the block containing the transaction.
+    #[allow(clippy::unwrap_in_result)]
     pub fn is_valid(&self, branch_id: ConsensusBranchId, input_index: usize) -> Result<(), Error> {
         let previous_output = self
             .all_previous_outputs
@@ -162,7 +163,6 @@ impl CachedFfiTransaction {
         let script_pub_key: &[u8] = lock_script.as_raw_bytes();
 
         // This conversion is useful on some platforms, but not others.
-        #[allow(clippy::useless_conversion)]
         let n_in = input_index
             .try_into()
             .expect("transaction indexes are much less than c_uint::MAX");
@@ -176,6 +176,7 @@ impl CachedFfiTransaction {
             | zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_CHECKLOCKTIMEVERIFY;
         // This conversion is useful on some platforms, but not others.
         #[allow(clippy::useless_conversion)]
+        #[allow(clippy::unwrap_in_result)]
         let flags = flags
             .try_into()
             .expect("zcash_script_SCRIPT_FLAGS_VERIFY_* enum values fit in a c_uint");
@@ -210,6 +211,7 @@ impl CachedFfiTransaction {
 
     /// Returns the number of transparent signature operations in the
     /// transparent inputs and outputs of this transaction.
+    #[allow(clippy::unwrap_in_result)]
     pub fn legacy_sigop_count(&self) -> Result<u64, Error> {
         let mut err = 0;
 
