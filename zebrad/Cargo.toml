@@ -86,7 +86,7 @@ toml = "0.5.9"
 
 futures = "0.3.21"
 tokio = { version = "1.19.2", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
-tower = { version = "0.4.12", features = ["hedge", "limit"] }
+tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.0.10"
 
 color-eyre = { version = "0.6.1", default_features = false, features = ["issue-url"] }
@@ -111,7 +111,7 @@ sentry = { version = "0.26.0", default-features = false, features = ["backtrace"
 
 # prod feature flamegraph
 tracing-flame = { version = "0.2.0", optional = true }
-inferno = { version = "0.11.4", default-features = false, optional = true }
+inferno = { version = "0.11.5", default-features = false, optional = true }
 
 # prod feature journald
 tracing-journald = { version = "0.3.0", optional = true }
