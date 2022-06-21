@@ -8,17 +8,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
-    /// If the state's best chain tip has reached this height, always enable the mempool,
-    /// regardless of Zebra's sync status.
-    ///
-    /// Set to `None` by default: Zebra always checks the sync status before enabling the mempool.
-    //
-    // TODO:
-    // - allow the mempool to be enabled before the genesis block is committed?
-    //   we could replace `Option` with an enum that has an `AlwaysEnable` variant
-    // - move debug configs last (needs #2847)
-    pub debug_enable_at_height: Option<u32>,
-
     /// The mempool transaction cost limit.
     ///
     /// This limits the total serialized byte size of all transactions in the mempool.
@@ -31,18 +20,27 @@ pub struct Config {
 
     /// The mempool transaction eviction age limit.
     ///
-    /// This limits the maximum amount of time evicted transaction IDs stay in the mempool rejection list.
-    /// Transactions are randomly evicted from the mempool when the mempool reaches [`tx_cost_limit`].
+    /// This limits the maximum amount of time evicted transaction IDs stay in
+    /// the mempool rejection list. Transactions are randomly evicted from the
+    /// mempool when the mempool reaches [`Self::tx_cost_limit`].
     ///
     /// (Transactions can also be rejected by the mempool for other reasons.
     /// Different rejection reasons can have different age limits.)
     ///
     /// This corresponds to `mempoolevictionmemoryminutes` from
     /// [ZIP-401](https://zips.z.cash/zip-0401#specification).
-    ///
-    // Note: Durations become a TOML table, so they must be the final item in the config
-    //       We'll replace them with a more user-friendly format in #2847
+    #[serde(with = "humantime_serde")]
     pub eviction_memory_time: Duration,
+
+    /// If the state's best chain tip has reached this height, always enable the mempool,
+    /// regardless of Zebra's sync status.
+    ///
+    /// Set to `None` by default: Zebra always checks the sync status before enabling the mempool.
+    //
+    // TODO:
+    // - allow the mempool to be enabled before the genesis block is committed?
+    //   we could replace `Option` with an enum that has an `AlwaysEnable` variant
+    pub debug_enable_at_height: Option<u32>,
 }
 
 impl Default for Config {

@@ -1,9 +1,9 @@
 //! Zcash node address types and serialization for Zcash network messages.
 //!
 //! Zcash has 3 different node address formats:
-//! - [`AddrV1`]: the format used in `addr` (v1) messages,
+//! - `AddrV1`: the format used in `addr` (v1) messages,
 //! - [`AddrInVersion`]: the format used in `version` messages, and
-//! - [`AddrV2`]: the format used in `addrv2` messages.
+//! - `AddrV2`: the format used in `addrv2` messages.
 
 pub mod canonical;
 pub mod in_version;

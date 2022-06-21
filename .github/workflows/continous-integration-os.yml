@@ -267,13 +267,14 @@ jobs:
           args: --locked --all-features --all-targets
 
   cargo-deny:
-    name: Check deny.toml ${{ matrix.checks }}
+    name: Check deny.toml ${{ matrix.checks }} ${{ matrix.features }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         checks:
           - bans
           - sources
+        features: ['', '--all-features', '--no-default-features']
 
     # Prevent sudden announcement of a new advisory from failing ci:
     continue-on-error: ${{ matrix.checks == 'advisories' }}
@@ -283,14 +284,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: EmbarkStudios/cargo-deny-action@v1
-        with:
-          command: check ${{ matrix.checks }}
-          args: --all-features --workspace
-
-      # this check runs with optional features off
+      # this check also runs with optional features off
       # so we expect some warnings about "skip tree root was not found"
-      - uses: EmbarkStudios/cargo-deny-action@v1
+      - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
+        uses: EmbarkStudios/cargo-deny-action@v1
         with:
           command: check ${{ matrix.checks }}
-          args: --workspace
+          args: --workspace with features ${{ matrix.features }}

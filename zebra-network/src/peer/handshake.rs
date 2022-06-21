@@ -1,4 +1,4 @@
-//! Initial [`Handshake`]s with Zebra peers over a [`PeerTransport`].
+//! Initial [`Handshake`]s with Zebra peers over a `PeerTransport`.
 
 use std::{
     cmp::min,

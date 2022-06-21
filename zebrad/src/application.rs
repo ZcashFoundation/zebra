@@ -314,7 +314,7 @@ impl Application for ZebradApp {
 
         // The Sentry default config pulls in the DSN from the `SENTRY_DSN`
         // environment variable.
-        #[cfg(feature = "enable-sentry")]
+        #[cfg(feature = "sentry")]
         let guard = sentry::init(sentry::ClientOptions {
             debug: true,
             release: Some(app_version().to_string().into()),
@@ -325,7 +325,7 @@ impl Application for ZebradApp {
             let panic_report = panic_hook.panic_report(panic_info);
             eprintln!("{}", panic_report);
 
-            #[cfg(feature = "enable-sentry")]
+            #[cfg(feature = "sentry")]
             {
                 let event = crate::sentry::panic_event_from(panic_report);
                 sentry::capture_event(event);

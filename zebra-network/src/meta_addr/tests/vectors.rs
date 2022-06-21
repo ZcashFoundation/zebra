@@ -3,10 +3,15 @@
 use std::net::SocketAddr;
 
 use chrono::Utc;
-use zebra_chain::serialization::{DateTime32, Duration32};
+
+use zebra_chain::{
+    parameters::Network::*,
+    serialization::{DateTime32, Duration32},
+};
+
+use crate::{constants::MAX_PEER_ACTIVE_FOR_GOSSIP, protocol::types::PeerServices};
 
 use super::{super::MetaAddr, check};
-use crate::{constants::MAX_PEER_ACTIVE_FOR_GOSSIP, protocol::types::PeerServices};
 
 /// Margin of error for time-based tests.
 ///
@@ -39,10 +44,10 @@ fn sanitize_extremes() {
         last_connection_state: Default::default(),
     };
 
-    if let Some(min_sanitized) = min_time_entry.sanitize() {
+    if let Some(min_sanitized) = min_time_entry.sanitize(Mainnet) {
         check::sanitize_avoids_leaks(&min_time_entry, &min_sanitized);
     }
-    if let Some(max_sanitized) = max_time_entry.sanitize() {
+    if let Some(max_sanitized) = max_time_entry.sanitize(Mainnet) {
         check::sanitize_avoids_leaks(&max_time_entry, &max_sanitized);
     }
 }

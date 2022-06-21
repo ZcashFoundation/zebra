@@ -100,8 +100,8 @@ impl PreparedBlock {
 }
 
 impl ContextuallyValidBlock {
-    /// Create a block that's ready for non-finalized `Chain` contextual validation,
-    /// using a [`PreparedBlock`] and fake zero-valued spent UTXOs.
+    /// Create a block that's ready for non-finalized `Chain` contextual
+    /// validation, using a [`PreparedBlock`] and fake zero-valued spent UTXOs.
     ///
     /// Only for use in tests.
     pub fn test_with_zero_spent_utxos(block: impl Into<PreparedBlock>) -> Self {

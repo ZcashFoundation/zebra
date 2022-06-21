@@ -32,7 +32,7 @@ pub enum Request {
     /// Query matching  transactions in the mempool,
     /// using a unique set of [`struct@Hash`]s. Pre-V5 transactions are matched
     /// directly; V5 transaction are matched just by the Hash, disregarding
-    /// the [`AuthDigest`].
+    /// the [`AuthDigest`](zebra_chain::transaction::AuthDigest).
     TransactionsByMinedId(HashSet<Hash>),
 
     /// Query matching cached rejected transaction IDs in the mempool,
@@ -59,10 +59,10 @@ pub enum Request {
     ///
     /// This request is required to avoid hangs in the mempool.
     ///
-    /// The queue checker task can't call `poll_ready` directly on the [`Mempool`] service,
-    /// because the mempool service is wrapped in a `Buffer`.
-    /// Calling [`Buffer::poll_ready`] reserves a buffer slot, which can cause hangs when
-    /// too many slots are reserved but unused:
+    /// The queue checker task can't call `poll_ready` directly on the mempool
+    /// service, because the service is wrapped in a `Buffer`. Calling
+    /// `Buffer::poll_ready` reserves a buffer slot, which can cause hangs
+    /// when too many slots are reserved but unused:
     /// <https://docs.rs/tower/0.4.10/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound>
     CheckForVerifiedTransactions,
 }

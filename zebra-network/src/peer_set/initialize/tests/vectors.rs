@@ -1260,7 +1260,7 @@ where
     }
 
     // Manually initialize an address book without a timestamp tracker.
-    let mut address_book = AddressBook::new(config.listen_addr, Span::current());
+    let mut address_book = AddressBook::new(config.listen_addr, config.network, Span::current());
 
     // Add enough fake peers to go over the limit, even if the limit is zero.
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
