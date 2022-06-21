@@ -1300,7 +1300,8 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     // lightwalletd will keep retrying getblock.
     if !test_type.allow_lightwalletd_cached_state() {
         if test_type.needs_zebra_cached_state() {
-            lightwalletd.expect_stdout_line_matches("([Aa]dding block to cache)|([Ww]aiting for block)")?;
+            lightwalletd
+                .expect_stdout_line_matches("([Aa]dding block to cache)|([Ww]aiting for block)")?;
         } else {
             lightwalletd.expect_stdout_line_matches(regex::escape(
                 "Waiting for zcashd height to reach Sapling activation height (419200)",
@@ -1313,7 +1314,8 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
         // Wait for lightwalletd to sync some blocks
-        lightwalletd.expect_stdout_line_matches("([Aa]dding block to cache)|([Ww]aiting for block)")?;
+        lightwalletd
+            .expect_stdout_line_matches("([Aa]dding block to cache)|([Ww]aiting for block)")?;
 
         // Wait for lightwalletd to sync to Zebra's tip
         //

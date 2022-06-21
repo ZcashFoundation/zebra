@@ -838,15 +838,14 @@ fn zip143_sighash() -> Result<()> {
             Some(output) => mock_pre_v5_output_list(output, input_index.unwrap()),
             None => vec![],
         };
-        let result = hex::encode(
-            transaction.sighash(
+        let result =
+            hex::encode(transaction.sighash(
                 NetworkUpgrade::from_branch_id(test.consensus_branch_id)
                     .expect("must be a valid branch ID"),
                 HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
                 &all_previous_outputs,
                 input_index,
-            ),
-        );
+            ));
         let expected = hex::encode(test.sighash);
         assert_eq!(expected, result, "test #{}: sighash does not match", i);
     }
@@ -874,15 +873,14 @@ fn zip243_sighash() -> Result<()> {
             Some(output) => mock_pre_v5_output_list(output, input_index.unwrap()),
             None => vec![],
         };
-        let result = hex::encode(
-            transaction.sighash(
+        let result =
+            hex::encode(transaction.sighash(
                 NetworkUpgrade::from_branch_id(test.consensus_branch_id)
                     .expect("must be a valid branch ID"),
                 HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
                 &all_previous_outputs,
                 input_index,
-            ),
-        );
+            ));
         let expected = hex::encode(test.sighash);
         assert_eq!(expected, result, "test #{}: sighash does not match", i);
     }
