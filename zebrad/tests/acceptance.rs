@@ -1300,7 +1300,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     // lightwalletd will keep retrying getblock.
     if !test_type.allow_lightwalletd_cached_state() {
         if test_type.needs_zebra_cached_state() {
-            lightwalletd.expect_stdout_line_matches("[Aa]dding block to cache")?;
+            lightwalletd.expect_stdout_line_matches("([Aa]dding block to cache)|([Ww]aiting for block)")?;
         } else {
             lightwalletd.expect_stdout_line_matches(regex::escape(
                 "Waiting for zcashd height to reach Sapling activation height (419200)",
@@ -1312,7 +1312,13 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         // Wait for Zebra to sync its cached state to the chain tip
         zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
+        // Wait for lightwalletd to sync some blocks
+        lightwalletd.expect_stdout_line_matches("([Aa]dding block to cache)|([Ww]aiting for block)")?;
+
         // Wait for lightwalletd to sync to Zebra's tip
+        //
+        // TODO: re-enable this code when lightwalletd hangs are fixed
+        #[cfg(lightwalletd_hang_fix)]
         lightwalletd.expect_stdout_line_matches("[Ww]aiting for block")?;
 
         // Check Zebra is still at the tip (also clears and prints Zebra's logs)
@@ -1322,7 +1328,9 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         // But when it gets near the tip, it starts using the mempool.
         //
         // adityapk00/lightwalletd logs mempool changes, but zcash/lightwalletd doesn't.
-        #[cfg(adityapk00_lightwalletd)]
+        //
+        // TODO: re-enable this code when lightwalletd hangs are fixed
+        #[cfg(lightwalletd_hang_fix)]
         {
             lightwalletd.expect_stdout_line_matches(regex::escape(
                 "Block hash changed, clearing mempool clients",
