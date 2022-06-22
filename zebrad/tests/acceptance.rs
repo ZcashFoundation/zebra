@@ -123,7 +123,7 @@ mod common;
 
 use common::{
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
-    config::{default_test_config, persistent_test_config, testdir},
+    config::{default_test_config, persistent_test_config, stored_config_path, testdir},
     launch::{
         spawn_zebrad_for_rpc_without_initial_peers, ZebradTestDirExt, BETWEEN_NODES_DELAY,
         LAUNCH_DELAY,
@@ -1702,6 +1702,57 @@ async fn delete_old_databases() -> Result<()> {
     output
         .assert_was_killed()
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn stored_config_works() -> Result<()> {
+    zebra_test::init();
+
+    let run_dir = testdir()?;
+    let stored_config_path = stored_config_path();
+
+    // run zebra with stored config
+    let mut child =
+        run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
+
+    //zebra was able to start with the stored config
+    child.expect_stdout_line_matches("Starting zebrad".to_string())?;
+
+    // finish
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn stored_config_is_newest() -> Result<()> {
+    zebra_test::init();
+
+    let run_dir = testdir()?;
+    let stored_config_path = stored_config_path();
+    let generated_config_path = run_dir.path().join("newest_config.toml");
+
+    // generate an up to date config
+    let child =
+        run_dir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
+
+    let output = child.wait_with_output()?;
+    let _output = output.assert_success()?;
+
+    let contents_generated = std::fs::read_to_string(generated_config_path).unwrap();
+    let contents_stored = std::fs::read_to_string(stored_config_path).unwrap();
+
+    assert_eq!(contents_generated, contents_stored);
 
     Ok(())
 }
