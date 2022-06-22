@@ -27,17 +27,6 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
-  build-chain-no-features:
-    name: Build ${{ matrix.rust }} zebra-chain w/o features on ubuntu-latest
-    timeout-minutes: 60
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust: [stable, beta]
-
-    steps:
-      - run: 'echo "No build required"'
-
   install-from-lockfile-no-cache:
     name: Install zebrad from lockfile without cache on ubuntu-latest
     runs-on: ubuntu-latest
