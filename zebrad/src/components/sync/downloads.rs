@@ -119,6 +119,15 @@ pub enum BlockDownloadVerifyError {
     CancelledDuringDownload { hash: block::Hash },
 
     #[error(
+        "block download & verification was cancelled while waiting for the verifier service: \
+         to become ready: {height:?} {hash:?}"
+    )]
+    CancelledAwaitingVerifierReadiness {
+        height: block::Height,
+        hash: block::Hash,
+    },
+
+    #[error(
         "block download & verification was cancelled during verification: {height:?} {hash:?}"
     )]
     CancelledDuringVerification {
@@ -282,6 +291,7 @@ where
 
         let task = tokio::spawn(
             async move {
+                // Download the block.
                 // Prefer the cancel handle if both are ready.
                 let rsp = tokio::select! {
                     biased;
@@ -393,12 +403,24 @@ where
                     Err(BlockDownloadVerifyError::BehindTipHeightLimit { height: block_height, hash })?;
                 }
 
+                // Wait for the verifier service to be ready.
+                let readiness = verifier.ready();
+                // Prefer the cancel handle if both are ready.
+                let verifier = tokio::select! {
+                    biased;
+                    _ = &mut cancel_rx => {
+                        trace!("task cancelled waiting for verifier service readiness");
+                        metrics::counter!("sync.cancelled.verify.ready.count", 1);
+                        return Err(BlockDownloadVerifyError::CancelledAwaitingVerifierReadiness { height: block_height, hash })
+                    }
+                    verifier = readiness => verifier,
+                };
+
+                // Verify the block.
                 let rsp = verifier
-                    .ready()
-                    .await
                     .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?
                     .call(block);
-                // Prefer the cancel handle if both are ready.
+
                 let verification = tokio::select! {
                     biased;
                     _ = &mut cancel_rx => {
@@ -408,6 +430,7 @@ where
                     }
                     verification = rsp => verification,
                 };
+
                 if verification.is_ok() {
                     metrics::counter!("sync.verified.block.count", 1);
                 }
