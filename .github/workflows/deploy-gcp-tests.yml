@@ -319,8 +319,11 @@ jobs:
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
     runs-on: ubuntu-latest
+    # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
+    # Normally, if a job is skipped, all the jobs that depend on it are also skipped.
+    # So we need to override the default success() check to make this job run.
     needs: [ test-without-cached-state, test-with-cached-state ]
-    if: ${{ inputs.saves_to_disk }}
+    if: ${{ inputs.saves_to_disk && !cancelled() && !failure() }}
     permissions:
       contents: 'read'
       id-token: 'write'
