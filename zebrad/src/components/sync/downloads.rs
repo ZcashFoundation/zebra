@@ -425,6 +425,9 @@ where
             .map_err(move |e| (e, hash)),
         );
 
+        // Try to start the spawned task before queueing the next block request
+        tokio::task::yield_now().await;
+
         self.pending.push(task);
         assert!(
             self.cancel_handles.insert(hash, cancel_tx).is_none(),
