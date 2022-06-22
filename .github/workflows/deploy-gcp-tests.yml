@@ -67,6 +67,8 @@ env:
   MACHINE_TYPE: c2d-standard-16
 
 jobs:
+  # run the test without any cached state
+  # each test runs one of these test-* jobs, and skips the other
   test-without-cached-state:
     name: Run ${{ inputs.test_id }} test
     if: ${{ !inputs.needs_zebra_state }}
@@ -132,6 +134,10 @@ jobs:
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
+  # run the test using cached state
+  # each test runs one of these test-* jobs, and skips the other
+  #
+  # TODO: if we're running full syncs with cached state, split this job into checkpoint and full validation
   test-with-cached-state:
     name: Run ${{ inputs.test_id }} test
     if: ${{ inputs.needs_zebra_state }}
@@ -316,6 +322,7 @@ jobs:
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}"
 
+  # create a state image from the instance's state disk, if requested by the caller
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
     runs-on: ubuntu-latest
@@ -402,6 +409,7 @@ jobs:
           --storage-location=us \
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
 
+  # delete the Google Cloud instance for this test
   delete-instance:
     name: Delete ${{ inputs.test_id }} instance
     runs-on: ubuntu-latest
