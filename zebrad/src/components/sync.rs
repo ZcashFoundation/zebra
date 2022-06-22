@@ -57,7 +57,7 @@ const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
 
 /// A lower bound on the user-specified lookahead limit.
 ///
-/// Set to the maximum checkpoint interval, so the pipeline holds at least one checkpoint's
+/// Set to the maximum checkpoint interval, so the pipeline holds around a checkpoint's
 /// worth of blocks.
 ///
 /// ## Security
@@ -79,7 +79,9 @@ pub const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GA
 /// The default for the user-specified lookahead limit.
 ///
 /// See [`MIN_LOOKAHEAD_LIMIT`] for details.
-pub const DEFAULT_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 5;
+///
+/// TODO: increase to `MAX_CHECKPOINT_HEIGHT_GAP * 5`, after we implement orchard batching
+pub const DEFAULT_LOOKAHEAD_LIMIT: usize = MIN_LOOKAHEAD_LIMIT;
 
 /// The expected maximum number of hashes in an ObtainTips or ExtendTips response.
 ///
