@@ -1711,7 +1711,7 @@ fn stored_config_works() -> Result<()> {
     zebra_test::init();
 
     let run_dir = testdir()?;
-    let stored_config_path = stored_config_path();
+    let stored_config_path = stored_config_path().unwrap();
 
     // run zebra with stored config
     let mut child =
@@ -1739,7 +1739,7 @@ fn stored_config_is_newest() -> Result<()> {
     zebra_test::init();
 
     let run_dir = testdir()?;
-    let stored_config_path = stored_config_path();
+    let stored_config_path = stored_config_path().unwrap();
     let generated_config_path = run_dir.path().join("newest_config.toml");
 
     // generate an up to date config

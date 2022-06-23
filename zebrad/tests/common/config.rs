@@ -86,13 +86,12 @@ pub fn testdir() -> Result<TempDir> {
 }
 
 /// Get stored config path
-pub fn stored_config_path() -> PathBuf {
-    Path::new(env!("CARGO_BIN_EXE_zebrad"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("zebrad/tests/common/config.toml")
+pub fn stored_config_path() -> Option<PathBuf> {
+    let ancestors = Path::new(env!("CARGO_BIN_EXE_zebrad")).ancestors();
+    for potential_zebra in ancestors {
+        if potential_zebra.ends_with("zebra") {
+            return Some(potential_zebra.join("zebrad/tests/common/config.toml"));
+        }
+    }
+    None
 }
