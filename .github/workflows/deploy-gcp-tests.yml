@@ -151,7 +151,7 @@ jobs:
     needs: [ setup-without-cached-state ]
     # if the previous step fails, we also want to run and fail this step,
     # so that the branch protection rule fails in Mergify and GitHub
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && !inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -318,7 +318,7 @@ jobs:
     needs: [ setup-with-cached-state ]
     # if the previous step fails, we also want to run and fail this step,
     # so that the branch protection rule fails in Mergify and GitHub
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
