@@ -1737,6 +1737,7 @@ fn stored_config_works() -> Result<()> {
 }
 
 #[test]
+#[allow(clippy::print_stderr)]
 fn stored_config_is_newest() -> Result<()> {
     zebra_test::init();
 
@@ -1761,7 +1762,15 @@ fn stored_config_is_newest() -> Result<()> {
 
         contents_stored = contents_stored.replace("[CACHE_DIR]", cache_dir.to_str().unwrap());
 
-        assert_eq!(contents_generated, contents_stored);
+        if contents_generated != contents_stored {
+            eprintln!(
+                "Error: Stored config is not up to date. Please generate an up to date config and overwrite
+the stored one using `zebrad generate -o zebrad/common/newest_config.toml`. Then run this test again."
+            );
+
+            // show the 2 strings also
+            assert_eq!(contents_generated, contents_stored);
+        }
     }
 
     Ok(())
