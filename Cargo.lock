@@ -377,7 +377,7 @@ checksum = "0d96d7f4f3dc9a699bdef1d19648f6f20ef966b51892d224582a4475be669cb5"
 dependencies = [
  "bitvec",
  "blake2s_simd",
- "byteorder",
+ "byteorder 1.4.3",
  "crossbeam-channel",
  "ff",
  "group",
@@ -521,7 +521,7 @@ checksum = "c0940dc441f31689269e10ac70eb1002a3a1d3ad1390e030043662eb7fe4688b"
 dependencies = [
  "block-padding 0.1.5",
  "byte-tools",
- "byteorder",
+ "byteorder 1.4.3",
  "generic-array 0.12.4",
 ]
 
@@ -635,6 +635,12 @@ checksum = "0e851ca7c24871e7336801608a4797d7376545b6928a10d32d75685687141ead"
 
 [[package]]
 name = "byteorder"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fc10e8cc6b2580fda3f36eb6dc5316657f812a3df879a44a66fc9f0fdbc4855"
+
+[[package]]
+name = "byteorder"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
@@ -675,6 +681,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c24dab4283a142afa2fdca129b80ad2c6284e073930f964c3a1293c225ee39a"
 dependencies = [
  "rustc_version",
+]
+
+[[package]]
+name = "cbor"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e56053652b4b5c0ded5ae6183c7cd547ad2dd6bcce149658bef052a4995533bd"
+dependencies = [
+ "byteorder 0.5.3",
+ "rustc-serialize",
 ]
 
 [[package]]
@@ -1106,7 +1122,7 @@ version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90f9d052967f590a76e62eb387bd0bbb1b000182c3cefe5364db6b7211651bc0"
 dependencies = [
- "byteorder",
+ "byteorder 1.4.3",
  "digest 0.9.0",
  "rand_core 0.5.1",
  "serde",
@@ -1482,7 +1498,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4127688f6177e3f57521881cb1cfd90d1228214f9dc43b8efe6f6c6948cd8280"
 dependencies = [
  "blake2b_simd 0.5.11",
- "byteorder",
+ "byteorder 1.4.3",
 ]
 
 [[package]]
@@ -1491,7 +1507,7 @@ version = "0.1.0"
 source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=6d75718076e592a41b6bd6ec916dc15420e4cc3c#6d75718076e592a41b6bd6ec916dc15420e4cc3c"
 dependencies = [
  "blake2b_simd 1.0.0",
- "byteorder",
+ "byteorder 1.4.3",
 ]
 
 [[package]]
@@ -1548,7 +1564,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcf0ed7fe52a17a03854ec54a9f76d6d84508d1c0e66bc1793301c73fc8493c"
 dependencies = [
- "byteorder",
+ "byteorder 1.4.3",
  "rand 0.8.5",
  "rustc-hex",
  "static_assertions",
@@ -1830,7 +1846,7 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7391856def869c1c81063a03457c676fbcd419709c3dfb33d8d319de484b154d"
 dependencies = [
- "byteorder",
+ "byteorder 1.4.3",
  "ff",
  "rand_core 0.6.3",
  "subtle",
@@ -1938,7 +1954,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31672b7011be2c4f7456c4ddbcb40e7e9a4a9fad8efe49a6ebaf5f307d0109c0"
 dependencies = [
  "base64",
- "byteorder",
+ "byteorder 1.4.3",
  "flate2",
  "nom",
  "num-traits",
@@ -1953,7 +1969,7 @@ dependencies = [
  "lazy_static",
  "rand_core 0.6.3",
  "ring",
- "secp256k1",
+ "secp256k1 0.21.3",
 ]
 
 [[package]]
@@ -2586,7 +2602,7 @@ version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e261cf0f8b3c42ded9f7d2bb59dea03aa52bc8a1cbc7482f9fc3fd1229d3b42"
 dependencies = [
- "byteorder",
+ "byteorder 1.4.3",
  "keccak",
  "rand_core 0.5.1",
  "zeroize",
@@ -2796,7 +2812,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4547ee5541c18742396ae2c895d0717d0f886d8823b8399cdaf7b07d63ad0480"
 dependencies = [
  "autocfg 0.1.8",
- "byteorder",
+ "byteorder 1.4.3",
  "lazy_static",
  "libm",
  "num-integer",
@@ -3459,7 +3475,7 @@ checksum = "12e6c80c1139113c28ee4670dc50cc42915228b51f56a9e407f0ec60f966646f"
 dependencies = [
  "bit-set",
  "bitflags",
- "byteorder",
+ "byteorder 1.4.3",
  "lazy_static",
  "num-traits",
  "quick-error",
@@ -3745,7 +3761,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cc8038c8b7e481bdf688d0585d4897ed0e9e0cee10aa365dde51238c20e4182"
 dependencies = [
  "blake2b_simd 1.0.0",
- "byteorder",
+ "byteorder 1.4.3",
  "group",
  "jubjub",
  "pasta_curves",
@@ -3762,7 +3778,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6039ff156887caf92df308cbaccdc058c9d3155a913da046add6e48c4cdbd91d"
 dependencies = [
  "blake2b_simd 1.0.0",
- "byteorder",
+ "byteorder 1.4.3",
  "digest 0.9.0",
  "jubjub",
  "rand_core 0.6.3",
@@ -3948,7 +3964,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e05c2603e2823634ab331437001b411b9ed11660fbc4066f3908c84a9439260d"
 dependencies = [
- "byteorder",
+ "byteorder 1.4.3",
  "digest 0.9.0",
  "lazy_static",
  "num-bigint-dig",
@@ -3995,6 +4011,12 @@ name = "rustc-hex"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e75f6a532d0fd9f7f13144f392b6ad56a32696bfcd9c78f797f16bbb6f072d6"
+
+[[package]]
+name = "rustc-serialize"
+version = "0.3.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcf128d1287d2ea9d80910b5f1120d0b8eede3fbf1abe91c40d39ea7d51e6fda"
 
 [[package]]
 name = "rustc_version"
@@ -4101,7 +4123,17 @@ version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c42e6f1735c5f00f51e43e28d6634141f2bcad10931b2609ddd74a86d751260"
 dependencies = [
- "secp256k1-sys",
+ "secp256k1-sys 0.4.2",
+]
+
+[[package]]
+name = "secp256k1"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61f7ccaeed44ae6e882660d11a9ac86ace19695c40802ccb66178abfae2ef2f9"
+dependencies = [
+ "cbor",
+ "secp256k1-sys 0.6.0",
  "serde",
 ]
 
@@ -4110,6 +4142,15 @@ name = "secp256k1-sys"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "957da2573cde917463ece3570eab4a0b3f19de6f1646cde62e6fd3868f566036"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "secp256k1-sys"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7058dc8eaf3f2810d7828680320acda0b25a288f6d288e19278e249bbf74226b"
 dependencies = [
  "cc",
 ]
@@ -5583,7 +5624,7 @@ version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12f03af7ccf01dd611cc450a0d10dbc9b745770d096473e2faf0ca6e2d66d1e0"
 dependencies = [
- "byteorder",
+ "byteorder 1.4.3",
  "crunchy",
  "hex",
  "static_assertions",
@@ -6013,7 +6054,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9fb61ea88eb539bc0ac2068e5da99411dd4978595b3d7ff6a4b1562ddc8e8710"
 dependencies = [
- "byteorder",
+ "byteorder 1.4.3",
  "nonempty",
 ]
 
@@ -6022,7 +6063,7 @@ name = "zcash_encoding"
 version = "0.1.0"
 source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=6d75718076e592a41b6bd6ec916dc15420e4cc3c#6d75718076e592a41b6bd6ec916dc15420e4cc3c"
 dependencies = [
- "byteorder",
+ "byteorder 1.4.3",
  "nonempty",
 ]
 
@@ -6033,7 +6074,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb611a28a4e13ac715ee712f4344d6b279b767daf6345dafefb2c4bf582b6679"
 dependencies = [
  "blake2b_simd 1.0.0",
- "byteorder",
+ "byteorder 1.4.3",
  "primitive-types",
 ]
 
@@ -6073,7 +6114,7 @@ dependencies = [
  "blake2s_simd",
  "bls12_381",
  "bs58",
- "byteorder",
+ "byteorder 1.4.3",
  "chacha20poly1305",
  "equihash 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ff",
@@ -6090,7 +6131,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_core 0.6.3",
  "ripemd",
- "secp256k1",
+ "secp256k1 0.21.3",
  "sha2",
  "subtle",
  "zcash_encoding 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6108,7 +6149,7 @@ dependencies = [
  "blake2b_simd 1.0.0",
  "blake2s_simd",
  "bls12_381",
- "byteorder",
+ "byteorder 1.4.3",
  "chacha20poly1305",
  "equihash 0.1.0 (git+https://github.com/ZcashFoundation/librustzcash.git?rev=6d75718076e592a41b6bd6ec916dc15420e4cc3c)",
  "ff",
@@ -6137,7 +6178,7 @@ dependencies = [
  "bellman",
  "blake2b_simd 1.0.0",
  "bls12_381",
- "byteorder",
+ "byteorder 1.4.3",
  "directories",
  "ff",
  "group",
@@ -6179,7 +6220,7 @@ dependencies = [
  "blake2s_simd",
  "bls12_381",
  "bs58",
- "byteorder",
+ "byteorder 1.4.3",
  "chrono",
  "color-eyre",
  "criterion",
@@ -6204,7 +6245,7 @@ dependencies = [
  "rand_core 0.6.3",
  "redjubjub",
  "ripemd",
- "secp256k1",
+ "secp256k1 0.23.0",
  "serde",
  "serde-big-array",
  "serde_with",
@@ -6276,7 +6317,7 @@ version = "1.0.0-beta.11"
 dependencies = [
  "arti-client",
  "bitflags",
- "byteorder",
+ "byteorder 1.4.3",
  "bytes",
  "chrono",
  "futures",
