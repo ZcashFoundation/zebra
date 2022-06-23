@@ -81,7 +81,7 @@ pub const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GA
 /// See [`MIN_LOOKAHEAD_LIMIT`] for details.
 ///
 /// TODO: increase to `MAX_CHECKPOINT_HEIGHT_GAP * 5`, after we implement orchard batching
-pub const DEFAULT_LOOKAHEAD_LIMIT: usize = MIN_LOOKAHEAD_LIMIT;
+pub const DEFAULT_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 3;
 
 /// The expected maximum number of hashes in an ObtainTips or ExtendTips response.
 ///
