@@ -50,7 +50,7 @@ peerset_initial_target_size = 25
 [rpc]
 
 [state]
-cache_dir = '[CACHE_DIR]'
+cache_dir = 'cache_dir'
 delete_old_database = true
 ephemeral = false
 
