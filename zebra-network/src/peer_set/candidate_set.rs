@@ -4,6 +4,7 @@ use chrono::Utc;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::{sleep_until, timeout, Instant};
 use tower::{Service, ServiceExt};
+use tracing::Span;
 
 use zebra_chain::serialization::DateTime32;
 
@@ -333,9 +334,12 @@ where
         //
         // Extend handles duplicate addresses internally.
         let address_book = self.address_book.clone();
-        tokio::task::spawn_blocking(move || address_book.lock().unwrap().extend(addrs))
-            .await
-            .expect("panic in new peers address book update task");
+        let span = Span::current();
+        tokio::task::spawn_blocking(move || {
+            span.in_scope(|| address_book.lock().unwrap().extend(addrs))
+        })
+        .await
+        .expect("panic in new peers address book update task");
     }
 
     /// Returns the next candidate for a connection attempt, if any are available.
@@ -386,7 +390,8 @@ where
         };
 
         // Correctness: Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
-        let next_peer = tokio::task::spawn_blocking(next_peer)
+        let span = Span::current();
+        let next_peer = tokio::task::spawn_blocking(move || span.in_scope(next_peer))
             .await
             .expect("panic in next peer address book task")?;
 
@@ -406,9 +411,12 @@ where
         // Spawn address book accesses on a blocking thread,
         // to avoid deadlocks (see #1976).
         let address_book = self.address_book.clone();
-        tokio::task::spawn_blocking(move || address_book.lock().unwrap().update(addr))
-            .await
-            .expect("panic in peer failure address book update task");
+        let span = Span::current();
+        tokio::task::spawn_blocking(move || {
+            span.in_scope(|| address_book.lock().unwrap().update(addr))
+        })
+        .await
+        .expect("panic in peer failure address book update task");
     }
 }
 
