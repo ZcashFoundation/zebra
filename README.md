@@ -78,11 +78,7 @@ Every few weeks, we release a new Zebra beta [release](https://github.com/ZcashF
 Zebra's network stack is interoperable with `zcashd`,
 and Zebra implements all the features required to reach Zcash network consensus.
 
-The goals of the beta release series are for Zebra to act as a fully validating Zcash node,
-for all active consensus rules as of NU5 activation.
-
 Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
-(As of the second NU5 activation on testnet.)
 
 But it may not validate any:
 - Undocumented rules derived from Bitcoin
@@ -106,7 +102,7 @@ for your platform:
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
- 3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.11 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.11 zebrad`
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 If you're interested in testing out `zebrad` please feel free, but keep in mind
@@ -215,8 +211,6 @@ So Zebra's state should always be valid, unless your OS or disk hardware is corr
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
-- [Old state versions are not deleted #1213](https://github.com/ZcashFoundation/zebra/issues/1213)
-  - When Zebra changes its state format, it does not delete the old state directory. You can delete old state directories if you need the space.
 - [No Windows support #3801](https://github.com/ZcashFoundation/zebra/issues/3801)
   - We used to test with Windows Server 2019, but not anymore; see issue for details
 
@@ -226,7 +220,6 @@ Features:
 - Wallet functionality
 
 Performance and Reliability:
-- Reliable syncing on Testnet
 - Reliable syncing under poor network conditions
 - Additional batch verification
 - Performance tuning
