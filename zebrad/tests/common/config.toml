@@ -50,13 +50,13 @@ peerset_initial_target_size = 25
 [rpc]
 
 [state]
-cache_dir = '/home/oxarbitrage/.cache/zebra'
+cache_dir = '[CACHE_DIR]'
 delete_old_database = true
 ephemeral = false
 
 [sync]
-lookahead_limit = 2000
-max_concurrent_block_requests = 50
+lookahead_limit = 400
+max_concurrent_block_requests = 25
 
 [tracing]
 force_use_color = false

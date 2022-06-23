@@ -1750,7 +1750,13 @@ fn stored_config_is_newest() -> Result<()> {
     let _output = output.assert_success()?;
 
     let contents_generated = std::fs::read_to_string(generated_config_path).unwrap();
-    let contents_stored = std::fs::read_to_string(stored_config_path).unwrap();
+    let mut contents_stored = std::fs::read_to_string(stored_config_path).unwrap();
+
+    let cache_dir = dirs::cache_dir()
+        .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
+        .join("zebra");
+
+    contents_stored = contents_stored.replace("[CACHE_DIR]", cache_dir.to_str().unwrap());
 
     assert_eq!(contents_generated, contents_stored);
 
