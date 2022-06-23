@@ -1710,28 +1710,26 @@ async fn delete_old_databases() -> Result<()> {
 fn stored_config_works() -> Result<()> {
     zebra_test::init();
 
-    // only run the test if we found a stored config
-    if let Some(stored_config_path) = stored_config_path() {
-        let run_dir = testdir()?;
+    let stored_config_path = stored_config_path();
+    let run_dir = testdir()?;
 
-        // run zebra with stored config
-        let mut child =
-            run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
+    // run zebra with stored config
+    let mut child =
+        run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
 
-        //zebra was able to start with the stored config
-        child.expect_stdout_line_matches("Starting zebrad".to_string())?;
+    //zebra was able to start with the stored config
+    child.expect_stdout_line_matches("Starting zebrad".to_string())?;
 
-        // finish
-        child.kill()?;
+    // finish
+    child.kill()?;
 
-        let output = child.wait_with_output()?;
-        let output = output.assert_failure()?;
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
 
-        // [Note on port conflict](#Note on port conflict)
-        output
-            .assert_was_killed()
-            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
-    }
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
     Ok(())
 }
@@ -1741,36 +1739,34 @@ fn stored_config_works() -> Result<()> {
 fn stored_config_is_newest() -> Result<()> {
     zebra_test::init();
 
-    // only run the test if we found a stored config
-    if let Some(stored_config_path) = stored_config_path() {
-        let run_dir = testdir()?;
-        let generated_config_path = run_dir.path().join("newest_config.toml");
+    let stored_config_path = stored_config_path();
+    let run_dir = testdir()?;
+    let generated_config_path = run_dir.path().join("newest_config.toml");
 
-        // generate an up to date config
-        let child = run_dir
-            .spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
+    // generate an up to date config
+    let child =
+        run_dir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
 
-        let output = child.wait_with_output()?;
-        let _output = output.assert_success()?;
+    let output = child.wait_with_output()?;
+    let _output = output.assert_success()?;
 
-        let contents_generated = std::fs::read_to_string(generated_config_path).unwrap();
-        let mut contents_stored = std::fs::read_to_string(stored_config_path).unwrap();
+    let contents_generated = std::fs::read_to_string(generated_config_path).unwrap();
+    let mut contents_stored = std::fs::read_to_string(stored_config_path).unwrap();
 
-        let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
-            .join("zebra");
+    let cache_dir = dirs::cache_dir()
+        .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
+        .join("zebra");
 
-        contents_stored = contents_stored.replace("[CACHE_DIR]", cache_dir.to_str().unwrap());
+    contents_stored = contents_stored.replace("[CACHE_DIR]", cache_dir.to_str().unwrap());
 
-        if contents_generated != contents_stored {
-            eprintln!(
-                "Error: Stored config is not up to date. Please generate an up to date config and overwrite
+    if contents_generated != contents_stored {
+        eprintln!(
+            "Error: Stored config is not up to date. Please generate an up to date config and overwrite
 the stored one using `zebrad generate -o zebrad/common/newest_config.toml`. Then run this test again."
-            );
+        );
 
-            // show the 2 strings also
-            assert_eq!(contents_generated, contents_stored);
-        }
+        // show the 2 strings also
+        assert_eq!(contents_generated, contents_stored);
     }
 
     Ok(())
