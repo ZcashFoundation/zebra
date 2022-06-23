@@ -1,18 +1,48 @@
 //! ![Zebra logotype](https://zfnd.org/wp-content/uploads/2022/03/zebra-logotype.png)
 //!
-//! Hello! I am Zebra, an ongoing Rust implementation of a Zcash node.
+//! Zebra is a Zcash node written in Rust.
 //!
-//! Zebra is a work in progress.  It is developed as a collection of `zebra-*`
-//! libraries implementing the different components of a Zcash node (networking,
-//! chain structures, consensus rules, etc), and a `zebrad` binary which uses them.
-//!
-//! Most of our work so far has gone into `zebra-network`, building a new
-//! networking stack for Zcash, and `zebra-chain`, building foundational data
-//! structures.
+//! The `zebrad` binary uses a collection of `zebra-*` crates,
+//! which implement the different components of a Zcash node
+//! (networking, chain structures, validation, rpc, etc).
 //!
 //! [Rendered docs from the `main` branch](https://doc.zebra.zfnd.org).
-//!
 //! [Join us on the Zcash Foundation Engineering Discord](https://discord.gg/na6QZNd).
+//!
+//! ## Zebra Feature Flags
+//!
+//! The following `zebrad` feature flags are available at compile time:
+//!
+//! ### Metrics
+//!
+//! * `prometheus`: export metrics to prometheus.
+//!
+//! Read the [metrics](https://zebra.zfnd.org/user/metrics.html) section of the book
+//! for more details.
+//!
+//! ### Tracing
+//!
+//! Sending traces to different subscribers:
+//! * `journald`: send tracing spans and events to `systemd-journald`.
+//! * `sentry`: send crash and panic events to sentry.io.
+//! * `flamegraph`: generate a flamegraph of tracing spans.
+//!
+//! Changing the traces that are collected:
+//! * `filter-reload`: dynamically reload tracing filters at runtime.
+//! * `error-debug`: enable extra debugging in release builds.
+//! * `tokio-console`: enable tokio's `console-subscriber`.
+//! * A set of features that [skip verbose tracing].
+//!   The default features ignore `debug` and `trace` logs in release builds.
+//!
+//! Read the [tracing](https://zebra.zfnd.org/user/tracing.html) section of the book
+//! for more details.
+//!
+//! [ignore verbose tracing]: https://docs.rs/tracing/0.1.35/tracing/level_filters/index.html#compile-time-filters
+//!
+//! ### Testing
+//!
+//! * `proptest-impl`: enable randomised test data generation.
+//! * `lightwalletd-grpc-tests`: enable Zebra JSON-RPC tests that query `lightwalletd` using gRPC.
 
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
