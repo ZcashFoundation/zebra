@@ -3,62 +3,76 @@ name: Deploy GCP tests
 on:
   workflow_call:
     inputs:
+      # Status and logging
+      test_id:
+        required: true
+        type: string
+        description: 'Unique identifier for the test'
+      test_description:
+        required: true
+        type: string
+        description: 'Explains what the test does'
+      # Test selection and parameters
+      test_variables:
+        required: true
+        type: string
+        description: 'Environmental variables used to select and configure the test'
       network:
         required: false
         type: string
         default: Mainnet
-      app_name:
-        required: false
-        type: string
-        default: 'zebra'
-      test_id:
-        required: true
-        type: string
-      test_description:
-        required: true
-        type: string
-      test_variables:
-        required: true
-        type: string
+        description: 'Zcash network to test against'
+      # Cached state
+      #
       # TODO: find a better name
       root_state_path:
         required: false
         type: string
         default: '/zebrad-cache'
+        description: 'Cached state base directory path'
       # TODO: find a better name
       zebra_state_dir:
         required: false
         type: string
         default: ''
-        description: 'Name of the Zebra cached state directory and input image prefix to search in GCP'
+        description: 'Zebra cached state directory and input image prefix to search in GCP'
       # TODO: find a better name
       lwd_state_dir:
         required: false
         type: string
         default: ''
-        description: 'Name of the Lightwalletd cached state directory and input image prefix to search in GCP'
+        description: 'Lightwalletd cached state directory and input image prefix to search in GCP'
       disk_prefix:
         required: false
         type: string
         default: 'zebrad-cache'
-        description: 'Used to name the image, and for tests that do not use a `zebra_state_dir` to work, but builds a cached state'
+        description: 'Image name prefix, and `zebra_state_dir` name for newly created cached states'
       disk_suffix:
         required: false
         type: string
+        description: 'Image name suffix'
       needs_zebra_state:
         required: true
         type: boolean
-        description: 'Indicates if a test needs a disk with a Zebra cached state to run'
+        description: 'Does the test use Zebra cached state?'
       needs_lwd_state:
         required: false
         type: boolean
-        description: 'Indicates if a test needs a disk with Lightwalletd cached state to run (which also includes a Zebra cached state)'
+        description: 'Does the test use Lightwalletd and Zebra cached state?'
       saves_to_disk:
         required: true
         type: boolean
+        description: 'Does the test create a new cached state disk?'
+      # Metadata
       height_grep_text:
         required: false
         type: string
+        description: 'Regular expression to find the tip height in test logs, and add it to newly created cached state image metadata'
+      app_name:
+        required: false
+        type: string
+        default: 'zebra'
+        description: 'Application name for Google Cloud instance metadata'
 
 env:
   IMAGE_NAME: zebrad-test
