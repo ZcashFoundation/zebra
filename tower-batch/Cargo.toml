@@ -10,7 +10,7 @@ futures = "0.3.21"
 futures-core = "0.3.21"
 pin-project = "1.0.10"
 tokio = { version = "1.19.2", features = ["time", "sync", "tracing", "macros"] }
-tower = { version = "0.4.12", features = ["util", "buffer"] }
+tower = { version = "0.4.13", features = ["util", "buffer"] }
 tracing = "0.1.31"
 tracing-futures = "0.2.5"
 

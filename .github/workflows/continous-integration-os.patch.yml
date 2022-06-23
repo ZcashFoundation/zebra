@@ -14,46 +14,21 @@ on:
 jobs:
   test:
     name: Test ${{ matrix.rust }} on ${{ matrix.os }}
-    # The large timeout is to accommodate:
-    # - Windows builds (75 minutes, typically 30-50 minutes)
-    # - parameter downloads (40 minutes, but only when the cache expires)
-    timeout-minutes: 115
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
         os: [ubuntu-latest, macos-latest]
-        rust: [stable]
-
-    steps:
-      - run: 'echo "No build required"'
-
-  test-fake-activation-heights:
-    name: Test ${{ matrix.rust }} zebra-state with fake activation heights on ubuntu-latest
-    timeout-minutes: 60
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust: [stable]
-
-    steps:
-      - run: 'echo "No build required"'
-
-  build-chain-no-features:
-    name: Build ${{ matrix.rust }} zebra-chain w/o features on ubuntu-latest
-    timeout-minutes: 60
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
         rust: [stable, beta]
+        exclude:
+          - os: macos-latest
+            rust: beta
 
     steps:
       - run: 'echo "No build required"'
 
   install-from-lockfile-no-cache:
     name: Install zebrad from lockfile without cache on ubuntu-latest
-    timeout-minutes: 60
     runs-on: ubuntu-latest
 
     steps:
@@ -61,23 +36,20 @@ jobs:
 
   check-cargo-lock:
     name: Check Cargo.lock is up to date
-    timeout-minutes: 60
     runs-on: ubuntu-latest
 
     steps:
       - run: 'echo "No build required"'
 
   cargo-deny:
-    name: Check deny.toml ${{ matrix.checks }}
+    name: Check deny.toml ${{ matrix.checks }} ${{ matrix.features }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         checks:
           - bans
           - sources
-
-    # Prevent sudden announcement of a new advisory from failing ci:
-    continue-on-error: ${{ matrix.checks == 'advisories' }}
+        features: ['', '--all-features', '--no-default-features']
 
     steps:
       - run: 'echo "No build required"'

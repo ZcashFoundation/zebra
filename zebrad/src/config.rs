@@ -166,7 +166,7 @@ impl Default for MetricsSection {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct SyncSection {
-    /// The maximum number of concurrent block requests during sync.
+    /// The maximum number of concurrent block download requests during sync.
     ///
     /// This is set to a low value by default, to avoid task and
     /// network contention. Increasing this value may improve
@@ -178,22 +178,27 @@ pub struct SyncSection {
     /// download before waiting for queued verifications to complete.
     ///
     /// Increasing this limit increases the buffer size, so it reduces
-    /// the impact of an individual block request failing.  The block
-    /// size limit is 2MB, so in theory, this could represent multiple
+    /// the impact of an individual block request failing. However, it
+    /// also increases memory and CPU usage if block validation stalls,
+    /// or there are some large blocks in the pipeline.
+    ///
+    /// The block size limit is 2MB, so in theory, this could represent multiple
     /// gigabytes of data, if we downloaded arbitrary blocks. However,
     /// because we randomly load balance outbound requests, and separate
     /// block download from obtaining block hashes, an adversary would
     /// have to control a significant fraction of our peers to lead us
     /// astray.
     ///
-    /// This value is clamped to an implementation-defined lower bound.
+    /// For reliable checkpoint syncing, Zebra enforces a
+    /// [`MIN_LOOKAHEAD_LIMIT`](sync::MIN_LOOKAHEAD_LIMIT).
     pub lookahead_limit: usize,
 }
 
 impl Default for SyncSection {
     fn default() -> Self {
         Self {
-            max_concurrent_block_requests: 50,
+            // TODO: increase to 50, after we implement orchard batching
+            max_concurrent_block_requests: 25,
             lookahead_limit: sync::DEFAULT_LOOKAHEAD_LIMIT,
         }
     }
