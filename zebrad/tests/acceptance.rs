@@ -1706,8 +1706,8 @@ async fn delete_old_databases() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn stored_config_works() -> Result<()> {
+#[test]
+fn stored_config_works() -> Result<()> {
     zebra_test::init();
 
     let run_dir = testdir()?;
@@ -1734,8 +1734,8 @@ async fn stored_config_works() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn stored_config_is_newest() -> Result<()> {
+#[test]
+fn stored_config_is_newest() -> Result<()> {
     zebra_test::init();
 
     let run_dir = testdir()?;
