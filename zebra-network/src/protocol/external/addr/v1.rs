@@ -140,6 +140,8 @@ impl TrustedPreallocate for AddrV1 {
 /// Transform a `SocketAddr` into an IPv6-mapped IPv4 addresses.
 ///
 /// See [`canonical_ip_addr`] for detailed info on IPv6-mapped IPv4 addresses.
+///
+/// [`canonical_ip_addr`]: super::canonical::canonical_ip_addr
 pub(in super::super) fn ipv6_mapped_ip_addr(ip_addr: &IpAddr) -> Ipv6Addr {
     use IpAddr::*;
 
@@ -155,6 +157,8 @@ pub(in super::super) fn ipv6_mapped_ip_addr(ip_addr: &IpAddr) -> Ipv6Addr {
 /// Also remove IPv6 scope IDs and flow information.
 ///
 /// See [`canonical_ip_addr`] for detailed info on IPv6-mapped IPv4 addresses.
+///
+/// [`canonical_ip_addr`]: super::canonical::canonical_ip_addr
 pub(in super::super) fn ipv6_mapped_socket_addr(
     socket_addr: impl Into<SocketAddr>,
 ) -> SocketAddrV6 {

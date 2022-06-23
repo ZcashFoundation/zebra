@@ -7,10 +7,11 @@ edition = "2021"
 
 [dependencies]
 pin-project = "0.4.29"
-tower = "0.4.12"
+tower = "0.4.13"
 futures-core = "0.3.21"
 tracing = "0.1.31"
 
 [dev-dependencies]
+tokio = { version = "1.19.2", features = ["full", "tracing", "test-util"] }
+
 zebra-test = { path = "../zebra-test/" }
-tokio = { version = "1.19.2", features = ["full"] }

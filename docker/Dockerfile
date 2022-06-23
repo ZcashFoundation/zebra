@@ -100,7 +100,7 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd:pr-4626 /lightwal
 # This is the caching Docker layer for Rust!
 #
 # TODO: is it faster to use --tests here?
-RUN cargo chef cook --release --features enable-sentry,lightwalletd-grpc-tests --workspace --recipe-path recipe.json
+RUN cargo chef cook --release --features sentry,lightwalletd-grpc-tests --workspace --recipe-path recipe.json
 
 COPY . .
 RUN cargo test --locked --release --features lightwalletd-grpc-tests --workspace --no-run
@@ -118,11 +118,11 @@ CMD [ "cargo"]
 # `test` stage. This step is a dependency for the `runtime` stage, which uses the resulting
 # zebrad binary from this step.
 FROM deps AS release
-RUN cargo chef cook --release --features enable-sentry --recipe-path recipe.json
+RUN cargo chef cook --release --features sentry --recipe-path recipe.json
 
 COPY . .
 # Build zebra
-RUN cargo build --locked --release --features enable-sentry --package zebrad --bin zebrad
+RUN cargo build --locked --release --features sentry --package zebrad --bin zebrad
 
 # This stage is only used when deploying nodes or when only the resulting zebrad binary is needed
 #

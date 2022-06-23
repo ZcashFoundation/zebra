@@ -103,7 +103,7 @@ pub enum Message {
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#ping)
     Ping(
-        /// A nonce unique to this [`Ping`] message.
+        /// A nonce unique to this [`Self::Ping`] message.
         Nonce,
     ),
 
@@ -111,7 +111,7 @@ pub enum Message {
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#pong)
     Pong(
-        /// The nonce from the [`Ping`] message this was in response to.
+        /// The nonce from the [`Self::Ping`] message this was in response to.
         Nonce,
     ),
 
@@ -352,7 +352,11 @@ where
             // use specific varieties of `RejectReason`.
             ccode: RejectReason::Other,
 
-            reason: e.source().unwrap().to_string(),
+            reason: if let Some(reason) = e.source() {
+                reason.to_string()
+            } else {
+                String::from("")
+            },
 
             // Allow this to be overridden but not populated by default, methinks.
             data: None,

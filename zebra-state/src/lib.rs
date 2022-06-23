@@ -28,7 +28,7 @@ mod util;
 #[cfg(test)]
 mod tests;
 
-pub use config::Config;
+pub use config::{check_and_delete_old_databases, Config};
 pub use constants::MAX_BLOCK_REORG_HEIGHT;
 pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
 pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, ReadRequest, Request};

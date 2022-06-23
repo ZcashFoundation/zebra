@@ -31,7 +31,7 @@ futures = "0.3.21"
 tokio = { version = "1.19.2", features = ["net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.9", features = ["sync", "time"] }
 tokio-util = { version = "0.7.3", features = ["codec"] }
-tower = { version = "0.4.12", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
+tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
 metrics = "0.18.1"
 tracing-futures = "0.2.5"
@@ -53,7 +53,7 @@ proptest = "0.10.1"
 proptest-derive = "0.3.0"
 
 static_assertions = "1.1.0"
-tokio = { version = "1.19.2", features = ["test-util"] }
+tokio = { version = "1.19.2", features = ["full", "tracing", "test-util"] }
 toml = "0.5.9"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
