@@ -114,6 +114,15 @@ that there is a lot of key functionality still missing.
 
 For more detailed instructions, refer to the [documentation](https://zebra.zfnd.org/user/install.html).
 
+### Optional Features
+
+For performance reasons, some debugging and monitoring features are disabled in release builds.
+
+You can [enable these features](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-feature-flags) using:
+```sh
+cargo install --features=<name> ...
+```
+
 ### System Requirements
 
 The recommended requirements for compiling and running `zebrad` are:
