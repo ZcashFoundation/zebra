@@ -572,7 +572,7 @@ fn stored_config_works() -> Result<()> {
     let mut child =
         run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
 
-    //zebra was able to start with the stored config
+    // zebra was able to start with the stored config
     child.expect_stdout_line_matches("Starting zebrad".to_string())?;
 
     // finish
