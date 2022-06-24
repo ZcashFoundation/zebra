@@ -340,20 +340,29 @@ pub enum Message {
     FilterClear,
 }
 
+/// The maximum size of the rejection message
+const MAX_REJECT_MESSAGE_LENGTH: usize = 12;
+/// The maximum size of the rejection reason
+const MAX_REJECT_REASON_LENGTH: usize = 100;
+
 impl<E> From<E> for Message
 where
     E: Error,
 {
     fn from(e: E) -> Self {
+        let mut message = e.to_string();
+        message.truncate(MAX_REJECT_MESSAGE_LENGTH);
         Message::Reject {
-            message: e.to_string(),
+            message,
 
             // The generic case, impls for specific error types should
             // use specific varieties of `RejectReason`.
             ccode: RejectReason::Other,
 
             reason: if let Some(reason) = e.source() {
-                reason.to_string()
+                let mut reason = reason.to_string();
+                reason.truncate(MAX_REJECT_REASON_LENGTH);
+                reason
             } else {
                 String::from("")
             },
