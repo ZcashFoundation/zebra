@@ -198,7 +198,7 @@ impl Default for SyncSection {
     fn default() -> Self {
         Self {
             // TODO: increase to 50, after we implement orchard batching
-            max_concurrent_block_requests: 25,
+            max_concurrent_block_requests: 40,
             lookahead_limit: sync::DEFAULT_LOOKAHEAD_LIMIT,
         }
     }
