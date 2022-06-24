@@ -465,10 +465,14 @@ impl PartialOrd<ExpandedDifficulty> for block::Hash {
     ///
     /// See `<ExpandedDifficulty as PartialOrd<block::Hash>::partial_cmp`
     /// for details.
+    #[allow(clippy::unwrap_in_result)]
     fn partial_cmp(&self, other: &ExpandedDifficulty) -> Option<Ordering> {
         Some(
             // Use the canonical implementation, but reverse the order
-            other.partial_cmp(self)?.reverse(),
+            other
+                .partial_cmp(self)
+                .expect("difficulties and hashes have a total order")
+                .reverse(),
         )
     }
 }

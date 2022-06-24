@@ -113,6 +113,7 @@ impl NoteCommitment {
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#concretewindowedcommit>
     #[allow(non_snake_case)]
+    #[allow(clippy::unwrap_in_result)]
     pub fn new(note: Note) -> Option<Self> {
         // s as in the argument name for WindowedPedersenCommit_r(s)
         let mut s: BitVec<u8, Lsb0> = BitVec::new();
@@ -141,11 +142,10 @@ impl NoteCommitment {
 
         let rcm = CommitmentRandomness::from(note.rseed);
 
-        Some(NoteCommitment::from(sinsemilla_commit(
-            rcm.0,
-            b"z.cash:Orchard-NoteCommit",
-            &s,
-        )?))
+        Some(NoteCommitment::from(
+            sinsemilla_commit(rcm.0, b"z.cash:Orchard-NoteCommit", &s)
+                .expect("valid orchard note commitment, not ⊥ "),
+        ))
     }
 
     /// Extract the x coordinate of the note commitment.

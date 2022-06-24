@@ -101,9 +101,10 @@ impl ZcashSerialize for LockTime {
 }
 
 impl ZcashDeserialize for LockTime {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let n = reader.read_u32::<LittleEndian>()?;
-        if n < Self::MIN_TIMESTAMP.try_into()? {
+        if n < Self::MIN_TIMESTAMP.try_into().expect("fits in u32") {
             Ok(LockTime::Height(block::Height(n)))
         } else {
             // This can't panic, because all u32 values are valid `Utc.timestamp`s.

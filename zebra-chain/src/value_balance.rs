@@ -294,11 +294,14 @@ impl ValueBalance<NonNegative> {
     /// value pool.
     ///
     /// See `add_block` for details.
+    #[allow(clippy::unwrap_in_result)]
     pub fn add_chain_value_pool_change(
         self,
         chain_value_pool_change: ValueBalance<NegativeAllowed>,
     ) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
-        let mut chain_value_pool = self.constrain::<NegativeAllowed>()?;
+        let mut chain_value_pool = self
+            .constrain::<NegativeAllowed>()
+            .expect("conversion from NonNegative to NegativeAllowed is always valid");
         chain_value_pool = (chain_value_pool + chain_value_pool_change)?;
 
         chain_value_pool.constrain()

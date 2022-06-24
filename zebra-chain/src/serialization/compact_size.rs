@@ -236,6 +236,7 @@ impl TryFrom<usize> for CompactSizeMessage {
     type Error = SerializationError;
 
     #[inline]
+    #[allow(clippy::unwrap_in_result)]
     fn try_from(size: usize) -> Result<Self, Self::Error> {
         use SerializationError::Parse;
 
@@ -243,7 +244,11 @@ impl TryFrom<usize> for CompactSizeMessage {
 
         // # Security
         // Defence-in-depth for memory DoS via preallocation.
-        if size > MAX_PROTOCOL_MESSAGE_LEN.try_into()? {
+        if size
+            > MAX_PROTOCOL_MESSAGE_LEN
+                .try_into()
+                .expect("MAX_PROTOCOL_MESSAGE_LEN fits in u32")
+        {
             // This could be invalid data from peers, so we return a parse error.
             Err(Parse("CompactSize larger than protocol message limit"))?;
         }

@@ -178,6 +178,7 @@ impl ZcashSerialize for sapling::ShieldedData<SharedAnchor> {
 // we can't split ShieldedData out of Option<ShieldedData> deserialization,
 // because the counts are read along with the arrays.
 impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // Denoted as `nSpendsSapling` and `vSpendsSapling` in the spec.
         let spend_prefixes: Vec<_> = (&mut reader).zcash_deserialize_into()?;
@@ -299,11 +300,15 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         let transfers = match shared_anchor {
             Some(shared_anchor) => sapling::TransferData::SpendsAndMaybeOutputs {
                 shared_anchor,
-                spends: spends.try_into()?,
+                spends: spends
+                    .try_into()
+                    .expect("checked spends when parsing shared anchor"),
                 maybe_outputs: outputs,
             },
             None => sapling::TransferData::JustOutputs {
-                outputs: outputs.try_into()?,
+                outputs: outputs
+                    .try_into()
+                    .expect("checked spends or outputs and returned early"),
             },
         };
 
@@ -658,6 +663,7 @@ impl ZcashSerialize for Transaction {
 }
 
 impl ZcashDeserialize for Transaction {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         // # Consensus
         //
@@ -816,12 +822,12 @@ impl ZcashDeserialize for Transaction {
                 let sapling_transfers = if !shielded_spends.is_empty() {
                     Some(sapling::TransferData::SpendsAndMaybeOutputs {
                         shared_anchor: FieldNotPresent,
-                        spends: shielded_spends.try_into()?,
+                        spends: shielded_spends.try_into().expect("checked for spends"),
                         maybe_outputs: shielded_outputs,
                     })
                 } else if !shielded_outputs.is_empty() {
                     Some(sapling::TransferData::JustOutputs {
-                        outputs: shielded_outputs.try_into()?,
+                        outputs: shielded_outputs.try_into().expect("checked for outputs"),
                     })
                 } else {
                     // # Consensus

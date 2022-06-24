@@ -34,9 +34,12 @@ impl<'a> TxIdBuilder<'a> {
 
     /// Compute the Transaction ID for transactions V1 to V4.
     /// In these cases it's simply the hash of the serialized transaction.
+    #[allow(clippy::unwrap_in_result)]
     fn txid_v1_to_v4(self) -> Result<Hash, io::Error> {
         let mut hash_writer = sha256d::Writer::default();
-        self.trans.zcash_serialize(&mut hash_writer)?;
+        self.trans
+            .zcash_serialize(&mut hash_writer)
+            .expect("Transactions must serialize into the hash.");
         Ok(Hash(hash_writer.finish()))
     }
 
