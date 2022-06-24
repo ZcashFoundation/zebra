@@ -509,6 +509,9 @@ fn valid_generated_config_test() -> Result<()> {
     // cache conflicts.
     valid_generated_config("start", "Starting zebrad")?;
 
+    // Check that the stored configuration we have for Zebra works
+    stored_config_works()?;
+
     Ok(())
 }
 
@@ -557,6 +560,31 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
         &output,
         "generated config file not found"
     );
+
+    Ok(())
+}
+
+fn stored_config_works() -> Result<()> {
+    let stored_config_path = stored_config_path();
+    let run_dir = testdir()?;
+
+    // run zebra with stored config
+    let mut child =
+        run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
+
+    //zebra was able to start with the stored config
+    child.expect_stdout_line_matches("Starting zebrad".to_string())?;
+
+    // finish
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
     Ok(())
 }
@@ -1691,34 +1719,6 @@ async fn delete_old_databases() -> Result<()> {
 
     // outside dir was not deleted
     assert!(outside_dir.as_path().exists());
-
-    // finish
-    child.kill()?;
-
-    let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    // [Note on port conflict](#Note on port conflict)
-    output
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
-
-    Ok(())
-}
-
-#[test]
-fn stored_config_works() -> Result<()> {
-    zebra_test::init();
-
-    let stored_config_path = stored_config_path();
-    let run_dir = testdir()?;
-
-    // run zebra with stored config
-    let mut child =
-        run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
-
-    //zebra was able to start with the stored config
-    child.expect_stdout_line_matches("Starting zebrad".to_string())?;
 
     // finish
     child.kill()?;
