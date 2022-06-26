@@ -5,7 +5,11 @@
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
 
-use std::{env, time::Duration};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use color_eyre::eyre::Result;
 use tempfile::TempDir;
@@ -79,4 +83,9 @@ pub fn testdir() -> Result<TempDir> {
         .prefix("zebrad_tests")
         .tempdir()
         .map_err(Into::into)
+}
+
+/// Get stored config path
+pub fn stored_config_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common/config.toml")
 }
