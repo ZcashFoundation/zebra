@@ -81,7 +81,7 @@ env:
   MACHINE_TYPE: c2d-standard-16
 
 jobs:
-  # set up the test without any cached state
+  # set up the test, if it doesn't use any cached state
   # each test runs one of the *-with/without-cached-state job series, and skips the other
   setup-without-cached-state:
     name: Setup ${{ inputs.test_id }} test
@@ -149,8 +149,8 @@ jobs:
   test-without-cached-state:
     name: Run ${{ inputs.test_id }} test
     needs: [ setup-without-cached-state ]
-    # if the previous step fails, we also want to run and fail this step,
-    # so that the branch protection rule fails in Mergify and GitHub
+    # If the previous job fails, we also want to run and fail this job,
+    # so that the branch protection rule fails in Mergify and GitHub.
     if: ${{ !cancelled() && !inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
     permissions:
@@ -189,12 +189,16 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
-          docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
+          docker run \
+          --name ${{ inputs.test_id }} \
+          --tty \
+          ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
-  # set up the test using cached state
+
+  # set up the test, if it uses cached state
   # each test runs one of the *-with/without-cached-state job series, and skips the other
   setup-with-cached-state:
     name: Setup ${{ inputs.test_id }} test
@@ -316,8 +320,8 @@ jobs:
   test-with-cached-state:
     name: Run ${{ inputs.test_id }} test
     needs: [ setup-with-cached-state ]
-    # if the previous step fails, we also want to run and fail this step,
-    # so that the branch protection rule fails in Mergify and GitHub
+    # If the previous job fails, we also want to run and fail this job,
+    # so that the branch protection rule fails in Mergify and GitHub.
     if: ${{ !cancelled() && inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
     permissions:
@@ -378,7 +382,10 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
-          docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
+          docker run \
+          --name ${{ inputs.test_id }} \
+          --tty \
+          ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
@@ -422,7 +429,10 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
-          docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
+          docker run \
+          --name ${{ inputs.test_id }} \
+          --tty \
+          ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
