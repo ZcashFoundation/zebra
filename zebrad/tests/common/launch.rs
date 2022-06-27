@@ -6,7 +6,6 @@
 //! This file is only for test library code.
 
 use std::{
-    collections::HashSet,
     env,
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -14,6 +13,7 @@ use std::{
 };
 
 use color_eyre::eyre::Result;
+use indexmap::IndexSet;
 
 use zebra_chain::parameters::Network;
 use zebra_test::{
@@ -201,8 +201,8 @@ pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
         .expect("Failed to create a config file with a known RPC listener port");
 
     config.state.ephemeral = false;
-    config.network.initial_mainnet_peers = HashSet::new();
-    config.network.initial_testnet_peers = HashSet::new();
+    config.network.initial_mainnet_peers = IndexSet::new();
+    config.network.initial_testnet_peers = IndexSet::new();
     config.network.network = network;
     config.mempool.debug_enable_at_height = Some(0);
 
