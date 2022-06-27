@@ -358,11 +358,11 @@ where
     fn from(e: E) -> Self {
         Message::Reject {
             message: String::from_utf8(
-                e.to_string().zcash_serialize_to_vec().unwrap_or(Vec::new())
+                e.to_string().zcash_serialize_to_vec().unwrap_or_default()
                     [0..MAX_REJECT_MESSAGE_LENGTH]
                     .to_vec(),
             )
-            .unwrap_or(String::from("")),
+            .unwrap_or_else(|_| String::from("")),
 
             // The generic case, impls for specific error types should
             // use specific varieties of `RejectReason`.
@@ -373,10 +373,10 @@ where
                     reason
                         .to_string()
                         .zcash_serialize_to_vec()
-                        .unwrap_or(Vec::new())[0..MAX_REJECT_REASON_LENGTH]
+                        .unwrap_or_default()[0..MAX_REJECT_REASON_LENGTH]
                         .to_vec(),
                 )
-                .unwrap_or(String::from(""))
+                .unwrap_or_else(|_| String::from(""))
             } else {
                 String::from("")
             },
