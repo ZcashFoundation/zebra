@@ -53,7 +53,7 @@ orchard = "0.1.0"
 
 equihash = "0.1.0"
 zcash_note_encryption = "0.1"
-zcash_primitives = { version = "0.6.0", features = ["transparent-inputs"] }
+zcash_primitives = { version = "0.7.0", features = ["transparent-inputs"] }
 zcash_encoding = "0.1.0"
 zcash_history = "0.3.0"
 
