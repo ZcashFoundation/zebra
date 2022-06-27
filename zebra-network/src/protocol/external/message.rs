@@ -356,10 +356,11 @@ where
     E: Error,
 {
     fn from(e: E) -> Self {
+        let message_bytes = e.to_string().zcash_serialize_to_vec().unwrap_or_default();
+
         Message::Reject {
             message: String::from_utf8(
-                e.to_string().zcash_serialize_to_vec().unwrap_or_default()
-                    [0..MAX_REJECT_MESSAGE_LENGTH]
+                message_bytes[0..std::cmp::min(MAX_REJECT_MESSAGE_LENGTH, message_bytes.len())]
                     .to_vec(),
             )
             .unwrap_or_else(|_| String::from("")),
@@ -369,11 +370,13 @@ where
             ccode: RejectReason::Other,
 
             reason: if let Some(reason) = e.source() {
+                let reason_bytes = reason
+                    .to_string()
+                    .zcash_serialize_to_vec()
+                    .unwrap_or_default();
+
                 String::from_utf8(
-                    reason
-                        .to_string()
-                        .zcash_serialize_to_vec()
-                        .unwrap_or_default()[0..MAX_REJECT_REASON_LENGTH]
+                    reason_bytes[0..std::cmp::min(MAX_REJECT_REASON_LENGTH, reason_bytes.len())]
                         .to_vec(),
                 )
                 .unwrap_or_else(|_| String::from(""))
