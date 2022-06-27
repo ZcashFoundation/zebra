@@ -51,7 +51,7 @@ x25519-dalek = { version = "1.2.0", features = ["serde"] }
 
 orchard = "0.1.0"
 
-equihash = "0.1.0"
+equihash = "0.2.0"
 zcash_note_encryption = "0.1"
 zcash_primitives = { version = "0.6.0", features = ["transparent-inputs"] }
 zcash_encoding = "0.1.0"

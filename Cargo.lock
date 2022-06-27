@@ -1495,6 +1495,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "equihash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab579d7cf78477773b03e80bc2f89702ef02d7112c711d54ca93dcdce68533d5"
+dependencies = [
+ "blake2b_simd 1.0.0",
+ "byteorder",
+]
+
+[[package]]
 name = "eyre"
 version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6191,7 +6201,7 @@ dependencies = [
  "criterion",
  "displaydoc",
  "ed25519-zebra",
- "equihash 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "equihash 0.2.0",
  "fpe",
  "futures",
  "group",
