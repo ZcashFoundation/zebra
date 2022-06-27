@@ -1,8 +1,9 @@
 //! Inbound service tests with a real peer set.
 
-use std::{collections::HashSet, iter, net::SocketAddr, sync::Arc};
+use std::{iter, net::SocketAddr, sync::Arc};
 
 use futures::FutureExt;
+use indexmap::IndexSet;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{
     buffer::Buffer,
@@ -655,8 +656,8 @@ async fn setup(
         listen_addr: config_listen_addr,
 
         // Stop Zebra making outbound connections
-        initial_mainnet_peers: HashSet::new(),
-        initial_testnet_peers: HashSet::new(),
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
 
         ..NetworkConfig::default()
     };
