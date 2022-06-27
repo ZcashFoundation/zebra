@@ -341,10 +341,15 @@ pub enum Message {
     FilterClear,
 }
 
-/// The maximum size of the rejection message
+/// The maximum size of the rejection message.
+///
+/// This is equivalent to `COMMAND_SIZE` in zcashd.
 const MAX_REJECT_MESSAGE_LENGTH: usize = 12;
-/// The maximum size of the rejection reason
-const MAX_REJECT_REASON_LENGTH: usize = 100;
+
+/// The maximum size of the rejection reason.
+///
+/// This is equivalent to `MAX_REJECT_MESSAGE_LENGTH` in zcashd.
+const MAX_REJECT_REASON_LENGTH: usize = 111;
 
 impl<E> From<E> for Message
 where
