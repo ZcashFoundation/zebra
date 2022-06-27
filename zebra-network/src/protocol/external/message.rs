@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     block::{self, Block},
+    serialization::ZcashSerialize,
     transaction::UnminedTx,
 };
 
@@ -350,19 +351,27 @@ where
     E: Error,
 {
     fn from(e: E) -> Self {
-        let mut message = e.to_string();
-        message.truncate(MAX_REJECT_MESSAGE_LENGTH);
         Message::Reject {
-            message,
+            message: String::from_utf8(
+                e.to_string().zcash_serialize_to_vec().unwrap_or(Vec::new())
+                    [0..MAX_REJECT_MESSAGE_LENGTH]
+                    .to_vec(),
+            )
+            .unwrap_or(String::from("")),
 
             // The generic case, impls for specific error types should
             // use specific varieties of `RejectReason`.
             ccode: RejectReason::Other,
 
             reason: if let Some(reason) = e.source() {
-                let mut reason = reason.to_string();
-                reason.truncate(MAX_REJECT_REASON_LENGTH);
-                reason
+                String::from_utf8(
+                    reason
+                        .to_string()
+                        .zcash_serialize_to_vec()
+                        .unwrap_or(Vec::new())[0..MAX_REJECT_REASON_LENGTH]
+                        .to_vec(),
+                )
+                .unwrap_or(String::from(""))
             } else {
                 String::from("")
             },
