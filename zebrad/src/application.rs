@@ -207,7 +207,7 @@ impl Application for ZebradApp {
             Some(path) => match self.load_config(&path) {
                 Ok(config) => config,
                 Err(e) => {
-                    status_err!("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file.");
+                    status_err!("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file. You can generate a valid config by running \"zebrad generate\", and diff it against yours to examine any format inconsistencies.");
                     return Err(e);
                 }
             },
