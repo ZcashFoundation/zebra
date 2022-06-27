@@ -59,33 +59,32 @@ impl AddressBookUpdater {
         let address_book = Arc::new(std::sync::Mutex::new(address_book));
 
         let worker_address_book = address_book.clone();
-        let span = Span::current();
         let worker = move || {
-            span.in_scope(|| {
-                info!("starting the address book updater");
+            info!("starting the address book updater");
 
-                while let Some(event) = worker_rx.blocking_recv() {
-                    trace!(?event, "got address book change");
+            while let Some(event) = worker_rx.blocking_recv() {
+                trace!(?event, "got address book change");
 
-                    // # Correctness
-                    //
-                    // Briefly hold the address book threaded mutex, to update the
-                    // state for a single address.
-                    worker_address_book
-                        .lock()
-                        .expect("mutex should be unpoisoned")
-                        .update(event);
-                }
+                // # Correctness
+                //
+                // Briefly hold the address book threaded mutex, to update the
+                // state for a single address.
+                worker_address_book
+                    .lock()
+                    .expect("mutex should be unpoisoned")
+                    .update(event);
+            }
 
-                let error = Err(AllAddressBookUpdaterSendersClosed.into());
-                info!(?error, "stopping address book updater");
-                error
-            })
+            let error = Err(AllAddressBookUpdaterSendersClosed.into());
+            info!(?error, "stopping address book updater");
+            error
         };
 
         // Correctness: spawn address book accesses on a blocking thread,
         //              to avoid deadlocks (see #1976)
-        let address_book_updater_task_handle = tokio::task::spawn_blocking(worker);
+        let span = Span::current();
+        let address_book_updater_task_handle =
+            tokio::task::spawn_blocking(move || span.in_scope(worker));
 
         (
             address_book,
