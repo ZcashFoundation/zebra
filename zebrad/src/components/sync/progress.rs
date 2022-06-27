@@ -113,6 +113,7 @@ pub async fn show_block_chain_progress(
             let current_height = latest_chain_tip
                 .best_tip_height()
                 .expect("unexpected empty state: estimate requires a block height");
+            let network_upgrade = NetworkUpgrade::current(network, current_height);
 
             // Work out the sync progress towards the estimated tip.
             let sync_progress = f64::from(current_height.0) / f64::from(estimated_height.0);
@@ -147,6 +148,7 @@ pub async fn show_block_chain_progress(
                 warn!(
                     %sync_percent,
                     ?current_height,
+                    ?network_upgrade,
                     %time_since_last_state_block,
                     %target_block_spacing,
                     %max_block_spacing,
@@ -164,6 +166,7 @@ pub async fn show_block_chain_progress(
                 info!(
                     %sync_percent,
                     ?current_height,
+                    ?network_upgrade,
                     ?remaining_sync_blocks,
                     ?after_checkpoint_height,
                     %time_since_last_state_block,
@@ -183,6 +186,7 @@ pub async fn show_block_chain_progress(
                 warn!(
                     %sync_percent,
                     ?current_height,
+                    ?network_upgrade,
                     ?remaining_sync_blocks,
                     ?after_checkpoint_height,
                     %time_since_last_state_block,
@@ -198,6 +202,7 @@ pub async fn show_block_chain_progress(
                 info!(
                     %sync_percent,
                     ?current_height,
+                    ?network_upgrade,
                     ?remaining_sync_blocks,
                     %time_since_last_state_block,
                     "finished initial sync to chain tip, using gossiped blocks",
@@ -208,6 +213,7 @@ pub async fn show_block_chain_progress(
                 info!(
                     %sync_percent,
                     ?current_height,
+                    ?network_upgrade,
                     ?remaining_sync_blocks,
                     %time_since_last_state_block,
                     "close to finishing initial sync, \
@@ -218,6 +224,7 @@ pub async fn show_block_chain_progress(
                 info!(
                     %sync_percent,
                     ?current_height,
+                    ?network_upgrade,
                     ?remaining_sync_blocks,
                     %time_since_last_state_block,
                     "estimated progress to chain tip",
