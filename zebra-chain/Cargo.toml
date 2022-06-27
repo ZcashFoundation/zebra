@@ -49,7 +49,7 @@ thiserror = "1.0.31"
 uint = "0.9.1"
 x25519-dalek = { version = "1.2.0", features = ["serde"] }
 
-orchard = "0.1.0"
+orchard = "0.2.0"
 
 equihash = "0.1.0"
 zcash_note_encryption = "0.1"
