@@ -533,7 +533,10 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Wait for the container to finish, and return the test exit status
+      # Wait for the container to finish, then exit with the test's exit status.
+      #
+      # `docker wait` prints the container exit status as a string, but we need to exit `ssh` with that status.
+      # `docker wait` can also wait for multiple containers, but we only ever wait for a single container.
       - name: Result of ${{ inputs.test_id }} test
         run: |
           gcloud compute ssh \
@@ -543,8 +546,7 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
-          docker wait \
-          ${{ inputs.test_id }} \
+          exit $(docker wait ${{ inputs.test_id }}) \
           "
 
 
