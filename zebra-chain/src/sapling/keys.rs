@@ -273,7 +273,8 @@ impl FromStr for SpendingKey {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match bech32::decode(s) {
             Ok((hrp, bytes, Variant::Bech32)) => {
-                let decoded = Vec::<u8>::from_base32(&bytes).expect("bytes are valid base32");
+                let decoded =
+                    Vec::<u8>::from_base32(&bytes).expect("bech32::decode guarantees valid base32");
 
                 let mut decoded_bytes = [0u8; 32];
                 decoded_bytes[..].copy_from_slice(&decoded[0..32]);
@@ -699,7 +700,8 @@ impl FromStr for IncomingViewingKey {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match bech32::decode(s) {
             Ok((hrp, bytes, Variant::Bech32)) => {
-                let decoded = Vec::<u8>::from_base32(&bytes).expect("bytes are valid base32");
+                let decoded =
+                    Vec::<u8>::from_base32(&bytes).expect("bech32::decode guarantees valid base32");
 
                 let mut scalar_bytes = [0u8; 32];
                 scalar_bytes[..].copy_from_slice(&decoded[0..32]);
@@ -990,7 +992,7 @@ impl FromStr for FullViewingKey {
         match bech32::decode(s) {
             Ok((hrp, bytes, Variant::Bech32)) => {
                 let mut decoded_bytes = io::Cursor::new(
-                    Vec::<u8>::from_base32(&bytes).expect("bytes are valid base32"),
+                    Vec::<u8>::from_base32(&bytes).expect("bech32::decode guarantees valid base32"),
                 );
 
                 let authorizing_key_bytes = decoded_bytes.read_32_bytes()?;

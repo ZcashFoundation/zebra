@@ -73,7 +73,7 @@ impl std::str::FromStr for Address {
         match bech32::decode(s) {
             Ok((hrp, bytes, Variant::Bech32)) => {
                 let mut decoded_bytes = io::Cursor::new(
-                    Vec::<u8>::from_base32(&bytes).expect("bytes are valid base32"),
+                    Vec::<u8>::from_base32(&bytes).expect("bech32::decode guarantees valid base32"),
                 );
 
                 let mut diversifier_bytes = [0; 11];

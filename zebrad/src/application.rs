@@ -402,7 +402,10 @@ impl Application for ZebradApp {
         self.register_components(command)?;
 
         // Fire callback to signal state in the application lifecycle
-        let config = self.config.take().expect("we should have a config object");
+        let config = self
+            .config
+            .take()
+            .expect("register_components always populates the config");
         self.after_config(config)?;
 
         Ok(())

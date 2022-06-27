@@ -149,7 +149,8 @@ impl VerifiedSet {
                 .map(|tx| tx.clone().eviction_weight())
                 .collect();
 
-            let dist = WeightedIndex::new(weights).expect("iterator is not empty");
+            let dist = WeightedIndex::new(weights)
+                .expect("there is at least one weight and all weights are valid");
 
             Some(self.remove(dist.sample(&mut thread_rng())))
         }
