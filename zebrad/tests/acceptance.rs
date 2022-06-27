@@ -501,12 +501,17 @@ fn version_args() -> Result<()> {
     Ok(())
 }
 
+/// Run config tests that use the default ports and paths.
+///
+/// Unlike the other tests, these tests can not be run in parallel, because
+/// they use the generated config. So parallel execution can cause port and
+/// cache conflicts.
 #[test]
 fn config_test() -> Result<()> {
-    // Unlike the other tests, these tests can not be run in parallel, because
-    // they use the generated config. So parallel execution can cause port and
-    // cache conflicts.
     valid_generated_config("start", "Starting zebrad")?;
+
+    // Check what happens when Zebra parses an invalid config
+    invalid_generated_config()?;
 
     // Check that an older stored configuration we have for Zebra works
     stored_config_works()?;
@@ -514,6 +519,7 @@ fn config_test() -> Result<()> {
     Ok(())
 }
 
+/// Test that `zebrad start` can parse the output from `zebrad generate`.
 fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> Result<()> {
     zebra_test::init();
 
@@ -565,7 +571,6 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
 
 /// Checks that Zebra prints an informative message when it cannot parse the
 /// config file.
-#[test]
 fn invalid_generated_config() -> Result<()> {
     zebra_test::init();
 
