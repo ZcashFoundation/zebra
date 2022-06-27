@@ -452,7 +452,7 @@ jobs:
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # If the previous job fails, we also want to run and fail this job,
     # so that the branch protection rule fails in Mergify and GitHub.
-    if: ${{ !cancelled() && !inputs.needs_zebra_state }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -504,7 +504,7 @@ jobs:
     needs: [ follow-logs ]
     # If the previous job fails, we also want to run and fail this job,
     # so that the branch protection rule fails in Mergify and GitHub.
-    if: ${{ !cancelled() && !inputs.needs_zebra_state }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
