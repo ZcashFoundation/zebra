@@ -91,9 +91,12 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
+      # Or will that break the slug-action variables we use to find the instance?
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
+          fetch-depth: '2'
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -158,9 +161,12 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
+      # Or will that break the slug-action variables we use to find the instance?
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
+          fetch-depth: '2'
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -332,6 +338,8 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
+      # Or will that break the slug-action variables we use to find the instance?
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
@@ -458,9 +466,12 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
+      # Or will that break the slug-action variables we use to find the instance?
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
+          fetch-depth: '2'
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -510,9 +521,12 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
+      # Or will that break the slug-action variables we use to find the instance?
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
+          fetch-depth: '2'
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -563,6 +577,11 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -650,6 +669,13 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
+      # Or will that break the slug-action variables we use to find the instance?
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
