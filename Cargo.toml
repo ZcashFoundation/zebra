@@ -66,4 +66,4 @@ lto = "thin"
 [patch.crates-io]
 
 # Currently pointing to `download-sprout-params` branch.
-zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "6d75718076e592a41b6bd6ec916dc15420e4cc3c" }
+zcash_proofs = { git = "https://github.com/ZcashFoundation/librustzcash.git", rev = "4567a37ceccbd506a58aaaded39ba14c952c1510" }
