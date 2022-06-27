@@ -57,7 +57,6 @@ pub struct TransparentTransfers {
 // A created UTXO
 //
 // TODO: replace arguments with a struct
-#[allow(clippy::unwrap_in_result)]
 impl
     UpdateWith<(
         // The location of the UTXO
@@ -67,6 +66,7 @@ impl
         &transparent::OrderedUtxo,
     )> for TransparentTransfers
 {
+    #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
         &(outpoint, created_utxo): &(&transparent::OutPoint, &transparent::OrderedUtxo),
@@ -131,7 +131,6 @@ impl
 // A transparent input
 //
 // TODO: replace arguments with a struct
-#[allow(clippy::unwrap_in_result)]
 impl
     UpdateWith<(
         // The transparent input data
@@ -144,6 +143,7 @@ impl
         &transparent::OrderedUtxo,
     )> for TransparentTransfers
 {
+    #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
         &(spending_input, spending_tx_hash, spent_output): &(
@@ -215,7 +215,6 @@ impl
     }
 }
 
-#[allow(clippy::unwrap_in_result)]
 impl TransparentTransfers {
     /// Returns true if there are no transfers for this address.
     pub fn is_empty(&self) -> bool {

@@ -111,6 +111,7 @@ impl<T> ZebradTestDirExt for T
 where
     Self: TestDirExt + AsRef<Path> + Sized,
 {
+    #[allow(clippy::unwrap_in_result)]
     fn spawn_child(self, extra_args: Arguments) -> Result<TestChild<Self>> {
         let dir = self.as_ref();
         let default_config_path = dir.join("zebrad.toml");

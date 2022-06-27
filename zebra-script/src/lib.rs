@@ -163,6 +163,7 @@ impl CachedFfiTransaction {
         let script_pub_key: &[u8] = lock_script.as_raw_bytes();
 
         // This conversion is useful on some platforms, but not others.
+        #[allow(clippy::useless_conversion)]
         let n_in = input_index
             .try_into()
             .expect("transaction indexes are much less than c_uint::MAX");
@@ -176,7 +177,6 @@ impl CachedFfiTransaction {
             | zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_CHECKLOCKTIMEVERIFY;
         // This conversion is useful on some platforms, but not others.
         #[allow(clippy::useless_conversion)]
-        #[allow(clippy::unwrap_in_result)]
         let flags = flags
             .try_into()
             .expect("zcash_script_SCRIPT_FLAGS_VERIFY_* enum values fit in a c_uint");

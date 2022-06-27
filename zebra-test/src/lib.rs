@@ -13,7 +13,6 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use std::sync::Once;
 
 #[allow(missing_docs)]
-#[allow(clippy::unwrap_in_result)]
 pub mod command;
 pub mod mock_service;
 pub mod net;

@@ -131,6 +131,7 @@ impl<T> TestDirExt for T
 where
     Self: AsRef<Path> + Sized,
 {
+    #[allow(clippy::unwrap_in_result)]
     fn spawn_child_with_command(self, cmd: &str, args: Arguments) -> Result<TestChild<Self>> {
         let mut cmd = test_cmd(cmd, self.as_ref())?;
 
@@ -639,6 +640,7 @@ impl<T> TestChild<T> {
     /// Kills the child on error, or after the configured timeout has elapsed.
     /// See [`Self::expect_line_matching_regex_set`] for details.
     #[instrument(skip(self))]
+    #[allow(clippy::unwrap_in_result)]
     pub fn expect_stdout_line_matches<R>(&mut self, success_regex: R) -> Result<&mut Self>
     where
         R: ToRegex + Debug,
@@ -665,6 +667,7 @@ impl<T> TestChild<T> {
     /// Kills the child on error, or after the configured timeout has elapsed.
     /// See [`Self::expect_line_matching_regex_set`] for details.
     #[instrument(skip(self))]
+    #[allow(clippy::unwrap_in_result)]
     pub fn expect_stderr_line_matches<R>(&mut self, success_regex: R) -> Result<&mut Self>
     where
         R: ToRegex + Debug,
@@ -689,6 +692,7 @@ impl<T> TestChild<T> {
     ///
     /// [`Self::expect_line_matching_regexes`] wrapper for strings,
     /// [`Regex`](regex::Regex)es, and [`RegexSet`]s.
+    #[allow(clippy::unwrap_in_result)]
     pub fn expect_line_matching_regex_set<L, R>(
         &mut self,
         lines: &mut L,
@@ -709,6 +713,7 @@ impl<T> TestChild<T> {
     /// Checks each line in `lines` against a regex set, and returns Ok if a line matches.
     ///
     /// [`Self::expect_line_matching_regexes`] wrapper for regular expression iterators.
+    #[allow(clippy::unwrap_in_result)]
     pub fn expect_line_matching_regex_iter<L, I>(
         &mut self,
         lines: &mut L,
@@ -1007,6 +1012,7 @@ impl<T> TestOutput<T> {
 
     /// Tests if standard output matches `regex`.
     #[instrument(skip(self))]
+    #[allow(clippy::unwrap_in_result)]
     pub fn stdout_matches<R>(&self, regex: R) -> Result<&Self>
     where
         R: ToRegex + Debug,
@@ -1030,6 +1036,7 @@ impl<T> TestOutput<T> {
 
     /// Tests if any lines in standard output match `regex`.
     #[instrument(skip(self))]
+    #[allow(clippy::unwrap_in_result)]
     pub fn stdout_line_matches<R>(&self, regex: R) -> Result<&Self>
     where
         R: ToRegex + Debug,
@@ -1059,6 +1066,7 @@ impl<T> TestOutput<T> {
 
     /// Tests if standard error matches `regex`.
     #[instrument(skip(self))]
+    #[allow(clippy::unwrap_in_result)]
     pub fn stderr_matches<R>(&self, regex: R) -> Result<&Self>
     where
         R: ToRegex + Debug,
@@ -1082,6 +1090,7 @@ impl<T> TestOutput<T> {
 
     /// Tests if any lines in standard error match `regex`.
     #[instrument(skip(self))]
+    #[allow(clippy::unwrap_in_result)]
     pub fn stderr_line_matches<R>(&self, regex: R) -> Result<&Self>
     where
         R: ToRegex + Debug,

@@ -45,7 +45,6 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-#[allow(clippy::unwrap_in_result)]
 impl ZebraDb {
     // Read block methods
 
@@ -60,18 +59,21 @@ impl ZebraDb {
     /// Returns the tip height and hash, if there is one.
     //
     // TODO: move this method to the tip section
+    #[allow(clippy::unwrap_in_result)]
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         self.db.zs_last_key_value(&hash_by_height)
     }
 
     /// Returns the finalized hash for a given `block::Height` if it is present.
+    #[allow(clippy::unwrap_in_result)]
     pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         self.db.zs_get(&hash_by_height, &height)
     }
 
     /// Returns the height of the given block if it exists.
+    #[allow(clippy::unwrap_in_result)]
     pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
         self.db.zs_get(&height_by_hash, &hash)
@@ -81,6 +83,7 @@ impl ZebraDb {
     /// [`Height`](zebra_chain::block::Height), if it exists in the finalized chain.
     //
     // TODO: move this method to the start of the section
+    #[allow(clippy::unwrap_in_result)]
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         // Blocks
         let block_header_by_height = self.db.cf_handle("block_by_height").unwrap();
@@ -117,6 +120,7 @@ impl ZebraDb {
     /// Returns the Sapling
     /// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a
     /// hash or height, if it exists in the finalized `db`.
+    #[allow(clippy::unwrap_in_result)]
     pub fn sapling_tree(
         &self,
         hash_or_height: HashOrHeight,
@@ -131,6 +135,7 @@ impl ZebraDb {
     /// Returns the Orchard
     /// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
     /// hash or height, if it exists in the finalized `db`.
+    #[allow(clippy::unwrap_in_result)]
     pub fn orchard_tree(
         &self,
         hash_or_height: HashOrHeight,
@@ -167,6 +172,7 @@ impl ZebraDb {
 
     /// Returns the [`TransactionLocation`] for [`transaction::Hash`],
     /// if it exists in the finalized chain.
+    #[allow(clippy::unwrap_in_result)]
     pub fn transaction_location(&self, hash: transaction::Hash) -> Option<TransactionLocation> {
         let tx_loc_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
         self.db.zs_get(&tx_loc_by_hash, &hash)
@@ -174,6 +180,7 @@ impl ZebraDb {
 
     /// Returns the [`transaction::Hash`] for [`TransactionLocation`],
     /// if it exists in the finalized chain.
+    #[allow(clippy::unwrap_in_result)]
     #[allow(dead_code)]
     pub fn transaction_hash(&self, location: TransactionLocation) -> Option<transaction::Hash> {
         let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
@@ -184,6 +191,7 @@ impl ZebraDb {
     /// if a transaction with that hash exists in the finalized chain.
     //
     // TODO: move this method to the start of the section
+    #[allow(clippy::unwrap_in_result)]
     pub fn transaction(&self, hash: transaction::Hash) -> Option<(Arc<Transaction>, Height)> {
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
 

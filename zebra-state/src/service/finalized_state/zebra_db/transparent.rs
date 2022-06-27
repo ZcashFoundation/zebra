@@ -38,12 +38,12 @@ use crate::{
     BoxError, FinalizedBlock,
 };
 
-#[allow(clippy::unwrap_in_result)]
 impl ZebraDb {
     // Read transparent methods
 
     /// Returns the [`AddressBalanceLocation`] for a [`transparent::Address`],
     /// if it is in the finalized state.
+    #[allow(clippy::unwrap_in_result)]
     pub fn address_balance_location(
         &self,
         address: &transparent::Address,
@@ -90,6 +90,7 @@ impl ZebraDb {
 
     /// Returns the transparent output for an [`OutputLocation`],
     /// if it is unspent in the finalized state.
+    #[allow(clippy::unwrap_in_result)]
     pub fn utxo_by_location(
         &self,
         output_location: OutputLocation,
@@ -177,6 +178,7 @@ impl ZebraDb {
     }
 
     /// Returns the transaction hash for an [`TransactionLocation`].
+    #[allow(clippy::unwrap_in_result)]
     pub fn tx_id_by_location(&self, tx_location: TransactionLocation) -> Option<transaction::Hash> {
         let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
 
@@ -354,7 +356,6 @@ impl ZebraDb {
     }
 }
 
-#[allow(clippy::unwrap_in_result)]
 impl DiskWriteBatch {
     /// Prepare a database batch containing `finalized.block`'s transparent transaction indexes,
     /// and return it (without actually writing anything).
@@ -417,6 +418,7 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
+    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_new_transparent_outputs_batch(
         &mut self,
         db: &DiskDb,
@@ -492,6 +494,7 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
+    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_spent_transparent_outputs_batch(
         &mut self,
         db: &DiskDb,
@@ -545,6 +548,7 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
+    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_spending_transparent_tx_ids_batch(
         &mut self,
         db: &DiskDb,
@@ -593,6 +597,7 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
+    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_transparent_balances_batch(
         &mut self,
         db: &DiskDb,
