@@ -521,6 +521,7 @@ where
     ///
     /// If the block does not pass basic validity checks,
     /// returns an error immediately.
+    #[allow(clippy::unwrap_in_result)]
     fn queue_block(&mut self, block: Arc<Block>) -> Result<RequestBlock, VerifyCheckpointError> {
         // Set up a oneshot channel to send results
         let (tx, rx) = oneshot::channel();
@@ -595,6 +596,7 @@ where
     /// During checkpoint range processing, process all the blocks at `height`.
     ///
     /// Returns the first valid block. If there is no valid block, returns None.
+    #[allow(clippy::unwrap_in_result)]
     fn process_height(
         &mut self,
         height: block::Height,

@@ -272,6 +272,7 @@ impl AddressBook {
     /// As an exception, this function can ignore all changes for specific
     /// [`SocketAddr`]s. Ignored addresses will never be used to connect to
     /// peers.
+    #[allow(clippy::unwrap_in_result)]
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
         let previous = self.get(&change.addr());
 

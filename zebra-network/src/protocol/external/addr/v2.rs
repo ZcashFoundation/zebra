@@ -181,6 +181,7 @@ impl AddrV2 {
     ///
     /// The returned IP version is chosen based on `IP_ADDR_SIZE`,
     /// which should be [`ADDR_V2_IPV4_ADDR_SIZE`] or [`ADDR_V2_IPV6_ADDR_SIZE`].
+    #[allow(clippy::unwrap_in_result)]
     fn ip_addr_from_bytes<const IP_ADDR_SIZE: usize>(
         addr_bytes: Vec<u8>,
     ) -> Result<IpAddr, SerializationError>

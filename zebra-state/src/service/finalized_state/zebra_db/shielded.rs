@@ -91,6 +91,7 @@ impl ZebraDb {
     /// Returns the Sprout note commitment tree matching the given anchor.
     ///
     /// This is used for interstitial tree building, which is unique to Sprout.
+    #[allow(clippy::unwrap_in_result)]
     pub fn sprout_note_commitment_tree_by_anchor(
         &self,
         sprout_anchor: &sprout::tree::Root,
@@ -118,6 +119,7 @@ impl ZebraDb {
 
     /// Returns the Sapling note commitment tree matching the given block height.
     #[allow(dead_code)]
+    #[allow(clippy::unwrap_in_result)]
     pub fn sapling_note_commitment_tree_by_height(
         &self,
         height: &Height,
@@ -145,6 +147,7 @@ impl ZebraDb {
 
     /// Returns the Orchard note commitment tree matching the given block height.
     #[allow(dead_code)]
+    #[allow(clippy::unwrap_in_result)]
     pub fn orchard_note_commitment_tree_by_height(
         &self,
         height: &Height,
@@ -199,6 +202,7 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
+    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_nullifier_batch(
         &mut self,
         db: &DiskDb,
@@ -263,6 +267,7 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating the history tree
+    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_note_commitment_batch(
         &mut self,
         db: &DiskDb,

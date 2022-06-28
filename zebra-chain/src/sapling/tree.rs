@@ -306,6 +306,7 @@ impl NoteCommitmentTree {
     /// chain and input into the proof.
     ///
     /// Returns an error if the tree is full.
+    #[allow(clippy::unwrap_in_result)]
     pub fn append(&mut self, cm_u: jubjub::Fq) -> Result<(), NoteCommitmentTreeError> {
         if self.inner.append(&cm_u.into()) {
             // Invalidate cached root

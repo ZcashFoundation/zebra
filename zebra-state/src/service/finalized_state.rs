@@ -235,6 +235,7 @@ impl FinalizedState {
     /// - Propagates any errors from updating history and note commitment trees
     /// - If `hashFinalSaplingRoot` / `hashLightClientRoot` / `hashBlockCommitments`
     ///   does not match the expected value
+    #[allow(clippy::unwrap_in_result)]
     pub fn commit_finalized_direct(
         &mut self,
         finalized: FinalizedBlock,

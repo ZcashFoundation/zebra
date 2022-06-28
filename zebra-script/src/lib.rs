@@ -152,6 +152,7 @@ impl CachedFfiTransaction {
     /// Verify if the script in the input at `input_index` of a transaction correctly
     /// spends the matching [`transparent::Output`] it refers to, with the [`ConsensusBranchId`]
     /// of the block containing the transaction.
+    #[allow(clippy::unwrap_in_result)]
     pub fn is_valid(&self, branch_id: ConsensusBranchId, input_index: usize) -> Result<(), Error> {
         let previous_output = self
             .all_previous_outputs
@@ -210,6 +211,7 @@ impl CachedFfiTransaction {
 
     /// Returns the number of transparent signature operations in the
     /// transparent inputs and outputs of this transaction.
+    #[allow(clippy::unwrap_in_result)]
     pub fn legacy_sigop_count(&self) -> Result<u64, Error> {
         let mut err = 0;
 

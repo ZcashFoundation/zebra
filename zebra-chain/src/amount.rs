@@ -536,6 +536,7 @@ impl ZcashDeserialize for Amount<NegativeAllowed> {
 }
 
 impl ZcashSerialize for Amount<NonNegative> {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         let amount = self
             .0
