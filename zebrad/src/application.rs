@@ -194,6 +194,7 @@ impl Application for ZebradApp {
     /// beyond the default ones provided by the framework, this is the place
     /// to do so.
     #[allow(clippy::print_stderr)]
+    #[allow(clippy::unwrap_in_result)]
     fn register_components(&mut self, command: &Self::Cmd) -> Result<(), FrameworkError> {
         use crate::components::{
             metrics::MetricsEndpoint, tokio::TokioComponent, tracing::TracingEndpoint,
@@ -316,7 +317,7 @@ impl Application for ZebradApp {
         // This MUST happen after `Terminal::new` to ensure our preferred panic
         // handler is the last one installed
         let (panic_hook, eyre_hook) = builder.into_hooks();
-        eyre_hook.install().unwrap();
+        eyre_hook.install().expect("eyre_hook.install() error");
 
         // The Sentry default config pulls in the DSN from the `SENTRY_DSN`
         // environment variable.
@@ -399,6 +400,7 @@ impl Application for ZebradApp {
     }
 
     /// Load this application's configuration and initialize its components.
+    #[allow(clippy::unwrap_in_result)]
     fn init(&mut self, command: &Self::Cmd) -> Result<(), FrameworkError> {
         // Create and register components with the application.
         // We do this first to calculate a proper dependency ordering before
@@ -406,7 +408,10 @@ impl Application for ZebradApp {
         self.register_components(command)?;
 
         // Fire callback to signal state in the application lifecycle
-        let config = self.config.take().unwrap();
+        let config = self
+            .config
+            .take()
+            .expect("register_components always populates the config");
         self.after_config(config)?;
 
         Ok(())

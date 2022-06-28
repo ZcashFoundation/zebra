@@ -136,6 +136,7 @@ impl ClientTestHarness {
     ///
     /// TODO: make ReceiveRequestAttempt generic, and use it here.
     #[allow(dead_code)]
+    #[allow(clippy::unwrap_in_result)]
     pub(crate) fn try_to_receive_inventory_change(&mut self) -> Option<InventoryChange> {
         let receive_result = self
             .inv_receiver

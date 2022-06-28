@@ -86,6 +86,7 @@ impl LockTime {
 }
 
 impl ZcashSerialize for LockTime {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // This implementation does not check the invariants on `LockTime` so that the
         // serialization is fallible only if the underlying writer is. This ensures that
@@ -100,6 +101,7 @@ impl ZcashSerialize for LockTime {
 }
 
 impl ZcashDeserialize for LockTime {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let n = reader.read_u32::<LittleEndian>()?;
         if n < Self::MIN_TIMESTAMP.try_into().expect("fits in u32") {

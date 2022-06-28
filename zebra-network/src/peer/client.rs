@@ -203,6 +203,7 @@ impl ClientRequestReceiver {
     /// Closing the channel ensures that:
     /// - the request stream terminates, and
     /// - task notifications are not required.
+    #[allow(clippy::unwrap_in_result)]
     pub fn close_and_flush_next(&mut self) -> Option<InProgressClientRequest> {
         self.inner.close();
 
@@ -419,6 +420,7 @@ impl MissingInventoryCollector {
 
 impl Client {
     /// Check if this connection's heartbeat task has exited.
+    #[allow(clippy::unwrap_in_result)]
     fn check_heartbeat(&mut self, cx: &mut Context<'_>) -> Result<(), SharedPeerError> {
         let is_canceled = self
             .shutdown_tx
