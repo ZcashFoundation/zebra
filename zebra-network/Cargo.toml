@@ -19,6 +19,7 @@ bytes = "1.1.0"
 chrono = "0.4.19"
 hex = "0.4.3"
 humantime-serde = "1.1.1"
+indexmap = { version = "1.9.1", features = ["serde"] }
 lazy_static = "1.4.0"
 ordered-map = "0.4.2"
 pin-project = "1.0.10"
@@ -31,7 +32,7 @@ futures = "0.3.21"
 tokio = { version = "1.19.2", features = ["net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.9", features = ["sync", "time"] }
 tokio-util = { version = "0.7.3", features = ["codec"] }
-tower = { version = "0.4.12", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
+tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
 metrics = "0.18.1"
 tracing-futures = "0.2.5"

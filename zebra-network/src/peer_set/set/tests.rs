@@ -1,3 +1,5 @@
+//! Peer set unit tests, and test setup code.
+
 use std::{net::SocketAddr, sync::Arc};
 
 use futures::{channel::mpsc, stream, Stream, StreamExt};

@@ -5,6 +5,7 @@ use std::{fmt::Write as _, io::Write as _, process};
 use abscissa_core::{
     application::{self, fatal_error, AppCell},
     config::{self, Configurable},
+    status_err,
     terminal::{component::Terminal, stderr, stdout, ColorChoice},
     Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths, Version,
 };
@@ -202,11 +203,16 @@ impl Application for ZebradApp {
 
         // Load config *after* framework components so that we can
         // report an error to the terminal if it occurs.
-        let config = command
-            .config_path()
-            .map(|path| self.load_config(&path))
-            .transpose()?
-            .unwrap_or_default();
+        let config = match command.config_path() {
+            Some(path) => match self.load_config(&path) {
+                Ok(config) => config,
+                Err(e) => {
+                    status_err!("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file. You can generate a valid config by running \"zebrad generate\", and diff it against yours to examine any format inconsistencies.");
+                    return Err(e);
+                }
+            },
+            None => ZebradConfig::default(),
+        };
 
         let config = command.process_config(config)?;
 
@@ -314,7 +320,7 @@ impl Application for ZebradApp {
 
         // The Sentry default config pulls in the DSN from the `SENTRY_DSN`
         // environment variable.
-        #[cfg(feature = "enable-sentry")]
+        #[cfg(feature = "sentry")]
         let guard = sentry::init(sentry::ClientOptions {
             debug: true,
             release: Some(app_version().to_string().into()),
@@ -325,7 +331,7 @@ impl Application for ZebradApp {
             let panic_report = panic_hook.panic_report(panic_info);
             eprintln!("{}", panic_report);
 
-            #[cfg(feature = "enable-sentry")]
+            #[cfg(feature = "sentry")]
             {
                 let event = crate::sentry::panic_event_from(panic_report);
                 sentry::capture_event(event);

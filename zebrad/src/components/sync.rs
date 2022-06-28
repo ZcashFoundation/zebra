@@ -30,6 +30,7 @@ use crate::{
 
 mod downloads;
 mod gossip;
+mod progress;
 mod recent_sync_lengths;
 mod status;
 
@@ -39,6 +40,7 @@ mod tests;
 use downloads::{AlwaysHedge, Downloads};
 
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
+pub use progress::show_block_chain_progress;
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
 
@@ -57,8 +59,8 @@ const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
 
 /// A lower bound on the user-specified lookahead limit.
 ///
-/// Set to two checkpoint intervals, so that we're sure that the lookahead
-/// limit always contains at least one complete checkpoint.
+/// Set to the maximum checkpoint interval, so the pipeline holds around a checkpoint's
+/// worth of blocks.
 ///
 /// ## Security
 ///
@@ -74,12 +76,14 @@ const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
 /// Once these malicious blocks start failing validation, the syncer will cancel all
 /// the pending download and verify tasks, drop all the blocks, and start a new
 /// ObtainTips with a new set of peers.
-pub const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
+pub const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 
 /// The default for the user-specified lookahead limit.
 ///
 /// See [`MIN_LOOKAHEAD_LIMIT`] for details.
-pub const DEFAULT_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 5;
+///
+/// TODO: increase to `MAX_CHECKPOINT_HEIGHT_GAP * 5`, after we implement orchard batching
+pub const DEFAULT_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 3;
 
 /// The expected maximum number of hashes in an ObtainTips or ExtendTips response.
 ///
@@ -141,7 +145,9 @@ pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
 ///
 /// If this timeout is set too low, the syncer will sometimes get stuck in a
 /// failure loop.
-pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(6 * 60);
+///
+/// TODO: reduce to `6 * 60`, after we implement orchard batching?
+pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
@@ -318,24 +324,27 @@ where
         // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
 
-        assert!(
-            config.sync.lookahead_limit >= MIN_LOOKAHEAD_LIMIT,
-            "configured lookahead limit {} too low, must be at least {}",
-            config.sync.lookahead_limit,
-            MIN_LOOKAHEAD_LIMIT
-        );
+        let mut lookahead_limit = config.sync.lookahead_limit;
+        if lookahead_limit < MIN_LOOKAHEAD_LIMIT {
+            warn!(
+                "configured lookahead limit {} too low, increasing to {}",
+                config.sync.lookahead_limit, MIN_LOOKAHEAD_LIMIT,
+            );
+
+            lookahead_limit = MIN_LOOKAHEAD_LIMIT;
+        }
 
         let (sync_status, recent_syncs) = SyncStatus::new();
 
         let new_syncer = Self {
             genesis_hash: genesis_hash(config.network.network),
-            lookahead_limit: config.sync.lookahead_limit,
+            lookahead_limit,
             tip_network,
             downloads: Box::pin(Downloads::new(
                 block_network,
                 verifier,
                 latest_chain_tip.clone(),
-                config.sync.lookahead_limit,
+                lookahead_limit,
             )),
             state,
             latest_chain_tip,

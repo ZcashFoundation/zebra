@@ -1,6 +1,7 @@
 # Zebra Metrics
 
-Zebra has support for Prometheus, configured using the [`MetricsSection`][metrics_section].
+Zebra has support for Prometheus, configured using the `prometheus` compile-time feature,
+and the [`MetricsSection`][metrics_section] runtime configuration.
 
 This requires supporting infrastructure to collect and visualize metrics, for example:
 

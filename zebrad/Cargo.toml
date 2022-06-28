@@ -17,7 +17,13 @@ default-run = "zebrad"
 default = ["release_max_level_info"]
 
 # Production features that activate extra dependencies
-enable-sentry = ["sentry", "sentry-tracing"]
+
+sentry = ["dep:sentry", "sentry-tracing"]
+flamegraph = ["tracing-flame", "inferno"]
+journald = ["tracing-journald"]
+filter-reload = ["hyper"]
+
+prometheus = ["metrics-exporter-prometheus"]
 
 # Production features that modify dependency behaviour
 
@@ -72,41 +78,50 @@ zebra-state = { path = "../zebra-state" }
 abscissa_core = "0.5"
 gumdrop = "0.7"
 chrono = "0.4.19"
+humantime = "2.1.0"
 humantime-serde = "1.1.1"
-indexmap = "1.8.2"
+indexmap = "1.9.1"
 lazy_static = "1.4.0"
 serde = { version = "1.0.137", features = ["serde_derive"] }
 toml = "0.5.9"
 
-hyper = { version = "0.14.19", features = ["full"] }
 futures = "0.3.21"
 tokio = { version = "1.19.2", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
-tower = { version = "0.4.12", features = ["hedge", "limit"] }
+tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.0.10"
 
 color-eyre = { version = "0.6.1", default_features = false, features = ["issue-url"] }
 thiserror = "1.0.31"
 
-tracing-flame = "0.2.0"
-tracing-journald = "0.3.0"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 tracing-error = "0.2.0"
 tracing-futures = "0.2.5"
 tracing = "0.1.31"
 
 metrics = "0.18.1"
-metrics-exporter-prometheus = { version = "0.9.0", default-features = false, features = ["http-listener"] }
 
 dirs = "4.0.0"
-inferno = { version = "0.11.4", default-features = false }
 atty = "0.2.14"
 
 num-integer = "0.1.45"
 rand = { version = "0.8.5", package = "rand" }
 
-# prod feature enable-sentry
+# prod feature sentry
 sentry-tracing = { version = "0.26.0", optional = true }
 sentry = { version = "0.26.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"], optional = true }
+
+# prod feature flamegraph
+tracing-flame = { version = "0.2.0", optional = true }
+inferno = { version = "0.11.6", default-features = false, optional = true }
+
+# prod feature journald
+tracing-journald = { version = "0.3.0", optional = true }
+
+# prod feature filter-reload
+hyper = { version = "0.14.19", features = ["http1", "http2", "server"], optional = true }
+
+# prod feature prometheus
+metrics-exporter-prometheus = { version = "0.9.0", default-features = false, features = ["http-listener"], optional = true }
 
 # prod feature release_max_level_info
 #
@@ -132,11 +147,14 @@ abscissa_core = { version = "0.5", features = ["testing"] }
 hex = "0.4.3"
 once_cell = "1.12.0"
 regex = "1.5.6"
-reqwest = "0.11.11"
 semver = "1.0.10"
+
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { version = "1.0.81", features = ["preserve_order"] }
 tempfile = "3.3.0"
+
+hyper = { version = "0.14.18", features = ["http1", "http2", "server"]}
+reqwest = "0.11.11"
 
 tokio = { version = "1.19.2", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.9"
