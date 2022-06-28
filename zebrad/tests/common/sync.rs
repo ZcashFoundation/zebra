@@ -45,12 +45,6 @@ pub const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 pub const SYNC_FINISHED_REGEX: &str =
     r"finished initial sync to chain tip, using gossiped blocks .*sync_percent.*=.*100\.";
 
-/// Temporary workaround for slow syncs - stop at 97%.
-///
-/// TODO: revert this change (#4456)
-pub const SYNC_FINISHED_REGEX_TMP_STOP_EARLY: &str =
-    r"estimated progress to chain tip .*sync_percent.*=.*97\.";
-
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///
 /// This should only take a second, but sometimes CI VMs or RocksDB can be slow.
