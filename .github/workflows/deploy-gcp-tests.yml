@@ -75,10 +75,19 @@ on:
         description: 'Application name for Google Cloud instance metadata'
 
 env:
+  # where we get the Docker image from
   IMAGE_NAME: zebrad-test
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
+  # what kind of Google Cloud instance we want to launch
   ZONE: us-central1-a
   MACHINE_TYPE: c2d-standard-16
+  # How many previous log lines we show at the start of each new log job.
+  # Increase this number if some log lines are skipped between jobs
+  #
+  # We want to show all the logs since the last job finished,
+  # but we don't know how long it will be between jobs.
+  # 200 lines is about 6-15 minutes of sync logs, or one panic log.
+  EXTRA_LOG_LINES: 200
 
 jobs:
   # set up the test, if it doesn't use any cached state
@@ -453,9 +462,9 @@ jobs:
           "
 
 
-  # follow the logs of the test we just launched
-  follow-logs:
-    name: Show logs for ${{ inputs.test_id }} test
+  # follow the logs of the test we just launched, up to Sapling activation (or the test finishing)
+  follow-logs-sprout:
+    name: Log ${{ inputs.test_id }} test (sprout)
     needs: [ launch-with-cached-state, launch-without-cached-state ]
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # If the previous job fails, we also want to run and fail this job,
@@ -492,8 +501,9 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Show all the logs since the container launched
-      - name: Show logs for ${{ inputs.test_id }} test
+      # Show all the logs since the container launched,
+      # following until Sapling activation (or the test finishes)
+      - name: Show logs for ${{ inputs.test_id }} test (sprout)
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -502,17 +512,139 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
+          set -o pipefail; \
           docker logs \
           --tail all \
           --follow \
-          ${{ inputs.test_id }} \
+          ${{ inputs.test_id }} | \
+          tee /dev/tty | \
+          grep --max-count=1 --extended-regexp --color=always \
+          '(estimated progress.*network_upgrade.*=.*Sapling)|(test result:.*finished in)' \
           "
+
+  # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
+  # TODO: split out sapling logs when the mandatory checkpoint is above NU5 activation
+  follow-logs-checkpoint:
+    name: Log ${{ inputs.test_id }} test (checkpoint)
+    needs: [ follow-logs-sprout ]
+    # If the previous job fails, we also want to run and fail this job,
+    # so that the branch protection rule fails in Mergify and GitHub.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
+      # Or will that break the slug-action variables we use to find the instance?
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.8.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Show recent logs, following until the last checkpoint (or the test finishes)
+      - name: Show logs for ${{ inputs.test_id }} test (checkpoint)
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          set -o pipefail; \
+          docker logs \
+          --tail ${{ env.EXTRA_LOG_LINES }} \
+          --follow \
+          ${{ inputs.test_id }} | \
+          tee /dev/tty | \
+          grep --max-count=1 --extended-regexp --color=always \
+          '(verified final checkpoint)|(test result:.*finished in)' \
+          "
+
+  # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
+  follow-logs-end:
+    name: Log ${{ inputs.test_id }} test (end)
+    needs: [ follow-logs-checkpoint ]
+    # If the previous job fails, we also want to run and fail this job,
+    # so that the branch protection rule fails in Mergify and GitHub.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
+      # Or will that break the slug-action variables we use to find the instance?
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.8.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Show recent logs, following until the test finishes
+      - name: Show logs for ${{ inputs.test_id }} test (end)
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          set -o pipefail; \
+          docker logs \
+          --tail ${{ env.EXTRA_LOG_LINES }} \
+          --follow \
+          ${{ inputs.test_id }} | \
+          tee /dev/tty | \
+          grep --max-count=1 --extended-regexp --color=always \
+          'test result:.*finished in' \
+          "
+
 
   # wait for the result of the test
   test-result:
     # TODO: update the job name here, and in the branch protection rules
     name: Run ${{ inputs.test_id }} test
-    needs: [ follow-logs ]
+    needs: [ follow-logs-end ]
     # If the previous job fails, we also want to run and fail this job,
     # so that the branch protection rule fails in Mergify and GitHub.
     if: ${{ !cancelled() }}
