@@ -30,7 +30,7 @@ This release also contains some breaking changes which:
 
 - Most of Zebra's [tracing](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/tracing.md)
   and [metrics](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/metrics.md) features
-  are off by default at compile time (#4539)
+  are off by default at compile time (#4539, #4680)
 - The `enable-sentry` feature has been renamed to `sentry` (#4623)
 
 #### Config
@@ -47,6 +47,7 @@ This release also contains some breaking changes which:
 - Add some missing tracing spans (#4660)
 - Add tokio-console support to zebrad (#4519, #4641)
 - Add `fallible_impl_from` clippy lint (#4609)
+- Add `unwrap_in_result` clippy lint (#4667)
 
 #### Testing
 
@@ -60,6 +61,10 @@ This release also contains some breaking changes which:
 - Build each Zebra crate individually (#4640)
 
 ### Changed
+
+#### Chain Sync
+
+- Update mainnet and testnet checkpoint hashes (#4708) 
 
 #### Diagnostics
 
@@ -109,6 +114,7 @@ This release also contains some breaking changes which:
 - Fix various `cargo doc` warnings (#4561, #4611, #4627)
 - Clarify how Zebra and `zcashd` interact in `README.md` (#4570)
 - Improve `lightwalletd` tutorial (#4566)
+- Simplify README and link to detailed documentation (#4680)
 
 #### Diagnostics
 
