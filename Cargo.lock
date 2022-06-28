@@ -2002,7 +2002,7 @@ dependencies = [
  "lazy_static",
  "rand_core 0.6.3",
  "ring",
- "secp256k1",
+ "secp256k1 0.21.3",
 ]
 
 [[package]]
@@ -4178,7 +4178,16 @@ version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c42e6f1735c5f00f51e43e28d6634141f2bcad10931b2609ddd74a86d751260"
 dependencies = [
- "secp256k1-sys",
+ "secp256k1-sys 0.4.2",
+]
+
+[[package]]
+name = "secp256k1"
+version = "0.23.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5328db62fe38ebda0a5bf6c5dd2fcff3a4d55bb182e35a539a9993201a7724e0"
+dependencies = [
+ "secp256k1-sys 0.6.0",
  "serde",
 ]
 
@@ -4187,6 +4196,15 @@ name = "secp256k1-sys"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "957da2573cde917463ece3570eab4a0b3f19de6f1646cde62e6fd3868f566036"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "secp256k1-sys"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7058dc8eaf3f2810d7828680320acda0b25a288f6d288e19278e249bbf74226b"
 dependencies = [
  "cc",
 ]
@@ -6167,7 +6185,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_core 0.6.3",
  "ripemd",
- "secp256k1",
+ "secp256k1 0.21.3",
  "sha2",
  "subtle",
  "zcash_encoding 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6204,7 +6222,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_core 0.6.3",
  "ripemd",
- "secp256k1",
+ "secp256k1 0.21.3",
  "sha2",
  "subtle",
  "zcash_encoding 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6318,7 +6336,7 @@ dependencies = [
  "rand_core 0.6.3",
  "redjubjub",
  "ripemd",
- "secp256k1",
+ "secp256k1 0.23.2",
  "serde",
  "serde-big-array",
  "serde_with",
