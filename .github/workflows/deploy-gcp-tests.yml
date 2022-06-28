@@ -517,7 +517,7 @@ jobs:
           --tail all \
           --follow \
           ${{ inputs.test_id }} | \
-          tee /dev/tty | \
+          tee /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           '(estimated progress.*network_upgrade.*=.*Sapling)|(test result:.*finished in)' \
           "
@@ -576,7 +576,7 @@ jobs:
           --tail ${{ env.EXTRA_LOG_LINES }} \
           --follow \
           ${{ inputs.test_id }} | \
-          tee /dev/tty | \
+          tee /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           '(verified final checkpoint)|(test result:.*finished in)' \
           "
@@ -634,7 +634,7 @@ jobs:
           --tail ${{ env.EXTRA_LOG_LINES }} \
           --follow \
           ${{ inputs.test_id }} | \
-          tee /dev/tty | \
+          tee /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           'test result:.*finished in' \
           "
