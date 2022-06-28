@@ -65,6 +65,7 @@ impl std::io::Write for FakeWriter {
 ///
 /// See `zcash_serialize_external_count` for more details, and usage information.
 impl<T: ZcashSerialize> ZcashSerialize for Vec<T> {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         let len: CompactSizeMessage = self
             .len()

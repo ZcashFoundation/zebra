@@ -113,6 +113,7 @@ impl Block {
     /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
     ///
     /// [ZIP-244]: https://zips.z.cash/zip-0244
+    #[allow(clippy::unwrap_in_result)]
     pub fn check_transaction_network_upgrade_consistency(
         &self,
         network: Network,

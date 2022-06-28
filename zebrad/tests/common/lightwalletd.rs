@@ -130,6 +130,7 @@ impl<T> LightWalletdTestDirExt for T
 where
     Self: TestDirExt + AsRef<Path> + Sized,
 {
+    #[allow(clippy::unwrap_in_result)]
     fn spawn_lightwalletd_child(
         self,
         lightwalletd_state_path: impl Into<Option<PathBuf>>,

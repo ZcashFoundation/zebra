@@ -381,6 +381,7 @@ impl NonFinalizedState {
     ///
     /// The trees must be the trees of the finalized tip.
     /// They are used to recreate the trees if a fork is needed.
+    #[allow(clippy::unwrap_in_result)]
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,

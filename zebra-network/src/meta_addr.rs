@@ -294,6 +294,7 @@ impl MetaAddr {
     /// [`MetaAddr`].
     ///
     /// Returns [`None`] if the gossiped peer is missing the untrusted services field.
+    #[allow(clippy::unwrap_in_result)]
     pub fn new_gossiped_change(self) -> Option<MetaAddrChange> {
         let untrusted_services = self.services?;
 
@@ -593,6 +594,7 @@ impl MetaAddr {
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
     ///
     /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
+    #[allow(clippy::unwrap_in_result)]
     pub fn sanitize(&self, network: Network) -> Option<MetaAddr> {
         if !self.last_known_info_is_valid_for_outbound(network) {
             return None;

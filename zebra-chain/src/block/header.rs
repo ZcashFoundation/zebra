@@ -101,6 +101,7 @@ pub enum BlockTimeError {
 impl Header {
     /// TODO: Inline this function into zebra_consensus::block::check::time_is_valid_at.
     /// See <https://github.com/ZcashFoundation/zebra/issues/1021> for more details.
+    #[allow(clippy::unwrap_in_result)]
     pub fn time_is_valid_at(
         &self,
         now: DateTime<Utc>,

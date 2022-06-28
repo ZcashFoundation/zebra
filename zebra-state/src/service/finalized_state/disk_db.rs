@@ -216,6 +216,7 @@ impl ReadDisk for DiskDb {
             .valid()
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn zs_get<C, K, V>(&self, cf: &C, key: &K) -> Option<V>
     where
         C: rocksdb::AsColumnFamilyRef,
