@@ -463,7 +463,7 @@ jobs:
 
 
   # follow the logs of the test we just launched, up to Sapling activation (or the test finishing)
-  follow-logs-sprout:
+  logs-sprout:
     name: Log ${{ inputs.test_id }} test (sprout)
     needs: [ launch-with-cached-state, launch-without-cached-state ]
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
@@ -524,9 +524,9 @@ jobs:
 
   # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
   # TODO: split out sapling logs when the mandatory checkpoint is above NU5 activation
-  follow-logs-checkpoint:
+  logs-checkpoint:
     name: Log ${{ inputs.test_id }} test (checkpoint)
-    needs: [ follow-logs-sprout ]
+    needs: [ logs-sprout ]
     # If the previous job fails, we also want to run and fail this job,
     # so that the branch protection rule fails in Mergify and GitHub.
     if: ${{ !cancelled() }}
@@ -582,9 +582,9 @@ jobs:
           "
 
   # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
-  follow-logs-end:
+  logs-end:
     name: Log ${{ inputs.test_id }} test (end)
-    needs: [ follow-logs-checkpoint ]
+    needs: [ logs-checkpoint ]
     # If the previous job fails, we also want to run and fail this job,
     # so that the branch protection rule fails in Mergify and GitHub.
     if: ${{ !cancelled() }}
@@ -644,7 +644,7 @@ jobs:
   test-result:
     # TODO: update the job name here, and in the branch protection rules
     name: Run ${{ inputs.test_id }} test
-    needs: [ follow-logs-end ]
+    needs: [ logs-end ]
     # If the previous job fails, we also want to run and fail this job,
     # so that the branch protection rule fails in Mergify and GitHub.
     if: ${{ !cancelled() }}
