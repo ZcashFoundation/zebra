@@ -11,8 +11,19 @@ assignees: ''
 
 ### Which Crates to Increment
 
-To check if any of the top-level crates need version increments, go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra and use the last modified dates of each crate. Alternatively you can use the github compare tool and check the `main` branch against the last tag ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.15...main)). `git diff --stat <previous-release-tag> origin/main` is also useful to see what's changed.
+To check if any of the top-level crates need version increments:
+1. go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra
+2. check if the last commit was a Zebra version bump, or something else
 
+<details>
+   
+Alternatively you can:
+- use the github compare tool and check the `main` branch against the last tag ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.15...main))
+- use `git diff --stat <previous-release-tag> origin/main`
+
+</details>
+   
+Once you know which crates have changed:
 - [ ] Increment the crates that have new commits since the last version update
 - [ ] Increment any crates that depend on crates that have changed
 - [ ] Keep a list of the crates that haven't been incremented, to include in the PR
@@ -22,6 +33,8 @@ To check if any of the top-level crates need version increments, go to the zebra
 Zebra follows [semantic versioning](https://semver.org).
 
 Semantic versions look like: `MAJOR`.`MINOR`.`PATCH[`-`TAG`.`PRE-RELEASE]`
+   
+<details>
 
 #### Pre-Release Crates
 
@@ -46,6 +59,17 @@ Increment the first version component in this list, and reset the other componen
 3. PATCH versions for bug fixes
     * includes dependency updates that don't impact the public API
 
+### Reviewing Version Bumps
+
+Check for missed changes by going to:
+`https://github.com/ZcashFoundation/zebra/tree/<commit-hash>/`
+Where `<commit-hash>` is the hash of the last commit in the version bump PR.
+
+If any Zebra or Tower crates have commit messages that are **not** a version bump, we have missed an update.
+Also check for crates that depend on crates that have changed. They should get a version bump as well.
+
+</details>
+   
 ### Version Locations
 
 Once you know which versions you want to increment, you can find them in the:
@@ -63,34 +87,20 @@ You can use `fastmod` to interactively find and replace versions.
 For example, you can do something like:
 ```
 fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.12' '1.0.0-alpha.13'
-fastmod --extensions rs,toml,md --fixed-strings '0.2.9' '0.2.10' tower-batch
-fastmod --extensions rs,toml,md --fixed-strings '0.2.8' '0.2.9' tower-fallback
+fastmod --extensions rs,toml,md --fixed-strings '0.2.9' '0.2.10' tower-batch tower-fallback
 ```
-
-### Reviewing Version Bumps
-
-Check for missed changes by going to:
-`https://github.com/ZcashFoundation/zebra/tree/<commit-hash>/`
-Where `<commit-hash>` is the hash of the last commit in the version bump PR.
-
-If any Zebra or Tower crates have commit messages that are **not** a version bump, we have missed an update.
-
-Also check for crates that depend on crates that have changed. They should get a version bump as well.
 
 ## README
 
-As we resolve various outstanding known issues and implement new functionality with each release, we should double check the README for any necessary updates.
-
-We should check and update if necessary:
-
-- [ ] The "Known Issues" section to ensure that any items that are resolved in the latest release are no longer listed in the README.
-- [ ] The "Build and Run Instructions" section. Check if any new dependencies were introduced and
-      list them if needed; one possible approach is to check for changes in the `Dockerfile`
-      since the last tag: `git diff <previous-release-tag> docker/Dockerfile`.
+We should update the README to:
+- [ ] remove any "Known Issues" that have been fixed
+- [ ] update the "Build and Run Instructions" with any new dependencies.
+      Check for changes in the `Dockerfile` since the last tag: `git diff <previous-release-tag> docker/Dockerfile`.
 
 ## Change Log
 
-**Important**: Any merge into `main` deletes any edits to the draft changelog. Once you are ready to tag a release, copy the draft changelog into `CHANGELOG.md`.
+**Important**: Any merge into `main` deletes any edits to the draft changelog.
+Once you are ready to tag a release, copy the draft changelog into `CHANGELOG.md`.
 
 We follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
@@ -104,6 +114,8 @@ To create the final change log:
 - [ ] Check the category for each change
   - prefer the "Fix" category if you're not sure
 
+<details>
+   
 #### Change Categories
 
 From "Keep a Changelog":
@@ -113,6 +125,8 @@ From "Keep a Changelog":
 * `Removed` for now removed features.
 * `Fixed` for any bug fixes.
 * `Security` in case of vulnerabilities.
+
+</details>
 
 ## Create the Release
 
