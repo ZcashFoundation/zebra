@@ -623,7 +623,7 @@ jobs:
           "
 
 
-  # wait for the result of the test
+  # check the results of the test
   test-result:
     # TODO: update the job name here, and in the branch protection rules
     name: Run ${{ inputs.test_id }} test
@@ -660,7 +660,9 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Wait for the container to finish, then exit with the test's exit status.
+      # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
+      # Then wait for the container to finish, and exit with the test's exit status.
+      # Also shows recent test logs.
       #
       # If the container has already finished, `docker wait` should return its status.
       # But sometimes this doesn't work, so we use `docker inspect` as a fallback.
@@ -676,6 +678,13 @@ jobs:
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command=' \
+          set -e;
+          docker logs \
+          --tail ${{ env.EXTRA_LOG_LINES }} \
+          ${{ inputs.test_id }} | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          "test result: .*ok.* [1-9][0-9]* passed.*finished in"; \
           EXIT_STATUS=$( \
           docker wait ${{ inputs.test_id }} || \
           docker inspect --format "{{.State.ExitCode}}" ${{ inputs.test_id }} || \
