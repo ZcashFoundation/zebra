@@ -88,9 +88,7 @@ impl std::str::FromStr for Address {
                     },
                     diversifier: keys::Diversifier::from(diversifier_bytes),
                     transmission_key: keys::TransmissionKey::try_from(transmission_key_bytes)
-                        .map_err(|_| {
-                            SerializationError::Parse("invalid transmission key bytes")
-                        })?,
+                        .map_err(|_| SerializationError::Parse("invalid transmission key bytes"))?,
                 })
             }
             _ => Err(SerializationError::Parse("bech32 decoding error")),
