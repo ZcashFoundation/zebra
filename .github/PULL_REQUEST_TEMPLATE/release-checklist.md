@@ -90,6 +90,8 @@ fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.12' '1.0.0-alpha.13
 fastmod --extensions rs,toml,md --fixed-strings '0.2.9' '0.2.10' tower-batch tower-fallback
 ```
 
+Ignore any `fastmod` updates to previous release notes in `CHANGELOG.md`.
+
 ## README
 
 We should update the README to:
