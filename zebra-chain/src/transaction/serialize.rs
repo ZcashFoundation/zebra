@@ -178,6 +178,7 @@ impl ZcashSerialize for sapling::ShieldedData<SharedAnchor> {
 // we can't split ShieldedData out of Option<ShieldedData> deserialization,
 // because the counts are read along with the arrays.
 impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // Denoted as `nSpendsSapling` and `vSpendsSapling` in the spec.
         let spend_prefixes: Vec<_> = (&mut reader).zcash_deserialize_into()?;
@@ -447,6 +448,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
 }
 
 impl ZcashSerialize for Transaction {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Post-Sapling, transaction size is limited to MAX_BLOCK_BYTES.
         // (Strictly, the maximum transaction size is about 1.5 kB less,
@@ -661,6 +663,7 @@ impl ZcashSerialize for Transaction {
 }
 
 impl ZcashDeserialize for Transaction {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         // # Consensus
         //

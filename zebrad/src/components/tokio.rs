@@ -22,13 +22,14 @@ pub struct TokioComponent {
 }
 
 impl TokioComponent {
+    #[allow(clippy::unwrap_in_result)]
     pub fn new() -> Result<Self, FrameworkError> {
         Ok(Self {
             rt: Some(
                 tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()
-                    .unwrap(),
+                    .expect("runtime building should not fail"),
             ),
         })
     }

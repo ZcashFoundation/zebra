@@ -105,6 +105,7 @@ impl<V: Version> Tree<V> {
     /// # Panics
     ///
     /// Will panic if `peaks` is empty.
+    #[allow(clippy::unwrap_in_result)]
     pub fn new_from_cache(
         network: Network,
         network_upgrade: NetworkUpgrade,
@@ -138,6 +139,7 @@ impl<V: Version> Tree<V> {
     /// `sapling_root` is the root of the Sapling note commitment tree of the block.
     /// `orchard_root` is the root of the Orchard note commitment tree of the block;
     ///  (ignored for V1 trees).
+    #[allow(clippy::unwrap_in_result)]
     pub fn new_from_block(
         network: Network,
         block: Arc<Block>,
@@ -171,6 +173,7 @@ impl<V: Version> Tree<V> {
     ///
     /// Panics if the network upgrade of the given block is different from
     /// the network upgrade of the other blocks in the tree.
+    #[allow(clippy::unwrap_in_result)]
     pub fn append_leaf(
         &mut self,
         block: Arc<Block>,
