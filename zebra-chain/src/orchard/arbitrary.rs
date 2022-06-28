@@ -140,7 +140,8 @@ impl Arbitrary for keys::TransmissionKey {
                 let diversifier_key = keys::DiversifierKey::from(full_viewing_key);
 
                 let diversifier = Diversifier::from(diversifier_key);
-                let incoming_viewing_key = keys::IncomingViewingKey::from(full_viewing_key);
+                let incoming_viewing_key = keys::IncomingViewingKey::try_from(full_viewing_key)
+                    .expect("a valid incoming viewing key");
 
                 Self::from((incoming_viewing_key, diversifier))
             })
