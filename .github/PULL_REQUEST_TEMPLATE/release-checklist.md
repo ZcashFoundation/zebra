@@ -140,8 +140,8 @@ After you have the version increments and the updated changelog:
       (name suggestion, example: `v1.0.0-alpha.0-release`)
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the
       comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.0-release?expand=1&template=release-checklist.md)).
-      - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.
-      - [ ] Also add the list of not-bumped crates as a comment (can use the same comment as the previous one).
+  - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.
+  - [ ] Also add the list of not-bumped crates as a comment (can use the same comment as the previous one).
 - [ ] Turn on [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches).
 - [ ] Once the PR is ready to be merged, unfreeze it
       [here](https://www.mergefreeze.com/installations/3676/branches). Do not
