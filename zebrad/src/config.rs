@@ -95,10 +95,14 @@ pub struct TracingSection {
 
     /// The address used for an ad-hoc RPC endpoint allowing dynamic control of the tracing filter.
     ///
+    /// Install Zebra using `cargo install --features=filter-reload` to enable this config.
+    ///
     /// If this is set to None, the endpoint is disabled.
     pub endpoint_addr: Option<SocketAddr>,
 
     /// Controls whether to write a flamegraph of tracing spans.
+    ///
+    /// Install Zebra using `cargo install --features=flamegraph` to enable this config.
     ///
     /// If this is set to None, flamegraphs are disabled. Otherwise, it specifies
     /// an output file path, as described below.
@@ -125,6 +129,8 @@ pub struct TracingSection {
 
     /// The use_journald flag sends tracing events to systemd-journald, on Linux
     /// distributions that use systemd.
+    ///
+    /// Install Zebra using `cargo install --features=journald` to enable this config.
     pub use_journald: bool,
 }
 
@@ -146,6 +152,8 @@ impl Default for TracingSection {
 #[serde(deny_unknown_fields, default)]
 pub struct MetricsSection {
     /// The address used for the Prometheus metrics endpoint.
+    ///
+    /// Install Zebra using `cargo install --features=prometheus` to enable this config.
     ///
     /// The endpoint is disabled if this is set to `None`.
     pub endpoint_addr: Option<SocketAddr>,
