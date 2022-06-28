@@ -1,6 +1,6 @@
 # Running lightwalletd with zebra
 
-Starting on [v1.0.0-beta.11](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.11), the Zebra RPC methods are fully featured to run a lightwalletd service backed by zebrad.
+Zebra's RPC methods can support a lightwalletd service backed by zebrad.
 
 Contents:
 
