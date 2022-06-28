@@ -86,8 +86,8 @@ You can use `fastmod` to interactively find and replace versions.
 
 For example, you can do something like:
 ```
-fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.12' '1.0.0-alpha.13'
-fastmod --extensions rs,toml,md --fixed-strings '0.2.9' '0.2.10' tower-batch tower-fallback
+fastmod --extensions rs,toml,md --fixed-strings '1.0.0-beta.11' '1.0.0-beta.12'
+fastmod --extensions rs,toml,md --fixed-strings '0.2.26' '0.2.27' tower-batch tower-fallback
 ```
 
 Ignore any `fastmod` updates to previous release notes in `CHANGELOG.md`.
