@@ -464,6 +464,11 @@ where
         if verified_height == self.checkpoint_list.max_height() {
             metrics::gauge!("checkpoint.verified.height", verified_height.0 as f64);
             self.verifier_progress = FinalCheckpoint;
+
+            tracing::info!(
+                final_checkpoint_height = ?verified_height,
+                "verified final checkpoint: starting full validation",
+            );
         } else if self.checkpoint_list.contains(verified_height) {
             metrics::gauge!("checkpoint.verified.height", verified_height.0 as f64);
             self.verifier_progress = PreviousCheckpoint(verified_height);

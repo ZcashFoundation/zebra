@@ -78,6 +78,7 @@ zebra-state = { path = "../zebra-state" }
 abscissa_core = "0.5"
 gumdrop = "0.7"
 chrono = "0.4.19"
+humantime = "2.1.0"
 humantime-serde = "1.1.1"
 indexmap = "1.9.1"
 lazy_static = "1.4.0"
