@@ -162,9 +162,8 @@ jobs:
   launch-without-cached-state:
     name: Launch ${{ inputs.test_id }} test
     needs: [ setup-without-cached-state ]
-    # If the previous job fails, we also want to run and fail this job,
-    # so that the branch protection rule fails in Mergify and GitHub.
-    if: ${{ !cancelled() && !inputs.needs_zebra_state }}
+    # If creating the Google Cloud instance fails, we don't want to launch another docker instance.
+    if: ${{ !cancelled() && !failure() && !inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -339,9 +338,8 @@ jobs:
   launch-with-cached-state:
     name: Launch ${{ inputs.test_id }} test
     needs: [ setup-with-cached-state ]
-    # If the previous job fails, we also want to run and fail this job,
-    # so that the branch protection rule fails in Mergify and GitHub.
-    if: ${{ !cancelled() && inputs.needs_zebra_state }}
+    # If creating the Google Cloud instance fails, we don't want to launch another docker instance.
+    if: ${{ !cancelled() && !failure() && inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -465,10 +463,9 @@ jobs:
   # follow the logs of the test we just launched, up to Sapling activation (or the test finishing)
   logs-sprout:
     name: Log ${{ inputs.test_id }} test (sprout)
-    needs: [ launch-with-cached-state, launch-without-cached-state ]
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
-    # If the previous job fails, we also want to run and fail this job,
-    # so that the branch protection rule fails in Mergify and GitHub.
+    needs: [ launch-with-cached-state, launch-without-cached-state ]
+    # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
@@ -527,8 +524,7 @@ jobs:
   logs-checkpoint:
     name: Log ${{ inputs.test_id }} test (checkpoint)
     needs: [ logs-sprout ]
-    # If the previous job fails, we also want to run and fail this job,
-    # so that the branch protection rule fails in Mergify and GitHub.
+    # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
@@ -585,8 +581,7 @@ jobs:
   logs-end:
     name: Log ${{ inputs.test_id }} test (end)
     needs: [ logs-checkpoint ]
-    # If the previous job fails, we also want to run and fail this job,
-    # so that the branch protection rule fails in Mergify and GitHub.
+    # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
