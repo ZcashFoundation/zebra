@@ -680,15 +680,15 @@ jobs:
       # `docker wait` can also wait for multiple containers, but we only ever wait for a single container.
       - name: Result of ${{ inputs.test_id }} test
         run: |
+          EXIT_CODE=$(\
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command \
-          "\
-          exit $(docker wait ${{ inputs.test_id }}) \
-          "
+          --command="docker wait ${{ inputs.test_id }}")
+
+          exit ${EXIT_CODE}
 
 
   # create a state image from the instance's state disk, if requested by the caller
