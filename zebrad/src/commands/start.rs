@@ -137,6 +137,7 @@ impl StartCmd {
         info!("initializing syncer");
         let (syncer, sync_status) = ChainSync::new(
             &config,
+            max_checkpoint_height,
             peer_set.clone(),
             chain_verifier.clone(),
             state.clone(),

@@ -85,6 +85,11 @@ pub const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GA
 /// TODO: increase to `MAX_CHECKPOINT_HEIGHT_GAP * 5`, after we implement orchard batching
 pub const DEFAULT_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 3;
 
+/// A lower bound on the user-specified concurrency limit.
+///
+/// If the concurrency limit is 0, Zebra can't download or verify any blocks.
+pub const MIN_CONCURRENCY_LIMIT: usize = 1;
+
 /// The expected maximum number of hashes in an ObtainTips or ExtendTips response.
 ///
 /// This is used to allow block heights that are slightly beyond the lookahead limit,
@@ -214,13 +219,21 @@ where
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     // Configuration
+    //
     /// The genesis hash for the configured network
     genesis_hash: block::Hash,
 
-    /// The configured lookahead limit, after applying the minimum limit.
-    lookahead_limit: usize,
+    /// The largest block height for the checkpoint verifier, based on the current config.
+    max_checkpoint_height: Height,
+
+    /// The configured checkpoint verification lookahead limit, after applying the minimum limit.
+    checkpoint_lookahead_limit: usize,
+
+    /// The configured full verification lookahead limit, after applying the minimum limit.
+    full_verification_lookahead_limit: usize,
 
     // Services
+    //
     /// A network service which is used to perform ObtainTips and ExtendTips
     /// requests.
     ///
@@ -246,6 +259,7 @@ where
     latest_chain_tip: ZSTip,
 
     // Internal sync state
+    //
     /// The tips that the syncer is currently following.
     prospective_tips: HashSet<CheckedTip>,
 
@@ -294,11 +308,33 @@ where
     /// Also returns a [`SyncStatus`] to check if the syncer has likely reached the chain tip.
     pub fn new(
         config: &ZebradConfig,
+        max_checkpoint_height: Height,
         peers: ZN,
         verifier: ZV,
         state: ZS,
         latest_chain_tip: ZSTip,
     ) -> (Self, SyncStatus) {
+        let mut max_concurrent_block_requests = config.sync.max_concurrent_block_requests;
+        let mut lookahead_limit = config.sync.lookahead_limit;
+
+        if max_concurrent_block_requests < MIN_CONCURRENCY_LIMIT {
+            warn!(
+                "configured concurrency limit {} too low, increasing to {}",
+                config.sync.max_concurrent_block_requests, MIN_CONCURRENCY_LIMIT,
+            );
+
+            max_concurrent_block_requests = MIN_CONCURRENCY_LIMIT;
+        }
+
+        if lookahead_limit < MIN_LOOKAHEAD_LIMIT {
+            warn!(
+                "configured lookahead limit {} too low, increasing to {}",
+                config.sync.lookahead_limit, MIN_LOOKAHEAD_LIMIT,
+            );
+
+            lookahead_limit = MIN_LOOKAHEAD_LIMIT;
+        }
+
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
         // The Hedge middleware is the outermost layer, hedging requests
         // between two retry-wrapped networks.  The innermost timeout
@@ -309,12 +345,9 @@ where
         // abstracts away spurious failures from individual peers
         // making a less-fallible network service, and the Hedge layer
         // tries to reduce latency of that less-fallible service.
-        //
-        // XXX add ServiceBuilder::hedge() so this becomes
-        // ServiceBuilder::new().hedge(...).retry(...)...
         let block_network = Hedge::new(
             ServiceBuilder::new()
-                .concurrency_limit(config.sync.max_concurrent_block_requests)
+                .concurrency_limit(max_concurrent_block_requests)
                 .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
                 .timeout(BLOCK_DOWNLOAD_TIMEOUT)
                 .service(peers),
@@ -327,21 +360,13 @@ where
         // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
 
-        let mut lookahead_limit = config.sync.lookahead_limit;
-        if lookahead_limit < MIN_LOOKAHEAD_LIMIT {
-            warn!(
-                "configured lookahead limit {} too low, increasing to {}",
-                config.sync.lookahead_limit, MIN_LOOKAHEAD_LIMIT,
-            );
-
-            lookahead_limit = MIN_LOOKAHEAD_LIMIT;
-        }
-
         let (sync_status, recent_syncs) = SyncStatus::new();
 
         let new_syncer = Self {
             genesis_hash: genesis_hash(config.network.network),
-            lookahead_limit,
+            max_checkpoint_height,
+            checkpoint_lookahead_limit: lookahead_limit,
+            full_verification_lookahead_limit: max_concurrent_block_requests,
             tip_network,
             downloads: Box::pin(Downloads::new(
                 block_network,
@@ -418,19 +443,19 @@ where
             //
             // Starting to wait is interesting, but logging each wait can be
             // very verbose.
-            if self.downloads.in_flight() > self.lookahead_limit {
+            if self.downloads.in_flight() > self.lookahead_limit() {
                 tracing::info!(
                     tips.len = self.prospective_tips.len(),
                     in_flight = self.downloads.in_flight(),
-                    lookahead_limit = self.lookahead_limit,
+                    lookahead_limit = self.lookahead_limit(),
                     "waiting for pending blocks",
                 );
             }
-            while self.downloads.in_flight() > self.lookahead_limit {
+            while self.downloads.in_flight() > self.lookahead_limit() {
                 trace!(
                     tips.len = self.prospective_tips.len(),
                     in_flight = self.downloads.in_flight(),
-                    lookahead_limit = self.lookahead_limit,
+                    lookahead_limit = self.lookahead_limit(),
                     state_tip = ?self.latest_chain_tip.best_tip_height(),
                     "waiting for pending blocks",
                 );
@@ -445,7 +470,7 @@ where
             info!(
                 tips.len = self.prospective_tips.len(),
                 in_flight = self.downloads.in_flight(),
-                lookahead_limit = self.lookahead_limit,
+                lookahead_limit = self.lookahead_limit(),
                 state_tip = ?self.latest_chain_tip.best_tip_height(),
                 "extending tips",
             );
@@ -806,6 +831,16 @@ where
         }
 
         Ok(())
+    }
+
+    /// The configured lookahead limit, based on the currently verified height.
+    fn lookahead_limit(&self) -> usize {
+        // When the state is empty, we want to verify using checkpoints
+        if self.verified_height.unwrap_or(Height(0)) >= self.max_checkpoint_height {
+            self.full_verification_lookahead_limit
+        } else {
+            self.checkpoint_lookahead_limit
+        }
     }
 
     /// Handles a response for a requested block.

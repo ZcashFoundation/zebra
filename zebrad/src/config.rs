@@ -174,7 +174,8 @@ impl Default for MetricsSection {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct SyncSection {
-    /// The maximum number of concurrent block download requests during sync.
+    /// The concurrency limit on block download requests and full verify requests,
+    /// for the syncer.
     ///
     /// This is set to a low value by default, to avoid task and
     /// network contention. Increasing this value may improve
@@ -182,8 +183,9 @@ pub struct SyncSection {
     /// connection.
     pub max_concurrent_block_requests: usize,
 
-    /// Controls how far ahead of the chain tip the syncer tries to
-    /// download before waiting for queued verifications to complete.
+    /// How far ahead of the chain tip the syncer tries to download,
+    /// before waiting for queued checkpoint verifications to complete.
+    /// Also the concurrency limit on block checkpoint verify requests.
     ///
     /// Increasing this limit increases the buffer size, so it reduces
     /// the impact of an individual block request failing. However, it
