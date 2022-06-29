@@ -2,7 +2,7 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{collections::HashSet, pin::Pin, sync::Arc, task::Poll, time::Duration};
+use std::{cmp::max, collections::HashSet, pin::Pin, sync::Arc, task::Poll, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -251,6 +251,9 @@ where
 
     /// The lengths of recent sync responses.
     recent_syncs: RecentSyncLengths,
+
+    /// The highest block this syncer has verified.
+    verified_height: Option<Height>,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -350,6 +353,7 @@ where
             latest_chain_tip,
             prospective_tips: HashSet::new(),
             recent_syncs,
+            verified_height: None,
         };
 
         (new_syncer, sync_status)
@@ -766,7 +770,9 @@ where
             let response = self.downloads.next().await.expect("downloads is nonempty");
 
             match response {
-                Ok(hash) => trace!(?hash, "verified and committed block to state"),
+                Ok(response) => self
+                    .handle_block_response(Ok(response))
+                    .expect("never returns Err for Ok"),
                 Err(error) => {
                     // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
                     if Self::should_restart_sync(&error) {
@@ -813,7 +819,12 @@ where
         response: Result<(Height, block::Hash), BlockDownloadVerifyError>,
     ) -> Result<(), BlockDownloadVerifyError> {
         match response {
-            Ok(hash) => trace!(?hash, "verified and committed block to state"),
+            Ok((height, hash)) => {
+                trace!(?height, ?hash, "verified and committed block to state");
+
+                // Blocks commit to the state in order, but their results can return out of order
+                self.verified_height = Some(max(height, self.verified_height.unwrap_or(height)));
+            }
             Err(_) => return Self::handle_response(response.map(|_| ())),
         }
 
