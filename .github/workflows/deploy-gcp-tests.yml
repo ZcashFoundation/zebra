@@ -672,9 +672,10 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker wait ${{ inputs.test_id }}")
-
-          exit ${EXIT_CODE}
+          --command="docker wait ${{ inputs.test_id }}" \
+          )
+          echo "$EXIT_CODE"
+          exit "$EXIT_CODE"
 
 
   # create a state image from the instance's state disk, if requested by the caller
