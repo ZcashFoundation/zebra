@@ -4,22 +4,126 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
-## Next Release: [Zebra 1.0.0-beta.12](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.12) - 2022-06-??
 
-This release contains some breaking changes which improve config usability, and increase compilation speed.
+## Next Release (Draft)
+
+(Draft notes for the next release can be added here.)
+
+
+## [Zebra 1.0.0-beta.12](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.12) - 2022-06-29
+
+This release improves Zebra's Orchard proof verification performance and sync performance.
+Zebra prefers to connect to peers on the canonical Zcash ports.
+
+This release also contains some breaking changes which:
+- improve usability, and
+- make Zebra compile faster.
 
 ### Breaking Changes
 
+#### Cache Deletion
+
+- Zebra deletes unused cached state directories in `<OS-specific cache dir>/zebra` (#4586)
+  These caches only contain public chain data, so it is safe to delete them.
+
 #### Compile-Time Features
 
-- Most of Zebra's [tracing](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/tracing.md) and [metrics](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/metrics.md) features are off by default (#4539)
+- Most of Zebra's [tracing](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/tracing.md)
+  and [metrics](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/metrics.md) features
+  are off by default at compile time (#4539, #4680)
 - The `enable-sentry` feature has been renamed to `sentry` (#4623)
 
 #### Config
 
-- Times in `zebrad.config` change from seconds/nanoseconds to a [human-readable format](https://docs.rs/humantime/latest/humantime/) (#4587)
+- Times in `zebrad.config` change from seconds/nanoseconds to a
+  [human-readable format](https://docs.rs/humantime/latest/humantime/).
+  Remove times in the old format, or use `zebrad generate` to create a new config. (#4587)
 
-TODO: insert changelog here
+### Added
+
+#### Diagnostics
+
+- Show the current network upgrade in progress logs (#4694)
+- Add some missing tracing spans (#4660)
+- Add tokio-console support to zebrad (#4519, #4641)
+- Add `fallible_impl_from` clippy lint (#4609)
+- Add `unwrap_in_result` clippy lint (#4667)
+
+#### Testing
+
+- Check that old `zebrad.toml` configs can be parsed by the latest version (#4676)
+- Test `cargo doc` warnings and errors (#4635, #4654)
+- Document how to run full sync and lightwalletd tests (#4523)
+
+#### Continuous Integration
+
+- Add `beta` rust to CI (#4637, #4668)
+- Build each Zebra crate individually (#4640)
+
+### Changed
+
+#### Chain Sync
+
+- Update mainnet and testnet checkpoint hashes (#4708) 
+
+#### Diagnostics
+
+- Update transaction verification dashboard to show all shielded pool sigs, proofs, nullifiers (#4585)
+
+#### Testing
+
+- Add an identifiable suffix to zcash-rpc-diff temp directories (#4577)
+
+#### Dependencies
+
+- Manage`cargo-mdbook` as a GitHub action (#4636)
+
+#### Continuous Integration
+
+- Automatically delete old GCP resources (#4598)
+
+#### Documentation
+
+- Improve the release checklist (#4568, #4595)
+
+### Removed
+
+#### Continuous Integration
+
+- Remove redundant build-chain-no-features job (#4656)
+
+### Fixed
+
+#### Performance
+
+- Upgrade `halo2` and related dependencies to improve proof verification speed (#4699)
+- Change default sync config to improve reliability (#4662, #4670, #4679)
+- Fix a lookahead config panic (#4662)
+
+#### Continuous Integration
+
+- Actually create a cached state image after running a sync (#4669)
+- Split `docker run` into launch, `logs`, and `wait`, to avoid GitHub job timeouts (#4675, #4690)
+- Ignore lightwalletd test hangs for now (#4663)
+- Disable `zcash_rpc_conflict` test on macOS (#4614)
+- Use `latest` lightwalletd image for Zebra's Dockerfile (#4599)
+- Increase lightwalletd timeout, remove testnet tests (#4584)
+
+#### Documentation
+
+- Fix various `cargo doc` warnings (#4561, #4611, #4627)
+- Clarify how Zebra and `zcashd` interact in `README.md` (#4570)
+- Improve `lightwalletd` tutorial (#4566)
+- Simplify README and link to detailed documentation (#4680)
+
+#### Diagnostics
+
+- Resolve some lifetime and reference lints  (#4578)
+
+### Security
+
+- When connecting to peers, ignore invalid ports, and prefer canonical ports (#4564)
+
 
 ## [Zebra 1.0.0-beta.11](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.11) - 2022-06-03
 
