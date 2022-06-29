@@ -512,6 +512,7 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
+          set -o pipefail; \
           docker logs \
           --tail all \
           --follow \
@@ -570,6 +571,7 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
+          set -o pipefail; \
           docker logs \
           --tail ${{ env.EXTRA_LOG_LINES }} \
           --follow \
@@ -627,6 +629,7 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
+          set -o pipefail; \
           docker logs \
           --tail ${{ env.EXTRA_LOG_LINES }} \
           --follow \
