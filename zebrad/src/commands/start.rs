@@ -125,7 +125,7 @@ impl StartCmd {
             zebra_network::init(config.network.clone(), inbound, latest_chain_tip.clone()).await;
 
         info!("initializing verifiers");
-        let (chain_verifier, tx_verifier, mut groth16_download_handle) =
+        let (chain_verifier, tx_verifier, mut groth16_download_handle, max_checkpoint_height) =
             zebra_consensus::chain::init(
                 config.consensus.clone(),
                 config.network.network,
