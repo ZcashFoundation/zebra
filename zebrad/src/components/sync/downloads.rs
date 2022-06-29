@@ -20,7 +20,7 @@ use tower::{hedge, Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, Height},
     chain_tip::ChainTip,
 };
 use zebra_network as zn;
@@ -169,8 +169,9 @@ where
     // Internal downloads state
     /// A list of pending block download and verify tasks.
     #[pin]
-    pending:
-        FuturesUnordered<JoinHandle<Result<block::Hash, (BlockDownloadVerifyError, block::Hash)>>>,
+    pending: FuturesUnordered<
+        JoinHandle<Result<(Height, block::Hash), (BlockDownloadVerifyError, block::Hash)>>,
+    >,
 
     /// A list of channels that can be used to cancel pending block download and
     /// verify tasks.
@@ -189,7 +190,7 @@ where
     ZV::Future: Send,
     ZSTip: ChainTip + Clone + Send + 'static,
 {
-    type Item = Result<block::Hash, BlockDownloadVerifyError>;
+    type Item = Result<(Height, block::Hash), BlockDownloadVerifyError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -204,9 +205,10 @@ where
         // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
             match join_result.expect("block download and verify tasks must not panic") {
-                Ok(hash) => {
+                Ok((height, hash)) => {
                     this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Ok(hash)))
+
+                    Poll::Ready(Some(Ok((height, hash))))
                 }
                 Err((e, hash)) => {
                     this.cancel_handles.remove(&hash);
@@ -435,12 +437,14 @@ where
                     metrics::counter!("sync.verified.block.count", 1);
                 }
 
-                verification.map_err(|err| {
-                    match err.downcast::<zebra_consensus::chain::VerifyChainError>() {
-                        Ok(error) => BlockDownloadVerifyError::Invalid { error: *error, height: block_height, hash },
-                        Err(error) => BlockDownloadVerifyError::ValidationRequestError { error, height: block_height, hash },
-                    }
-                })
+                verification
+                    .map(|hash| (block_height, hash))
+                    .map_err(|err| {
+                        match err.downcast::<zebra_consensus::chain::VerifyChainError>() {
+                            Ok(error) => BlockDownloadVerifyError::Invalid { error: *error, height: block_height, hash },
+                            Err(error) => BlockDownloadVerifyError::ValidationRequestError { error, height: block_height, hash },
+                        }
+                    })
             }
             .in_current_span()
             // Tack the hash onto the error so we can remove the cancel handle

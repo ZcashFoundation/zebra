@@ -14,7 +14,7 @@ use tower::{
 };
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, Height},
     chain_tip::ChainTip,
     parameters::genesis_hash,
 };
@@ -406,7 +406,7 @@ where
         while !self.prospective_tips.is_empty() {
             // Check whether any block tasks are currently ready:
             while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
-                Self::handle_block_response(rsp)?;
+                self.handle_block_response(rsp)?;
             }
             self.update_metrics();
 
@@ -433,7 +433,7 @@ where
 
                 let response = self.downloads.next().await.expect("downloads is nonempty");
 
-                Self::handle_block_response(response)?;
+                self.handle_block_response(response)?;
                 self.update_metrics();
             }
 
@@ -809,7 +809,8 @@ where
     ///
     /// Returns `Err` if an unexpected error occurred, to force the synchronizer to restart.
     fn handle_block_response(
-        response: Result<block::Hash, BlockDownloadVerifyError>,
+        &mut self,
+        response: Result<(Height, block::Hash), BlockDownloadVerifyError>,
     ) -> Result<(), BlockDownloadVerifyError> {
         match response {
             Ok(hash) => trace!(?hash, "verified and committed block to state"),
