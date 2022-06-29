@@ -831,8 +831,18 @@ where
         &mut self,
         hashes: IndexSet<block::Hash>,
     ) -> Result<(), BlockDownloadVerifyError> {
-        debug!(hashes.len = hashes.len(), "requesting blocks");
-        for hash in hashes.into_iter() {
+        let lookahead_limit = self.lookahead_limit();
+
+        debug!(
+            hashes.len = hashes.len(),
+            ?lookahead_limit,
+            "requesting blocks",
+        );
+
+        // Allow a limit's worth of verifying hashes, and a limit's worth of downloading hashes.
+        //
+        // TODO: Return excess block hashes, and submit them when some lower blocks have been verified.
+        for hash in hashes.into_iter().take(lookahead_limit * 2) {
             self.downloads.download_and_verify(hash).await?;
         }
 
