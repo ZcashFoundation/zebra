@@ -100,8 +100,6 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
-      # Or will that break the slug-action variables we use to find the instance?
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
@@ -169,8 +167,6 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
-      # Or will that break the slug-action variables we use to find the instance?
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
@@ -345,8 +341,6 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
-      # Or will that break the slug-action variables we use to find the instance?
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
@@ -472,8 +466,6 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
-      # Or will that break the slug-action variables we use to find the instance?
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
@@ -533,8 +525,6 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
-      # Or will that break the slug-action variables we use to find the instance?
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
@@ -589,8 +579,6 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
-      # Or will that break the slug-action variables we use to find the instance?
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
@@ -648,8 +636,6 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
-      # Or will that break the slug-action variables we use to find the instance?
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
@@ -796,8 +782,6 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      # TODO: can we delete this step and set create_credentials_file to false in Google Cloud?
-      # Or will that break the slug-action variables we use to find the instance?
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
