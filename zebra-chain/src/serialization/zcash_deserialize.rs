@@ -1,18 +1,16 @@
-use std::{
-    convert::{TryFrom, TryInto},
-    io,
-    net::Ipv6Addr,
-    sync::Arc,
-};
+//! Converting bytes into Zcash consensus-critical data structures.
+
+use std::{io, net::Ipv6Addr, sync::Arc};
 
 use super::{AtLeastOne, CompactSizeMessage, SerializationError, MAX_PROTOCOL_MESSAGE_LEN};
 
-/// Consensus-critical serialization for Zcash.
+/// Consensus-critical deserialization for Zcash.
 ///
 /// This trait provides a generic deserialization for consensus-critical
-/// formats, such as network messages, transactions, blocks, etc. It is intended
-/// for use only in consensus-critical contexts; in other contexts, such as
-/// internal storage, it would be preferable to use Serde.
+/// formats, such as network messages, transactions, blocks, etc.
+///
+/// It is intended for use only for consensus-critical formats.
+/// Internal deserialization can freely use `serde`, or any other format.
 pub trait ZcashDeserialize: Sized {
     /// Try to read `self` from the given `reader`.
     ///

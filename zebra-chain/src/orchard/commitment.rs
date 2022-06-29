@@ -113,6 +113,7 @@ impl NoteCommitment {
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#concretewindowedcommit>
     #[allow(non_snake_case)]
+    #[allow(clippy::unwrap_in_result)]
     pub fn new(note: Note) -> Option<Self> {
         // s as in the argument name for WindowedPedersenCommit_r(s)
         let mut s: BitVec<u8, Lsb0> = BitVec::new();

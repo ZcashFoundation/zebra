@@ -1,4 +1,6 @@
-use std::{convert::TryInto, io, net::Ipv6Addr};
+//! Converting Zcash consensus-critical data structures into bytes.
+
+use std::{io, net::Ipv6Addr};
 
 use super::{AtLeastOne, CompactSizeMessage};
 
@@ -10,9 +12,10 @@ pub const MAX_PROTOCOL_MESSAGE_LEN: usize = 2 * 1024 * 1024;
 /// Consensus-critical serialization for Zcash.
 ///
 /// This trait provides a generic serialization for consensus-critical
-/// formats, such as network messages, transactions, blocks, etc. It is intended
-/// for use only in consensus-critical contexts; in other contexts, such as
-/// internal storage, it would be preferable to use Serde.
+/// formats, such as network messages, transactions, blocks, etc.
+///
+/// It is intended for use only for consensus-critical formats.
+/// Internal serialization can freely use `serde`, or any other format.
 pub trait ZcashSerialize: Sized {
     /// Write `self` to the given `writer` using the canonical format.
     ///
@@ -62,6 +65,7 @@ impl std::io::Write for FakeWriter {
 ///
 /// See `zcash_serialize_external_count` for more details, and usage information.
 impl<T: ZcashSerialize> ZcashSerialize for Vec<T> {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         let len: CompactSizeMessage = self
             .len()
