@@ -1,5 +1,6 @@
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
+#![allow(clippy::unwrap_used)]
 
 use std::io::Cursor;
 

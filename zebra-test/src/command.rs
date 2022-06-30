@@ -1,4 +1,5 @@
 //! Launching test commands for Zebra integration and acceptance tests.
+//#![allow(clippy::unwrap_used)]
 
 use std::{
     convert::Infallible as NoDir,

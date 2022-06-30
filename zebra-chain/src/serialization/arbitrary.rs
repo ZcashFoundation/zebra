@@ -1,5 +1,7 @@
 //! Arbitrary data generation for serialization proptests
 
+#![allow(clippy::unwrap_used)]
+
 use std::convert::TryInto;
 
 use chrono::{TimeZone, Utc, MAX_DATETIME, MIN_DATETIME};

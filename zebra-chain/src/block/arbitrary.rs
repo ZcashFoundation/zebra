@@ -1,4 +1,5 @@
 //! Randomised property testing for [`Block`]s.
+#![allow(clippy::unwrap_used)]
 
 use proptest::{
     arbitrary::{any, Arbitrary},

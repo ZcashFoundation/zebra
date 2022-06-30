@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use super::*;
 use color_eyre::Report;
 use std::convert::TryFrom;

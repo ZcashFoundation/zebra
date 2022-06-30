@@ -1,4 +1,5 @@
 //! Peer set unit tests, and test setup code.
+#![allow(clippy::unwrap_used)]
 
 use std::{net::SocketAddr, sync::Arc};
 

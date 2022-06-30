@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::time::Duration;
 use tokio_test::{assert_pending, assert_ready, assert_ready_err, task};
 use tower::{Service, ServiceExt};

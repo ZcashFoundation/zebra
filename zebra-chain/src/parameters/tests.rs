@@ -1,4 +1,5 @@
 //! Consensus parameter tests for Zebra.
+#![allow(clippy::unwrap_used)]
 
 use std::collections::HashSet;
 

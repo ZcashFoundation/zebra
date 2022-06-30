@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::pin::Pin;
 
 use tower::ServiceExt;

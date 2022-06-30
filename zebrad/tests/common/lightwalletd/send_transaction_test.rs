@@ -10,6 +10,7 @@
 //! external peers, which prevents it from downloading the blocks from where the test transactions
 //! were obtained. This is to ensure that zebra does not reject the transactions because they have
 //! already been seen in a block.
+#![allow(clippy::unwrap_used)]
 
 use std::{
     path::{Path, PathBuf},

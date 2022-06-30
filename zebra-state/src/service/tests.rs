@@ -1,6 +1,7 @@
 //! StateService test vectors.
 //!
 //! TODO: move these tests into tests::vectors and tests::prop modules.
+#![allow(clippy::unwrap_used)]
 
 use std::{convert::TryInto, env, sync::Arc};
 

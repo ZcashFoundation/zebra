@@ -4,6 +4,9 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_test")]
 // Each lazy_static variable uses additional recursion
 #![recursion_limit = "512"]
+//
+#![allow(clippy::unwrap_used)]
+
 use color_eyre::section::PanicMessage;
 use once_cell::sync::Lazy;
 use owo_colors::OwoColorize;

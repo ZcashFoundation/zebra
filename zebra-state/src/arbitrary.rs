@@ -1,4 +1,5 @@
 //! Randomised data generation for state data.
+#![allow(clippy::unwrap_used)]
 
 use std::sync::Arc;
 

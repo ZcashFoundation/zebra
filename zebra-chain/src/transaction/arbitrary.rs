@@ -1,5 +1,7 @@
 //! Arbitrary data generation for transaction proptests
 
+#![allow(clippy::unwrap_used)]
+
 use std::{
     cmp::max,
     collections::HashMap,

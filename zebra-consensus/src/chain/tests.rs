@@ -1,4 +1,5 @@
 //! Tests for chain verification
+#![allow(clippy::unwrap_used)]
 
 use std::{sync::Arc, time::Duration};
 

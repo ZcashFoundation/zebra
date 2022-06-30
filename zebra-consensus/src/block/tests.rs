@@ -1,4 +1,5 @@
 //! Tests for block verification
+#![allow(clippy::unwrap_used)]
 
 use std::{convert::TryFrom, sync::Arc};
 

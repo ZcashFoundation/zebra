@@ -4,6 +4,7 @@
 //!
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
+#![allow(clippy::unwrap_used)]
 
 use std::{
     env,

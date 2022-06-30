@@ -1,4 +1,5 @@
 //! Tests for peer connections
+#![allow(clippy::unwrap_used)]
 
 use std::io;
 

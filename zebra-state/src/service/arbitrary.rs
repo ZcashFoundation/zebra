@@ -1,4 +1,5 @@
 //! Arbitrary data generation and test setup for Zebra's state.
+#![allow(clippy::unwrap_used)]
 
 use std::sync::Arc;
 

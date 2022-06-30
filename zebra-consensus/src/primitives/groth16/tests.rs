@@ -1,4 +1,5 @@
 //! Tests for transaction verification
+#![allow(clippy::unwrap_used)]
 
 use std::convert::TryInto;
 

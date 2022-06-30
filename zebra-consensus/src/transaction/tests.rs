@@ -1,4 +1,5 @@
 //! Tests for Zcash transaction consensus checks.
+#![allow(clippy::unwrap_used)]
 
 use std::{
     collections::HashMap,

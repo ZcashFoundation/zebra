@@ -1,4 +1,5 @@
 //! Tests for verifying simple Halo2 proofs with the async verifier
+#![allow(clippy::unwrap_used)]
 
 use std::convert::TryInto;
 

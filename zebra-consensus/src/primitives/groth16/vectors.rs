@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::convert::TryFrom;
 
 use crate::groth16::h_sig;

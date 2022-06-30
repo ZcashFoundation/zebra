@@ -30,6 +30,7 @@
 //! - `GetLightdInfo`: Covered.
 //! - `Ping`: Not covered and it will never be. `Ping` is only used for testing
 //! purposes.
+#![allow(clippy::unwrap_used)]
 
 use color_eyre::eyre::Result;
 

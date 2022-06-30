@@ -1,4 +1,5 @@
 //! Tests for checkpoint-based block verification
+#![allow(clippy::unwrap_used)]
 
 use super::*;
 

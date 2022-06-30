@@ -55,6 +55,7 @@ rustflags = [
     # Panics
     "-Wclippy::fallible_impl_from",
     "-Wclippy::unwrap_in_result",
+    "-Wclippy::unwrap_used",
 
     # TODOs:
     # `cargo fix` might help do these fixes,

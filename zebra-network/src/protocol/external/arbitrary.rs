@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::{
     convert::TryInto,
     net::{SocketAddr, SocketAddrV6},

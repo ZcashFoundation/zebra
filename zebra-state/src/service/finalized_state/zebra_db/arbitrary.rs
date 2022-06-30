@@ -1,6 +1,7 @@
 //! Arbitrary value generation and test harnesses for high-level typed database access.
 
 #![allow(dead_code)]
+#![allow(clippy::unwrap_used)]
 
 use std::ops::Deref;
 

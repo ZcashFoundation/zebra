@@ -119,6 +119,7 @@ impl Arbitrary for Address {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
 
     use rand_core::OsRng;
 

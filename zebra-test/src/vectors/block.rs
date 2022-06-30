@@ -1,5 +1,6 @@
 //! Block test vectors
 
+#![allow(clippy::unwrap_used)]
 #![allow(missing_docs)]
 
 use hex::FromHex;

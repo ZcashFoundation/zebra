@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::{convert::TryFrom, mem, sync::Arc};
 
 use zebra_chain::{

@@ -253,6 +253,7 @@ impl Address {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
 
     use secp256k1::PublicKey;
 

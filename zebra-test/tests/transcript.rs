@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use tower::{Service, ServiceExt};
 use zebra_test::transcript::ExpectedTranscriptError;
 use zebra_test::transcript::Transcript;

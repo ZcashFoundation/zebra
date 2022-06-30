@@ -1,4 +1,5 @@
 //! Basic integration tests for zebra-state
+#![allow(clippy::unwrap_used)]
 
 use std::sync::Arc;
 

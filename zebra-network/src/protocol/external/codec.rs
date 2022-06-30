@@ -679,6 +679,8 @@ impl Codec {
 // XXX replace these interior unit tests with exterior integration tests + proptest
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     use chrono::{MAX_DATETIME, MIN_DATETIME};

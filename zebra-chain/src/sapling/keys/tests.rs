@@ -1,4 +1,6 @@
 #![allow(clippy::module_inception)]
+#![allow(clippy::unwrap_used)]
+
 use super::*;
 
 #[cfg(test)]

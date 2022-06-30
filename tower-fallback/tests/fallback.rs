@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use tower::{service_fn, Service, ServiceExt};
 use tower_fallback::Fallback;
 

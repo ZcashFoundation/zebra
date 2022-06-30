@@ -1,6 +1,6 @@
 //! Tests for the [`Client`] part of peer connections, and some test utilities for mocking
 //! [`Client`] instances.
-
+#![allow(clippy::unwrap_used)]
 #![cfg_attr(feature = "proptest-impl", allow(dead_code))]
 
 use std::time::Duration;

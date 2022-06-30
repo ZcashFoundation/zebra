@@ -77,6 +77,7 @@ fn memo_fmt() {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn memo_from_string() {
     zebra_test::init();
 

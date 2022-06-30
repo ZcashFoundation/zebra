@@ -1,4 +1,5 @@
 //! Tests for CheckpointList
+#![allow(clippy::unwrap_used)]
 
 use super::*;
 

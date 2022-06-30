@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::{process::Command, time::Duration};
 
 use color_eyre::eyre::{eyre, Result};

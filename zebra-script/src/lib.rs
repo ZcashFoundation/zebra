@@ -276,6 +276,8 @@ impl Drop for CachedFfiTransaction {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use hex::FromHex;
     use std::convert::TryInto;
     use std::sync::Arc;
