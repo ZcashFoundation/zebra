@@ -135,8 +135,8 @@ use common::{
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
         LARGE_CHECKPOINT_TIMEOUT, MEDIUM_CHECKPOINT_TEST_HEIGHT, STOP_AT_HEIGHT_REGEX,
-        STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX, SYNC_FINISHED_REGEX_TMP_STOP_EARLY,
-        TINY_CHECKPOINT_TEST_HEIGHT, TINY_CHECKPOINT_TIMEOUT,
+        STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX, TINY_CHECKPOINT_TEST_HEIGHT,
+        TINY_CHECKPOINT_TIMEOUT,
     },
 };
 
@@ -882,7 +882,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
             // Use the checkpoints to sync quickly, then do full validation until the chain tip
             true,
             // Finish when we reach the chain tip
-            SYNC_FINISHED_REGEX_TMP_STOP_EARLY,
+            SYNC_FINISHED_REGEX,
         )
     } else {
         eprintln!(
