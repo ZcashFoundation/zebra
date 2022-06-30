@@ -204,7 +204,8 @@ pub fn sync_until(
     // Use the default lookahead limit if we're syncing lots of blocks.
     // (Most tests use a smaller limit to minimise redundant block downloads.)
     if height > MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD {
-        config.sync.checkpoint_verify_concurrency_limit = sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
+        config.sync.checkpoint_verify_concurrency_limit =
+            sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
     }
 
     let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {

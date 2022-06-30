@@ -298,7 +298,8 @@ impl LightwalletdTestType {
             Err(error) => return Some(Err(error)),
         };
 
-        config.sync.checkpoint_verify_concurrency_limit = zebrad::components::sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
+        config.sync.checkpoint_verify_concurrency_limit =
+            zebrad::components::sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
 
         config.state.ephemeral = false;
         config.state.cache_dir = zebra_state_path;
