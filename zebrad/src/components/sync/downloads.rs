@@ -327,6 +327,7 @@ where
                 // that will timeout before being verified.
                 let tip_height = latest_chain_tip.best_tip_height();
 
+                // TODO: don't use VERIFICATION_PIPELINE_SCALING_MULTIPLIER for full verification?
                 let max_lookahead_height = if let Some(tip_height) = tip_height {
                     // Scale the height limit with the lookahead limit,
                     // so users with low capacity or under DoS can reduce them both.
@@ -375,9 +376,7 @@ where
                         ?tip_height,
                         ?max_lookahead_height,
                         lookahead_limit = ?lookahead_limit,
-                        "synced block height too far ahead of the tip: dropped downloaded block. \
-                         Hint: Try increasing the value of the lookahead_limit field \
-                         in the sync section of the configuration file."
+                        "synced block height too far ahead of the tip: dropped downloaded block",
                     );
                     metrics::counter!("sync.max.height.limit.dropped.block.count", 1);
 

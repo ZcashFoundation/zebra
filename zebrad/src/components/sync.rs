@@ -2,7 +2,7 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{collections::HashSet, pin::Pin, sync::Arc, task::Poll, time::Duration};
+use std::{cmp::max, collections::HashSet, pin::Pin, sync::Arc, task::Poll, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -57,7 +57,7 @@ const FANOUT: usize = 3;
 /// retries may be concurrent, inner retries are sequential.
 const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
 
-/// A lower bound on the user-specified lookahead limit.
+/// A lower bound on the user-specified checkpoint verification concurrency limit.
 ///
 /// Set to the maximum checkpoint interval, so the pipeline holds around a checkpoint's
 /// worth of blocks.
@@ -76,14 +76,15 @@ const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
 /// Once these malicious blocks start failing validation, the syncer will cancel all
 /// the pending download and verify tasks, drop all the blocks, and start a new
 /// ObtainTips with a new set of peers.
-pub const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
+pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 
 /// The default for the user-specified lookahead limit.
 ///
-/// See [`MIN_LOOKAHEAD_LIMIT`] for details.
+/// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
 ///
 /// TODO: increase to `MAX_CHECKPOINT_HEIGHT_GAP * 5`, after we implement orchard batching
-pub const DEFAULT_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 3;
+pub const DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT: usize =
+    zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 3;
 
 /// A lower bound on the user-specified concurrency limit.
 ///
@@ -96,7 +97,7 @@ pub const MIN_CONCURRENCY_LIMIT: usize = 1;
 /// but still limit the number of blocks in the pipeline between the downloader and
 /// the state.
 ///
-/// See [`MIN_LOOKAHEAD_LIMIT`] for details.
+/// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
 pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
 
 /// Controls how long we wait for a tips response to return.
@@ -226,11 +227,11 @@ where
     /// The largest block height for the checkpoint verifier, based on the current config.
     max_checkpoint_height: Height,
 
-    /// The configured checkpoint verification lookahead limit, after applying the minimum limit.
-    checkpoint_lookahead_limit: usize,
+    /// The configured checkpoint verification concurrency limit, after applying the minimum limit.
+    checkpoint_verify_concurrency_limit: usize,
 
-    /// The configured full verification lookahead limit, after applying the minimum limit.
-    full_verification_lookahead_limit: usize,
+    /// The configured full verification concurrency limit, after applying the minimum limit.
+    full_verify_concurrency_limit: usize,
 
     // Services
     //
@@ -311,25 +312,36 @@ where
         state: ZS,
         latest_chain_tip: ZSTip,
     ) -> (Self, SyncStatus) {
-        let mut max_concurrent_block_requests = config.sync.max_concurrent_block_requests;
-        let mut lookahead_limit = config.sync.lookahead_limit;
+        let mut download_concurrency_limit = config.sync.download_concurrency_limit;
+        let mut checkpoint_verify_concurrency_limit =
+            config.sync.checkpoint_verify_concurrency_limit;
+        let mut full_verify_concurrency_limit = config.sync.full_verify_concurrency_limit;
 
-        if max_concurrent_block_requests < MIN_CONCURRENCY_LIMIT {
+        if download_concurrency_limit < MIN_CONCURRENCY_LIMIT {
             warn!(
-                "configured concurrency limit {} too low, increasing to {}",
-                config.sync.max_concurrent_block_requests, MIN_CONCURRENCY_LIMIT,
+                "configured download concurrency limit {} too low, increasing to {}",
+                config.sync.download_concurrency_limit, MIN_CONCURRENCY_LIMIT,
             );
 
-            max_concurrent_block_requests = MIN_CONCURRENCY_LIMIT;
+            download_concurrency_limit = MIN_CONCURRENCY_LIMIT;
         }
 
-        if lookahead_limit < MIN_LOOKAHEAD_LIMIT {
+        if checkpoint_verify_concurrency_limit < MIN_CHECKPOINT_CONCURRENCY_LIMIT {
             warn!(
-                "configured lookahead limit {} too low, increasing to {}",
-                config.sync.lookahead_limit, MIN_LOOKAHEAD_LIMIT,
+                "configured checkpoint verify concurrency limit {} too low, increasing to {}",
+                config.sync.checkpoint_verify_concurrency_limit, MIN_CHECKPOINT_CONCURRENCY_LIMIT,
             );
 
-            lookahead_limit = MIN_LOOKAHEAD_LIMIT;
+            checkpoint_verify_concurrency_limit = MIN_CHECKPOINT_CONCURRENCY_LIMIT;
+        }
+
+        if full_verify_concurrency_limit < MIN_CONCURRENCY_LIMIT {
+            warn!(
+                "configured full verify concurrency limit {} too low, increasing to {}",
+                config.sync.full_verify_concurrency_limit, MIN_CONCURRENCY_LIMIT,
+            );
+
+            full_verify_concurrency_limit = MIN_CONCURRENCY_LIMIT;
         }
 
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
@@ -344,7 +356,7 @@ where
         // tries to reduce latency of that less-fallible service.
         let block_network = Hedge::new(
             ServiceBuilder::new()
-                .concurrency_limit(max_concurrent_block_requests)
+                .concurrency_limit(download_concurrency_limit)
                 .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
                 .timeout(BLOCK_DOWNLOAD_TIMEOUT)
                 .service(peers),
@@ -362,14 +374,18 @@ where
         let new_syncer = Self {
             genesis_hash: genesis_hash(config.network.network),
             max_checkpoint_height,
-            checkpoint_lookahead_limit: lookahead_limit,
-            full_verification_lookahead_limit: max_concurrent_block_requests,
+            checkpoint_verify_concurrency_limit,
+            full_verify_concurrency_limit,
             tip_network,
             downloads: Box::pin(Downloads::new(
                 block_network,
                 verifier,
                 latest_chain_tip.clone(),
-                lookahead_limit,
+                // TODO: change the download lookahead for full verification?
+                max(
+                    checkpoint_verify_concurrency_limit,
+                    full_verify_concurrency_limit,
+                ),
             )),
             state,
             latest_chain_tip,
@@ -878,15 +894,15 @@ where
             .expect("fits in usize");
 
         if verified_height >= max_checkpoint_height {
-            self.full_verification_lookahead_limit
+            self.full_verify_concurrency_limit
         } else if (verified_height + new_hashes) >= max_checkpoint_height {
             // If we're just about to start full verification, allow enough for the remaining checkpoint,
             // and also enough for a separate full verification lookahead.
             let checkpoint_hashes = verified_height + new_hashes - max_checkpoint_height;
 
-            self.full_verification_lookahead_limit + checkpoint_hashes
+            self.full_verify_concurrency_limit + checkpoint_hashes
         } else {
-            self.checkpoint_lookahead_limit
+            self.checkpoint_verify_concurrency_limit
         }
     }
 

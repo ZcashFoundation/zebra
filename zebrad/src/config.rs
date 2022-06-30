@@ -174,18 +174,15 @@ impl Default for MetricsSection {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct SyncSection {
-    /// The concurrency limit on block download requests and full verify requests,
-    /// for the syncer.
+    /// The number of parallel block download requests.
     ///
     /// This is set to a low value by default, to avoid task and
     /// network contention. Increasing this value may improve
-    /// performance on machines with many cores and a fast network
-    /// connection.
-    pub max_concurrent_block_requests: usize,
+    /// performance on machines with a fast network connection.
+    #[serde(alias = "max_concurrent_block_requests")]
+    pub download_concurrency_limit: usize,
 
-    /// How far ahead of the chain tip the syncer tries to download,
-    /// before waiting for queued checkpoint verifications to complete.
-    /// Also the concurrency limit on block checkpoint verify requests.
+    /// The number of blocks submitted in parallel to the checkpoint verifier.
     ///
     /// Increasing this limit increases the buffer size, so it reduces
     /// the impact of an individual block request failing. However, it
@@ -200,16 +197,26 @@ pub struct SyncSection {
     /// astray.
     ///
     /// For reliable checkpoint syncing, Zebra enforces a
-    /// [`MIN_LOOKAHEAD_LIMIT`](sync::MIN_LOOKAHEAD_LIMIT).
-    pub lookahead_limit: usize,
+    /// [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`](sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT).
+    ///
+    /// This is set to a high value by default, to avoid verification pipeline stalls.
+    /// Decreasing this value reduces RAM usage.
+    #[serde(alias = "lookahead_limit")]
+    pub checkpoint_verify_concurrency_limit: usize,
+
+    /// The number of blocks submitted in parallel to the full verifier.
+    ///
+    /// This is set to a low value by default, to avoid verification timeouts on large blocks.
+    /// Increasing this value may improve performance on machines with many cores.
+    pub full_verify_concurrency_limit: usize,
 }
 
 impl Default for SyncSection {
     fn default() -> Self {
         Self {
-            // TODO: increase to 50, after we implement orchard batching
-            max_concurrent_block_requests: 40,
-            lookahead_limit: sync::DEFAULT_LOOKAHEAD_LIMIT,
+            download_concurrency_limit: 50,
+            checkpoint_verify_concurrency_limit: sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT,
+            full_verify_concurrency_limit: 25,
         }
     }
 }

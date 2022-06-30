@@ -67,8 +67,6 @@
 //!
 //! Some of the diagnostic features are optional, and need to be enabled at compile-time.
 
-use std::cmp::max;
-
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
@@ -343,15 +341,19 @@ impl StartCmd {
     fn state_buffer_bound() -> usize {
         let config = app_config().clone();
 
+        // Ignore the checkpoint verify limit, because it is very large.
+        //
         // TODO: do we also need to account for concurrent use across services?
         //       we could multiply the maximum by 3/2, or add a fixed constant
-        max(
-            config.sync.max_concurrent_block_requests,
-            max(
-                inbound::downloads::MAX_INBOUND_CONCURRENCY,
-                mempool::downloads::MAX_INBOUND_CONCURRENCY,
-            ),
-        )
+        [
+            config.sync.download_concurrency_limit,
+            config.sync.full_verify_concurrency_limit,
+            inbound::downloads::MAX_INBOUND_CONCURRENCY,
+            mempool::downloads::MAX_INBOUND_CONCURRENCY,
+        ]
+        .into_iter()
+        .max()
+        .unwrap()
     }
 }
 
