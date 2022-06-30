@@ -849,11 +849,31 @@ where
         Ok(())
     }
 
-    /// The configured lookahead limit, based on the currently verified height.
-    fn lookahead_limit(&self) -> usize {
+    /// The configured lookahead limit, based on the currently verified height,
+    /// and the number of hashes we haven't queued yet..
+    fn lookahead_limit(&self, new_hashes: usize) -> usize {
+        let max_checkpoint_height: usize = self
+            .max_checkpoint_height
+            .0
+            .try_into()
+            .expect("fits in usize");
+
         // When the state is empty, we want to verify using checkpoints
-        if self.verified_height.unwrap_or(Height(0)) >= self.max_checkpoint_height {
+        let verified_height: usize = self
+            .verified_height
+            .unwrap_or(Height(0))
+            .0
+            .try_into()
+            .expect("fits in usize");
+
+        if verified_height >= max_checkpoint_height {
             self.full_verification_lookahead_limit
+        } else if (verified_height + new_hashes) >= max_checkpoint_height {
+            // If we're just about to start full verification, allow enough for the remaining checkpoint,
+            // and also enough for a separate full verification pipeline.
+            let checkpoint_hashes = verified_height + new_hashes - max_checkpoint_height;
+
+            self.full_verification_lookahead_limit + checkpoint_hashes
         } else {
             self.checkpoint_lookahead_limit
         }
