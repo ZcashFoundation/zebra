@@ -12,14 +12,14 @@ assignees: ''
 ### Which Crates to Increment
 
 To check if any of the top-level crates need version increments:
-1. go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra
-2. check if the last commit was a Zebra version bump, or something else
+1. Go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra
+2. Check if the last commit was a Zebra version bump, or something else
 
 <details>
    
 Alternatively you can:
-- use the github compare tool and check the `main` branch against the last tag ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.15...main))
-- use `git diff --stat <previous-release-tag> origin/main`
+- Use the github compare tool and check the `main` branch against the last tag ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.15...main))
+- Use `git diff --stat <previous-release-tag> origin/main`
 
 </details>
    
@@ -95,8 +95,8 @@ Ignore any `fastmod` updates to previous release notes in `CHANGELOG.md`.
 ## README
 
 We should update the README to:
-- [ ] remove any "Known Issues" that have been fixed
-- [ ] update the "Build and Run Instructions" with any new dependencies.
+- [ ] Remove any "Known Issues" that have been fixed
+- [ ] Update the "Build and Run Instructions" with any new dependencies.
       Check for changes in the `Dockerfile` since the last tag: `git diff <previous-release-tag> docker/Dockerfile`.
 
 ## Change Log
@@ -114,7 +114,7 @@ To create the final change log:
 - [ ] Combine duplicate changes
 - [ ] Edit change descriptions so they are consistent, and make sense to non-developers
 - [ ] Check the category for each change
-  - prefer the "Fix" category if you're not sure
+  - Prefer the "Fix" category if you're not sure
 
 <details>
    
@@ -168,8 +168,8 @@ After you have the version increments and the updated changelog:
 - [ ] Turn off [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches) for the whole repository
 
 If the build fails after tagging:
-1. fix the build
-2. increment versions again, following these instructions from the start
-3. update `README.md` with a **new** git tag
-4. update `CHANGELOG.md` with details about the fix
-5. tag a **new** release
+1. Fix the build
+2. Increment versions again, following these instructions from the start
+3. Update `README.md` with a **new** git tag
+4. Update `CHANGELOG.md` with details about the fix
+5. Tag a **new** release
