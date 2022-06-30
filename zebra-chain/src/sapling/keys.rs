@@ -254,23 +254,27 @@ impl From<[u8; 32]> for SpendingKey {
 }
 
 impl fmt::Display for SpendingKey {
+    #[allow(clippy::unwrap_in_result)]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let hrp = match self.network {
             Network::Mainnet => sk_hrp::MAINNET,
             _ => sk_hrp::TESTNET,
         };
 
-        bech32::encode_to_fmt(f, hrp, &self.bytes.to_base32(), Variant::Bech32).unwrap()
+        bech32::encode_to_fmt(f, hrp, &self.bytes.to_base32(), Variant::Bech32)
+            .expect("hrp is valid")
     }
 }
 
 impl FromStr for SpendingKey {
     type Err = SerializationError;
 
+    #[allow(clippy::unwrap_in_result)]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match bech32::decode(s) {
             Ok((hrp, bytes, Variant::Bech32)) => {
-                let decoded = Vec::<u8>::from_base32(&bytes).unwrap();
+                let decoded =
+                    Vec::<u8>::from_base32(&bytes).expect("bech32::decode guarantees valid base32");
 
                 let mut decoded_bytes = [0u8; 32];
                 decoded_bytes[..].copy_from_slice(&decoded[0..32]);
@@ -637,13 +641,15 @@ impl fmt::Debug for IncomingViewingKey {
 }
 
 impl fmt::Display for IncomingViewingKey {
+    #[allow(clippy::unwrap_in_result)]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let hrp = match self.network {
             Network::Mainnet => ivk_hrp::MAINNET,
             _ => ivk_hrp::TESTNET,
         };
 
-        bech32::encode_to_fmt(f, hrp, &self.scalar.to_bytes().to_base32(), Variant::Bech32).unwrap()
+        bech32::encode_to_fmt(f, hrp, &self.scalar.to_bytes().to_base32(), Variant::Bech32)
+            .expect("hrp is valid")
     }
 }
 
@@ -690,10 +696,12 @@ impl From<(AuthorizingKey, NullifierDerivingKey)> for IncomingViewingKey {
 impl FromStr for IncomingViewingKey {
     type Err = SerializationError;
 
+    #[allow(clippy::unwrap_in_result)]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match bech32::decode(s) {
             Ok((hrp, bytes, Variant::Bech32)) => {
-                let decoded = Vec::<u8>::from_base32(&bytes).unwrap();
+                let decoded =
+                    Vec::<u8>::from_base32(&bytes).expect("bech32::decode guarantees valid base32");
 
                 let mut scalar_bytes = [0u8; 32];
                 scalar_bytes[..].copy_from_slice(&decoded[0..32]);
@@ -958,6 +966,7 @@ impl fmt::Debug for FullViewingKey {
 }
 
 impl fmt::Display for FullViewingKey {
+    #[allow(clippy::unwrap_in_result)]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut bytes = io::Cursor::new(Vec::new());
 
@@ -970,17 +979,21 @@ impl fmt::Display for FullViewingKey {
             _ => fvk_hrp::TESTNET,
         };
 
-        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32).unwrap()
+        bech32::encode_to_fmt(f, hrp, bytes.get_ref().to_base32(), Variant::Bech32)
+            .expect("hrp is valid")
     }
 }
 
 impl FromStr for FullViewingKey {
     type Err = SerializationError;
 
+    #[allow(clippy::unwrap_in_result)]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match bech32::decode(s) {
             Ok((hrp, bytes, Variant::Bech32)) => {
-                let mut decoded_bytes = io::Cursor::new(Vec::<u8>::from_base32(&bytes).unwrap());
+                let mut decoded_bytes = io::Cursor::new(
+                    Vec::<u8>::from_base32(&bytes).expect("bech32::decode guarantees valid base32"),
+                );
 
                 let authorizing_key_bytes = decoded_bytes.read_32_bytes()?;
                 let nullifier_deriving_key_bytes = decoded_bytes.read_32_bytes()?;

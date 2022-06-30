@@ -21,6 +21,7 @@ use super::{merkle, Block, CountedHeader, Hash, Header};
 pub const MAX_BLOCK_BYTES: u64 = 2_000_000;
 
 impl ZcashSerialize for Header {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u32::<LittleEndian>(self.version)?;
         self.previous_block_hash.zcash_serialize(&mut writer)?;

@@ -50,6 +50,7 @@ impl TracingEndpoint {
     }
 
     #[cfg(feature = "filter-reload")]
+    #[allow(clippy::unwrap_in_result)]
     pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
         use hyper::{
             service::{make_service_fn, service_fn},

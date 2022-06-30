@@ -2,7 +2,7 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-beta.11"
+version = "1.0.0-beta.12"
 edition = "2021"
 # Zebra is only supported on the latest stable Rust version. Some earlier versions might work.
 # Zebra uses features introduced in Rust 1.58.
@@ -78,6 +78,7 @@ zebra-state = { path = "../zebra-state" }
 abscissa_core = "0.5"
 gumdrop = "0.7"
 chrono = "0.4.19"
+humantime = "2.1.0"
 humantime-serde = "1.1.1"
 indexmap = "1.9.1"
 lazy_static = "1.4.0"
@@ -146,7 +147,7 @@ abscissa_core = { version = "0.5", features = ["testing"] }
 hex = "0.4.3"
 once_cell = "1.12.0"
 regex = "1.5.6"
-semver = "1.0.10"
+semver = "1.0.11"
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { version = "1.0.81", features = ["preserve_order"] }

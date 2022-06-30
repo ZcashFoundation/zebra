@@ -71,6 +71,7 @@ impl DateTime32 {
 
     /// Returns the duration elapsed since this time,
     /// or if this time is in the future, returns `None`.
+    #[allow(clippy::unwrap_in_result)]
     pub fn checked_elapsed(&self, now: chrono::DateTime<Utc>) -> Option<Duration32> {
         DateTime32::try_from(now)
             .expect("unexpected out of range chrono::DateTime")

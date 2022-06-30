@@ -266,6 +266,7 @@ impl Chain {
     ///
     /// The trees must match the trees of the finalized tip and are used
     /// to rebuild them after the fork.
+    #[allow(clippy::unwrap_in_result)]
     pub fn fork(
         &self,
         fork_tip: block::Hash,
@@ -706,6 +707,7 @@ trait UpdateWith<T> {
 
 impl UpdateWith<ContextuallyValidBlock> for Chain {
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
+    #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
         contextually_valid: &ContextuallyValidBlock,
@@ -994,6 +996,7 @@ impl
         &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     )> for Chain
 {
+    #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
         &(created_outputs, creating_tx_hash, block_created_outputs): &(

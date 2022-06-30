@@ -66,12 +66,19 @@ impl
         &transparent::OrderedUtxo,
     )> for TransparentTransfers
 {
+    #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
         &(outpoint, created_utxo): &(&transparent::OutPoint, &transparent::OrderedUtxo),
     ) -> Result<(), ValidateContextError> {
-        self.balance =
-            (self.balance + created_utxo.utxo.output.value().constrain().unwrap()).unwrap();
+        self.balance = (self.balance
+            + created_utxo
+                .utxo
+                .output
+                .value()
+                .constrain()
+                .expect("NonNegative values are always valid NegativeAllowed values"))
+        .expect("total UTXO value has already been checked");
 
         let transaction_location = transaction_location(created_utxo);
         let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
@@ -94,8 +101,14 @@ impl
         &(outpoint, created_utxo): &(&transparent::OutPoint, &transparent::OrderedUtxo),
         _position: RevertPosition,
     ) {
-        self.balance =
-            (self.balance - created_utxo.utxo.output.value().constrain().unwrap()).unwrap();
+        self.balance = (self.balance
+            - created_utxo
+                .utxo
+                .output
+                .value()
+                .constrain()
+                .expect("NonNegative values are always valid NegativeAllowed values"))
+        .expect("reversing previous balance changes is always valid");
 
         let transaction_location = transaction_location(created_utxo);
         let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
@@ -130,6 +143,7 @@ impl
         &transparent::OrderedUtxo,
     )> for TransparentTransfers
 {
+    #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
         &(spending_input, spending_tx_hash, spent_output): &(
@@ -139,8 +153,14 @@ impl
         ),
     ) -> Result<(), ValidateContextError> {
         // Spending a UTXO subtracts value from the balance
-        self.balance =
-            (self.balance - spent_output.utxo.output.value().constrain().unwrap()).unwrap();
+        self.balance = (self.balance
+            - spent_output
+                .utxo
+                .output
+                .value()
+                .constrain()
+                .expect("NonNegative values are always valid NegativeAllowed values"))
+        .expect("total UTXO value has already been checked");
 
         let spent_outpoint = spending_input.outpoint().expect("checked by caller");
 
@@ -166,8 +186,14 @@ impl
         ),
         _position: RevertPosition,
     ) {
-        self.balance =
-            (self.balance + spent_output.utxo.output.value().constrain().unwrap()).unwrap();
+        self.balance = (self.balance
+            + spent_output
+                .utxo
+                .output
+                .value()
+                .constrain()
+                .expect("NonNegative values are always valid NegativeAllowed values"))
+        .expect("reversing previous balance changes is always valid");
 
         let spent_outpoint = spending_input.outpoint().expect("checked by caller");
 

@@ -67,6 +67,7 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Returns any errors from updating the history tree
+    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_history_batch(
         &mut self,
         db: &DiskDb,
@@ -108,6 +109,7 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - Propagates any errors from updating value pools
+    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_chain_value_pools_batch(
         &mut self,
         db: &DiskDb,

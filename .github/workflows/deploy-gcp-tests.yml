@@ -75,13 +75,22 @@ on:
         description: 'Application name for Google Cloud instance metadata'
 
 env:
+  # where we get the Docker image from
   IMAGE_NAME: zebrad-test
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
+  # what kind of Google Cloud instance we want to launch
   ZONE: us-central1-a
   MACHINE_TYPE: c2d-standard-16
+  # How many previous log lines we show at the start of each new log job.
+  # Increase this number if some log lines are skipped between jobs
+  #
+  # We want to show all the logs since the last job finished,
+  # but we don't know how long it will be between jobs.
+  # 200 lines is about 6-15 minutes of sync logs, or one panic log.
+  EXTRA_LOG_LINES: 200
 
 jobs:
-  # set up the test without any cached state
+  # set up the test, if it doesn't use any cached state
   # each test runs one of the *-with/without-cached-state job series, and skips the other
   setup-without-cached-state:
     name: Setup ${{ inputs.test_id }} test
@@ -94,6 +103,7 @@ jobs:
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
+          fetch-depth: '2'
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -146,12 +156,12 @@ jobs:
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
 
-  test-without-cached-state:
-    name: Run ${{ inputs.test_id }} test
+  # launch the test, if it doesn't use any cached state
+  launch-without-cached-state:
+    name: Launch ${{ inputs.test_id }} test
     needs: [ setup-without-cached-state ]
-    # if the previous step fails, we also want to run and fail this step,
-    # so that the branch protection rule fails in Mergify and GitHub
-    if: ${{ !cancelled() && !inputs.needs_zebra_state }}
+    # If creating the Google Cloud instance fails, we don't want to launch another docker instance.
+    if: ${{ !cancelled() && !failure() && !inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -160,6 +170,7 @@ jobs:
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
+          fetch-depth: '2'
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -180,7 +191,8 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      - name: Run ${{ inputs.test_id }} test
+      # Launch the test without any cached state
+      - name: Launch ${{ inputs.test_id }} test
         run: |
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -189,12 +201,17 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
-          docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
+          docker run \
+          --name ${{ inputs.test_id }} \
+          --tty \
+          --detach \
+          ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
-  # set up the test using cached state
+
+  # set up the test, if it uses cached state
   # each test runs one of the *-with/without-cached-state job series, and skips the other
   setup-with-cached-state:
     name: Setup ${{ inputs.test_id }} test
@@ -313,12 +330,12 @@ jobs:
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
 
-  test-with-cached-state:
-    name: Run ${{ inputs.test_id }} test
+  # launch the test, if it uses cached state
+  launch-with-cached-state:
+    name: Launch ${{ inputs.test_id }} test
     needs: [ setup-with-cached-state ]
-    # if the previous step fails, we also want to run and fail this step,
-    # so that the branch protection rule fails in Mergify and GitHub
-    if: ${{ !cancelled() && inputs.needs_zebra_state }}
+    # If creating the Google Cloud instance fails, we don't want to launch another docker instance.
+    if: ${{ !cancelled() && !failure() && inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -348,8 +365,8 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Run the test with the previously created Zebra-only cached state.
-      # Each test runs one of the "Run test" steps, and skips the other.
+      # Launch the test with the previously created Zebra-only cached state.
+      # Each test runs one of the "Launch test" steps, and skips the other.
       #
       # SSH into the just created VM, and create a Docker container to run the incoming test
       # from ${{ inputs.test_id }}, then mount the docker volume created in the previous job.
@@ -364,7 +381,7 @@ jobs:
       # Although we're mounting the disk root, Zebra will only respect the values from
       # $ZEBRA_CACHED_STATE_DIR. The inputs like ${{ inputs.zebra_state_dir }} are only used
       # to match that variable paths.
-      - name: Run ${{ inputs.test_id }} test
+      - name: Launch ${{ inputs.test_id }} test
         # This step only runs for tests that just read or write a Zebra state.
         #
         # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
@@ -378,13 +395,17 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
-          docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
+          docker run \
+          --name ${{ inputs.test_id }} \
+          --tty \
+          --detach \
+          ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
-      # Run the test with the previously created Lightwalletd and Zebra cached state.
-      # Each test runs one of the "Run test" steps, and skips the other.
+      # Launch the test with the previously created Lightwalletd and Zebra cached state.
+      # Each test runs one of the "Launch test" steps, and skips the other.
       #
       # SSH into the just created VM, and create a Docker container to run the incoming test
       # from ${{ inputs.test_id }}, then mount the docker volume created in the previous job.
@@ -408,7 +429,7 @@ jobs:
       # Although we're mounting the disk root to both directories, Zebra and Lightwalletd
       # will only respect the values from $ZEBRA_CACHED_STATE_DIR and $LIGHTWALLETD_DATA_DIR,
       # the inputs like ${{ inputs.lwd_state_dir }} are only used to match those variables paths.
-      - name: Run ${{ inputs.test_id }} test
+      - name: Launch ${{ inputs.test_id }} test
         # This step only runs for tests that read or write Lightwalletd and Zebra states.
         #
         # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
@@ -422,25 +443,267 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
-          docker run ${{ inputs.test_variables }} -t --name ${{ inputs.test_id }} \
+          docker run \
+          --name ${{ inputs.test_id }} \
+          --tty \
+          --detach \
+          ${{ inputs.test_variables }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
           --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
           ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           "
 
+
+  # follow the logs of the test we just launched, up to Sapling activation (or the test finishing)
+  logs-sprout:
+    name: Log ${{ inputs.test_id }} test (sprout)
+    # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
+    needs: [ launch-with-cached-state, launch-without-cached-state ]
+    # If the previous job fails, we still want to show the logs.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.8.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Show all the logs since the container launched,
+      # following until Sapling activation (or the test finishes).
+      #
+      # The log pipeline ignores the exit status of `docker logs`.
+      # Errors in the tests are caught by the final test status job.
+      - name: Show logs for ${{ inputs.test_id }} test (sprout)
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          docker logs \
+          --tail all \
+          --follow \
+          ${{ inputs.test_id }} | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          '(estimated progress.*network_upgrade.*=.*Sapling)|(test result:.*finished in)' \
+          "
+
+  # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
+  # TODO: split out sapling logs when the mandatory checkpoint is above NU5 activation
+  logs-checkpoint:
+    name: Log ${{ inputs.test_id }} test (checkpoint)
+    needs: [ logs-sprout ]
+    # If the previous job fails, we still want to show the logs.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.8.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Show recent logs, following until the last checkpoint (or the test finishes)
+      - name: Show logs for ${{ inputs.test_id }} test (checkpoint)
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          docker logs \
+          --tail ${{ env.EXTRA_LOG_LINES }} \
+          --follow \
+          ${{ inputs.test_id }} | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          '(verified final checkpoint)|(test result:.*finished in)' \
+          "
+
+  # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
+  logs-end:
+    name: Log ${{ inputs.test_id }} test (end)
+    needs: [ logs-checkpoint ]
+    # If the previous job fails, we still want to show the logs.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.8.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Show recent logs, following until the test finishes
+      - name: Show logs for ${{ inputs.test_id }} test (end)
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          docker logs \
+          --tail ${{ env.EXTRA_LOG_LINES }} \
+          --follow \
+          ${{ inputs.test_id }} | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          'test result:.*finished in' \
+          "
+
+
+  # wait for the result of the test
+  test-result:
+    # TODO: update the job name here, and in the branch protection rules
+    name: Run ${{ inputs.test_id }} test
+    needs: [ logs-end ]
+    # If the previous job fails, we also want to run and fail this job,
+    # so that the branch protection rule fails in Mergify and GitHub.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.8.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Wait for the container to finish, then exit with the test's exit status.
+      #
+      # If the container has already finished, `docker wait` should return its status.
+      # But sometimes this doesn't work, so we use `docker inspect` as a fallback.
+      #
+      # `docker wait` prints the container exit status as a string, but we need to exit the `ssh` command
+      # with that status.
+      # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
+      - name: Result of ${{ inputs.test_id }} test
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command=' \
+          EXIT_STATUS=$( \
+          docker wait ${{ inputs.test_id }} || \
+          docker inspect --format "{{.State.ExitCode}}" ${{ inputs.test_id }} || \
+          echo "missing container, or missing exit status for container" \
+          ); \
+          echo "docker exit status: $EXIT_STATUS"; \
+          exit "$EXIT_STATUS" \
+          '
+
+
   # create a state image from the instance's state disk, if requested by the caller
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
     runs-on: ubuntu-latest
+    needs: [ test-result ]
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # Normally, if a job is skipped, all the jobs that depend on it are also skipped.
     # So we need to override the default success() check to make this job run.
-    needs: [ test-without-cached-state, test-with-cached-state ]
     if: ${{ !cancelled() && !failure() && inputs.saves_to_disk }}
     permissions:
       contents: 'read'
       id-token: 'write'
     steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -528,6 +791,11 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:

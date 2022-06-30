@@ -294,6 +294,7 @@ impl ValueBalance<NonNegative> {
     /// value pool.
     ///
     /// See `add_block` for details.
+    #[allow(clippy::unwrap_in_result)]
     pub fn add_chain_value_pool_change(
         self,
         chain_value_pool_change: ValueBalance<NegativeAllowed>,
@@ -345,6 +346,7 @@ impl ValueBalance<NonNegative> {
     }
 
     /// From byte array
+    #[allow(clippy::unwrap_in_result)]
     pub fn from_bytes(bytes: [u8; 32]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let transparent = Amount::from_bytes(
             bytes[0..8]
