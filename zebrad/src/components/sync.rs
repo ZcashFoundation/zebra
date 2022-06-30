@@ -2,7 +2,7 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{cmp::max, collections::HashSet, pin::Pin, sync::Arc, task::Poll, time::Duration};
+use std::{collections::HashSet, pin::Pin, sync::Arc, task::Poll, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -265,9 +265,6 @@ where
 
     /// The lengths of recent sync responses.
     recent_syncs: RecentSyncLengths,
-
-    /// The highest block this syncer has verified.
-    verified_height: Option<Height>,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -378,7 +375,6 @@ where
             latest_chain_tip,
             prospective_tips: HashSet::new(),
             recent_syncs,
-            verified_height: None,
         };
 
         (new_syncer, sync_status)
@@ -387,8 +383,6 @@ where
     /// Runs the syncer to synchronize the chain and keep it synchronized.
     #[instrument(skip(self))]
     pub async fn sync(mut self) -> Result<(), Report> {
-        self.verified_height = self.state_tip().await?;
-
         // We can't download the genesis block using our normal algorithm,
         // due to protocol limitations
         self.request_genesis().await?;
@@ -796,10 +790,6 @@ where
     /// Download and verify the genesis block, if it isn't currently known to
     /// our node.
     async fn request_genesis(&mut self) -> Result<(), Report> {
-        if self.verified_height.is_some() {
-            return Ok(());
-        }
-
         // Due to Bitcoin protocol limitations, we can't request the genesis
         // block using our standard tip-following algorithm:
         //  - getblocks requires at least one hash
@@ -807,7 +797,7 @@ where
         //  - the genesis hash is used as a placeholder for "no matches".
         //
         // So we just download and verify the genesis block here.
-        while self.state_tip().await?.is_none() {
+        while !self.state_contains(self.genesis_hash).await? {
             info!("starting genesis block download and verify");
 
             let response = self.downloads.download_and_verify(self.genesis_hash).await;
@@ -880,7 +870,8 @@ where
 
         // When the state is empty, we want to verify using checkpoints
         let verified_height: usize = self
-            .verified_height
+            .latest_chain_tip
+            .best_tip_height()
             .unwrap_or(Height(0))
             .0
             .try_into()
@@ -890,7 +881,7 @@ where
             self.full_verification_lookahead_limit
         } else if (verified_height + new_hashes) >= max_checkpoint_height {
             // If we're just about to start full verification, allow enough for the remaining checkpoint,
-            // and also enough for a separate full verification pipeline.
+            // and also enough for a separate full verification lookahead.
             let checkpoint_hashes = verified_height + new_hashes - max_checkpoint_height;
 
             self.full_verification_lookahead_limit + checkpoint_hashes
@@ -899,7 +890,7 @@ where
         }
     }
 
-    /// Handles a response for a requested block, updating the verified block height.
+    /// Handles a response for a requested block.
     ///
     /// See [`Self::handle_response`] for more details.
     fn handle_block_response(
@@ -909,9 +900,6 @@ where
         match response {
             Ok((height, hash)) => {
                 trace!(?height, ?hash, "verified and committed block to state");
-
-                // Blocks commit to the state in order, but their results can return out of order
-                self.verified_height = Some(max(height, self.verified_height.unwrap_or(height)));
 
                 Ok(())
             }
@@ -971,23 +959,6 @@ where
             zs::Response::Depth(Some(_)) => Ok(true),
             zs::Response::Depth(None) => Ok(false),
             _ => unreachable!("wrong response to depth request"),
-        }
-    }
-
-    /// Returns the state tip height.
-    async fn state_tip(&mut self) -> Result<Option<Height>, Report> {
-        match self
-            .state
-            .ready()
-            .await
-            .map_err(|e| eyre!(e))?
-            .call(zebra_state::Request::Tip)
-            .await
-            .map_err(|e| eyre!(e))?
-        {
-            zs::Response::Tip(Some((height, _hash))) => Ok(Some(height)),
-            zs::Response::Tip(None) => Ok(None),
-            response => unreachable!("wrong response to tip request: {:?}", response),
         }
     }
 
