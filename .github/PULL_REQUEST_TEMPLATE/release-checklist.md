@@ -90,7 +90,7 @@ fastmod --extensions rs,toml,md --fixed-strings '1.0.0-beta.11' '1.0.0-beta.12'
 fastmod --extensions rs,toml,md --fixed-strings '0.2.26' '0.2.27' tower-batch tower-fallback
 ```
 
-Ignore any `fastmod` updates to previous release notes in `CHANGELOG.md`.
+If you use `fastmod`, don't update versions in `CHANGELOG.md`.
 
 ## README
 
