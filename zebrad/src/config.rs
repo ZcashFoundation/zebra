@@ -216,7 +216,9 @@ impl Default for SyncSection {
         Self {
             download_concurrency_limit: 50,
             checkpoint_verify_concurrency_limit: sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT,
-            full_verify_concurrency_limit: 25,
+            // TODO: try increasing to 25 when we implement orchard proof batching?
+            //       limit full verification concurrency based on block transaction counts?
+            full_verify_concurrency_limit: 5,
         }
     }
 }
