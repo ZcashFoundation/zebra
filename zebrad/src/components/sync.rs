@@ -428,13 +428,13 @@ where
             state_tip = ?self.latest_chain_tip.best_tip_height(),
             "starting sync, obtaining new tips"
         );
-        if let Err(e) = self.obtain_tips().await {
+        let mut extra_hashes = self.obtain_tips().await.map_err(|e| {
             info!("temporary error obtaining tips: {:#}", e);
-            return Err(e);
-        }
+            e
+        })?;
         self.update_metrics();
 
-        while !self.prospective_tips.is_empty() {
+        while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
             // Check whether any block tasks are currently ready:
             while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
                 self.handle_block_response(rsp)?;
@@ -445,19 +445,21 @@ where
             //
             // Starting to wait is interesting, but logging each wait can be
             // very verbose.
-            if self.downloads.in_flight() > self.lookahead_limit() {
+            if self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) {
                 tracing::info!(
                     tips.len = self.prospective_tips.len(),
                     in_flight = self.downloads.in_flight(),
-                    lookahead_limit = self.lookahead_limit(),
+                    extra_hashes = extra_hashes.len(),
+                    lookahead_limit = self.lookahead_limit(extra_hashes.len()),
                     "waiting for pending blocks",
                 );
             }
-            while self.downloads.in_flight() > self.lookahead_limit() {
+            while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) {
                 trace!(
                     tips.len = self.prospective_tips.len(),
                     in_flight = self.downloads.in_flight(),
-                    lookahead_limit = self.lookahead_limit(),
+                    extra_hashes = extra_hashes.len(),
+                    lookahead_limit = self.lookahead_limit(extra_hashes.len()),
                     state_tip = ?self.latest_chain_tip.best_tip_height(),
                     "waiting for pending blocks",
                 );
@@ -468,18 +470,33 @@ where
                 self.update_metrics();
             }
 
-            // Once we're below the lookahead limit, we can keep extending the tips.
-            info!(
-                tips.len = self.prospective_tips.len(),
-                in_flight = self.downloads.in_flight(),
-                lookahead_limit = self.lookahead_limit(),
-                state_tip = ?self.latest_chain_tip.best_tip_height(),
-                "extending tips",
-            );
+            // Once we're below the lookahead limit, we can request more blocks or hashes.
+            if !extra_hashes.is_empty() {
+                debug!(
+                    tips.len = self.prospective_tips.len(),
+                    in_flight = self.downloads.in_flight(),
+                    extra_hashes = extra_hashes.len(),
+                    lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                    state_tip = ?self.latest_chain_tip.best_tip_height(),
+                    "requesting more blocks",
+                );
 
-            if let Err(e) = self.extend_tips().await {
-                info!("temporary error extending tips: {:#}", e);
-                return Err(e);
+                let response = self.request_blocks(extra_hashes).await;
+                extra_hashes = Self::handle_hash_response(response)?;
+            } else {
+                info!(
+                    tips.len = self.prospective_tips.len(),
+                    in_flight = self.downloads.in_flight(),
+                    extra_hashes = extra_hashes.len(),
+                    lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                    state_tip = ?self.latest_chain_tip.best_tip_height(),
+                    "extending tips",
+                );
+
+                extra_hashes = self.extend_tips().await.map_err(|e| {
+                    info!("temporary error extending tips: {:#}", e);
+                    e
+                })?;
             }
             self.update_metrics();
         }
@@ -492,7 +509,7 @@ where
     /// Given a block_locator list fan out request for subsequent hashes to
     /// multiple peers
     #[instrument(skip(self))]
-    async fn obtain_tips(&mut self) -> Result<(), Report> {
+    async fn obtain_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
         let block_locator = self
             .state
             .ready()
@@ -635,13 +652,12 @@ where
         self.recent_syncs.push_obtain_tips_length(new_downloads);
 
         let response = self.request_blocks(download_set).await;
-        Self::handle_response(response)?;
 
-        Ok(())
+        Self::handle_hash_response(response).map_err(Into::into)
     }
 
     #[instrument(skip(self))]
-    async fn extend_tips(&mut self) -> Result<(), Report> {
+    async fn extend_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
         let tips = std::mem::take(&mut self.prospective_tips);
 
         let mut download_set = IndexSet::new();
@@ -773,9 +789,8 @@ where
         self.recent_syncs.push_extend_tips_length(new_downloads);
 
         let response = self.request_blocks(download_set).await;
-        Self::handle_response(response)?;
 
-        Ok(())
+        Self::handle_hash_response(response).map_err(Into::into)
     }
 
     /// Download and verify the genesis block, if it isn't currently known to
@@ -826,12 +841,14 @@ where
         Ok(())
     }
 
-    /// Queue download and verify tasks for each block that isn't currently known to our node
+    /// Queue download and verify tasks for each block that isn't currently known to our node.
+    ///
+    /// TODO: turn obtain and extend tips into a separate task, which sends hashes via a channel?
     async fn request_blocks(
         &mut self,
-        hashes: IndexSet<block::Hash>,
-    ) -> Result<(), BlockDownloadVerifyError> {
-        let lookahead_limit = self.lookahead_limit();
+        mut hashes: IndexSet<block::Hash>,
+    ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
+        let lookahead_limit = self.lookahead_limit(hashes.len());
 
         debug!(
             hashes.len = hashes.len(),
@@ -839,14 +856,17 @@ where
             "requesting blocks",
         );
 
-        // Allow a limit's worth of verifying hashes, and a limit's worth of downloading hashes.
-        //
-        // TODO: Return excess block hashes, and submit them when some lower blocks have been verified.
-        for hash in hashes.into_iter().take(lookahead_limit * 2) {
+        let extra_hashes = if hashes.len() > lookahead_limit {
+            hashes.split_off(lookahead_limit)
+        } else {
+            IndexSet::new()
+        };
+
+        for hash in hashes.into_iter() {
             self.downloads.download_and_verify(hash).await?;
         }
 
-        Ok(())
+        Ok(extra_hashes)
     }
 
     /// The configured lookahead limit, based on the currently verified height,
@@ -879,12 +899,9 @@ where
         }
     }
 
-    /// Handles a response for a requested block.
+    /// Handles a response for a requested block, updating the verified block height.
     ///
-    /// Returns `Ok` if the block was successfully verified and committed to the state, or if an
-    /// expected error occurred, so that the synchronization can continue normally.
-    ///
-    /// Returns `Err` if an unexpected error occurred, to force the synchronizer to restart.
+    /// See [`Self::handle_response`] for more details.
     fn handle_block_response(
         &mut self,
         response: Result<(Height, block::Hash), BlockDownloadVerifyError>,
@@ -895,11 +912,23 @@ where
 
                 // Blocks commit to the state in order, but their results can return out of order
                 self.verified_height = Some(max(height, self.verified_height.unwrap_or(height)));
-            }
-            Err(_) => return Self::handle_response(response.map(|_| ())),
-        }
 
-        Ok(())
+                Ok(())
+            }
+            Err(_) => Self::handle_response(response),
+        }
+    }
+
+    /// Handles a response to block hash submission, passing through any extra hashes.
+    ///
+    /// See [`Self::handle_response`] for more details.
+    fn handle_hash_response(
+        response: Result<IndexSet<block::Hash>, BlockDownloadVerifyError>,
+    ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
+        match response {
+            Ok(extra_hashes) => Ok(extra_hashes),
+            Err(_) => Self::handle_response(response).map(|()| IndexSet::new()),
+        }
     }
 
     /// Handles a response to a syncer request.
@@ -908,17 +937,20 @@ where
     /// so that the synchronization can continue normally.
     ///
     /// Returns `Err` if an unexpected error occurred, to force the synchronizer to restart.
-    fn handle_response(
-        response: Result<(), BlockDownloadVerifyError>,
+    fn handle_response<T>(
+        response: Result<T, BlockDownloadVerifyError>,
     ) -> Result<(), BlockDownloadVerifyError> {
-        if let Err(error) = response {
-            // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
-            if Self::should_restart_sync(&error) {
-                return Err(error);
+        match response {
+            Ok(_t) => Ok(()),
+            Err(error) => {
+                // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
+                if Self::should_restart_sync(&error) {
+                    Err(error)
+                } else {
+                    Ok(())
+                }
             }
         }
-
-        Ok(())
     }
 
     /// Returns `true` if the hash is present in the state, and `false`
