@@ -32,7 +32,7 @@ Once you know which crates have changed:
 
 Zebra follows [semantic versioning](https://semver.org).
 
-Semantic versions look like: `MAJOR`.`MINOR`.`PATCH[`-`TAG`.`PRE-RELEASE]`
+Semantic versions look like: MAJOR`.`MINOR`.`PATCH[`-`TAG`.`PRE-RELEASE]
    
 <details>
 
