@@ -662,20 +662,28 @@ jobs:
 
       # Wait for the container to finish, then exit with the test's exit status.
       #
-      # `docker wait` prints the container exit status as a string, but we need to exit `ssh` with that status.
-      # `docker wait` can also wait for multiple containers, but we only ever wait for a single container.
+      # If the container has already finished, `docker wait` should return its status.
+      # But sometimes this doesn't work, so we use `docker inspect` as a fallback.
+      #
+      # `docker wait` prints the container exit status as a string, but we need to exit the `ssh` command
+      # with that status.
+      # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
         run: |
-          EXIT_CODE=$(\
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker wait ${{ inputs.test_id }}" \
-          )
-          echo "$EXIT_CODE"
-          exit "$EXIT_CODE"
+          --command=' \
+          EXIT_STATUS=$( \
+          docker wait ${{ inputs.test_id }} || \
+          docker inspect --format "{{.State.ExitCode}}" ${{ inputs.test_id }} || \
+          echo "missing container, or missing exit status for container" \
+          ); \
+          echo "docker exit status: $EXIT_STATUS"; \
+          exit "$EXIT_STATUS" \
+          '
 
 
   # create a state image from the instance's state disk, if requested by the caller
