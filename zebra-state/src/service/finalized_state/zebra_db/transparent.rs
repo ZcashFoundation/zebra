@@ -95,7 +95,7 @@ impl ZebraDb {
         &self,
         output_location: OutputLocation,
     ) -> Option<transparent::OrderedUtxo> {
-        let utxo_by_out_loc = self.db.cf_handle("utxo_by_outpoint").unwrap();
+        let utxo_by_out_loc = self.db.cf_handle("utxo_by_out_loc").unwrap();
 
         let output = self.db.zs_get(&utxo_by_out_loc, &output_location)?;
 
@@ -425,7 +425,7 @@ impl DiskWriteBatch {
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &mut HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
-        let utxo_by_out_loc = db.cf_handle("utxo_by_outpoint").unwrap();
+        let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
             db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
         let tx_loc_by_transparent_addr_loc =
@@ -501,7 +501,7 @@ impl DiskWriteBatch {
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &mut HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
-        let utxo_by_out_loc = db.cf_handle("utxo_by_outpoint").unwrap();
+        let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
             db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
 
