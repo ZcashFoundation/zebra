@@ -102,7 +102,6 @@
 //! ```
 //!
 //! Please refer to the documentation of each test for more information.
-
 #![allow(clippy::unwrap_used)]
 
 use std::{collections::HashSet, env, fs, path::PathBuf, time::Duration};

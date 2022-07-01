@@ -4,7 +4,7 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_test")]
 // Each lazy_static variable uses additional recursion
 #![recursion_limit = "512"]
-//
+// Allow unwrap in the entire crate
 #![allow(clippy::unwrap_used)]
 
 use color_eyre::section::PanicMessage;
