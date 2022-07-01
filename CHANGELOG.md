@@ -7,8 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## Next Release (Draft)
 
-(Draft notes for the next release can be added here.)
+This release improves Zebra's sync and verification performance under heavy load.
+(TODO - complete the summary.)
 
+### Configuration Changes
+
+- Split the checkpoint and full verification [`sync` concurrency options](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html) (#4726):
+  - Add a new `full_verify_concurrency_limit`
+  - Rename `max_concurrent_block_requests` to `download_concurrency_limit`
+  - Rename `lookahead_limit` to `checkpoint_verify_concurrency_limit`
+  For backwards compatibility, the old names are still accepted as aliases.
+
+(TODO - insert changelog here)
 
 ## [Zebra 1.0.0-beta.12](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.12) - 2022-06-29
 
