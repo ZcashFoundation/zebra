@@ -117,7 +117,10 @@ impl StartCmd {
         let inbound = ServiceBuilder::new()
             .load_shed()
             .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
-            .service(Inbound::new(setup_rx));
+            .service(Inbound::new(
+                config.sync.full_verify_concurrency_limit,
+                setup_rx,
+            ));
 
         let (peer_set, address_book) =
             zebra_network::init(config.network.clone(), inbound, latest_chain_tip.clone()).await;
