@@ -422,16 +422,3 @@ cleaner and the cost is probably not too large.
 - We need to pick a timeout for UTXO lookup. This should be long enough to
 account for the fact that we may start verifying blocks before all of their
 ancestors are downloaded.
-
-These optimisations can be delayed until after the initial implementation is
-complete, and covered by tests:
-
-- Should we stop storing heights for non-coinbase UTXOs? (#2455)
-
-- Should we avoid storing any extra data for UTXOs, and just lookup the coinbase
-  flag and height using `outpoint.hash` and `tx_by_hash`? (#2455)
-
-- The maturity check can be skipped for UTXOs from the finalized state,
-because Zebra only finalizes mature UTXOs. We could implement this
-optimisation by adding a `Utxo::MatureCoinbase { output: transparent::Output }`
-variant, which only performs the spend checks. (#2455)

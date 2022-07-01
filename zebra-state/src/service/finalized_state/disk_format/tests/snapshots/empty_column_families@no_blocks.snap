@@ -1,10 +1,11 @@
 ---
 source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
+assertion_line: 154
 expression: empty_column_families
 ---
 [
   "balance_by_transparent_addr: no entries",
-  "block_by_height: no entries",
+  "block_header_by_height: no entries",
   "hash_by_height: no entries",
   "hash_by_tx_loc: no entries",
   "height_by_hash: no entries",
@@ -19,9 +20,9 @@ expression: empty_column_families
   "sprout_note_commitment_tree: no entries",
   "sprout_nullifiers: no entries",
   "tip_chain_value_pool: no entries",
-  "tx_by_hash: no entries",
   "tx_by_loc: no entries",
+  "tx_loc_by_hash: no entries",
   "tx_loc_by_transparent_addr_loc: no entries",
-  "utxo_by_outpoint: no entries",
+  "utxo_by_out_loc: no entries",
   "utxo_loc_by_transparent_addr_loc: no entries",
 ]

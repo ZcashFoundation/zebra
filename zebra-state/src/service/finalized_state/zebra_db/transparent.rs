@@ -100,8 +100,8 @@ impl ZebraDb {
     ) -> Option<transparent::OrderedUtxo> {
         let utxo_by_out_loc = self
             .db
-            .cf_handle("utxo_by_outpoint")
-            .expect("column utxo_by_outpoint exists");
+            .cf_handle("utxo_by_out_loc")
+            .expect("column utxo_by_out_loc exists");
 
         let output = self.db.zs_get(&utxo_by_out_loc, &output_location)?;
 
@@ -437,8 +437,8 @@ impl DiskWriteBatch {
         address_balances: &mut HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
         let utxo_by_out_loc = db
-            .cf_handle("utxo_by_outpoint")
-            .expect("column utxo_by_outpoint exists");
+            .cf_handle("utxo_by_out_loc")
+            .expect("column utxo_by_out_loc exists");
         let utxo_loc_by_transparent_addr_loc = db
             .cf_handle("utxo_loc_by_transparent_addr_loc")
             .expect("column utxo_loc_by_transparent_addr_loc exists");
@@ -517,8 +517,8 @@ impl DiskWriteBatch {
         address_balances: &mut HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
         let utxo_by_out_loc = db
-            .cf_handle("utxo_by_outpoint")
-            .expect("column utxo_by_outpoint exists");
+            .cf_handle("utxo_by_out_loc")
+            .expect("column utxo_by_out_loc exists");
         let utxo_loc_by_transparent_addr_loc = db
             .cf_handle("utxo_loc_by_transparent_addr_loc")
             .expect("column utxo_loc_by_transparent_addr_loc exists");

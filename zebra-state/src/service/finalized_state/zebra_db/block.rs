@@ -100,8 +100,8 @@ impl ZebraDb {
         // Blocks
         let block_header_by_height = self
             .db
-            .cf_handle("block_by_height")
-            .expect("column block_by_height exists");
+            .cf_handle("block_header_by_height")
+            .expect("column block_header_by_height exists");
         let height_by_hash = self
             .db
             .cf_handle("height_by_hash")
@@ -203,8 +203,8 @@ impl ZebraDb {
     pub fn transaction_location(&self, hash: transaction::Hash) -> Option<TransactionLocation> {
         let tx_loc_by_hash = self
             .db
-            .cf_handle("tx_by_hash")
-            .expect("column tx_by_hash exists");
+            .cf_handle("tx_loc_by_hash")
+            .expect("column tx_loc_by_hash exists");
         self.db.zs_get(&tx_loc_by_hash, &hash)
     }
 
@@ -459,8 +459,8 @@ impl DiskWriteBatch {
     ) -> Result<(), BoxError> {
         // Blocks
         let block_header_by_height = db
-            .cf_handle("block_by_height")
-            .expect("column block_by_height exists");
+            .cf_handle("block_header_by_height")
+            .expect("column block_header_by_height exists");
         let hash_by_height = db
             .cf_handle("hash_by_height")
             .expect("column hash_by_height exists");
@@ -474,8 +474,8 @@ impl DiskWriteBatch {
             .cf_handle("hash_by_tx_loc")
             .expect("column hash_by_tx_loc exists");
         let tx_loc_by_hash = db
-            .cf_handle("tx_by_hash")
-            .expect("column tx_by_hash exists");
+            .cf_handle("tx_loc_by_hash")
+            .expect("column tx_loc_by_hash exists");
 
         let FinalizedBlock {
             block,
