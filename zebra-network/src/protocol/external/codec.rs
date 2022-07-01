@@ -355,7 +355,7 @@ impl Decoder for Codec {
                             .cloned()
                             .flat_map(std::ascii::escape_default)
                             .collect()
-                    ).unwrap(),
+                    ).expect("command string is always valid utf-8"),
                     body_len,
                     ?checksum,
                     "read header from src buffer"

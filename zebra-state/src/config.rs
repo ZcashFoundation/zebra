@@ -115,7 +115,11 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .expect("current directory should be always valid")
+                    .join("cache")
+            })
             .join("zebra");
 
         Self {

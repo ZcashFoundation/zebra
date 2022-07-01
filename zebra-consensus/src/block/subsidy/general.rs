@@ -80,6 +80,8 @@ pub fn output_amounts(transaction: &Transaction) -> HashSet<Amount<NonNegative>>
 
 #[cfg(test)]
 mod test {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
     use color_eyre::Report;
 

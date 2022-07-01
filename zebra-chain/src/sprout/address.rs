@@ -131,6 +131,7 @@ impl Arbitrary for SproutShieldedAddress {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
 
     use super::*;
 
@@ -163,6 +164,7 @@ proptest! {
     }
 
     #[test]
+    #[allow(clippy::unwrap_used)]
     fn zcash_base58check_roundtrip(zaddr in any::<SproutShieldedAddress>()) {
         zebra_test::init();
 

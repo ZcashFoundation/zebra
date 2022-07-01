@@ -45,7 +45,7 @@ pub fn extract_p_bottom(maybe_point: Option<pallas::Point>) -> Option<pallas::Ba
 /// <https://zips.z.cash/protocol/nu5.pdf#concretegrouphashpallasandvesta>
 #[allow(non_snake_case)]
 pub fn pallas_group_hash(D: &[u8], M: &[u8]) -> pallas::Point {
-    let domain_separator = std::str::from_utf8(D).unwrap();
+    let domain_separator = std::str::from_utf8(D).expect("slice is valid utf-8");
 
     pallas::Point::hash_to_curve(domain_separator)(M)
 }
@@ -196,6 +196,7 @@ pub fn sinsemilla_short_commit(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
 
     use super::*;
     use crate::orchard::tests::vectors;

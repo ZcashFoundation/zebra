@@ -81,7 +81,9 @@ fn main() -> Result<()> {
     let starting_height = args::Args::from_args().last_checkpoint.map(block::Height);
     if starting_height.is_some() {
         // Since we're about to add 1, height needs to be strictly less than the maximum
-        assert!(starting_height.unwrap() < block::Height::MAX);
+        assert!(
+            starting_height.expect("we just checked there is a height above") < block::Height::MAX
+        );
     }
     // Start at the next block after the last checkpoint.
     // If there is no last checkpoint, start at genesis (height 0).
@@ -108,11 +110,14 @@ fn main() -> Result<()> {
         let v: Value = serde_json::from_str(&output)?;
 
         // get the values we are interested in
-        let hash: block::Hash = v["hash"].as_str().unwrap().parse()?;
-        let height = block::Height(v["height"].as_u64().unwrap() as u32);
+        let hash: block::Hash = v["hash"]
+            .as_str()
+            .expect("hash is always a valid string")
+            .parse()?;
+        let height = block::Height(v["height"].as_u64().expect("height always fit in u64") as u32);
         assert!(height <= block::Height::MAX);
         assert_eq!(x, height.0);
-        let size = v["size"].as_u64().unwrap();
+        let size = v["size"].as_u64().expect("size always fit in u64");
 
         // compute
         cumulative_bytes += size;

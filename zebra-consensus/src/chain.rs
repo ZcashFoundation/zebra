@@ -246,10 +246,10 @@ where
     let tip = match state_service
         .ready()
         .await
-        .unwrap()
+        .expect("service should be ready")
         .call(zs::Request::Tip)
         .await
-        .unwrap()
+        .expect("call can't fail")
     {
         zs::Response::Tip(tip) => tip,
         _ => unreachable!("wrong response to Request::Tip"),

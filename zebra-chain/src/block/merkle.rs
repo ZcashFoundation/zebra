@@ -80,8 +80,8 @@ impl fmt::Debug for Root {
 
 fn hash(h1: &[u8; 32], h2: &[u8; 32]) -> [u8; 32] {
     let mut w = sha256d::Writer::default();
-    w.write_all(h1).unwrap();
-    w.write_all(h2).unwrap();
+    w.write_all(h1).expect("writer should not error");
+    w.write_all(h2).expect("writer should not error");
     w.finish()
 }
 
@@ -221,6 +221,7 @@ impl std::iter::FromIterator<transaction::AuthDigest> for AuthDataRoot {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     use crate::{block::Block, serialization::ZcashDeserialize, transaction::AuthDigest};

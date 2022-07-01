@@ -231,7 +231,7 @@ where
 
     handle_tx
         .send(vec![listen_guard, crawl_guard, address_book_updater_guard])
-        .unwrap();
+        .expect("the receiver should be available");
 
     (peer_set, address_book)
 }

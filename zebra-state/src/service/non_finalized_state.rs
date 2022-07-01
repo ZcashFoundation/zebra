@@ -427,11 +427,11 @@ impl NonFinalizedState {
 
         if self
             .best_chain()
-            .unwrap()
+            .expect("there is always a best chain after committed block")
             .blocks
             .iter()
             .next_back()
-            .unwrap()
+            .expect("best chain should have at least the committed block")
             .1
             .hash
             == hash

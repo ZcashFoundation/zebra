@@ -20,7 +20,7 @@ where
     S: Subscriber + for<'span> LookupSpan<'span>,
 {
     let path = path_root.with_extension("folded");
-    let (layer, guard) = tracing_flame::FlameLayer::with_file(&path).unwrap();
+    let (layer, guard) = tracing_flame::FlameLayer::with_file(&path).expect("path should be valid");
     let layer = layer.with_empty_samples(false).with_threads_collapsed(true);
     let flamegrapher = Grapher { guard, path };
     (layer, flamegrapher)

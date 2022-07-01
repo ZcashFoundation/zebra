@@ -243,7 +243,7 @@ fn chain_transparent_balance_change(
 
     // Check if the finalized and non-finalized states match
     let required_chain_root = finalized_tip
-        .map(|tip| (tip + 1).unwrap())
+        .map(|tip| (tip + 1).expect("tip + 1 should always fit in a Height"))
         .unwrap_or(Height(0));
 
     let chain = Arc::make_mut(&mut chain);
@@ -489,7 +489,7 @@ where
         }
     }
 
-    let chain = chain.unwrap();
+    let chain = chain.expect("chain can't be empty");
     let chain = chain.as_ref();
 
     let non_finalized_root = chain.non_finalized_root_height();
@@ -790,7 +790,7 @@ where
         }
     }
 
-    let chain = chain.unwrap();
+    let chain = chain.expect("chain can't be empty");
     let chain = chain.as_ref();
 
     let non_finalized_root = chain.non_finalized_root_height();

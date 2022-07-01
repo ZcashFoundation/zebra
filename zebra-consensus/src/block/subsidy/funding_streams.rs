@@ -26,11 +26,15 @@ pub fn funding_stream_values(
     height: Height,
     network: Network,
 ) -> Result<HashMap<FundingStreamReceiver, Amount<NonNegative>>, Error> {
-    let canopy_height = Canopy.activation_height(network).unwrap();
+    let canopy_height = Canopy
+        .activation_height(network)
+        .expect("canopy activation height should be available");
     let mut results = HashMap::new();
 
     if height >= canopy_height {
-        let range = FUNDING_STREAM_HEIGHT_RANGES.get(&network).unwrap();
+        let range = FUNDING_STREAM_HEIGHT_RANGES
+            .get(&network)
+            .expect("funding stream addresses for Mainnet and Testnet should be available");
         if range.contains(&height) {
             let block_subsidy = block_subsidy(height, network)?;
             for (&receiver, &numerator) in FUNDING_STREAM_RECEIVER_NUMERATORS.iter() {
@@ -93,7 +97,10 @@ fn funding_stream_address_index(height: Height, network: Network) -> usize {
         .checked_add(funding_stream_address_period(height, network))
         .expect("no overflow should happen in this sum")
         .checked_sub(funding_stream_address_period(
-            FUNDING_STREAM_HEIGHT_RANGES.get(&network).unwrap().start,
+            FUNDING_STREAM_HEIGHT_RANGES
+                .get(&network)
+                .expect("funding stream addresses for Mainnet and Testnet should be available")
+                .start,
             network,
         ))
         .expect("no overflow should happen in this sub") as usize;

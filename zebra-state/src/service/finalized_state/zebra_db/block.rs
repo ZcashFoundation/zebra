@@ -52,7 +52,10 @@ impl ZebraDb {
     //
     // TODO: move this method to the tip section
     pub fn is_empty(&self) -> bool {
-        let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
+        let hash_by_height = self
+            .db
+            .cf_handle("hash_by_height")
+            .expect("column hash_by_height exists");
         self.db.zs_is_empty(&hash_by_height)
     }
 
@@ -61,21 +64,30 @@ impl ZebraDb {
     // TODO: move this method to the tip section
     #[allow(clippy::unwrap_in_result)]
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
-        let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
+        let hash_by_height = self
+            .db
+            .cf_handle("hash_by_height")
+            .expect("column hash_by_height exists");
         self.db.zs_last_key_value(&hash_by_height)
     }
 
     /// Returns the finalized hash for a given `block::Height` if it is present.
     #[allow(clippy::unwrap_in_result)]
     pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
-        let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
+        let hash_by_height = self
+            .db
+            .cf_handle("hash_by_height")
+            .expect("column hash_by_height exists");
         self.db.zs_get(&hash_by_height, &height)
     }
 
     /// Returns the height of the given block if it exists.
     #[allow(clippy::unwrap_in_result)]
     pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
-        let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
+        let height_by_hash = self
+            .db
+            .cf_handle("height_by_hash")
+            .expect("column height_by_hash exists");
         self.db.zs_get(&height_by_hash, &hash)
     }
 
@@ -86,15 +98,24 @@ impl ZebraDb {
     #[allow(clippy::unwrap_in_result)]
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         // Blocks
-        let block_header_by_height = self.db.cf_handle("block_by_height").unwrap();
-        let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
+        let block_header_by_height = self
+            .db
+            .cf_handle("block_by_height")
+            .expect("column block_by_height exists");
+        let height_by_hash = self
+            .db
+            .cf_handle("height_by_hash")
+            .expect("column height_by_hash exists");
 
         let height =
             hash_or_height.height_or_else(|hash| self.db.zs_get(&height_by_hash, &hash))?;
         let header = self.db.zs_get(&block_header_by_height, &height)?;
 
         // Transactions
-        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+        let tx_by_loc = self
+            .db
+            .cf_handle("tx_by_loc")
+            .expect("column tx_by_loc exists");
 
         // Manually fetch the entire block's transactions
         let mut transactions = Vec::new();
@@ -127,7 +148,10 @@ impl ZebraDb {
     ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
-        let sapling_tree_handle = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+        let sapling_tree_handle = self
+            .db
+            .cf_handle("sapling_note_commitment_tree")
+            .expect("column sapling_note_commitment_tree exists");
 
         self.db.zs_get(&sapling_tree_handle, &height)
     }
@@ -142,7 +166,10 @@ impl ZebraDb {
     ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
-        let orchard_tree_handle = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+        let orchard_tree_handle = self
+            .db
+            .cf_handle("orchard_note_commitment_tree")
+            .expect("column orchard_note_commitment_tree exists");
 
         self.db.zs_get(&orchard_tree_handle, &height)
     }
@@ -174,7 +201,10 @@ impl ZebraDb {
     /// if it exists in the finalized chain.
     #[allow(clippy::unwrap_in_result)]
     pub fn transaction_location(&self, hash: transaction::Hash) -> Option<TransactionLocation> {
-        let tx_loc_by_hash = self.db.cf_handle("tx_by_hash").unwrap();
+        let tx_loc_by_hash = self
+            .db
+            .cf_handle("tx_by_hash")
+            .expect("column tx_by_hash exists");
         self.db.zs_get(&tx_loc_by_hash, &hash)
     }
 
@@ -183,7 +213,10 @@ impl ZebraDb {
     #[allow(clippy::unwrap_in_result)]
     #[allow(dead_code)]
     pub fn transaction_hash(&self, location: TransactionLocation) -> Option<transaction::Hash> {
-        let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
+        let hash_by_tx_loc = self
+            .db
+            .cf_handle("hash_by_tx_loc")
+            .expect("column hash_by_tx_loc exists");
         self.db.zs_get(&hash_by_tx_loc, &location)
     }
 
@@ -193,7 +226,10 @@ impl ZebraDb {
     // TODO: move this method to the start of the section
     #[allow(clippy::unwrap_in_result)]
     pub fn transaction(&self, hash: transaction::Hash) -> Option<(Arc<Transaction>, Height)> {
-        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+        let tx_by_loc = self
+            .db
+            .cf_handle("tx_by_loc")
+            .expect("column tx_by_loc exists");
 
         let transaction_location = self.transaction_location(hash)?;
 
@@ -422,14 +458,24 @@ impl DiskWriteBatch {
         finalized: &FinalizedBlock,
     ) -> Result<(), BoxError> {
         // Blocks
-        let block_header_by_height = db.cf_handle("block_by_height").unwrap();
-        let hash_by_height = db.cf_handle("hash_by_height").unwrap();
-        let height_by_hash = db.cf_handle("height_by_hash").unwrap();
+        let block_header_by_height = db
+            .cf_handle("block_by_height")
+            .expect("column block_by_height exists");
+        let hash_by_height = db
+            .cf_handle("hash_by_height")
+            .expect("column hash_by_height exists");
+        let height_by_hash = db
+            .cf_handle("height_by_hash")
+            .expect("column height_by_hash exists");
 
         // Transactions
-        let tx_by_loc = db.cf_handle("tx_by_loc").unwrap();
-        let hash_by_tx_loc = db.cf_handle("hash_by_tx_loc").unwrap();
-        let tx_loc_by_hash = db.cf_handle("tx_by_hash").unwrap();
+        let tx_by_loc = db.cf_handle("tx_by_loc").expect("column tx_by_loc exists");
+        let hash_by_tx_loc = db
+            .cf_handle("hash_by_tx_loc")
+            .expect("column hash_by_tx_loc exists");
+        let tx_loc_by_hash = db
+            .cf_handle("tx_by_hash")
+            .expect("column tx_by_hash exists");
 
         let FinalizedBlock {
             block,

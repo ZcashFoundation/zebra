@@ -314,7 +314,7 @@ impl Service<zn::Request> for Inbound {
                 // Briefly hold the address book threaded mutex while
                 // cloning the address book. Then sanitize in the future,
                 // after releasing the lock.
-                let peers = address_book.lock().unwrap().clone();
+                let peers = address_book.lock().expect("mutex should be unpoisoned").clone();
 
                 async move {
                     // Correctness: get the current time after acquiring the address book lock.

@@ -308,7 +308,7 @@ impl Service<Request> for Mempool {
         // Clear the mempool and cancel downloads if there has been a chain tip reset.
         if matches!(tip_action, Some(TipAction::Reset { .. })) {
             info!(
-                tip_height = ?tip_action.as_ref().unwrap().best_tip_height(),
+                tip_height = ?tip_action.as_ref().expect("we just checked there is a value here").best_tip_height(),
                 "resetting mempool: switched best chain, skipped blocks, or activated network upgrade"
             );
 

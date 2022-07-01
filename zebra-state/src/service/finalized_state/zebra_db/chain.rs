@@ -35,7 +35,10 @@ impl ZebraDb {
     pub fn history_tree(&self) -> HistoryTree {
         match self.finalized_tip_height() {
             Some(height) => {
-                let history_tree_cf = self.db.cf_handle("history_tree").unwrap();
+                let history_tree_cf = self
+                    .db
+                    .cf_handle("history_tree")
+                    .expect("column history_tree exists");
                 let history_tree: Option<NonEmptyHistoryTree> =
                     self.db.zs_get(&history_tree_cf, &height);
                 if let Some(non_empty_tree) = history_tree {
@@ -50,7 +53,10 @@ impl ZebraDb {
 
     /// Returns the stored `ValueBalance` for the best chain at the finalized tip height.
     pub fn finalized_value_pool(&self) -> ValueBalance<NonNegative> {
-        let value_pool_cf = self.db.cf_handle("tip_chain_value_pool").unwrap();
+        let value_pool_cf = self
+            .db
+            .cf_handle("tip_chain_value_pool")
+            .expect("column tip_chain_value_pool exists");
         self.db
             .zs_get(&value_pool_cf, &())
             .unwrap_or_else(ValueBalance::zero)
@@ -76,7 +82,9 @@ impl DiskWriteBatch {
         orchard_root: orchard::tree::Root,
         mut history_tree: HistoryTree,
     ) -> Result<(), BoxError> {
-        let history_tree_cf = db.cf_handle("history_tree").unwrap();
+        let history_tree_cf = db
+            .cf_handle("history_tree")
+            .expect("column history_tree exists");
 
         let FinalizedBlock { block, height, .. } = finalized;
 
@@ -117,7 +125,9 @@ impl DiskWriteBatch {
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
-        let tip_chain_value_pool = db.cf_handle("tip_chain_value_pool").unwrap();
+        let tip_chain_value_pool = db
+            .cf_handle("tip_chain_value_pool")
+            .expect("column tip_chain_value_pool exists");
 
         let FinalizedBlock { block, .. } = finalized;
 

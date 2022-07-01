@@ -26,8 +26,11 @@ impl IntoDisk for ValueBalance<NonNegative> {
 
 impl FromDisk for ValueBalance<NonNegative> {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let array = bytes.as_ref().try_into().unwrap();
-        ValueBalance::from_bytes(array).unwrap()
+        let array = bytes
+            .as_ref()
+            .try_into()
+            .expect("bytes always fit in slice");
+        ValueBalance::from_bytes(array).expect("slice is always a valid value balance")
     }
 }
 

@@ -973,11 +973,21 @@ where
         let fut = match req {
             // Only do inventory-aware routing on individual items.
             Request::BlocksByHash(ref hashes) if hashes.len() == 1 => {
-                let hash = InventoryHash::from(*hashes.iter().next().unwrap());
+                let hash = InventoryHash::from(
+                    *hashes
+                        .iter()
+                        .next()
+                        .expect("already checked there is one hash"),
+                );
                 self.route_inv(req, hash)
             }
             Request::TransactionsById(ref hashes) if hashes.len() == 1 => {
-                let hash = InventoryHash::from(*hashes.iter().next().unwrap());
+                let hash = InventoryHash::from(
+                    *hashes
+                        .iter()
+                        .next()
+                        .expect("already checked there is one hash"),
+                );
                 self.route_inv(req, hash)
             }
 

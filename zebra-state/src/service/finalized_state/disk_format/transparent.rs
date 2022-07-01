@@ -500,7 +500,10 @@ impl IntoDisk for transparent::Address {
         let variant_bytes = vec![address_variant(self)];
         let hash_bytes = self.hash_bytes().to_vec();
 
-        [variant_bytes, hash_bytes].concat().try_into().unwrap()
+        [variant_bytes, hash_bytes]
+            .concat()
+            .try_into()
+            .expect("concatenation of fixed-sized arrays should have the correct size")
     }
 }
 
@@ -510,7 +513,9 @@ impl FromDisk for transparent::Address {
         let (address_variant, hash_bytes) = disk_bytes.as_ref().split_at(1);
 
         let address_variant = address_variant[0];
-        let hash_bytes = hash_bytes.try_into().unwrap();
+        let hash_bytes = hash_bytes
+            .try_into()
+            .expect("conversion of fixed-sized array should have the correct size");
 
         let network = if address_variant < 2 {
             Mainnet
@@ -536,8 +541,11 @@ impl IntoDisk for Amount<NonNegative> {
 
 impl FromDisk for Amount<NonNegative> {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let array = bytes.as_ref().try_into().unwrap();
-        Amount::from_bytes(array).unwrap()
+        let array = bytes
+            .as_ref()
+            .try_into()
+            .expect("bytes to slice should not error");
+        Amount::from_bytes(array).expect("amount from a slice of length 8 should not error")
     }
 }
 
@@ -551,17 +559,21 @@ impl IntoDisk for OutputIndex {
 
         let disk_bytes = truncate_zero_be_bytes(&mem_bytes, OUTPUT_INDEX_DISK_BYTES);
 
-        disk_bytes.try_into().unwrap()
+        disk_bytes.try_into().expect(
+            "bytes to slice should not error as we truncated the length to OUTPUT_INDEX_DISK_BYTES",
+        )
     }
 }
 
 impl FromDisk for OutputIndex {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
         let mem_len = u32::BITS / 8;
-        let mem_len = mem_len.try_into().unwrap();
+        let mem_len = mem_len.try_into().expect("32 / 8 fits in usize");
 
         let mem_bytes = expand_zero_be_bytes(disk_bytes.as_ref(), mem_len);
-        let mem_bytes = mem_bytes.try_into().unwrap();
+        let mem_bytes = mem_bytes
+            .try_into()
+            .expect("we just expanded to expected length");
         OutputIndex::from_index(u32::from_be_bytes(mem_bytes))
     }
 }
@@ -576,7 +588,7 @@ impl IntoDisk for OutputLocation {
         [transaction_location_bytes, output_index_bytes]
             .concat()
             .try_into()
-            .unwrap()
+            .expect("concatenation of fixed-sized arrays should have the correct size")
     }
 }
 
@@ -606,7 +618,7 @@ impl IntoDisk for AddressBalanceLocation {
         [balance_bytes, address_location_bytes]
             .concat()
             .try_into()
-            .unwrap()
+            .expect("concatenation of fixed-sized arrays should have the correct size")
     }
 }
 
@@ -615,7 +627,12 @@ impl FromDisk for AddressBalanceLocation {
         let (balance_bytes, address_location_bytes) =
             disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
 
-        let balance = Amount::from_bytes(balance_bytes.try_into().unwrap()).unwrap();
+        let balance = Amount::from_bytes(
+            balance_bytes
+                .try_into()
+                .expect("balance bytes should always convert to slice"),
+        )
+        .expect("slice should always convert to Amount");
         let address_location = AddressLocation::from_bytes(address_location_bytes);
 
         let mut address_balance_location = AddressBalanceLocation::new(address_location);
@@ -629,13 +646,17 @@ impl IntoDisk for transparent::Output {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.zcash_serialize_to_vec().unwrap()
+        self.zcash_serialize_to_vec()
+            .expect("given Output should always convert to Vec<u8>")
     }
 }
 
 impl FromDisk for transparent::Output {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bytes.as_ref().zcash_deserialize_into().unwrap()
+        bytes
+            .as_ref()
+            .zcash_deserialize_into()
+            .expect("given bytes should be always valid Output")
     }
 }
 
@@ -649,7 +670,7 @@ impl IntoDisk for AddressUnspentOutput {
         [address_location_bytes, unspent_output_location_bytes]
             .concat()
             .try_into()
-            .unwrap()
+            .expect("concatenation of fixed-sized arrays should have the correct size")
     }
 }
 

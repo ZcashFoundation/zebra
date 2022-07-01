@@ -186,17 +186,17 @@ impl IntoDisk for Height {
 
         let disk_bytes = truncate_zero_be_bytes(&mem_bytes, HEIGHT_DISK_BYTES);
 
-        disk_bytes.try_into().unwrap()
+        disk_bytes.try_into().expect("bytes should be always valid")
     }
 }
 
 impl FromDisk for Height {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
         let mem_len = u32::BITS / 8;
-        let mem_len = mem_len.try_into().unwrap();
+        let mem_len = mem_len.try_into().expect("32 / 8 fits in usize");
 
         let mem_bytes = expand_zero_be_bytes(disk_bytes.as_ref(), mem_len);
-        let mem_bytes = mem_bytes.try_into().unwrap();
+        let mem_bytes = mem_bytes.try_into().expect("bytes should be always valid");
         Height(u32::from_be_bytes(mem_bytes))
     }
 }
@@ -211,7 +211,10 @@ impl IntoDisk for block::Hash {
 
 impl FromDisk for block::Hash {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let array = bytes.as_ref().try_into().unwrap();
+        let array = bytes
+            .as_ref()
+            .try_into()
+            .expect("bytes should be always valid");
         Self(array)
     }
 }
@@ -247,7 +250,10 @@ impl IntoDisk for TransactionIndex {
 
 impl FromDisk for TransactionIndex {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let disk_bytes = disk_bytes.as_ref().try_into().unwrap();
+        let disk_bytes = disk_bytes
+            .as_ref()
+            .try_into()
+            .expect("bytes should be always valid");
 
         TransactionIndex::from_index(u16::from_be_bytes(disk_bytes))
     }
@@ -260,7 +266,10 @@ impl IntoDisk for TransactionLocation {
         let height_bytes = self.height.as_bytes().to_vec();
         let index_bytes = self.index.as_bytes().to_vec();
 
-        [height_bytes, index_bytes].concat().try_into().unwrap()
+        [height_bytes, index_bytes]
+            .concat()
+            .try_into()
+            .expect("bytes should be always valid")
     }
 }
 
@@ -285,6 +294,11 @@ impl IntoDisk for transaction::Hash {
 
 impl FromDisk for transaction::Hash {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        transaction::Hash(disk_bytes.as_ref().try_into().unwrap())
+        transaction::Hash(
+            disk_bytes
+                .as_ref()
+                .try_into()
+                .expect("bytes should be always valid"),
+        )
     }
 }

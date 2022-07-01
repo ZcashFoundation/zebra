@@ -311,6 +311,7 @@ impl ValueBalance<NonNegative> {
     ///
     /// The resulting [`ValueBalance`] will have half of the MAX_MONEY amount on each pool.
     #[cfg(any(test, feature = "proptest-impl"))]
+    #[allow(clippy::unwrap_used)]
     pub fn fake_populated_pool() -> ValueBalance<NonNegative> {
         let mut fake_value_pool = ValueBalance::zero();
 

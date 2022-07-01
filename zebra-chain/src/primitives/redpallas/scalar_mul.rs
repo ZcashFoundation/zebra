@@ -60,7 +60,7 @@ pub trait VartimeMultiscalarMul {
             scalars,
             points.into_iter().map(|p| Some(p.borrow().clone())),
         )
-        .unwrap()
+        .expect("all optional points are some")
     }
 }
 

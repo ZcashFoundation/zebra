@@ -378,7 +378,13 @@ impl Application for ZebradApp {
         // Activate the global span, so it's visible when we load the other
         // components. Space is at a premium here, so we use an empty message,
         // short commit hash, and the unique part of the network name.
-        let net = &self.config.clone().unwrap().network.network.to_string()[..4];
+        let net = &self
+            .config
+            .clone()
+            .expect("we always have a config here")
+            .network
+            .network
+            .to_string()[..4];
         let global_span = if let Some(git_commit) = ZebradApp::git_commit() {
             error_span!("", zebrad = git_commit, net)
         } else {

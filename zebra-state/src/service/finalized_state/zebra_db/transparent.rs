@@ -48,7 +48,10 @@ impl ZebraDb {
         &self,
         address: &transparent::Address,
     ) -> Option<AddressBalanceLocation> {
-        let balance_by_transparent_addr = self.db.cf_handle("balance_by_transparent_addr").unwrap();
+        let balance_by_transparent_addr = self
+            .db
+            .cf_handle("balance_by_transparent_addr")
+            .expect("column balance_by_transparent_addr exists");
 
         self.db.zs_get(&balance_by_transparent_addr, address)
     }
@@ -95,7 +98,10 @@ impl ZebraDb {
         &self,
         output_location: OutputLocation,
     ) -> Option<transparent::OrderedUtxo> {
-        let utxo_by_out_loc = self.db.cf_handle("utxo_by_outpoint").unwrap();
+        let utxo_by_out_loc = self
+            .db
+            .cf_handle("utxo_by_outpoint")
+            .expect("column utxo_by_outpoint exists");
 
         let output = self.db.zs_get(&utxo_by_out_loc, &output_location)?;
 
@@ -144,7 +150,7 @@ impl ZebraDb {
         let utxo_loc_by_transparent_addr_loc = self
             .db
             .cf_handle("utxo_loc_by_transparent_addr_loc")
-            .unwrap();
+            .expect("column utxo_loc_by_transparent_addr_loc exists");
 
         // Manually fetch the entire addresses' UTXO locations
         let mut addr_unspent_outputs = BTreeSet::new();
@@ -180,7 +186,10 @@ impl ZebraDb {
     /// Returns the transaction hash for an [`TransactionLocation`].
     #[allow(clippy::unwrap_in_result)]
     pub fn tx_id_by_location(&self, tx_location: TransactionLocation) -> Option<transaction::Hash> {
-        let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
+        let hash_by_tx_loc = self
+            .db
+            .cf_handle("hash_by_tx_loc")
+            .expect("column hash_by_tx_loc exists");
 
         self.db.zs_get(&hash_by_tx_loc, &tx_location)
     }
@@ -231,8 +240,10 @@ impl ZebraDb {
         address_location: AddressLocation,
         query_height_range: RangeInclusive<Height>,
     ) -> BTreeSet<AddressTransaction> {
-        let tx_loc_by_transparent_addr_loc =
-            self.db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
+        let tx_loc_by_transparent_addr_loc = self
+            .db
+            .cf_handle("tx_loc_by_transparent_addr_loc")
+            .expect("column tx_loc_by_transparent_addr_loc exists");
 
         // Manually fetch the entire addresses' transaction locations
         let mut addr_transactions = BTreeSet::new();
@@ -425,11 +436,15 @@ impl DiskWriteBatch {
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &mut HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
-        let utxo_by_out_loc = db.cf_handle("utxo_by_outpoint").unwrap();
-        let utxo_loc_by_transparent_addr_loc =
-            db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
-        let tx_loc_by_transparent_addr_loc =
-            db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
+        let utxo_by_out_loc = db
+            .cf_handle("utxo_by_outpoint")
+            .expect("column utxo_by_outpoint exists");
+        let utxo_loc_by_transparent_addr_loc = db
+            .cf_handle("utxo_loc_by_transparent_addr_loc")
+            .expect("column utxo_loc_by_transparent_addr_loc exists");
+        let tx_loc_by_transparent_addr_loc = db
+            .cf_handle("tx_loc_by_transparent_addr_loc")
+            .expect("column tx_loc_by_transparent_addr_loc exists");
 
         // Index all new transparent outputs
         for (new_output_location, utxo) in new_outputs_by_out_loc {
@@ -501,9 +516,12 @@ impl DiskWriteBatch {
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &mut HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
-        let utxo_by_out_loc = db.cf_handle("utxo_by_outpoint").unwrap();
-        let utxo_loc_by_transparent_addr_loc =
-            db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
+        let utxo_by_out_loc = db
+            .cf_handle("utxo_by_outpoint")
+            .expect("column utxo_by_outpoint exists");
+        let utxo_loc_by_transparent_addr_loc = db
+            .cf_handle("utxo_loc_by_transparent_addr_loc")
+            .expect("column utxo_loc_by_transparent_addr_loc exists");
 
         // Mark all transparent inputs as spent.
         //
@@ -557,8 +575,9 @@ impl DiskWriteBatch {
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
         address_balances: &HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
-        let tx_loc_by_transparent_addr_loc =
-            db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
+        let tx_loc_by_transparent_addr_loc = db
+            .cf_handle("tx_loc_by_transparent_addr_loc")
+            .expect("column tx_loc_by_transparent_addr_loc exists");
 
         // Index the transparent addresses that spent in this transaction.
         //
@@ -603,7 +622,9 @@ impl DiskWriteBatch {
         db: &DiskDb,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
-        let balance_by_transparent_addr = db.cf_handle("balance_by_transparent_addr").unwrap();
+        let balance_by_transparent_addr = db
+            .cf_handle("balance_by_transparent_addr")
+            .expect("column balance_by_transparent_addr exists");
 
         // Update all the changed address balances in the database.
         for (address, address_balance_location) in address_balances.into_iter() {

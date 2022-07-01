@@ -336,7 +336,12 @@ where
         let address_book = self.address_book.clone();
         let span = Span::current();
         tokio::task::spawn_blocking(move || {
-            span.in_scope(|| address_book.lock().unwrap().extend(addrs))
+            span.in_scope(|| {
+                address_book
+                    .lock()
+                    .expect("mutex should be unpoisoned")
+                    .extend(addrs)
+            })
         })
         .await
         .expect("panic in new peers address book update task");
@@ -368,7 +373,7 @@ where
         // Correctness: To avoid hangs, computation in the critical section should be kept to a minimum.
         let address_book = self.address_book.clone();
         let next_peer = move || -> Option<MetaAddr> {
-            let mut guard = address_book.lock().unwrap();
+            let mut guard = address_book.lock().expect("mutex should be unpoisoned");
 
             // Now we have the lock, get the current time
             let instant_now = std::time::Instant::now();
@@ -413,7 +418,12 @@ where
         let address_book = self.address_book.clone();
         let span = Span::current();
         tokio::task::spawn_blocking(move || {
-            span.in_scope(|| address_book.lock().unwrap().update(addr))
+            span.in_scope(|| {
+                address_book
+                    .lock()
+                    .expect("mutex should be unpoisoned")
+                    .update(addr)
+            })
         })
         .await
         .expect("panic in peer failure address book update task");

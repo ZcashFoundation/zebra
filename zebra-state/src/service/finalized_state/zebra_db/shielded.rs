@@ -38,38 +38,56 @@ impl ZebraDb {
 
     /// Returns `true` if the finalized state contains `sprout_nullifier`.
     pub fn contains_sprout_nullifier(&self, sprout_nullifier: &sprout::Nullifier) -> bool {
-        let sprout_nullifiers = self.db.cf_handle("sprout_nullifiers").unwrap();
+        let sprout_nullifiers = self
+            .db
+            .cf_handle("sprout_nullifiers")
+            .expect("column sprout_nullifiers exists");
         self.db.zs_contains(&sprout_nullifiers, &sprout_nullifier)
     }
 
     /// Returns `true` if the finalized state contains `sapling_nullifier`.
     pub fn contains_sapling_nullifier(&self, sapling_nullifier: &sapling::Nullifier) -> bool {
-        let sapling_nullifiers = self.db.cf_handle("sapling_nullifiers").unwrap();
+        let sapling_nullifiers = self
+            .db
+            .cf_handle("sapling_nullifiers")
+            .expect("column sapling_nullifiers exists");
         self.db.zs_contains(&sapling_nullifiers, &sapling_nullifier)
     }
 
     /// Returns `true` if the finalized state contains `orchard_nullifier`.
     pub fn contains_orchard_nullifier(&self, orchard_nullifier: &orchard::Nullifier) -> bool {
-        let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
+        let orchard_nullifiers = self
+            .db
+            .cf_handle("orchard_nullifiers")
+            .expect("column orchard_nullifiers exists");
         self.db.zs_contains(&orchard_nullifiers, &orchard_nullifier)
     }
 
     /// Returns `true` if the finalized state contains `sprout_anchor`.
     #[allow(unused)]
     pub fn contains_sprout_anchor(&self, sprout_anchor: &sprout::tree::Root) -> bool {
-        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+        let sprout_anchors = self
+            .db
+            .cf_handle("sprout_anchors")
+            .expect("column sprout_anchors exists");
         self.db.zs_contains(&sprout_anchors, &sprout_anchor)
     }
 
     /// Returns `true` if the finalized state contains `sapling_anchor`.
     pub fn contains_sapling_anchor(&self, sapling_anchor: &sapling::tree::Root) -> bool {
-        let sapling_anchors = self.db.cf_handle("sapling_anchors").unwrap();
+        let sapling_anchors = self
+            .db
+            .cf_handle("sapling_anchors")
+            .expect("column sapling_anchors exists");
         self.db.zs_contains(&sapling_anchors, &sapling_anchor)
     }
 
     /// Returns `true` if the finalized state contains `orchard_anchor`.
     pub fn contains_orchard_anchor(&self, orchard_anchor: &orchard::tree::Root) -> bool {
-        let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
+        let orchard_anchors = self
+            .db
+            .cf_handle("orchard_anchors")
+            .expect("column orchard_anchors exists");
         self.db.zs_contains(&orchard_anchors, &orchard_anchor)
     }
 
@@ -81,7 +99,10 @@ impl ZebraDb {
             None => return Default::default(),
         };
 
-        let sprout_note_commitment_tree = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
+        let sprout_note_commitment_tree = self
+            .db
+            .cf_handle("sprout_note_commitment_tree")
+            .expect("column sprout_note_commitment_tree exists");
 
         self.db
             .zs_get(&sprout_note_commitment_tree, &height)
@@ -96,7 +117,10 @@ impl ZebraDb {
         &self,
         sprout_anchor: &sprout::tree::Root,
     ) -> Option<sprout::tree::NoteCommitmentTree> {
-        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+        let sprout_anchors = self
+            .db
+            .cf_handle("sprout_anchors")
+            .expect("column sprout_anchors exists");
 
         self.db.zs_get(&sprout_anchors, sprout_anchor)
     }
@@ -109,8 +133,10 @@ impl ZebraDb {
             None => return Default::default(),
         };
 
-        let sapling_note_commitment_tree =
-            self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+        let sapling_note_commitment_tree = self
+            .db
+            .cf_handle("sapling_note_commitment_tree")
+            .expect("column sapling_note_commitment_tree exists");
 
         self.db
             .zs_get(&sapling_note_commitment_tree, &height)
@@ -124,7 +150,10 @@ impl ZebraDb {
         &self,
         height: &Height,
     ) -> Option<sapling::tree::NoteCommitmentTree> {
-        let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+        let sapling_trees = self
+            .db
+            .cf_handle("sapling_note_commitment_tree")
+            .expect("column sapling_note_commitment_tree exists");
 
         self.db.zs_get(&sapling_trees, height)
     }
@@ -137,8 +166,10 @@ impl ZebraDb {
             None => return Default::default(),
         };
 
-        let orchard_note_commitment_tree =
-            self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+        let orchard_note_commitment_tree = self
+            .db
+            .cf_handle("orchard_note_commitment_tree")
+            .expect("column orchard_note_commitment_tree exists");
 
         self.db
             .zs_get(&orchard_note_commitment_tree, &height)
@@ -152,7 +183,10 @@ impl ZebraDb {
         &self,
         height: &Height,
     ) -> Option<orchard::tree::NoteCommitmentTree> {
-        let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+        let orchard_trees = self
+            .db
+            .cf_handle("orchard_note_commitment_tree")
+            .expect("column orchard_note_commitment_tree exists");
 
         self.db.zs_get(&orchard_trees, height)
     }
@@ -208,9 +242,15 @@ impl DiskWriteBatch {
         db: &DiskDb,
         transaction: &Transaction,
     ) -> Result<(), BoxError> {
-        let sprout_nullifiers = db.cf_handle("sprout_nullifiers").unwrap();
-        let sapling_nullifiers = db.cf_handle("sapling_nullifiers").unwrap();
-        let orchard_nullifiers = db.cf_handle("orchard_nullifiers").unwrap();
+        let sprout_nullifiers = db
+            .cf_handle("sprout_nullifiers")
+            .expect("column sprout_nullifiers exists");
+        let sapling_nullifiers = db
+            .cf_handle("sapling_nullifiers")
+            .expect("column sapling_nullifiers exists");
+        let orchard_nullifiers = db
+            .cf_handle("orchard_nullifiers")
+            .expect("column orchard_nullifiers exists");
 
         // Mark sprout, sapling and orchard nullifiers as spent
         for sprout_nullifier in transaction.sprout_nullifiers() {
@@ -275,13 +315,25 @@ impl DiskWriteBatch {
         note_commitment_trees: NoteCommitmentTrees,
         history_tree: HistoryTree,
     ) -> Result<(), BoxError> {
-        let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
-        let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
-        let orchard_anchors = db.cf_handle("orchard_anchors").unwrap();
+        let sprout_anchors = db
+            .cf_handle("sprout_anchors")
+            .expect("column sprout_anchors exists");
+        let sapling_anchors = db
+            .cf_handle("sapling_anchors")
+            .expect("column sapling_anchors exists");
+        let orchard_anchors = db
+            .cf_handle("orchard_anchors")
+            .expect("column orchard_anchors exists");
 
-        let sprout_note_commitment_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
-        let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
-        let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
+        let sprout_note_commitment_tree_cf = db
+            .cf_handle("sprout_note_commitment_tree")
+            .expect("column sprout_note_commitment_tree exists");
+        let sapling_note_commitment_tree_cf = db
+            .cf_handle("sapling_note_commitment_tree")
+            .expect("column sapling_note_commitment_tree exists");
+        let orchard_note_commitment_tree_cf = db
+            .cf_handle("orchard_note_commitment_tree")
+            .expect("column orchard_note_commitment_tree exists");
 
         let FinalizedBlock { height, .. } = finalized;
 
@@ -335,9 +387,15 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: &FinalizedBlock,
     ) {
-        let sprout_note_commitment_tree_cf = db.cf_handle("sprout_note_commitment_tree").unwrap();
-        let sapling_note_commitment_tree_cf = db.cf_handle("sapling_note_commitment_tree").unwrap();
-        let orchard_note_commitment_tree_cf = db.cf_handle("orchard_note_commitment_tree").unwrap();
+        let sprout_note_commitment_tree_cf = db
+            .cf_handle("sprout_note_commitment_tree")
+            .expect("column sprout_note_commitment_tree exists");
+        let sapling_note_commitment_tree_cf = db
+            .cf_handle("sapling_note_commitment_tree")
+            .expect("column sapling_note_commitment_tree exists");
+        let orchard_note_commitment_tree_cf = db
+            .cf_handle("orchard_note_commitment_tree")
+            .expect("column orchard_note_commitment_tree exists");
 
         let FinalizedBlock { height, .. } = finalized;
 

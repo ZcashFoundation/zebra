@@ -196,7 +196,11 @@ where
         // sending the error to all outstanding requests.
         let error = ServiceError::new(error);
 
-        let mut inner = self.handle.inner.lock().unwrap();
+        let mut inner = self
+            .handle
+            .inner
+            .lock()
+            .expect("error mutex should be unpoisoned");
 
         if inner.is_some() {
             // Future::poll was called after we've already errored out!
@@ -220,7 +224,7 @@ impl Handle {
     pub(crate) fn get_error_on_closed(&self) -> crate::BoxError {
         self.inner
             .lock()
-            .unwrap()
+            .expect("error mutex should be unpoisoned")
             .as_ref()
             .map(|svc_err| svc_err.clone().into())
             .unwrap_or_else(|| Closed::new().into())

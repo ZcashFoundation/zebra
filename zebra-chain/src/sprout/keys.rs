@@ -373,7 +373,7 @@ proptest! {
 
         let string = sk.to_string();
 
-        let sk2 = string.parse::<SpendingKey>().unwrap();
+        let sk2 = string.parse::<SpendingKey>().expect("string is a valid spending key");
 
         prop_assert_eq![sk, sk2];
 
@@ -399,7 +399,7 @@ proptest! {
 
         let string = ivk.to_string();
 
-        let ivk2 = string.parse::<IncomingViewingKey>().unwrap();
+        let ivk2 = string.parse::<IncomingViewingKey>().expect("string is a valid incoming viewing key");
 
         prop_assert_eq![ivk, ivk2];
 

@@ -50,10 +50,10 @@ fn prp_d(K: [u8; 32], d: [u8; 11]) -> [u8; 11] {
     let ff = FF1::<Aes256>::new(&K, radix).expect("valid radix");
 
     ff.encrypt(tweak, &BinaryNumeralString::from_bytes_le(&d))
-        .unwrap()
+        .expect("bytes are valid")
         .to_bytes_le()
         .try_into()
-        .unwrap()
+        .expect("vector of bytes to slice should not error")
 }
 
 /// Invokes Blake2b-512 as PRF^expand with parameter t.
@@ -298,7 +298,7 @@ impl Eq for SpendValidatingKey {}
 
 impl From<[u8; 32]> for SpendValidatingKey {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(redpallas::VerificationKey::try_from(bytes).unwrap())
+        Self(redpallas::VerificationKey::try_from(bytes).expect("bytes are valid"))
     }
 }
 

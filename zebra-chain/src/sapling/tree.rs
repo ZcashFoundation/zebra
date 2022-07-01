@@ -347,7 +347,7 @@ impl NoteCommitmentTree {
             Some(root) => root,
             None => {
                 // Compute root and cache it.
-                let root = Root::try_from(self.inner.root().0).unwrap();
+                let root = Root::try_from(self.inner.root().0).expect("computed root can't fail");
                 *write_root = Some(root);
                 root
             }
