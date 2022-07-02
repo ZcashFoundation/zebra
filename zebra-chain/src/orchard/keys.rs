@@ -700,6 +700,7 @@ impl TryFrom<FullViewingKey> for IncomingViewingKey {
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
     /// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
     #[allow(non_snake_case)]
+    #[allow(clippy::unwrap_in_result)]
     fn try_from(fvk: FullViewingKey) -> Result<Self, Self::Error> {
         let mut M: BitVec<u8, Lsb0> = BitVec::new();
 
