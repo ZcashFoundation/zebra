@@ -10,8 +10,12 @@ use std::{
 };
 
 use futures::future::{ready, Ready};
+use halo2::{
+    pasta::{pallas, vesta},
+    plonk,
+};
 use once_cell::sync::Lazy;
-use orchard::circuit::VerifyingKey;
+use orchard::circuit::{Circuit, VerifyingKey};
 use rand::{thread_rng, CryptoRng, RngCore};
 use thiserror::Error;
 use tokio::sync::broadcast::{channel, error::RecvError, Sender};
@@ -33,6 +37,49 @@ lazy_static::lazy_static! {
 // ed25519-zebra::batch. Once Halo2 batch proof verification math and
 // implementation is available, this code can be replaced with that.
 
+trait FromExt<T>: Sized {
+    fn from(_: T) -> Self;
+}
+
+// Similar to `orchard::circuit::Instance::to_halo2_instance()`
+// https://github.com/zcash/orchard/blob/1a77930f5ff314b5ae8165c555787eb0c725c76c/src/circuit.rs#L769
+impl FromExt<orchard::circuit::Instance> for Vec<Vec<Vec<vesta::Scalar>>> {
+    fn from(orchard_instance: orchard::circuit::Instance) -> Vec<Vec<Vec<vesta::Scalar>>> {
+        // let halo2_instance: Vec<Vec<Vec<vesta::Scalar>>> = Default::default();
+
+        const ANCHOR: usize = 0;
+        const CV_NET_X: usize = 1;
+        const CV_NET_Y: usize = 2;
+        const NF_OLD: usize = 3;
+        const RK_X: usize = 4;
+        const RK_Y: usize = 5;
+        const CMX: usize = 6;
+        const ENABLE_SPEND: usize = 7;
+        const ENABLE_OUTPUT: usize = 8;
+
+        let mut instance = vec![vesta::Scalar::zero(); 9];
+
+        instance[ANCHOR] = orchard_instance.anchor.inner();
+        instance[CV_NET_X] = orchard_instance.cv_net.x();
+        instance[CV_NET_Y] = orchard_instance.cv_net.y();
+        instance[NF_OLD] = orchard_instance.nf_old.0;
+
+        let rk = pallas::Point::from_bytes(&orchard_instance.rk.clone().into())
+            .unwrap()
+            .to_affine()
+            .coordinates()
+            .unwrap();
+
+        instance[RK_X] = *rk.x();
+        instance[RK_Y] = *rk.y();
+        instance[CMX] = orchard_instance.cmx.inner();
+        instance[ENABLE_SPEND] = vesta::Scalar::from(u64::from(orchard_instance.enable_spend));
+        instance[ENABLE_OUTPUT] = vesta::Scalar::from(u64::from(orchard_instance.enable_output));
+
+        vec![vec![instance]]
+    }
+}
+
 /// A Halo2 verification item, used as the request type of the service.
 #[derive(Clone, Debug)]
 pub struct Item {
@@ -50,14 +97,25 @@ impl Item {
     }
 }
 
-#[derive(Default)]
+// #[derive(Default)]
 pub struct BatchVerifier {
-    queue: Vec<Item>,
+    batch: &'static mut plonk::BatchVerifier<vesta::Affine>,
 }
 
 impl BatchVerifier {
     pub fn queue(&mut self, item: Item) {
-        self.queue.push(item);
+        let instances = item
+            .instances
+            .iter()
+            .map(|i| {
+                i.to_halo2_instance()
+                    .into_iter()
+                    .map(|c| c.into_iter().collect())
+                    .collect()
+            })
+            .collect();
+
+        self.batch.add_proof(instances, item.proof.clone());
     }
 
     pub fn verify<R: RngCore + CryptoRng>(
@@ -65,11 +123,27 @@ impl BatchVerifier {
         _rng: R,
         vk: &VerifyingKey,
     ) -> Result<(), halo2::plonk::Error> {
-        for item in self.queue {
-            item.verify_single(vk)?;
-        }
+        // for item in self.queue {
+        //     item.verify_single(vk)?;
+        // }
 
-        Ok(())
+        // Build the Orchard circuit params and verifiying key from scratch until this
+        // becomes exposed in the public API.
+
+        // The value 11 is the size of the Orchard circuit:
+        // https://github.com/zcash/orchard/blob/3faab98e9e82618a0f2d887054e9e28b0f7947dd/src/circuit.rs#L66
+        let params = halo2::poly::commitment::Params::new(11);
+        let circuit: Circuit = Default::default();
+
+        let vk = plonk::keygen_vk(&params, &circuit).unwrap();
+
+        if self.batch.finalize(&params, &vk) {
+            return Ok(());
+        } else {
+            // TODO: `orchard` directly exposes halo2/plonk Error types, we should create
+            // our own
+            return Err(halo2::plonk::Error::Opening);
+        }
     }
 }
 
@@ -263,7 +337,8 @@ impl Service<BatchControl<Item>> for Verifier {
 
 impl Drop for Verifier {
     fn drop(&mut self) {
-        // We need to flush the current batch in case there are still any pending futures.
+        // We need to flush the current batch in case there are still any pending
+        // futures.
         let batch = mem::take(&mut self.batch);
         let _ = self.tx.send(
             batch
