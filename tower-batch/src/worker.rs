@@ -142,8 +142,21 @@ where
                 },
                 Some(sleep) => {
                     // Wait on either a new message or the batch timer.
-                    // If both are ready, select! chooses one of them at random.
+                    // If both are ready, end the batch now, because the timer has elapsed.
                     tokio::select! {
+                        biased;
+
+                        () = sleep => {
+                            // The batch timer elapsed.
+                            // XXX(hdevalence): what span should instrument this?
+                            self.flush_service().await;
+                            timer = None;
+                            pending_items = 0;
+                        }
+
+                        // If both branches are ready, the timer elapses,
+                        // but the pending message is preserved:
+                        // https://docs.rs/tokio/latest/tokio/sync/mpsc/struct.UnboundedReceiver.html#cancel-safety
                         maybe_msg = self.rx.recv() => match maybe_msg {
                             Some(msg) => {
                                 let span = msg.span;
@@ -168,13 +181,6 @@ where
                                 return;
                             }
                         },
-                        () = sleep => {
-                            // The batch timer elapsed.
-                            // XXX(hdevalence): what span should instrument this?
-                            self.flush_service().await;
-                            timer = None;
-                            pending_items = 0;
-                        }
                     }
                 }
             }
