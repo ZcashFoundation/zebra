@@ -9,7 +9,7 @@ Contents:
   - [RPC section](#rpc-section)
 - [Sync Zebra](#sync-zebra)
 - [Download and build lightwalletd](#download-and-build-lightwalletd)
-- [Sync lightwalled](#sync-lightwalled)
+- [Sync lightwalletd](#sync-lightwalletd)
 - [Run tests](#run-tests)
 - [Connect wallet to lightwalletd](#connect-wallet-to-lightwalletd)
   - [Download and build the cli-wallet](#download-and-build-the-cli-wallet)
@@ -96,7 +96,7 @@ make install
 
 If everything went good you should have a `lightwalletd` binary in `~/go/bin/`.
 
-## Sync lightwalled
+## Sync lightwalletd
 [#sync-lightwalletd]: (#sync-lightwalletd)
 
 Please make sure you have zebrad running (with RPC endpoint and up to date blockchain) to synchronize lightwalletd.
