@@ -221,6 +221,8 @@ impl From<Transaction> for UnminedTx {
             "unexpected serialization failure: all structurally valid transactions have a size",
         );
 
+        // The borrow is actually needed to avoid taking ownership
+        #[allow(clippy::needless_borrow)]
         Self {
             id: (&transaction).into(),
             size,
