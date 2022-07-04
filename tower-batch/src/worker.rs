@@ -115,6 +115,9 @@ where
         {
             self.failed(e.into());
         }
+
+        // Correctness: allow other tasks to run at the end of every batch.
+        tokio::task::yield_now().await;
     }
 
     pub async fn run(mut self) {
