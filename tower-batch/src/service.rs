@@ -13,6 +13,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 use tower::Service;
+use tracing::{info_span, Instrument};
 
 /// Allows batch processing of requests.
 ///
@@ -74,7 +75,26 @@ where
         Request: Send + 'static,
     {
         let (batch, worker) = Self::pair(service, max_items, max_latency);
-        tokio::spawn(worker.run());
+
+        let span = info_span!("batch worker", kind = std::any::type_name::<T>());
+
+        // TODO: check for panics in the returned JoinHandle (#4738)
+        #[cfg(tokio_unstable)]
+        let _worker_handle = {
+            let batch_kind = std::any::type_name::<T>();
+
+            // TODO: identify the unique part of the type name generically,
+            //       or make it an argument to this method
+            let batch_kind = batch_kind.trim_start_matches("zebra_consensus::primitives::");
+            let batch_kind = batch_kind.trim_end_matches("::Verifier");
+
+            tokio::task::Builder::new()
+                .name(&format!("{} batch", batch_kind))
+                .spawn(worker.run().instrument(span))
+        };
+        #[cfg(not(tokio_unstable))]
+        let _worker_handle = tokio::spawn(worker.run().instrument(span));
+
         batch
     }
 
