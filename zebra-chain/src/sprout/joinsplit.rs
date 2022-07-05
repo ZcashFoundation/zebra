@@ -1,3 +1,5 @@
+//! Sprout funds transfers using [`JoinSplit`]s.
+
 use std::io;
 
 use serde::{Deserialize, Serialize};
@@ -82,18 +84,25 @@ impl<P: ZkSnarkProof> ZcashSerialize for JoinSplit<P> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.vpub_old.zcash_serialize(&mut writer)?;
         self.vpub_new.zcash_serialize(&mut writer)?;
+
         writer.write_32_bytes(&self.anchor.into())?;
         writer.write_32_bytes(&self.nullifiers[0].into())?;
         writer.write_32_bytes(&self.nullifiers[1].into())?;
         writer.write_32_bytes(&self.commitments[0].into())?;
         writer.write_32_bytes(&self.commitments[1].into())?;
+
         writer.write_all(&self.ephemeral_key.as_bytes()[..])?;
+        // The borrow is actually needed to avoid taking ownership
+        #[allow(clippy::needless_borrow)]
         writer.write_32_bytes(&(&self.random_seed).into())?;
+
         self.vmacs[0].zcash_serialize(&mut writer)?;
         self.vmacs[1].zcash_serialize(&mut writer)?;
         self.zkproof.zcash_serialize(&mut writer)?;
+
         self.enc_ciphertexts[0].zcash_serialize(&mut writer)?;
         self.enc_ciphertexts[1].zcash_serialize(&mut writer)?;
+
         Ok(())
     }
 }
