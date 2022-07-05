@@ -76,6 +76,26 @@ impl Default for Verifier {
     }
 }
 
+impl Verifier {
+    /// Flush the batch and return the result via the channel
+    fn flush(&mut self) {
+        let batch = mem::take(&mut self.batch);
+
+        // # Correctness
+        //
+        // Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+        //
+        // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
+        let result = tokio::task::block_in_place(|| batch.verify(thread_rng()));
+        let _ = self.tx.send(result);
+
+        // Use a new channel for each batch.
+        // TODO: replace with a watch channel (#4729)
+        let (tx, _) = channel(1);
+        let _ = mem::replace(&mut self.tx, tx);
+    }
+}
+
 /// Type alias to clarify that this `batch::Item` is a `Ed25519Item`
 pub type Item = batch::Item;
 
@@ -121,20 +141,8 @@ impl Service<BatchControl<Item>> for Verifier {
 
             BatchControl::Flush => {
                 tracing::trace!("got ed25519 flush command");
-                let batch = mem::take(&mut self.batch);
 
-                // # Correctness
-                //
-                // Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-                //
-                // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
-                let result = tokio::task::block_in_place(|| batch.verify(thread_rng()));
-                let _ = self.tx.send(result);
-
-                // Use a new channel for each batch.
-                // TODO: replace with a watch channel (#4729)
-                let (tx, _) = channel(1);
-                let _ = mem::replace(&mut self.tx, tx);
+                self.flush();
 
                 Box::pin(async { Ok(()) })
             }
@@ -144,8 +152,6 @@ impl Service<BatchControl<Item>> for Verifier {
 
 impl Drop for Verifier {
     fn drop(&mut self) {
-        // We need to flush the current batch in case there are still any pending futures.
-        let batch = mem::take(&mut self.batch);
-        let _ = self.tx.send(batch.verify(thread_rng()));
+        self.flush();
     }
 }
