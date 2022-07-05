@@ -916,9 +916,9 @@ where
             //
             // https://zips.z.cash/protocol/protocol.pdf#actiondesc
             //
-            // Unlike Sapling, Orchard shielded transactions have a single 
-            // aggregated Halo2 proof per transaction, even with multiple 
-            // Actions in one transaction. So we queue it for verification 
+            // Unlike Sapling, Orchard shielded transactions have a single
+            // aggregated Halo2 proof per transaction, even with multiple
+            // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
             async_checks.push(
                 primitives::halo2::VERIFIER
