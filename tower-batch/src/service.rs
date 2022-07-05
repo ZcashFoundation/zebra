@@ -1,5 +1,23 @@
 //! Wrapper service for batching items to an underlying service.
 
+use std::{
+    fmt,
+    future::Future,
+    pin::Pin,
+    sync::{Arc, Mutex},
+    task::{Context, Poll},
+};
+
+use futures_core::ready;
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
+use tower::Service;
+use tracing::{info_span, Instrument};
+
+use crate::semaphore::Semaphore;
+
 use super::{
     future::ResponseFuture,
     message::Message,
@@ -7,19 +25,9 @@ use super::{
     BatchControl,
 };
 
-use crate::semaphore::Semaphore;
-use futures_core::ready;
-use std::{
-    fmt,
-    task::{Context, Poll},
-};
-use tokio::sync::{mpsc, oneshot};
-use tower::Service;
-use tracing::{info_span, Instrument};
-
 /// Allows batch processing of requests.
 ///
-/// See the module documentation for more details.
+/// See the crate documentation for more details.
 pub struct Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
@@ -47,6 +55,11 @@ where
 
     /// An error handle shared between all service clones for the same worker.
     error_handle: ErrorHandle,
+
+    /// A worker task handle shared between all service clones for the same worker.
+    ///
+    /// Only used when the worker is spawned on the tokio runtime.
+    worker_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl<T, Request> fmt::Debug for Batch<T, Request>
@@ -59,6 +72,7 @@ where
             .field("tx", &self.tx)
             .field("semaphore", &self.semaphore)
             .field("error_handle", &self.error_handle)
+            .field("worker_handle", &self.worker_handle)
             .finish()
     }
 }
@@ -85,13 +99,12 @@ where
         T::Error: Send + Sync,
         Request: Send + 'static,
     {
-        let (batch, worker) = Self::pair(service, max_items, max_latency);
+        let (mut batch, worker) = Self::pair(service, max_items, max_latency);
 
         let span = info_span!("batch worker", kind = std::any::type_name::<T>());
 
-        // TODO: check for panics in the returned JoinHandle (#4738)
         #[cfg(tokio_unstable)]
-        let _worker_handle = {
+        let worker_handle = {
             let batch_kind = std::any::type_name::<T>();
 
             // TODO: identify the unique part of the type name generically,
@@ -104,7 +117,9 @@ where
                 .spawn(worker.run().instrument(span))
         };
         #[cfg(not(tokio_unstable))]
-        let _worker_handle = tokio::spawn(worker.run().instrument(span));
+        let worker_handle = tokio::spawn(worker.run().instrument(span));
+
+        batch.register_worker(worker_handle);
 
         batch
     }
@@ -139,11 +154,24 @@ where
             tx,
             semaphore,
             error_handle,
+            worker_handle: Arc::new(Mutex::new(None)),
         };
 
         (batch, worker)
     }
 
+    /// Ask the `Batch` to monitor the spawned worker task's [`JoinHandle`](tokio::task::JoinHandle).
+    ///
+    /// Only used when the task is spawned on the tokio runtime.
+    pub fn register_worker(&mut self, worker_handle: JoinHandle<()>) {
+        *self
+            .worker_handle
+            .lock()
+            .expect("previous task panicked while holding the worker handle mutex") =
+            Some(worker_handle);
+    }
+
+    /// Returns the error from the batch worker's `error_handle`.
     fn get_worker_error(&self) -> crate::BoxError {
         self.error_handle.get_error_on_closed()
     }
@@ -159,7 +187,22 @@ where
     type Future = ResponseFuture<T::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // First, check if the worker is still alive.
+        if let Some(worker_handle) = self
+            .worker_handle
+            .lock()
+            .expect("previous task panicked while holding the worker handle mutex")
+            .as_mut()
+        {
+            match Pin::new(worker_handle).poll(cx) {
+                Poll::Ready(Ok(())) => return Poll::Ready(Err(self.get_worker_error())),
+                Poll::Ready(task_panic) => {
+                    task_panic.expect("unexpected panic in batch worker task")
+                }
+                Poll::Pending => {}
+            }
+        }
+
+        // Check if the worker has set an error and closed its channels.
         if self.tx.is_closed() {
             // If the inner service has errored, then we error here.
             return Poll::Ready(Err(self.get_worker_error()));
@@ -214,8 +257,9 @@ where
     fn clone(&self) -> Self {
         Self {
             tx: self.tx.clone(),
-            error_handle: self.error_handle.clone(),
             semaphore: self.semaphore.clone(),
+            error_handle: self.error_handle.clone(),
+            worker_handle: self.worker_handle.clone(),
         }
     }
 }

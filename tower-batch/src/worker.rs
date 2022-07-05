@@ -229,7 +229,7 @@ impl ErrorHandle {
     pub(crate) fn get_error_on_closed(&self) -> crate::BoxError {
         self.inner
             .lock()
-            .unwrap()
+            .expect("previous task panicked while holding the error handle mutex")
             .as_ref()
             .map(|svc_err| svc_err.clone().into())
             .unwrap_or_else(|| Closed::new().into())
