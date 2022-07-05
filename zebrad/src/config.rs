@@ -214,11 +214,18 @@ pub struct SyncSection {
 impl Default for SyncSection {
     fn default() -> Self {
         Self {
+            // 2/3 of the default outbound peer limit.
             download_concurrency_limit: 50,
+
+            // A few max-length checkpoints.
             checkpoint_verify_concurrency_limit: sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT,
-            // TODO: try increasing to 25 when we implement orchard proof batching?
+
+            // Guaranteed to verify a bunch of large blocks in under 60 seconds
+            // (so that the committed block height changes in every progress log).
+            //
+            // TODO: when we implement orchard proof batching, try increasing to 100 or more
             //       limit full verification concurrency based on block transaction counts?
-            full_verify_concurrency_limit: 5,
+            full_verify_concurrency_limit: 30,
         }
     }
 }
