@@ -67,7 +67,7 @@ where
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn verify_sapling_groth16() {
     // Use separate verifiers so shared batch tasks aren't killed when the test ends (#2390)
     let mut spend_verifier = Fallback::new(
@@ -170,7 +170,7 @@ where
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn correctly_err_on_invalid_output_proof() {
     // Use separate verifiers so shared batch tasks aren't killed when the test ends (#2390).
     // Also, since we expect these to fail, we don't want to slow down the communal verifiers.
@@ -246,7 +246,7 @@ where
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn verify_sprout_groth16() {
     let mut verifier = tower::service_fn(
         (|item: Item| {
@@ -309,7 +309,7 @@ where
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn verify_sprout_groth16_vector() {
     let mut verifier = tower::service_fn(
         (|item: Item| {
@@ -431,7 +431,7 @@ where
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn correctly_err_on_invalid_joinsplit_proof() {
     // Use separate verifiers so shared batch tasks aren't killed when the test ends (#2390).
     // Also, since we expect these to fail, we don't want to slow down the communal verifiers.

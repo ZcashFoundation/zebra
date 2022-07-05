@@ -164,8 +164,16 @@ pub static VERIFIER: Lazy<
         // we use a Ready to avoid an async block and cast the closure to a
         // function (which is possible because it doesn't capture any state).
         tower::service_fn(
-            (|item: Item| ready(item.verify_single(&VERIFYING_KEY).map_err(Halo2Error::from)))
-                as fn(_) -> _,
+            (|item: Item| {
+                ready(
+                    // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+                    //
+                    // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
+                    tokio::task::block_in_place(|| {
+                        item.verify_single(&VERIFYING_KEY).map_err(Halo2Error::from)
+                    }),
+                )
+            }) as fn(_) -> _,
         ),
     )
 });
@@ -196,9 +204,7 @@ impl Verifier {
     /// Flush the batch and return the result via the channel
     fn flush(&mut self) {
         let batch = mem::take(&mut self.batch);
-        // # Correctness
-        //
-        // Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+        // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         //
         // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
         let result = tokio::task::block_in_place(|| batch.verify(thread_rng(), self.vk));

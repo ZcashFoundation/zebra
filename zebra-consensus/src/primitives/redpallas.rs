@@ -46,7 +46,16 @@ pub static VERIFIER: Lazy<
         // blocks have eldritch types whose names cannot be written. So instead,
         // we use a Ready to avoid an async block and cast the closure to a
         // function (which is possible because it doesn't capture any state).
-        tower::service_fn((|item: Item| ready(item.verify_single())) as fn(_) -> _),
+        tower::service_fn(
+            (|item: Item| {
+                ready(
+                    // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+                    //
+                    // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
+                    tokio::task::block_in_place(|| item.verify_single()),
+                )
+            }) as fn(_) -> _,
+        ),
     )
 });
 

@@ -129,9 +129,16 @@ pub static JOINSPLIT_VERIFIER: Lazy<ServiceFn<fn(Item) -> Ready<Result<(), Boxed
         tower::service_fn(
             (|item: Item| {
                 ready(
-                    item.verify_single(&GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key)
+                    // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+                    //
+                    // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
+                    tokio::task::block_in_place(|| {
+                        item.verify_single(
+                            &GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key,
+                        )
                         .map_err(|e| TransactionError::Groth16(e.to_string()))
-                        .map_err(tower_fallback::BoxedError::from),
+                        .map_err(tower_fallback::BoxedError::from)
+                    }),
                 )
             }) as fn(_) -> _,
         )
@@ -345,7 +352,7 @@ pub struct Verifier {
 impl Verifier {
     fn new(vk: &'static VerifyingKey<Bls12>) -> Self {
         let batch = batch::Verifier::default();
-        let (tx, _) = channel(super::BROADCAST_BUFFER_SIZE);
+        let (tx, _) = channel(1);
         Self { batch, vk, tx }
     }
 }
@@ -403,7 +410,20 @@ impl Service<BatchControl<Item>> for Verifier {
             BatchControl::Flush => {
                 tracing::trace!("got flush command");
                 let batch = mem::take(&mut self.batch);
-                let _ = self.tx.send(batch.verify(thread_rng(), self.vk));
+
+                // # Correctness
+                //
+                // Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+                //
+                // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
+                let result = tokio::task::block_in_place(|| batch.verify(thread_rng(), self.vk));
+                let _ = self.tx.send(result);
+
+                // Use a new channel for each batch.
+                // TODO: replace with a watch channel (#4729)
+                let (tx, _) = channel(1);
+                let _ = mem::replace(&mut self.tx, tx);
+
                 Box::pin(async { Ok(()) })
             }
         }

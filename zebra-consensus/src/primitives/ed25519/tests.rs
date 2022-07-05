@@ -33,7 +33,7 @@ where
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn batch_flushes_on_max_items_test() -> Result<()> {
     batch_flushes_on_max_items().await
 }
@@ -52,7 +52,7 @@ async fn batch_flushes_on_max_items() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn batch_flushes_on_max_latency_test() -> Result<()> {
     batch_flushes_on_max_latency().await
 }

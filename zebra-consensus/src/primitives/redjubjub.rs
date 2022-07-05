@@ -45,7 +45,16 @@ pub static VERIFIER: Lazy<
         // blocks have eldritch types whose names cannot be written. So instead,
         // we use a Ready to avoid an async block and cast the closure to a
         // function (which is possible because it doesn't capture any state).
-        tower::service_fn((|item: Item| ready(item.verify_single())) as fn(_) -> _),
+        tower::service_fn(
+            (|item: Item| {
+                ready(
+                    // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+                    //
+                    // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
+                    tokio::task::block_in_place(|| item.verify_single()),
+                )
+            }) as fn(_) -> _,
+        ),
     )
 });
 
@@ -62,7 +71,7 @@ pub struct Verifier {
 impl Default for Verifier {
     fn default() -> Self {
         let batch = batch::Verifier::default();
-        let (tx, _) = channel(super::BROADCAST_BUFFER_SIZE);
+        let (tx, _) = channel(1);
         Self { batch, tx }
     }
 }
@@ -112,7 +121,20 @@ impl Service<BatchControl<Item>> for Verifier {
             BatchControl::Flush => {
                 tracing::trace!("got flush command");
                 let batch = mem::take(&mut self.batch);
-                let _ = self.tx.send(batch.verify(thread_rng()));
+
+                // # Correctness
+                //
+                // Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+                //
+                // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
+                let result = tokio::task::block_in_place(|| batch.verify(thread_rng()));
+                let _ = self.tx.send(result);
+
+                // Use a new channel for each batch.
+                // TODO: replace with a watch channel (#4729)
+                let (tx, _) = channel(1);
+                let _ = mem::replace(&mut self.tx, tx);
+
                 Box::pin(async { Ok(()) })
             }
         }

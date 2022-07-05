@@ -1360,74 +1360,72 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
 /// - Test if an unsigned V4 transaction with a dummy [`sprout::JoinSplit`] is rejected.
 ///
 /// This test verifies if the transaction verifier correctly accepts a signed transaction.
-#[test]
-fn v4_with_signed_sprout_transfer_is_accepted() {
+#[tokio::test(flavor = "multi_thread")]
+async fn v4_with_signed_sprout_transfer_is_accepted() {
     zebra_test::init();
-    zebra_test::RUNTIME.block_on(async {
-        let network = Network::Mainnet;
 
-        let (height, transaction) = test_transactions(network)
-            .rev()
-            .filter(|(_, transaction)| {
-                !transaction.is_coinbase() && transaction.inputs().is_empty()
-            })
-            .find(|(_, transaction)| transaction.sprout_groth16_joinsplits().next().is_some())
-            .expect("No transaction found with Groth16 JoinSplits");
+    let network = Network::Mainnet;
 
-        let expected_hash = transaction.unmined_id();
+    let (height, transaction) = test_transactions(network)
+        .rev()
+        .filter(|(_, transaction)| !transaction.is_coinbase() && transaction.inputs().is_empty())
+        .find(|(_, transaction)| transaction.sprout_groth16_joinsplits().next().is_some())
+        .expect("No transaction found with Groth16 JoinSplits");
 
-        // Initialize the verifier
-        let state_service =
-            service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new(network, state_service);
+    let expected_hash = transaction.unmined_id();
 
-        // Test the transaction verifier
-        let result = verifier
-            .clone()
-            .oneshot(Request::Block {
-                transaction,
-                known_utxos: Arc::new(HashMap::new()),
-                height,
-                time: chrono::MAX_DATETIME,
-            })
-            .await;
+    // Initialize the verifier
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(network, state_service);
 
-        assert_eq!(
-            result.expect("unexpected error response").tx_id(),
-            expected_hash
-        );
-    });
+    // Test the transaction verifier
+    let result = verifier
+        .clone()
+        .oneshot(Request::Block {
+            transaction,
+            known_utxos: Arc::new(HashMap::new()),
+            height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result.expect("unexpected error response").tx_id(),
+        expected_hash
+    );
 }
 
 /// Test if an V4 transaction with a modified [`sprout::JoinSplit`] is rejected.
 ///
 /// This test verifies if the transaction verifier correctly rejects the transaction because of the
 /// invalid JoinSplit.
-#[test]
-fn v4_with_modified_joinsplit_is_rejected() {
+#[tokio::test(flavor = "multi_thread")]
+async fn v4_with_modified_joinsplit_is_rejected() {
     zebra_test::init();
-    zebra_test::RUNTIME.block_on(async {
-        v4_with_joinsplit_is_rejected_for_modification(
-            JoinSplitModification::CorruptSignature,
-            // TODO: Fix error downcast
-            // Err(TransactionError::Ed25519(ed25519::Error::InvalidSignature))
-            TransactionError::InternalDowncastError(
-                "downcast to known transaction error type failed, original error: InvalidSignature"
-                    .to_string(),
-            ),
-        )
-        .await;
-        v4_with_joinsplit_is_rejected_for_modification(
-            JoinSplitModification::CorruptProof,
-            TransactionError::Groth16("proof verification failed".to_string()),
-        )
-        .await;
-        v4_with_joinsplit_is_rejected_for_modification(
-            JoinSplitModification::ZeroProof,
-            TransactionError::MalformedGroth16("invalid G1".to_string()),
-        )
-        .await;
-    });
+
+    v4_with_joinsplit_is_rejected_for_modification(
+        JoinSplitModification::CorruptSignature,
+        // TODO: Fix error downcast
+        // Err(TransactionError::Ed25519(ed25519::Error::InvalidSignature))
+        TransactionError::InternalDowncastError(
+            "downcast to known transaction error type failed, original error: InvalidSignature"
+                .to_string(),
+        ),
+    )
+    .await;
+
+    v4_with_joinsplit_is_rejected_for_modification(
+        JoinSplitModification::CorruptProof,
+        TransactionError::Groth16("proof verification failed".to_string()),
+    )
+    .await;
+
+    v4_with_joinsplit_is_rejected_for_modification(
+        JoinSplitModification::ZeroProof,
+        TransactionError::MalformedGroth16("invalid G1".to_string()),
+    )
+    .await;
 }
 
 async fn v4_with_joinsplit_is_rejected_for_modification(
@@ -1552,46 +1550,43 @@ fn v4_with_duplicate_sapling_spends() {
 }
 
 /// Test if a V4 transaction with Sapling outputs but no spends is accepted by the verifier.
-#[test]
-fn v4_with_sapling_outputs_and_no_spends() {
+#[tokio::test(flavor = "multi_thread")]
+async fn v4_with_sapling_outputs_and_no_spends() {
     zebra_test::init();
-    zebra_test::RUNTIME.block_on(async {
-        let network = Network::Mainnet;
 
-        let (height, transaction) = test_transactions(network)
-            .rev()
-            .filter(|(_, transaction)| {
-                !transaction.is_coinbase() && transaction.inputs().is_empty()
-            })
-            .find(|(_, transaction)| {
-                transaction.sapling_spends_per_anchor().next().is_none()
-                    && transaction.sapling_outputs().next().is_some()
-            })
-            .expect("No transaction found with Sapling outputs and no Sapling spends");
+    let network = Network::Mainnet;
 
-        let expected_hash = transaction.unmined_id();
+    let (height, transaction) = test_transactions(network)
+        .rev()
+        .filter(|(_, transaction)| !transaction.is_coinbase() && transaction.inputs().is_empty())
+        .find(|(_, transaction)| {
+            transaction.sapling_spends_per_anchor().next().is_none()
+                && transaction.sapling_outputs().next().is_some()
+        })
+        .expect("No transaction found with Sapling outputs and no Sapling spends");
 
-        // Initialize the verifier
-        let state_service =
-            service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new(network, state_service);
+    let expected_hash = transaction.unmined_id();
 
-        // Test the transaction verifier
-        let result = verifier
-            .clone()
-            .oneshot(Request::Block {
-                transaction,
-                known_utxos: Arc::new(HashMap::new()),
-                height,
-                time: chrono::MAX_DATETIME,
-            })
-            .await;
+    // Initialize the verifier
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new(network, state_service);
 
-        assert_eq!(
-            result.expect("unexpected error response").tx_id(),
-            expected_hash
-        );
-    });
+    // Test the transaction verifier
+    let result = verifier
+        .clone()
+        .oneshot(Request::Block {
+            transaction,
+            known_utxos: Arc::new(HashMap::new()),
+            height,
+            time: chrono::MAX_DATETIME,
+        })
+        .await;
+
+    assert_eq!(
+        result.expect("unexpected error response").tx_id(),
+        expected_hash
+    );
 }
 
 /// Test if a V5 transaction with Sapling spends is accepted by the verifier.
