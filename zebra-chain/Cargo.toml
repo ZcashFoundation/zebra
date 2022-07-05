@@ -37,7 +37,7 @@ primitive-types = "0.11.1"
 rand_core = "0.6.3"
 ripemd = "0.1.1"
 
-serde = { version = "1.0.137", features = ["serde_derive", "rc"] }
+serde = { version = "1.0.138", features = ["serde_derive", "rc"] }
 serde_with = "1.14.0"
 serde-big-array = "0.4.1"
 # Matches version used by hdwallet
