@@ -1,3 +1,5 @@
+//! Batch worker item handling and run loop implementation.
+
 use std::{
     pin::Pin,
     sync::{Arc, Mutex},
@@ -9,10 +11,9 @@ use tokio::{
     sync::mpsc,
     time::{sleep, Sleep},
 };
+use tokio_util::sync::PollSemaphore;
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
-
-use crate::semaphore;
 
 use super::{
     error::{Closed, ServiceError},
@@ -34,13 +35,26 @@ where
     T: Service<BatchControl<Request>>,
     T::Error: Into<crate::BoxError>,
 {
+    /// A semaphore-bounded channel for receiving requests from the batch wrapper service.
     rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
+
+    /// The wrapped service that processes batches.
     service: T,
+
+    /// An error that's populated on permanent service failure.
     failed: Option<ServiceError>,
+
+    /// A shared error handle that's populated on permanent service failure.
     error_handle: ErrorHandle,
+
+    /// The maximum number of items allowed in a batch.
     max_items: usize,
+
+    /// The maximum delay before processing a batch with fewer than `max_items`.
     max_latency: std::time::Duration,
-    close: Option<semaphore::Close>,
+
+    /// A cloned copy of the wrapper service's semaphore, used to close the semaphore.
+    close: PollSemaphore,
 }
 
 /// Get the error out
@@ -59,7 +73,7 @@ where
         rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
         max_items: usize,
         max_latency: std::time::Duration,
-        close: semaphore::Close,
+        close: PollSemaphore,
     ) -> (ErrorHandle, Worker<T, Request>) {
         let error_handle = ErrorHandle {
             inner: Arc::new(Mutex::new(None)),
@@ -72,7 +86,7 @@ where
             failed: None,
             max_items,
             max_latency,
-            close: Some(close),
+            close,
         };
 
         (error_handle, worker)
@@ -97,10 +111,8 @@ where
                         .clone()));
 
                     // Wake any tasks waiting on channel capacity.
-                    if let Some(close) = self.close.take() {
-                        tracing::debug!("waking pending tasks");
-                        close.close();
-                    }
+                    tracing::debug!("waking pending tasks");
+                    self.close.close();
                 }
             }
         }
@@ -251,8 +263,13 @@ where
     T::Error: Into<crate::BoxError>,
 {
     fn drop(mut self: Pin<&mut Self>) {
-        if let Some(close) = self.as_mut().close.take() {
-            close.close();
-        }
+        // Fail pending tasks
+        self.failed(Closed::new().into());
+
+        // Clear queued requests
+        while self.rx.try_recv().is_ok() {}
+
+        // Stop accepting reservations
+        self.close.close();
     }
 }

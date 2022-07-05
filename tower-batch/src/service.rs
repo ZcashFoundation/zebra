@@ -10,13 +10,13 @@ use std::{
 
 use futures_core::ready;
 use tokio::{
-    sync::{mpsc, oneshot},
+    pin,
+    sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore},
     task::JoinHandle,
 };
+use tokio_util::sync::PollSemaphore;
 use tower::Service;
 use tracing::{info_span, Instrument};
-
-use crate::semaphore::Semaphore;
 
 use super::{
     future::ResponseFuture,
@@ -40,18 +40,18 @@ where
 
     /// A semaphore used to bound the channel.
     ///
-    /// TODO: replace with bounded mpsc::Sender::reserve() and delete crate::Semaphore
-    ///
     /// When the buffer's channel is full, we want to exert backpressure in
     /// `poll_ready`, so that callers such as load balancers could choose to call
     /// another service rather than waiting for buffer capacity.
     ///
     /// Unfortunately, this can't be done easily using Tokio's bounded MPSC
-    /// channel, because it doesn't expose a polling-based interface, only an
-    /// `async fn ready`, which borrows the sender. Therefore, we implement our
+    /// channel, because it doesn't wake pending tasks on close. Therefore, we implement our
     /// own bounded MPSC on top of the unbounded channel, using a semaphore to
     /// limit how many items are in the channel.
-    semaphore: Semaphore,
+    semaphore: PollSemaphore,
+
+    /// A semaphore permit that allows this service to send one message on `tx`.
+    permit: Option<OwnedSemaphorePermit>,
 
     /// An error handle shared between all service clones for the same worker.
     error_handle: ErrorHandle,
@@ -146,13 +146,15 @@ where
         // used their semaphore reservation in a `call` yet).
         // We choose a bound that allows callers to check readiness for every item in
         // a batch, then actually submit those items.
-        let bound = max_items;
-        let (semaphore, close) = Semaphore::new_with_close(bound);
+        let semaphore = Semaphore::new(max_items);
+        let semaphore = PollSemaphore::new(Arc::new(semaphore));
 
-        let (error_handle, worker) = Worker::new(service, rx, max_items, max_latency, close);
+        let (error_handle, worker) =
+            Worker::new(service, rx, max_items, max_latency, semaphore.clone());
         let batch = Batch {
             tx,
             semaphore,
+            permit: None,
             error_handle,
             worker_handle: Arc::new(Mutex::new(None)),
         };
@@ -187,6 +189,9 @@ where
     type Future = ResponseFuture<T::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Check to see if the worker has returned or panicked.
+        //
+        // Correctness: Registers this task for wakeup when the worker finishes.
         if let Some(worker_handle) = self
             .worker_handle
             .lock()
@@ -203,21 +208,33 @@ where
         }
 
         // Check if the worker has set an error and closed its channels.
-        if self.tx.is_closed() {
-            // If the inner service has errored, then we error here.
+        //
+        // Correctness: Registers this task for wakeup when the channel is closed.
+        let tx = self.tx.clone();
+        let closed = tx.closed();
+        pin!(closed);
+        if closed.poll(cx).is_ready() {
             return Poll::Ready(Err(self.get_worker_error()));
         }
 
+        // Poll to acquire a semaphore permit.
+        //
         // CORRECTNESS
         //
-        // Poll to acquire a semaphore permit. If we acquire a permit, then
-        // there's enough buffer capacity to send a new request. Otherwise, we
-        // need to wait for capacity.
+        // If we acquire a permit, then there's enough buffer capacity to send a new request.
+        // Otherwise, we need to wait for capacity.
         //
-        // The current task must be scheduled for wakeup every time we return
-        // `Poll::Pending`. If it returns Pending, the semaphore also schedules
-        // the task for wakeup when the next permit is available.
-        ready!(self.semaphore.poll_acquire(cx));
+        // Correctness: Registers this task for wakeup when the next permit is available,
+        // or when the semaphore is closed.
+        let permit = ready!(self.semaphore.poll_acquire(cx));
+        if let Some(permit) = permit {
+            // Calling poll_ready() more than once will drop any previous permit,
+            // releasing its capacity back to the semaphore.
+            self.permit = Some(permit);
+        } else {
+            // The semaphore has been closed.
+            return Poll::Ready(Err(self.get_worker_error()));
+        }
 
         Poll::Ready(Ok(()))
     }
@@ -225,9 +242,9 @@ where
     fn call(&mut self, request: Request) -> Self::Future {
         tracing::trace!("sending request to buffer worker");
         let _permit = self
-            .semaphore
-            .take_permit()
-            .expect("buffer full; poll_ready must be called first");
+            .permit
+            .take()
+            .expect("poll_ready must be called before a batch request");
 
         // get the current Span so that we can explicitly propagate it to the worker
         // if we didn't do this, events on the worker related to this span wouldn't be counted
@@ -258,6 +275,7 @@ where
         Self {
             tx: self.tx.clone(),
             semaphore: self.semaphore.clone(),
+            permit: None,
             error_handle: self.error_handle.clone(),
             worker_handle: self.worker_handle.clone(),
         }
