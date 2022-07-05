@@ -37,7 +37,7 @@ where
     rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
     service: T,
     failed: Option<ServiceError>,
-    handle: Handle,
+    error_handle: ErrorHandle,
     max_items: usize,
     max_latency: std::time::Duration,
     close: Option<semaphore::Close>,
@@ -45,7 +45,7 @@ where
 
 /// Get the error out
 #[derive(Debug)]
-pub(crate) struct Handle {
+pub(crate) struct ErrorHandle {
     inner: Arc<Mutex<Option<ServiceError>>>,
 }
 
@@ -60,22 +60,22 @@ where
         max_items: usize,
         max_latency: std::time::Duration,
         close: semaphore::Close,
-    ) -> (Handle, Worker<T, Request>) {
-        let handle = Handle {
+    ) -> (ErrorHandle, Worker<T, Request>) {
+        let error_handle = ErrorHandle {
             inner: Arc::new(Mutex::new(None)),
         };
 
         let worker = Worker {
             rx,
             service,
-            handle: handle.clone(),
+            error_handle: error_handle.clone(),
             failed: None,
             max_items,
             max_latency,
             close: Some(close),
         };
 
-        (handle, worker)
+        (error_handle, worker)
     }
 
     async fn process_req(&mut self, req: Request, tx: message::Tx<T::Future>) {
@@ -196,7 +196,7 @@ where
         // an `Arc`, send that `Arc<E>` to all pending requests, and store it so that subsequent
         // requests will also fail with the same error.
 
-        // Note that we need to handle the case where some handle is concurrently trying to send us
+        // Note that we need to handle the case where some error_handle is concurrently trying to send us
         // a request. We need to make sure that *either* the send of the request fails *or* it
         // receives an error on the `oneshot` it constructed. Specifically, we want to avoid the
         // case where we send errors to all outstanding requests, and *then* the caller sends its
@@ -205,7 +205,7 @@ where
         // sending the error to all outstanding requests.
         let error = ServiceError::new(error);
 
-        let mut inner = self.handle.inner.lock().unwrap();
+        let mut inner = self.error_handle.inner.lock().unwrap();
 
         if inner.is_some() {
             // Future::poll was called after we've already errored out!
@@ -225,7 +225,7 @@ where
     }
 }
 
-impl Handle {
+impl ErrorHandle {
     pub(crate) fn get_error_on_closed(&self) -> crate::BoxError {
         self.inner
             .lock()
@@ -236,9 +236,9 @@ impl Handle {
     }
 }
 
-impl Clone for Handle {
-    fn clone(&self) -> Handle {
-        Handle {
+impl Clone for ErrorHandle {
+    fn clone(&self) -> ErrorHandle {
+        ErrorHandle {
             inner: self.inner.clone(),
         }
     }

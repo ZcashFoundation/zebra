@@ -1,7 +1,9 @@
+//! Wrapper service for batching items to an underlying service.
+
 use super::{
     future::ResponseFuture,
     message::Message,
-    worker::{Handle, Worker},
+    worker::{ErrorHandle, Worker},
     BatchControl,
 };
 
@@ -22,20 +24,29 @@ pub struct Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
 {
-    // Note: this actually _is_ bounded, but rather than using Tokio's unbounded
-    // channel, we use tokio's semaphore separately to implement the bound.
+    /// A custom-bounded channel for sending requests to the batch worker.
+    ///
+    /// Note: this actually _is_ bounded, but rather than using Tokio's unbounded
+    /// channel, we use tokio's semaphore separately to implement the bound.
     tx: mpsc::UnboundedSender<Message<Request, T::Future>>,
-    // When the buffer's channel is full, we want to exert backpressure in
-    // `poll_ready`, so that callers such as load balancers could choose to call
-    // another service rather than waiting for buffer capacity.
-    //
-    // Unfortunately, this can't be done easily using Tokio's bounded MPSC
-    // channel, because it doesn't expose a polling-based interface, only an
-    // `async fn ready`, which borrows the sender. Therefore, we implement our
-    // own bounded MPSC on top of the unbounded channel, using a semaphore to
-    // limit how many items are in the channel.
+
+    /// A semaphore used to bound the channel.
+    ///
+    /// TODO: replace with bounded mpsc::Sender::reserve() and delete crate::Semaphore
+    ///
+    /// When the buffer's channel is full, we want to exert backpressure in
+    /// `poll_ready`, so that callers such as load balancers could choose to call
+    /// another service rather than waiting for buffer capacity.
+    ///
+    /// Unfortunately, this can't be done easily using Tokio's bounded MPSC
+    /// channel, because it doesn't expose a polling-based interface, only an
+    /// `async fn ready`, which borrows the sender. Therefore, we implement our
+    /// own bounded MPSC on top of the unbounded channel, using a semaphore to
+    /// limit how many items are in the channel.
     semaphore: Semaphore,
-    handle: Handle,
+
+    /// An error handle shared between all service clones for the same worker.
+    error_handle: ErrorHandle,
 }
 
 impl<T, Request> fmt::Debug for Batch<T, Request>
@@ -47,7 +58,7 @@ where
         f.debug_struct(name)
             .field("tx", &self.tx)
             .field("semaphore", &self.semaphore)
-            .field("handle", &self.handle)
+            .field("error_handle", &self.error_handle)
             .finish()
     }
 }
@@ -123,18 +134,18 @@ where
         let bound = max_items;
         let (semaphore, close) = Semaphore::new_with_close(bound);
 
-        let (handle, worker) = Worker::new(service, rx, max_items, max_latency, close);
+        let (error_handle, worker) = Worker::new(service, rx, max_items, max_latency, close);
         let batch = Batch {
             tx,
             semaphore,
-            handle,
+            error_handle,
         };
 
         (batch, worker)
     }
 
     fn get_worker_error(&self) -> crate::BoxError {
-        self.handle.get_error_on_closed()
+        self.error_handle.get_error_on_closed()
     }
 }
 
@@ -159,10 +170,6 @@ where
         // Poll to acquire a semaphore permit. If we acquire a permit, then
         // there's enough buffer capacity to send a new request. Otherwise, we
         // need to wait for capacity.
-        //
-        // In tokio 0.3.7, `acquire_owned` panics if its semaphore returns an
-        // error, so we don't need to handle errors until we upgrade to
-        // tokio 1.0.
         //
         // The current task must be scheduled for wakeup every time we return
         // `Poll::Pending`. If it returns Pending, the semaphore also schedules
@@ -207,7 +214,7 @@ where
     fn clone(&self) -> Self {
         Self {
             tx: self.tx.clone(),
-            handle: self.handle.clone(),
+            error_handle: self.error_handle.clone(),
             semaphore: self.semaphore.clone(),
         }
     }
