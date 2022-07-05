@@ -909,25 +909,25 @@ where
         let mut async_checks = AsyncChecks::new();
 
         if let Some(orchard_shielded_data) = orchard_shielded_data {
+            // # Consensus
+            //
+            // > The proof 𝜋 MUST be valid given a primary input (cv, rt^{Orchard},
+            // > nf, rk, cm_x, enableSpends, enableOutputs)
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#actiondesc
+            //
+            // Queue the verification of the Halo2 proof for each Action
+            // description while adding the resulting future to our
+            // collection of async checks that (at a minimum) must pass for
+            // the transaction to verify.
+            async_checks.push(
+                primitives::halo2::VERIFIER
+                    .clone()
+                    .oneshot(primitives::halo2::Item::from(orchard_shielded_data)),
+            );
+
             for authorized_action in orchard_shielded_data.actions.iter().cloned() {
                 let (action, spend_auth_sig) = authorized_action.into_parts();
-
-                // # Consensus
-                //
-                // > The proof 𝜋 MUST be valid given a primary input (cv, rt^{Orchard},
-                // > nf, rk, cm_x, enableSpends, enableOutputs)
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#actiondesc
-                //
-                // Queue the verification of the Halo2 proof for each Action
-                // description while adding the resulting future to our
-                // collection of async checks that (at a minimum) must pass for
-                // the transaction to verify.
-                async_checks.push(
-                    primitives::halo2::VERIFIER
-                        .clone()
-                        .oneshot(primitives::halo2::Item::from(orchard_shielded_data)),
-                );
 
                 // # Consensus
                 //
