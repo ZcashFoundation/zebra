@@ -220,12 +220,14 @@ impl Default for SyncSection {
             // A few max-length checkpoints.
             checkpoint_verify_concurrency_limit: sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT,
 
-            // Guaranteed to verify a bunch of large blocks in under 60 seconds
-            // (so that the committed block height changes in every progress log).
+            // This default is deliberately very low, so Zebra can verify a few large blocks in under 60 seconds,
+            // even on machines with only a few cores.
             //
-            // TODO: when we implement orchard proof batching, try increasing to 100 or more
+            // This lets users see the committed block height changing in every progress log.
+            //
+            // TODO: when we implement orchard proof batching, try increasing to 20 or more
             //       limit full verification concurrency based on block transaction counts?
-            full_verify_concurrency_limit: 30,
+            full_verify_concurrency_limit: 5,
         }
     }
 }
