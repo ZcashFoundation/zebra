@@ -63,11 +63,11 @@ pub struct Chain {
 
     /// The Sprout note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
-    pub(super) sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+    pub(super) sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
     /// The Sprout note commitment tree for each anchor.
     /// This is required for interstitial states.
     pub(crate) sprout_trees_by_anchor:
-        HashMap<sprout::tree::Root, sprout::tree::NoteCommitmentTree>,
+        HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
     /// The Sapling note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
@@ -125,7 +125,7 @@ impl Chain {
     /// Create a new Chain with the given trees and network.
     pub(crate) fn new(
         network: Network,
-        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+        sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
@@ -270,7 +270,7 @@ impl Chain {
     pub fn fork(
         &self,
         fork_tip: block::Hash,
-        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+        sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
@@ -290,6 +290,8 @@ impl Chain {
             forked.pop_tip();
         }
 
+        let sprout_nct = Arc::make_mut(&mut forked.sprout_note_commitment_tree);
+
         // Rebuild the note commitment trees, starting from the finalized tip tree.
         // TODO: change to a more efficient approach by removing nodes
         // from the tree of the original chain (in [`Self::pop_tip`]).
@@ -297,8 +299,7 @@ impl Chain {
         for block in forked.blocks.values() {
             for transaction in block.block.transactions.iter() {
                 for sprout_note_commitment in transaction.sprout_note_commitments() {
-                    forked
-                        .sprout_note_commitment_tree
+                    sprout_nct
                         .append(*sprout_note_commitment)
                         .expect("must work since it was already appended before the fork");
                 }
@@ -639,7 +640,7 @@ impl Chain {
     /// Useful when forking, where the trees are rebuilt anyway.
     fn with_trees(
         &self,
-        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
+        sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
@@ -1203,8 +1204,10 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
+            let sprout_ncm = Arc::make_mut(&mut self.sprout_note_commitment_tree);
+
             for cm in joinsplit_data.note_commitments() {
-                self.sprout_note_commitment_tree.append(*cm)?;
+                sprout_ncm.append(*cm)?;
             }
 
             check::nullifier::add_to_non_finalized_chain_unique(

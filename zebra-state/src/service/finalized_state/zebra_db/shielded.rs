@@ -12,6 +12,8 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
+use std::sync::Arc;
+
 use zebra_chain::{
     block::Height, history_tree::HistoryTree, orchard, sapling, sprout, transaction::Transaction,
 };
@@ -28,7 +30,7 @@ use crate::{
 /// An argument wrapper struct for note commitment trees.
 #[derive(Clone, Debug)]
 pub struct NoteCommitmentTrees {
-    sprout: sprout::tree::NoteCommitmentTree,
+    sprout: Arc<sprout::tree::NoteCommitmentTree>,
     sapling: sapling::tree::NoteCommitmentTree,
     orchard: orchard::tree::NoteCommitmentTree,
 }
@@ -75,16 +77,17 @@ impl ZebraDb {
 
     /// Returns the Sprout note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
-    pub fn sprout_note_commitment_tree(&self) -> sprout::tree::NoteCommitmentTree {
+    pub fn sprout_note_commitment_tree(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
             None => return Default::default(),
         };
 
-        let sprout_note_commitment_tree = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
+        let sprout_nct_handle = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
 
         self.db
-            .zs_get(&sprout_note_commitment_tree, &height)
+            .zs_get(&sprout_nct_handle, &height)
+            .map(Arc::new)
             .expect("Sprout note commitment tree must exist if there is a finalized tip")
     }
 
@@ -95,10 +98,12 @@ impl ZebraDb {
     pub fn sprout_note_commitment_tree_by_anchor(
         &self,
         sprout_anchor: &sprout::tree::Root,
-    ) -> Option<sprout::tree::NoteCommitmentTree> {
-        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+    ) -> Option<Arc<sprout::tree::NoteCommitmentTree>> {
+        let sprout_anchors_handle = self.db.cf_handle("sprout_anchors").unwrap();
 
-        self.db.zs_get(&sprout_anchors, sprout_anchor)
+        self.db
+            .zs_get(&sprout_anchors_handle, sprout_anchor)
+            .map(Arc::new)
     }
 
     /// Returns the Sapling note commitment tree of the finalized tip
@@ -239,11 +244,12 @@ impl DiskWriteBatch {
         note_commitment_trees: &mut NoteCommitmentTrees,
     ) -> Result<(), BoxError> {
         // Update the note commitment trees
+        let sprout_nct = Arc::make_mut(&mut note_commitment_trees.sprout);
+
         for sprout_note_commitment in transaction.sprout_note_commitments() {
-            note_commitment_trees
-                .sprout
-                .append(*sprout_note_commitment)?;
+            sprout_nct.append(*sprout_note_commitment)?;
         }
+
         for sapling_note_commitment in transaction.sapling_note_commitments() {
             note_commitment_trees
                 .sapling
