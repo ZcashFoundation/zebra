@@ -64,7 +64,7 @@ async fn verifiers_from_network(
         + 'static,
 ) {
     let state_service = zs::init_test(network);
-    let (chain_verifier, _transaction_verifier, _groth16_download_handle) =
+    let (chain_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
         crate::chain::init(Config::default(), network, state_service.clone(), true).await;
 
     // We can drop the download task handle here, because:
@@ -161,7 +161,7 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
     // init_from_verifiers.
     //
     // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
-    let (chain_verifier, _transaction_verifier, _groth16_download_handle) =
+    let (chain_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
         super::init(config.clone(), network, zs::init_test(network), true).await;
 
     // Add a timeout layer

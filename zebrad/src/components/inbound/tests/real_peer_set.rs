@@ -29,7 +29,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
     components::{
-        inbound::{Inbound, InboundSetupData},
+        inbound::{downloads::MAX_INBOUND_CONCURRENCY, Inbound, InboundSetupData},
         mempool::{gossip_mempool_transaction_id, Config as MempoolConfig, Mempool},
         sync::{self, BlockGossipError, SyncStatus},
     },
@@ -637,7 +637,7 @@ async fn setup(
 
     // Inbound
     let (setup_tx, setup_rx) = oneshot::channel();
-    let inbound_service = Inbound::new(setup_rx);
+    let inbound_service = Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx);
     let inbound_service = ServiceBuilder::new()
         .boxed_clone()
         .load_shed()
