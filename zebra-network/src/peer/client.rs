@@ -25,6 +25,7 @@ use crate::{
         external::{types::Version, InventoryHash},
         internal::{Request, Response},
     },
+    BoxError,
 };
 
 use super::{ErrorSlot, PeerError, SharedPeerError};
@@ -60,7 +61,7 @@ pub struct Client {
     pub(crate) connection_task: JoinHandle<()>,
 
     /// A handle to the task responsible for sending periodic heartbeats.
-    pub(crate) heartbeat_task: JoinHandle<()>,
+    pub(crate) heartbeat_task: JoinHandle<Result<(), BoxError>>,
 }
 
 /// A signal sent by the [`Client`] half of a peer connection,
@@ -438,7 +439,7 @@ impl Client {
                 // Heartbeat task is still running.
                 Ok(())
             }
-            Poll::Ready(Ok(())) => {
+            Poll::Ready(Ok(_)) => {
                 // Heartbeat task stopped unexpectedly, without panicking.
                 self.set_task_exited_error("heartbeat", PeerError::HeartbeatTaskExited)
             }
