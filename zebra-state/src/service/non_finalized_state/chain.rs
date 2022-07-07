@@ -264,8 +264,9 @@ impl Chain {
     /// Fork a chain at the block with the given hash, if it is part of this
     /// chain.
     ///
-    /// The trees must match the trees of the finalized tip and are used
-    /// to rebuild them after the fork.
+    /// The passed trees must match the trees of the finalized tip. They are
+    /// extended by the commitments from the newly forked chain up to the passed
+    /// `fork_tip`.
     #[allow(clippy::unwrap_in_result)]
     pub fn fork(
         &self,
