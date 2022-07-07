@@ -243,7 +243,6 @@ impl DiskWriteBatch {
         transaction: &Transaction,
         note_commitment_trees: &mut NoteCommitmentTrees,
     ) -> Result<(), BoxError> {
-        // Update the note commitment trees
         let sprout_nct = Arc::make_mut(&mut note_commitment_trees.sprout);
 
         for sprout_note_commitment in transaction.sprout_note_commitments() {
