@@ -78,6 +78,7 @@ pub enum Response {
 }
 
 impl fmt::Display for Response {
+    #[allow(clippy::unwrap_in_result)]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(&match self {
             Response::Nil => "Nil".to_string(),

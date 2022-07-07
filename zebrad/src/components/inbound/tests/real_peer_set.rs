@@ -1,8 +1,9 @@
 //! Inbound service tests with a real peer set.
 
-use std::{collections::HashSet, iter, net::SocketAddr, sync::Arc};
+use std::{iter, net::SocketAddr, sync::Arc};
 
 use futures::FutureExt;
+use indexmap::IndexSet;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{
     buffer::Buffer,
@@ -28,7 +29,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
     components::{
-        inbound::{Inbound, InboundSetupData},
+        inbound::{downloads::MAX_INBOUND_CONCURRENCY, Inbound, InboundSetupData},
         mempool::{gossip_mempool_transaction_id, Config as MempoolConfig, Mempool},
         sync::{self, BlockGossipError, SyncStatus},
     },
@@ -636,7 +637,7 @@ async fn setup(
 
     // Inbound
     let (setup_tx, setup_rx) = oneshot::channel();
-    let inbound_service = Inbound::new(setup_rx);
+    let inbound_service = Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx);
     let inbound_service = ServiceBuilder::new()
         .boxed_clone()
         .load_shed()
@@ -655,8 +656,8 @@ async fn setup(
         listen_addr: config_listen_addr,
 
         // Stop Zebra making outbound connections
-        initial_mainnet_peers: HashSet::new(),
-        initial_testnet_peers: HashSet::new(),
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
 
         ..NetworkConfig::default()
     };

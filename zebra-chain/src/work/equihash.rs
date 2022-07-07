@@ -41,6 +41,7 @@ impl Solution {
     pub const INPUT_LENGTH: usize = 4 + 32 * 3 + 4 * 2;
 
     /// Returns `Ok(())` if `EquihashSolution` is valid for `header`
+    #[allow(clippy::unwrap_in_result)]
     pub fn check(&self, header: &Header) -> Result<(), Error> {
         let n = 200;
         let k = 9;

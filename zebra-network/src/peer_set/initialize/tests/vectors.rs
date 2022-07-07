@@ -14,7 +14,6 @@
 //! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
 
 use std::{
-    collections::HashSet,
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
     time::{Duration, Instant},
@@ -22,6 +21,7 @@ use std::{
 
 use chrono::Utc;
 use futures::{channel::mpsc, FutureExt, StreamExt};
+use indexmap::IndexSet;
 use tokio::{net::TcpStream, task::JoinHandle};
 use tower::{service_fn, Service};
 use tracing::Span;
@@ -1137,7 +1137,7 @@ async fn add_initial_peers_deadlock() {
     // Create a list of dummy IPs, and initialize a config using them as the
     // initial peers. The amount of these peers will overflow
     // `PEERSET_INITIAL_TARGET_SIZE`.
-    let mut peers = HashSet::new();
+    let mut peers = IndexSet::new();
     for address_number in 0..PEER_COUNT {
         peers.insert(
             SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
@@ -1173,8 +1173,8 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
         network,
 
         // Stop Zebra making outbound connections
-        initial_mainnet_peers: HashSet::new(),
-        initial_testnet_peers: HashSet::new(),
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
 
         ..Config::default()
     };
@@ -1468,7 +1468,7 @@ where
 {
     // Create a list of dummy IPs and initialize a config using them as the
     // initial peers.
-    let mut peers = HashSet::new();
+    let mut peers = IndexSet::new();
     for address_number in 0..peer_count {
         peers.insert(
             SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),

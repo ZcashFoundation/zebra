@@ -29,7 +29,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
     components::{
-        inbound::{Inbound, InboundSetupData},
+        inbound::{downloads::MAX_INBOUND_CONCURRENCY, Inbound, InboundSetupData},
         mempool::{
             gossip_mempool_transaction_id, unmined_transactions_in_blocks, Config as MempoolConfig,
             Mempool, MempoolError, SameEffectsChainRejectionError, UnboxMempoolError,
@@ -708,7 +708,7 @@ async fn setup(
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
 
     // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
-    let (block_verifier, _transaction_verifier, _groth16_download_handle) =
+    let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
         zebra_consensus::chain::init(
             consensus_config.clone(),
             network,
@@ -785,7 +785,7 @@ async fn setup(
 
     let inbound_service = ServiceBuilder::new()
         .load_shed()
-        .service(Inbound::new(setup_rx));
+        .service(Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx));
     let inbound_service = BoxService::new(inbound_service);
     let inbound_service = ServiceBuilder::new().buffer(1).service(inbound_service);
 

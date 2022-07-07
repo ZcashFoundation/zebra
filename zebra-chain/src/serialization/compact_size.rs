@@ -236,6 +236,7 @@ impl TryFrom<usize> for CompactSizeMessage {
     type Error = SerializationError;
 
     #[inline]
+    #[allow(clippy::unwrap_in_result)]
     fn try_from(size: usize) -> Result<Self, Self::Error> {
         use SerializationError::Parse;
 
@@ -284,6 +285,7 @@ impl ZcashSerialize for CompactSizeMessage {
     ///
     /// If the value exceeds `MAX_PROTOCOL_MESSAGE_LEN`.
     #[inline]
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: std::io::Write>(&self, writer: W) -> Result<(), std::io::Error> {
         // # Security
         // Defence-in-depth for memory DoS via preallocation.

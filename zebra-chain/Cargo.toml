@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-beta.11"
+version = "1.0.0-beta.12"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -27,7 +27,7 @@ displaydoc = "0.2.3"
 fpe = "0.5.1"
 futures = "0.3.21"
 group = "0.12.0"
-halo2 = { package = "halo2_proofs", version = "0.1.0" }
+halo2 = { package = "halo2_proofs", version = "0.2.0" }
 hex = { version = "0.4.3", features = ["serde"] }
 incrementalmerkletree = "0.3.0"
 itertools = "0.10.3"
@@ -49,11 +49,11 @@ thiserror = "1.0.31"
 uint = "0.9.1"
 x25519-dalek = { version = "1.2.0", features = ["serde"] }
 
-orchard = "0.1.0"
+orchard = "0.2.0"
 
 equihash = "0.1.0"
 zcash_note_encryption = "0.1"
-zcash_primitives = { version = "0.6.0", features = ["transparent-inputs"] }
+zcash_primitives = { version = "0.7.0", features = ["transparent-inputs"] }
 zcash_encoding = "0.1.0"
 zcash_history = "0.3.0"
 

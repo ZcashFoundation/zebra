@@ -340,25 +340,47 @@ pub enum Message {
     FilterClear,
 }
 
+/// The maximum size of the rejection message.
+///
+/// This is equivalent to `COMMAND_SIZE` in zcashd.
+const MAX_REJECT_MESSAGE_LENGTH: usize = 12;
+
+/// The maximum size of the rejection reason.
+///
+/// This is equivalent to `MAX_REJECT_MESSAGE_LENGTH` in zcashd.
+const MAX_REJECT_REASON_LENGTH: usize = 111;
+
+// TODO: add tests for Error conversion and Reject message serialization (#4633)
+// (Zebra does not currently send reject messages, and it ignores received reject messages.)
 impl<E> From<E> for Message
 where
     E: Error,
 {
     fn from(e: E) -> Self {
+        let message = e
+            .to_string()
+            .escape_default()
+            .take(MAX_REJECT_MESSAGE_LENGTH)
+            .collect();
+        let reason = e
+            .source()
+            .map(ToString::to_string)
+            .unwrap_or_default()
+            .escape_default()
+            .take(MAX_REJECT_REASON_LENGTH)
+            .collect();
+
         Message::Reject {
-            message: e.to_string(),
+            message,
 
             // The generic case, impls for specific error types should
             // use specific varieties of `RejectReason`.
             ccode: RejectReason::Other,
 
-            reason: if let Some(reason) = e.source() {
-                reason.to_string()
-            } else {
-                String::from("")
-            },
+            reason,
 
-            // Allow this to be overridden but not populated by default, methinks.
+            // The hash of the rejected block or transaction.
+            // We don't have that data here, so the caller needs to fill it in later.
             data: None,
         }
     }

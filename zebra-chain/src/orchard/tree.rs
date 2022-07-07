@@ -301,6 +301,7 @@ impl NoteCommitmentTree {
     /// chain and input into the proof.
     ///
     /// Returns an error if the tree is full.
+    #[allow(clippy::unwrap_in_result)]
     pub fn append(&mut self, cm_x: pallas::Base) -> Result<(), NoteCommitmentTreeError> {
         if self.inner.append(&cm_x.into()) {
             // Invalidate cached root

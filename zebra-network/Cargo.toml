@@ -1,6 +1,6 @@
 [package]
 name = "zebra-network"
-version = "1.0.0-beta.11"
+version = "1.0.0-beta.12"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -19,6 +19,7 @@ bytes = "1.1.0"
 chrono = "0.4.19"
 hex = "0.4.3"
 humantime-serde = "1.1.1"
+indexmap = { version = "1.9.1", features = ["serde"] }
 lazy_static = "1.4.0"
 ordered-map = "0.4.2"
 pin-project = "1.0.10"

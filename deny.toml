@@ -26,10 +26,16 @@ allow = [
 skip = [
     #  wait for zcash_proofs fork be merged back into upstream
     # https://github.com/ZcashFoundation/zebra/issues/3831
-    { name = "equihash", version = "=0.1.0" },
+    { name = "equihash", version = "=0.2.0" },
     { name = "zcash_encoding", version = "=0.1.0" },
     { name = "zcash_note_encryption", version = "=0.1.0" },
-    { name = "zcash_primitives", version = "=0.6.0" },
+    { name = "zcash_primitives", version = "=0.7.0" },
+
+    # wait until zcash updates its halo2, orchard, etc. dependencies
+    # (which is likely to happen in the release after 5.0.0)
+    { name = "halo2_gadgets", version = "=0.1.0" },
+    { name = "halo2_proofs", version = "=0.1.0" },
+    { name = "orchard", version = "=0.1.0" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive

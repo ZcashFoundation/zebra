@@ -25,6 +25,8 @@ use zebra_chain::{
 use zebra_network as zn;
 use zebra_state as zs;
 
+use crate::components::sync::MIN_CONCURRENCY_LIMIT;
+
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// The maximum number of concurrent inbound download and verify tasks.
@@ -64,7 +66,7 @@ pub enum DownloadAction {
     /// The queue is at capacity, so this request was ignored.
     ///
     /// The sync service should discover this block later, when we are closer
-    /// to the tip. The queue's capacity is [`MAX_INBOUND_CONCURRENCY`].
+    /// to the tip. The queue's capacity is [`Downloads.full_verify_concurrency_limit`].
     FullQueue,
 }
 
@@ -80,7 +82,13 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
+    // Configuration
+    //
+    /// The configured full verification concurrency limit, after applying the minimum limit.
+    full_verify_concurrency_limit: usize,
+
     // Services
+    //
     /// A service that forwards requests to connected peers, and returns their
     /// responses.
     network: ZN,
@@ -95,6 +103,7 @@ where
     latest_chain_tip: zs::LatestChainTip,
 
     // Internal downloads state
+    //
     /// A list of pending block download and verify tasks.
     #[pin]
     pending: FuturesUnordered<JoinHandle<Result<block::Hash, (BoxError, block::Hash)>>>,
@@ -162,8 +171,19 @@ where
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
-    pub fn new(network: ZN, verifier: ZV, state: ZS, latest_chain_tip: zs::LatestChainTip) -> Self {
+    pub fn new(
+        full_verify_concurrency_limit: usize,
+        network: ZN,
+        verifier: ZV,
+        state: ZS,
+        latest_chain_tip: zs::LatestChainTip,
+    ) -> Self {
+        // The syncer already warns about the minimum.
+        let full_verify_concurrency_limit =
+            full_verify_concurrency_limit.clamp(MIN_CONCURRENCY_LIMIT, MAX_INBOUND_CONCURRENCY);
+
         Self {
+            full_verify_concurrency_limit,
             network,
             verifier,
             state,
@@ -182,8 +202,8 @@ where
             debug!(
                 ?hash,
                 queue_len = self.pending.len(),
-                ?MAX_INBOUND_CONCURRENCY,
-                "block hash already queued for inbound download: ignored block"
+                concurrency_limit = self.full_verify_concurrency_limit,
+                "block hash already queued for inbound download: ignored block",
             );
 
             metrics::gauge!("gossip.queued.block.count", self.pending.len() as f64);
@@ -192,12 +212,12 @@ where
             return DownloadAction::AlreadyQueued;
         }
 
-        if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
+        if self.pending.len() >= self.full_verify_concurrency_limit {
             debug!(
                 ?hash,
                 queue_len = self.pending.len(),
-                ?MAX_INBOUND_CONCURRENCY,
-                "too many blocks queued for inbound download: ignored block"
+                concurrency_limit = self.full_verify_concurrency_limit,
+                "too many blocks queued for inbound download: ignored block",
             );
 
             metrics::gauge!("gossip.queued.block.count", self.pending.len() as f64);
@@ -213,6 +233,7 @@ where
         let network = self.network.clone();
         let verifier = self.verifier.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
+        let full_verify_concurrency_limit = self.full_verify_concurrency_limit;
 
         let fut = async move {
             // Check if the block is already in the state.
@@ -232,7 +253,7 @@ where
                 assert_eq!(
                     blocks.len(),
                     1,
-                    "wrong number of blocks in response to a single hash"
+                    "wrong number of blocks in response to a single hash",
                 );
 
                 blocks
@@ -257,11 +278,11 @@ where
             let tip_height = latest_chain_tip.best_tip_height();
 
             let max_lookahead_height = if let Some(tip_height) = tip_height {
-                let lookahead = i32::try_from(MAX_INBOUND_CONCURRENCY).expect("fits in i32");
+                let lookahead = i32::try_from(full_verify_concurrency_limit).expect("fits in i32");
                 (tip_height + lookahead).expect("tip is much lower than Height::MAX")
             } else {
                 let genesis_lookahead =
-                    u32::try_from(MAX_INBOUND_CONCURRENCY - 1).expect("fits in u32");
+                    u32::try_from(full_verify_concurrency_limit - 1).expect("fits in u32");
                 block::Height(genesis_lookahead)
             };
 
@@ -296,8 +317,8 @@ where
                     ?block_height,
                     ?tip_height,
                     ?max_lookahead_height,
-                    lookahead_limit = ?MAX_INBOUND_CONCURRENCY,
-                    "gossiped block height too far ahead of the tip: dropped downloaded block"
+                    lookahead_limit = full_verify_concurrency_limit,
+                    "gossiped block height too far ahead of the tip: dropped downloaded block",
                 );
                 metrics::counter!("gossip.max.height.limit.dropped.block.count", 1);
 
@@ -309,7 +330,7 @@ where
                     ?tip_height,
                     ?min_accepted_height,
                     behind_tip_limit = ?zs::MAX_BLOCK_REORG_HEIGHT,
-                    "gossiped block height behind the finalized tip: dropped downloaded block"
+                    "gossiped block height behind the finalized tip: dropped downloaded block",
                 );
                 metrics::counter!("gossip.min.height.limit.dropped.block.count", 1);
 
@@ -353,8 +374,8 @@ where
         debug!(
             ?hash,
             queue_len = self.pending.len(),
-            ?MAX_INBOUND_CONCURRENCY,
-            "queued hash for download"
+            concurrency_limit = self.full_verify_concurrency_limit,
+            "queued hash for download",
         );
         metrics::gauge!("gossip.queued.block.count", self.pending.len() as f64);
 

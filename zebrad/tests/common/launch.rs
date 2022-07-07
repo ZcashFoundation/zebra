@@ -6,7 +6,6 @@
 //! This file is only for test library code.
 
 use std::{
-    collections::HashSet,
     env,
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -14,6 +13,7 @@ use std::{
 };
 
 use color_eyre::eyre::Result;
+use indexmap::IndexSet;
 
 use zebra_chain::parameters::Network;
 use zebra_test::{
@@ -111,6 +111,7 @@ impl<T> ZebradTestDirExt for T
 where
     Self: TestDirExt + AsRef<Path> + Sized,
 {
+    #[allow(clippy::unwrap_in_result)]
     fn spawn_child(self, extra_args: Arguments) -> Result<TestChild<Self>> {
         let dir = self.as_ref();
         let default_config_path = dir.join("zebrad.toml");
@@ -201,8 +202,8 @@ pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
         .expect("Failed to create a config file with a known RPC listener port");
 
     config.state.ephemeral = false;
-    config.network.initial_mainnet_peers = HashSet::new();
-    config.network.initial_testnet_peers = HashSet::new();
+    config.network.initial_mainnet_peers = IndexSet::new();
+    config.network.initial_testnet_peers = IndexSet::new();
     config.network.network = network;
     config.mempool.debug_enable_at_height = Some(0);
     config.tracing.filter = Some("info,rpc=trace".to_string());

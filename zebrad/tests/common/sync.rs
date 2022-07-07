@@ -45,12 +45,6 @@ pub const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 pub const SYNC_FINISHED_REGEX: &str =
     r"finished initial sync to chain tip, using gossiped blocks .*sync_percent.*=.*100\.";
 
-/// Temporary workaround for slow syncs - stop at 97%.
-///
-/// TODO: revert this change (#4456)
-pub const SYNC_FINISHED_REGEX_TMP_STOP_EARLY: &str =
-    r"estimated progress to chain tip .*sync_percent.*=.*97\.";
-
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///
 /// This should only take a second, but sometimes CI VMs or RocksDB can be slow.
@@ -81,7 +75,7 @@ pub const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 /// But if we're going to be downloading lots of blocks, we use the default lookahead limit,
 /// so that the sync is faster. This can increase the RAM needed for tests.
 pub const MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD: Height =
-    Height(3 * sync::DEFAULT_LOOKAHEAD_LIMIT as u32);
+    Height(3 * sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT as u32);
 
 /// What the expected behavior of the mempool is for a test that uses [`sync_until`].
 pub enum MempoolBehavior {
@@ -210,7 +204,8 @@ pub fn sync_until(
     // Use the default lookahead limit if we're syncing lots of blocks.
     // (Most tests use a smaller limit to minimise redundant block downloads.)
     if height > MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD {
-        config.sync.lookahead_limit = sync::DEFAULT_LOOKAHEAD_LIMIT;
+        config.sync.checkpoint_verify_concurrency_limit =
+            sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
     }
 
     let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {
@@ -323,7 +318,7 @@ pub fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
     // If we're syncing past the checkpoint with cached state, we don't need the extra lookahead.
     // But the extra downloaded blocks shouldn't slow down the test that much,
     // and testing with the defaults gives us better test coverage.
-    config.sync.lookahead_limit = sync::DEFAULT_LOOKAHEAD_LIMIT;
+    config.sync.checkpoint_verify_concurrency_limit = sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
 
     Ok(config)
 }

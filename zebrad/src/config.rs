@@ -95,10 +95,14 @@ pub struct TracingSection {
 
     /// The address used for an ad-hoc RPC endpoint allowing dynamic control of the tracing filter.
     ///
+    /// Install Zebra using `cargo install --features=filter-reload` to enable this config.
+    ///
     /// If this is set to None, the endpoint is disabled.
     pub endpoint_addr: Option<SocketAddr>,
 
     /// Controls whether to write a flamegraph of tracing spans.
+    ///
+    /// Install Zebra using `cargo install --features=flamegraph` to enable this config.
     ///
     /// If this is set to None, flamegraphs are disabled. Otherwise, it specifies
     /// an output file path, as described below.
@@ -125,6 +129,8 @@ pub struct TracingSection {
 
     /// The use_journald flag sends tracing events to systemd-journald, on Linux
     /// distributions that use systemd.
+    ///
+    /// Install Zebra using `cargo install --features=journald` to enable this config.
     pub use_journald: bool,
 }
 
@@ -147,6 +153,8 @@ impl Default for TracingSection {
 pub struct MetricsSection {
     /// The address used for the Prometheus metrics endpoint.
     ///
+    /// Install Zebra using `cargo install --features=prometheus` to enable this config.
+    ///
     /// The endpoint is disabled if this is set to `None`.
     pub endpoint_addr: Option<SocketAddr>,
 }
@@ -166,16 +174,15 @@ impl Default for MetricsSection {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct SyncSection {
-    /// The maximum number of concurrent block download requests during sync.
+    /// The number of parallel block download requests.
     ///
     /// This is set to a low value by default, to avoid task and
     /// network contention. Increasing this value may improve
-    /// performance on machines with many cores and a fast network
-    /// connection.
-    pub max_concurrent_block_requests: usize,
+    /// performance on machines with a fast network connection.
+    #[serde(alias = "max_concurrent_block_requests")]
+    pub download_concurrency_limit: usize,
 
-    /// Controls how far ahead of the chain tip the syncer tries to
-    /// download before waiting for queued verifications to complete.
+    /// The number of blocks submitted in parallel to the checkpoint verifier.
     ///
     /// Increasing this limit increases the buffer size, so it reduces
     /// the impact of an individual block request failing. However, it
@@ -190,16 +197,37 @@ pub struct SyncSection {
     /// astray.
     ///
     /// For reliable checkpoint syncing, Zebra enforces a
-    /// [`MIN_LOOKAHEAD_LIMIT`](sync::MIN_LOOKAHEAD_LIMIT).
-    pub lookahead_limit: usize,
+    /// [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`](sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT).
+    ///
+    /// This is set to a high value by default, to avoid verification pipeline stalls.
+    /// Decreasing this value reduces RAM usage.
+    #[serde(alias = "lookahead_limit")]
+    pub checkpoint_verify_concurrency_limit: usize,
+
+    /// The number of blocks submitted in parallel to the full verifier.
+    ///
+    /// This is set to a low value by default, to avoid verification timeouts on large blocks.
+    /// Increasing this value may improve performance on machines with many cores.
+    pub full_verify_concurrency_limit: usize,
 }
 
 impl Default for SyncSection {
     fn default() -> Self {
         Self {
-            // TODO: increase to 50, after we implement orchard batching
-            max_concurrent_block_requests: 40,
-            lookahead_limit: sync::DEFAULT_LOOKAHEAD_LIMIT,
+            // 2/3 of the default outbound peer limit.
+            download_concurrency_limit: 50,
+
+            // A few max-length checkpoints.
+            checkpoint_verify_concurrency_limit: sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT,
+
+            // This default is deliberately very low, so Zebra can verify a few large blocks in under 60 seconds,
+            // even on machines with only a few cores.
+            //
+            // This lets users see the committed block height changing in every progress log.
+            //
+            // TODO: when we implement orchard proof batching, try increasing to 20 or more
+            //       limit full verification concurrency based on block transaction counts?
+            full_verify_concurrency_limit: 5,
         }
     }
 }

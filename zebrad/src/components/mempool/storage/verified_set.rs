@@ -135,6 +135,7 @@ impl VerifiedSet {
     /// be too bad.
     ///
     /// [ZIP-401]: https://zips.z.cash/zip-0401
+    #[allow(clippy::unwrap_in_result)]
     pub fn evict_one(&mut self) -> Option<VerifiedUnminedTx> {
         if self.transactions.is_empty() {
             None
@@ -148,7 +149,8 @@ impl VerifiedSet {
                 .map(|tx| tx.clone().eviction_weight())
                 .collect();
 
-            let dist = WeightedIndex::new(weights).unwrap();
+            let dist = WeightedIndex::new(weights)
+                .expect("there is at least one weight and all weights are valid");
 
             Some(self.remove(dist.sample(&mut thread_rng())))
         }
