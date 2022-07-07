@@ -294,9 +294,6 @@ impl Chain {
         let sprout_nct = Arc::make_mut(&mut forked.sprout_note_commitment_tree);
 
         // Rebuild the note commitment trees, starting from the finalized tip tree.
-        // TODO: change to a more efficient approach by removing nodes
-        // from the tree of the original chain (in [`Self::pop_tip`]).
-        // See https://github.com/ZcashFoundation/zebra/issues/2378
         for block in forked.blocks.values() {
             for transaction in block.block.transactions.iter() {
                 for sprout_note_commitment in transaction.sprout_note_commitments() {
