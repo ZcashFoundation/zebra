@@ -11,8 +11,19 @@ assignees: ''
 
 ### Which Crates to Increment
 
-To check if any of the top-level crates need version increments, go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra and use the last modified dates of each crate. Alternatively you can use the github compare tool and check the `main` branch against the last tag ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.15...main)). `git diff --stat <previous-release-tag> origin/main` is also useful to see what's changed.
+To check if any of the top-level crates need version increments:
+1. Go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra
+2. Check if the last commit was a Zebra version bump, or something else
 
+<details>
+   
+Alternatively you can:
+- Use the github compare tool and check the `main` branch against the last tag ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.15...main))
+- Use `git diff --stat <previous-release-tag> origin/main`
+
+</details>
+   
+Once you know which crates have changed:
 - [ ] Increment the crates that have new commits since the last version update
 - [ ] Increment any crates that depend on crates that have changed
 - [ ] Keep a list of the crates that haven't been incremented, to include in the PR
@@ -21,7 +32,9 @@ To check if any of the top-level crates need version increments, go to the zebra
 
 Zebra follows [semantic versioning](https://semver.org).
 
-Semantic versions look like: `MAJOR`.`MINOR`.`PATCH[`-`TAG`.`PRE-RELEASE]`
+Semantic versions look like: MAJOR`.`MINOR`.`PATCH[`-`TAG`.`PRE-RELEASE]
+   
+<details>
 
 #### Pre-Release Crates
 
@@ -46,6 +59,17 @@ Increment the first version component in this list, and reset the other componen
 3. PATCH versions for bug fixes
     * includes dependency updates that don't impact the public API
 
+### Reviewing Version Bumps
+
+Check for missed changes by going to:
+`https://github.com/ZcashFoundation/zebra/tree/<commit-hash>/`
+Where `<commit-hash>` is the hash of the last commit in the version bump PR.
+
+If any Zebra or Tower crates have commit messages that are **not** a version bump, we have missed an update.
+Also check for crates that depend on crates that have changed. They should get a version bump as well.
+
+</details>
+   
 ### Version Locations
 
 Once you know which versions you want to increment, you can find them in the:
@@ -62,35 +86,23 @@ You can use `fastmod` to interactively find and replace versions.
 
 For example, you can do something like:
 ```
-fastmod --extensions rs,toml,md --fixed-strings '1.0.0-alpha.12' '1.0.0-alpha.13'
-fastmod --extensions rs,toml,md --fixed-strings '0.2.9' '0.2.10' tower-batch
-fastmod --extensions rs,toml,md --fixed-strings '0.2.8' '0.2.9' tower-fallback
+fastmod --extensions rs,toml,md --fixed-strings '1.0.0-beta.11' '1.0.0-beta.12'
+fastmod --extensions rs,toml,md --fixed-strings '0.2.26' '0.2.27' tower-batch tower-fallback
 ```
 
-### Reviewing Version Bumps
-
-Check for missed changes by going to:
-`https://github.com/ZcashFoundation/zebra/tree/<commit-hash>/`
-Where `<commit-hash>` is the hash of the last commit in the version bump PR.
-
-If any Zebra or Tower crates have commit messages that are **not** a version bump, we have missed an update.
-
-Also check for crates that depend on crates that have changed. They should get a version bump as well.
+If you use `fastmod`, don't update versions in `CHANGELOG.md`.
 
 ## README
 
-As we resolve various outstanding known issues and implement new functionality with each release, we should double check the README for any necessary updates.
-
-We should check and update if necessary:
-
-- [ ] The "Known Issues" section to ensure that any items that are resolved in the latest release are no longer listed in the README.
-- [ ] The "Build and Run Instructions" section. Check if any new dependencies were introduced and
-      list them if needed; one possible approach is to check for changes in the `Dockerfile`
-      since the last tag: `git diff <previous-release-tag> docker/Dockerfile`.
+We should update the README to:
+- [ ] Remove any "Known Issues" that have been fixed
+- [ ] Update the "Build and Run Instructions" with any new dependencies.
+      Check for changes in the `Dockerfile` since the last tag: `git diff <previous-release-tag> docker/Dockerfile`.
 
 ## Change Log
 
-**Important**: Any merge into `main` deletes any edits to the draft changelog. Once you are ready to tag a release, copy the draft changelog into `CHANGELOG.md`.
+**Important**: Any merge into `main` deletes any edits to the draft changelog.
+Once you are ready to tag a release, copy the draft changelog into `CHANGELOG.md`.
 
 We follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
@@ -102,8 +114,10 @@ To create the final change log:
 - [ ] Combine duplicate changes
 - [ ] Edit change descriptions so they are consistent, and make sense to non-developers
 - [ ] Check the category for each change
-  - prefer the "Fix" category if you're not sure
+  - Prefer the "Fix" category if you're not sure
 
+<details>
+   
 #### Change Categories
 
 From "Keep a Changelog":
@@ -113,6 +127,8 @@ From "Keep a Changelog":
 * `Removed` for now removed features.
 * `Fixed` for any bug fixes.
 * `Security` in case of vulnerabilities.
+
+</details>
 
 ## Create the Release
 
@@ -124,22 +140,22 @@ After you have the version increments and the updated changelog:
       (name suggestion, example: `v1.0.0-alpha.0-release`)
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the
       comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.0-release?expand=1&template=release-checklist.md)).
-      - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.
-      - [ ] Also add the list of not-bumped crates as a comment (can use the same comment as the previous one).
+  - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.
+  - [ ] Also add the list of not-bumped crates as a comment (can use the same comment as the previous one).
 - [ ] Turn on [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches).
-- [ ] Once the PR is ready to be merged, unfreeze it
-      [here](https://www.mergefreeze.com/installations/3676/branches). Do not
-      unfreeze the whole repository.
+- [ ] Once the PR is ready to be merged, unfreeze it [here](https://www.mergefreeze.com/installations/3676/branches).
+      Do not unfreeze the whole repository.
 
 ### Create the Release
 
-- [ ] Once the PR has been merged, create a new release using the draft release
-      as a base, by clicking the Edit icon in the [draft
-      release](https://github.com/ZcashFoundation/zebra/releases).
-- [ ] Set the tag name to the version tag, for example: `v1.0.0-alpha.0`
+- [ ] Once the PR has been merged,
+      create a new release using the draft release as a base,
+      by clicking the Edit icon in the [draft release](https://github.com/ZcashFoundation/zebra/releases)
+- [ ] Set the tag name to the version tag,
+      for example: `v1.0.0-alpha.0`
 - [ ] Set the release to target the `main` branch
-- [ ] Set the release title to `Zebra ` followed by the version tag, for example:
-      `Zebra 1.0.0-alpha.0`
+- [ ] Set the release title to `Zebra ` followed by the version tag,
+      for example: `Zebra 1.0.0-alpha.0`
 - [ ] Copy the final changelog of this release to the release description
       (starting just _after_ the title `## [Zebra ...`)
 - [ ] Mark the release as 'pre-release' (until we are no longer alpha/beta)
@@ -147,15 +163,13 @@ After you have the version increments and the updated changelog:
 
 ## Final Testing
 
-- [ ] After tagging the release, test that the exact `cargo install` command in
-      `README.md` works (`--git` behaves a bit differently to `--path`)
-- [ ] Turn off [Merge
-      Freeze](https://www.mergefreeze.com/installations/3676/branches) for the
-      whole repository.
+- [ ] After tagging the release, test that the exact `cargo install` command in `README.md` works
+      (`--git` behaves a bit differently to `--path`)
+- [ ] Turn off [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches) for the whole repository
 
 If the build fails after tagging:
-1. fix the build
-2. increment versions again, following these instructions from the start
-3. update `README.md` with a **new** git tag
-4. update `CHANGELOG.md` with details about the fix
-5. tag a **new** release
+1. Fix the build
+2. Increment versions again, following these instructions from the start
+3. Update `README.md` with a **new** git tag
+4. Update `CHANGELOG.md` with details about the fix
+5. Tag a **new** release
