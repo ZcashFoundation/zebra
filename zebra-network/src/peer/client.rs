@@ -431,7 +431,10 @@ impl Client {
             .is_ready();
 
         if is_canceled {
-            return self.set_task_exited_error("heartbeat", PeerError::HeartbeatTaskExited);
+            return self.set_task_exited_error(
+                "heartbeat",
+                PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
+            );
         }
 
         match self.heartbeat_task.poll_unpin(cx) {
@@ -439,13 +442,41 @@ impl Client {
                 // Heartbeat task is still running.
                 Ok(())
             }
-            Poll::Ready(Ok(_)) => {
-                // Heartbeat task stopped unexpectedly, without panicking.
-                self.set_task_exited_error("heartbeat", PeerError::HeartbeatTaskExited)
+            Poll::Ready(Ok(Ok(_))) => {
+                // Heartbeat task stopped unexpectedly, without panic or error.
+                self.set_task_exited_error(
+                    "heartbeat",
+                    PeerError::HeartbeatTaskExited(
+                        "Heartbeat task stopped unexpectedly".to_string(),
+                    ),
+                )
+            }
+            Poll::Ready(Ok(Err(error))) => {
+                // Heartbeat task stopped unexpectedly, with error.
+                self.set_task_exited_error(
+                    "heartbeat",
+                    PeerError::HeartbeatTaskExited(error.to_string()),
+                )
             }
             Poll::Ready(Err(error)) => {
-                // Heartbeat task stopped unexpectedly with a panic.
-                panic!("heartbeat task has panicked: {}", error);
+                // Heartbeat task was cancelled.
+                if error.is_cancelled() {
+                    self.set_task_exited_error(
+                        "heartbeat",
+                        PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
+                    )
+                }
+                // Heartbeat task stopped with panic.
+                else if error.is_panic() {
+                    panic!("heartbeat task has panicked: {}", error);
+                }
+                // Heartbeat task stopped with error.
+                else {
+                    self.set_task_exited_error(
+                        "heartbeat",
+                        PeerError::HeartbeatTaskExited(error.to_string()),
+                    )
+                }
             }
         }
     }
