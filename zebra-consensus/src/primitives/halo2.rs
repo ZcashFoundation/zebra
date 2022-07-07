@@ -8,7 +8,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::future::{ready, Ready};
+use futures::{future::BoxFuture, FutureExt};
 use once_cell::sync::Lazy;
 use orchard::circuit::VerifyingKey;
 use rand::{thread_rng, CryptoRng, RngCore};
@@ -149,9 +149,11 @@ impl From<halo2::plonk::Error> for Halo2Error {
 /// Note that making a `Service` call requires mutable access to the service, so
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
-#[allow(dead_code)]
 pub static VERIFIER: Lazy<
-    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), Halo2Error>>>>,
+    Fallback<
+        Batch<Verifier, Item>,
+        ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), Halo2Error>>>,
+    >,
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
@@ -159,24 +161,23 @@ pub static VERIFIER: Lazy<
             super::MAX_BATCH_SIZE,
             super::MAX_BATCH_LATENCY,
         ),
-        // We want to fallback to individual verification if batch verification
-        // fails, so we need a Service to use. The obvious way to do this would
-        // be to write a closure that returns an async block. But because we
-        // have to specify the type of a static, we need to be able to write the
-        // type of the closure and its return value, and both closures and async
-        // blocks have eldritch types whose names cannot be written. So instead,
-        // we use a Ready to avoid an async block and cast the closure to a
-        // function (which is possible because it doesn't capture any state).
+        // We want to fallback to individual verification if batch verification fails,
+        // so we need a Service to use.
+        //
+        // Because we have to specify the type of a static, we need to be able to
+        // write the type of the closure and its return value. But both closures and
+        // async blocks have unnameable types. So instead we cast the closure to a function
+        // (which is possible because it doesn't capture any state), and use a BoxFuture
+        // to erase the result type.
+        // (We can't use BoxCloneService to erase the service type, because it is !Sync.)
         tower::service_fn(
             (|item: Item| {
-                ready(
-                    // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-                    //
-                    // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
-                    tokio::task::block_in_place(|| {
-                        item.verify_single(&VERIFYING_KEY).map_err(Halo2Error::from)
-                    }),
-                )
+                // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+                tokio::task::spawn_blocking(move || {
+                    item.verify_single(&VERIFYING_KEY).map_err(Halo2Error::from)
+                })
+                .map(|join_result| join_result.expect("panic in ed25519 fallback verifier"))
+                .boxed()
             }) as fn(_) -> _,
         ),
     )

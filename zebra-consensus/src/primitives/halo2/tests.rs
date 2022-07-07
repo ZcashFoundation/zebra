@@ -1,6 +1,6 @@
 //! Tests for verifying simple Halo2 proofs with the async verifier
 
-use std::convert::TryInto;
+use std::future::ready;
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use tower::ServiceExt;

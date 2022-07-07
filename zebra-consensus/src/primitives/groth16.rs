@@ -14,7 +14,7 @@ use bellman::{
     VerificationError,
 };
 use bls12_381::Bls12;
-use futures::future::{ready, Ready};
+use futures::{future::BoxFuture, FutureExt};
 use once_cell::sync::Lazy;
 use rand::thread_rng;
 use tokio::sync::watch;
@@ -51,7 +51,10 @@ use crate::error::TransactionError;
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
 pub static SPEND_VERIFIER: Lazy<
-    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), VerificationError>>>>,
+    Fallback<
+        Batch<Verifier, Item>,
+        ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), VerificationError>>>,
+    >,
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
@@ -59,17 +62,23 @@ pub static SPEND_VERIFIER: Lazy<
             super::MAX_BATCH_SIZE,
             super::MAX_BATCH_LATENCY,
         ),
-        // We want to fallback to individual verification if batch verification
-        // fails, so we need a Service to use. The obvious way to do this would
-        // be to write a closure that returns an async block. But because we
-        // have to specify the type of a static, we need to be able to write the
-        // type of the closure and its return value, and both closures and async
-        // blocks have eldritch types whose names cannot be written. So instead,
-        // we use a Ready to avoid an async block and cast the closure to a
-        // function (which is possible because it doesn't capture any state).
+        // We want to fallback to individual verification if batch verification fails,
+        // so we need a Service to use.
+        //
+        // Because we have to specify the type of a static, we need to be able to
+        // write the type of the closure and its return value. But both closures and
+        // async blocks have unnameable types. So instead we cast the closure to a function
+        // (which is possible because it doesn't capture any state), and use a BoxFuture
+        // to erase the result type.
+        // (We can't use BoxCloneService to erase the service type, because it is !Sync.)
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(&GROTH16_PARAMETERS.sapling.spend_prepared_verifying_key))
+                // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+                tokio::task::spawn_blocking(|| {
+                    item.verify_single(&GROTH16_PARAMETERS.sapling.spend_prepared_verifying_key)
+                })
+                .map(|join_result| join_result.expect("panic in sapling spend fallback verifier"))
+                .boxed()
             }) as fn(_) -> _,
         ),
     )
@@ -84,7 +93,10 @@ pub static SPEND_VERIFIER: Lazy<
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
 pub static OUTPUT_VERIFIER: Lazy<
-    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> Ready<Result<(), VerificationError>>>>,
+    Fallback<
+        Batch<Verifier, Item>,
+        ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), VerificationError>>>,
+    >,
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
@@ -93,16 +105,17 @@ pub static OUTPUT_VERIFIER: Lazy<
             super::MAX_BATCH_LATENCY,
         ),
         // We want to fallback to individual verification if batch verification
-        // fails, so we need a Service to use. The obvious way to do this would
-        // be to write a closure that returns an async block. But because we
-        // have to specify the type of a static, we need to be able to write the
-        // type of the closure and its return value, and both closures and async
-        // blocks have eldritch types whose names cannot be written. So instead,
-        // we use a Ready to avoid an async block and cast the closure to a
-        // function (which is possible because it doesn't capture any state).
+        // fails, so we need a Service to use.
+        //
+        // See the note on [`SPEND_VERIFIER`] for details.
         tower::service_fn(
             (|item: Item| {
-                ready(item.verify_single(&GROTH16_PARAMETERS.sapling.output_prepared_verifying_key))
+                // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+                tokio::task::spawn_blocking(|| {
+                    item.verify_single(&GROTH16_PARAMETERS.sapling.output_prepared_verifying_key)
+                })
+                .map(|join_result| join_result.expect("panic in sapling output fallback verifier"))
+                .boxed()
             }) as fn(_) -> _,
         ),
     )
@@ -116,32 +129,25 @@ pub static OUTPUT_VERIFIER: Lazy<
 /// Note that making a `Service` call requires mutable access to the service, so
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
-pub static JOINSPLIT_VERIFIER: Lazy<ServiceFn<fn(Item) -> Ready<Result<(), BoxedError>>>> =
-    Lazy::new(|| {
-        // We need a Service to use. The obvious way to do this would
-        // be to write a closure that returns an async block. But because we
-        // have to specify the type of a static, we need to be able to write the
-        // type of the closure and its return value, and both closures and async
-        // blocks have eldritch types whose names cannot be written. So instead,
-        // we use a Ready to avoid an async block and cast the closure to a
-        // function (which is possible because it doesn't capture any state).
-        tower::service_fn(
-            (|item: Item| {
-                ready(
-                    // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-                    //
-                    // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
-                    tokio::task::block_in_place(|| {
-                        item.verify_single(
-                            &GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key,
-                        )
-                        .map_err(|e| TransactionError::Groth16(e.to_string()))
-                        .map_err(tower_fallback::BoxedError::from)
-                    }),
-                )
-            }) as fn(_) -> _,
-        )
-    });
+pub static JOINSPLIT_VERIFIER: Lazy<
+    ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), BoxedError>>>,
+> = Lazy::new(|| {
+    // We just need a Service to use: there is no batch verification for JoinSplits.
+    //
+    // See the note on [`SPEND_VERIFIER`] for details.
+    tower::service_fn(
+        (|item: Item| {
+            // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+            tokio::task::spawn_blocking(|| {
+                item.verify_single(&GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key)
+                    .map_err(|e| TransactionError::Groth16(e.to_string()))
+                    .map_err(tower_fallback::BoxedError::from)
+            })
+            .map(|join_result| join_result.expect("panic in joinsplit fallback verifier"))
+            .boxed()
+        }) as fn(_) -> _,
+    )
+});
 
 /// A Groth16 Description (JoinSplit, Spend, or Output) with a Groth16 proof
 /// and its inputs encoded as scalars.

@@ -1,8 +1,9 @@
 //! Tests for transaction verification
 
-use std::convert::TryInto;
-
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::{
+    future::ready,
+    stream::{FuturesUnordered, StreamExt},
+};
 use hex::FromHex;
 use tower::ServiceExt;
 
