@@ -219,7 +219,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             .orchard_note_commitment_tree_by_height(&block::Height::MIN)
             .expect("the genesis block in the database has an Orchard tree");
 
-        assert_eq!(sapling_tree, sapling::tree::NoteCommitmentTree::default());
+        assert_eq!(*sapling_tree, sapling::tree::NoteCommitmentTree::default());
         assert_eq!(orchard_tree, orchard::tree::NoteCommitmentTree::default());
 
         // Blocks

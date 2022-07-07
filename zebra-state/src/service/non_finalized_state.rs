@@ -386,7 +386,7 @@ impl NonFinalizedState {
         &mut self,
         parent_hash: block::Hash,
         sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
-        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+        sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
     ) -> Result<Arc<Chain>, ValidateContextError> {

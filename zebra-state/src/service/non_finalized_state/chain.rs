@@ -70,9 +70,10 @@ pub struct Chain {
         HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
     /// The Sapling note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
-    pub(super) sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+    pub(super) sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
     /// The Sapling note commitment tree for each height.
-    pub(crate) sapling_trees_by_height: BTreeMap<block::Height, sapling::tree::NoteCommitmentTree>,
+    pub(crate) sapling_trees_by_height:
+        BTreeMap<block::Height, Arc<sapling::tree::NoteCommitmentTree>>,
     /// The Orchard note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
@@ -126,7 +127,7 @@ impl Chain {
     pub(crate) fn new(
         network: Network,
         sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
-        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+        sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
         finalized_tip_chain_value_pools: ValueBalance<NonNegative>,
@@ -272,7 +273,7 @@ impl Chain {
         &self,
         fork_tip: block::Hash,
         sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
-        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+        sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
     ) -> Result<Option<Self>, ValidateContextError> {
@@ -292,6 +293,7 @@ impl Chain {
         }
 
         let sprout_nct = Arc::make_mut(&mut forked.sprout_note_commitment_tree);
+        let sapling_nct = Arc::make_mut(&mut forked.sapling_note_commitment_tree);
 
         // Rebuild the note commitment trees, starting from the finalized tip tree.
         for block in forked.blocks.values() {
@@ -303,8 +305,7 @@ impl Chain {
                 }
 
                 for sapling_note_commitment in transaction.sapling_note_commitments() {
-                    forked
-                        .sapling_note_commitment_tree
+                    sapling_nct
                         .append(*sapling_note_commitment)
                         .expect("must work since it was already appended before the fork");
                 }
@@ -400,11 +401,11 @@ impl Chain {
     pub fn sapling_tree(
         &self,
         hash_or_height: HashOrHeight,
-    ) -> Option<&sapling::tree::NoteCommitmentTree> {
+    ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
-        self.sapling_trees_by_height.get(&height)
+        self.sapling_trees_by_height.get(&height).cloned()
     }
 
     /// Returns the Orchard
@@ -639,7 +640,7 @@ impl Chain {
     fn with_trees(
         &self,
         sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
-        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
+        sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
         history_tree: HistoryTree,
     ) -> Self {
@@ -1246,11 +1247,13 @@ where
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
+            let sapling_nct = Arc::make_mut(&mut self.sapling_note_commitment_tree);
+
             // The `_u` here indicates that the Sapling note commitment is
             // specified only by the `u`-coordinate of the Jubjub curve
             // point `(u, v)`.
             for cm_u in sapling_shielded_data.note_commitments() {
-                self.sapling_note_commitment_tree.append(*cm_u)?;
+                sapling_nct.append(*cm_u)?;
             }
 
             check::nullifier::add_to_non_finalized_chain_unique(

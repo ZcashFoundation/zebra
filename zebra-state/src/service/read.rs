@@ -129,8 +129,7 @@ where
     // in memory, but `db` stores blocks on disk, with a memory cache.)
     chain
         .as_ref()
-        .and_then(|chain| chain.as_ref().sapling_tree(hash_or_height).cloned())
-        .map(Arc::new)
+        .and_then(|chain| chain.as_ref().sapling_tree(hash_or_height))
         .or_else(|| db.sapling_tree(hash_or_height))
 }
 

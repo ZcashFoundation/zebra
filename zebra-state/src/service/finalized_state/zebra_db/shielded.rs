@@ -31,7 +31,7 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct NoteCommitmentTrees {
     sprout: Arc<sprout::tree::NoteCommitmentTree>,
-    sapling: sapling::tree::NoteCommitmentTree,
+    sapling: Arc<sapling::tree::NoteCommitmentTree>,
     orchard: orchard::tree::NoteCommitmentTree,
 }
 
@@ -108,17 +108,17 @@ impl ZebraDb {
 
     /// Returns the Sapling note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
-    pub fn sapling_note_commitment_tree(&self) -> sapling::tree::NoteCommitmentTree {
+    pub fn sapling_note_commitment_tree(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
             None => return Default::default(),
         };
 
-        let sapling_note_commitment_tree =
-            self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+        let sapling_nct_handle = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
         self.db
-            .zs_get(&sapling_note_commitment_tree, &height)
+            .zs_get(&sapling_nct_handle, &height)
+            .map(Arc::new)
             .expect("Sapling note commitment tree must exist if there is a finalized tip")
     }
 
@@ -128,10 +128,10 @@ impl ZebraDb {
     pub fn sapling_note_commitment_tree_by_height(
         &self,
         height: &Height,
-    ) -> Option<sapling::tree::NoteCommitmentTree> {
+    ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
         let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
-        self.db.zs_get(&sapling_trees, height)
+        self.db.zs_get(&sapling_trees, height).map(Arc::new)
     }
 
     /// Returns the Orchard note commitment tree of the finalized tip
@@ -244,16 +244,15 @@ impl DiskWriteBatch {
         note_commitment_trees: &mut NoteCommitmentTrees,
     ) -> Result<(), BoxError> {
         let sprout_nct = Arc::make_mut(&mut note_commitment_trees.sprout);
-
         for sprout_note_commitment in transaction.sprout_note_commitments() {
             sprout_nct.append(*sprout_note_commitment)?;
         }
 
+        let sapling_nct = Arc::make_mut(&mut note_commitment_trees.sapling);
         for sapling_note_commitment in transaction.sapling_note_commitments() {
-            note_commitment_trees
-                .sapling
-                .append(*sapling_note_commitment)?;
+            sapling_nct.append(*sapling_note_commitment)?;
         }
+
         for orchard_note_commitment in transaction.orchard_note_commitments() {
             note_commitment_trees
                 .orchard
