@@ -23,6 +23,7 @@ use tower_fallback::Fallback;
 mod tests;
 
 lazy_static::lazy_static! {
+    /// The halo2 proof verifying key.
     pub static ref VERIFYING_KEY: VerifyingKey = VerifyingKey::build();
 }
 
@@ -50,16 +51,19 @@ impl Item {
     }
 }
 
+/// A batch verifier that queues and verifies halo2 proofs.
 #[derive(Default)]
 pub struct BatchVerifier {
     queue: Vec<Item>,
 }
 
 impl BatchVerifier {
+    /// Queues an item for batch verification.
     pub fn queue(&mut self, item: Item) {
         self.queue.push(item);
     }
 
+    /// Verifies the current batch.
     pub fn verify<R: RngCore + CryptoRng>(
         self,
         _rng: R,
@@ -121,6 +125,7 @@ impl From<&zebra_chain::orchard::ShieldedData> for Item {
 // remove this and just wrap `halo2::plonk::Error` as an enum variant of
 // `crate::transaction::Error`, which does the trait derivation via `thiserror`
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
+#[allow(missing_docs)]
 pub enum Halo2Error {
     #[error("the constraint system is not satisfied")]
     ConstraintSystemFailure,

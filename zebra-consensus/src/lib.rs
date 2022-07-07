@@ -53,7 +53,7 @@ pub use checkpoint::{
 };
 pub use config::Config;
 pub use error::BlockError;
-pub use primitives::groth16;
+pub use primitives::{ed25519, groth16, halo2, redjubjub, redpallas};
 
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
