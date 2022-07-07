@@ -1591,17 +1591,22 @@ async fn v4_with_sapling_outputs_and_no_spends() {
 
 /// Test if a V5 transaction with Sapling spends is accepted by the verifier.
 #[test]
-// TODO: Remove `should_panic` once V5 transaction verification is complete.
+// TODO: add NU5 mainnet test vectors with Sapling spends, then remove should_panic
 #[should_panic]
 fn v5_with_sapling_spends() {
     zebra_test::init();
     zebra_test::RUNTIME.block_on(async {
         let network = Network::Mainnet;
+        let nu5_activation = NetworkUpgrade::Nu5.activation_height(network);
 
         let transaction =
             fake_v5_transactions_for_network(network, zebra_test::vectors::MAINNET_BLOCKS.iter())
                 .rev()
-                .filter(|transaction| !transaction.is_coinbase() && transaction.inputs().is_empty())
+                .filter(|transaction| {
+                    !transaction.is_coinbase()
+                        && transaction.inputs().is_empty()
+                        && transaction.expiry_height() >= nu5_activation
+                })
                 .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
                 .expect("No transaction found with Sapling spends");
 
