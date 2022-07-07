@@ -1,4 +1,7 @@
+//! Fixed test cases for batch worker tasks.
+
 use std::time::Duration;
+
 use tokio_test::{assert_pending, assert_ready, assert_ready_err, task};
 use tower::{Service, ServiceExt};
 use tower_batch::{error, Batch};
