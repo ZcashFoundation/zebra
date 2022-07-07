@@ -1,7 +1,6 @@
 //! Async Halo2 batch verifier service
 
 use std::{
-    convert::TryFrom,
     fmt,
     future::Future,
     mem,
@@ -14,7 +13,7 @@ use once_cell::sync::Lazy;
 use orchard::circuit::VerifyingKey;
 use rand::{thread_rng, CryptoRng, RngCore};
 use thiserror::Error;
-use tokio::sync::broadcast::{channel, error::RecvError, Sender};
+use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
@@ -51,19 +50,19 @@ impl Item {
     }
 }
 
-/// A batch verifier that queues and verifies halo2 proofs.
+/// A fake batch verifier that queues and verifies halo2 proofs.
 #[derive(Default)]
 pub struct BatchVerifier {
     queue: Vec<Item>,
 }
 
 impl BatchVerifier {
-    /// Queues an item for batch verification.
+    /// Queues an item for fake batch verification.
     pub fn queue(&mut self, item: Item) {
         self.queue.push(item);
     }
 
-    /// Verifies the current batch.
+    /// Verifies the current fake batch.
     pub fn verify<R: RngCore + CryptoRng>(
         self,
         _rng: R,
@@ -189,20 +188,26 @@ pub static VERIFIER: Lazy<
 /// Halo2 verifier. It handles batching incoming requests, driving batches to
 /// completion, and reporting results.
 pub struct Verifier {
-    /// The sync Halo2 batch verifier.
+    /// The synchronous Halo2 batch verifier.
     batch: BatchVerifier,
-    // Making this 'static makes managing lifetimes much easier.
+
+    /// The halo2 proof verification key.
+    ///
+    /// Making this 'static makes managing lifetimes much easier.
     vk: &'static VerifyingKey,
-    /// Broadcast sender used to send the result of a batch verification to each
-    /// request source in the batch.
-    tx: Sender<Result<(), Halo2Error>>,
+
+    /// A channel for broadcasting the result of a batch to the futures for each batch item.
+    ///
+    /// Each batch gets a newly created channel, so there is only ever one result sent per channel.
+    /// Tokio doesn't have a oneshot multi-consumer channel, so we use a watch channel.
+    tx: watch::Sender<Option<Result<(), Halo2Error>>>,
 }
 
 impl Verifier {
     #[allow(dead_code)]
     fn new(vk: &'static VerifyingKey) -> Self {
         let batch = BatchVerifier::default();
-        let (tx, _) = channel(1);
+        let (tx, _) = watch::channel(None);
         Self { batch, vk, tx }
     }
 
@@ -213,11 +218,10 @@ impl Verifier {
         //
         // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
         let result = tokio::task::block_in_place(|| batch.verify(thread_rng(), self.vk));
-        let _ = self.tx.send(result.map_err(Halo2Error::from));
+        let _ = self.tx.send(Some(result.map_err(Halo2Error::from)));
 
         // Use a new channel for each batch.
-        // TODO: replace with a watch channel (#4729)
-        let (tx, _) = channel(1);
+        let (tx, _) = watch::channel(None);
         let _ = mem::replace(&mut self.tx, tx);
     }
 }
@@ -249,8 +253,16 @@ impl Service<BatchControl<Item>> for Verifier {
                 self.batch.queue(item);
                 let mut rx = self.tx.subscribe();
                 Box::pin(async move {
-                    match rx.recv().await {
-                        Ok(result) => {
+                    match rx.changed().await {
+                        Ok(()) => {
+                            // We use a new channel for each batch,
+                            // so we always get the correct batch result here.
+                            let result = rx
+                                .borrow()
+                                .as_ref()
+                                .expect("completed batch must send a value")
+                                .clone();
+
                             if result.is_ok() {
                                 tracing::trace!(?result, "verified halo2 proof");
                                 metrics::counter!("proofs.halo2.verified", 1);
@@ -261,16 +273,7 @@ impl Service<BatchControl<Item>> for Verifier {
 
                             result
                         }
-                        Err(RecvError::Lagged(_)) => {
-                            tracing::error!(
-                                "missed channel updates, BROADCAST_BUFFER_SIZE is too low!!"
-                            );
-                            // This is the enum variant that
-                            // orchard::circuit::Proof.verify() returns on
-                            // evaluation failure.
-                            Err(Halo2Error::ConstraintSystemFailure)
-                        }
-                        Err(RecvError::Closed) => panic!("verifier was dropped without flushing"),
+                        Err(_recv_error) => panic!("verifier was dropped without flushing"),
                     }
                 })
             }
