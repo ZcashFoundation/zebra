@@ -26,6 +26,7 @@ pub mod zip0243;
 pub mod zip0244;
 
 /// A single-threaded Tokio runtime that can be shared between tests.
+/// This runtime should be used for tests that need a single thread for consistent timings.
 ///
 /// This shared runtime should be used in tests that use shared background tasks. An example is
 /// with shared global `Lazy<BatchVerifier>` types, because they spawn a background task when they
@@ -40,8 +41,19 @@ pub mod zip0244;
 /// at a time, there's a risk of a test finishing while the timer is paused (due to a test failure,
 /// for example) and that means that the next test will already start with an incorrect timer
 /// state.
-pub static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+pub static SINGLE_THREADED_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
     tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create Tokio runtime")
+});
+
+/// A multi-threaded Tokio runtime that can be shared between tests.
+/// This runtime should be used for tests that spawn blocking threads.
+///
+/// See [`SINGLE_THREADED_RUNTIME`] for details.
+pub static MULTI_THREADED_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("Failed to create Tokio runtime")

@@ -1,8 +1,7 @@
 //! Asynchronous verification of transactions.
-//!
+
 use std::{
     collections::HashMap,
-    convert::TryInto,
     future::Future,
     iter::FromIterator,
     pin::Pin,

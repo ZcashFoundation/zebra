@@ -278,61 +278,64 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
     }
 }
 
-#[tokio::test]
-async fn v5_transaction_is_accepted_after_nu5_activation_mainnet() {
-    v5_transaction_is_accepted_after_nu5_activation_for_network(Network::Mainnet).await
+#[test]
+fn v5_transaction_is_accepted_after_nu5_activation_mainnet() {
+    v5_transaction_is_accepted_after_nu5_activation_for_network(Network::Mainnet)
 }
 
-#[tokio::test]
-async fn v5_transaction_is_accepted_after_nu5_activation_testnet() {
-    v5_transaction_is_accepted_after_nu5_activation_for_network(Network::Testnet).await
+#[test]
+fn v5_transaction_is_accepted_after_nu5_activation_testnet() {
+    v5_transaction_is_accepted_after_nu5_activation_for_network(Network::Testnet)
 }
 
-async fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network) {
-    let nu5 = NetworkUpgrade::Nu5;
-    let nu5_activation_height = nu5
-        .activation_height(network)
-        .expect("NU5 activation height is specified");
+fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network) {
+    zebra_test::init();
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+        let nu5 = NetworkUpgrade::Nu5;
+        let nu5_activation_height = nu5
+            .activation_height(network)
+            .expect("NU5 activation height is specified");
 
-    let blocks = match network {
-        Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
-        Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
-    };
+        let blocks = match network {
+            Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
+            Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
+        };
 
-    let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
-    let verifier = Verifier::new(network, state_service);
+        let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
+        let verifier = Verifier::new(network, state_service);
 
-    let mut transaction = fake_v5_transactions_for_network(network, blocks)
-        .rev()
-        .next()
-        .expect("At least one fake V5 transaction in the test vectors");
-    if transaction
-        .expiry_height()
-        .expect("V5 must have expiry_height")
-        < nu5_activation_height
-    {
-        let expiry_height = transaction.expiry_height_mut();
-        *expiry_height = nu5_activation_height;
-    }
+        let mut transaction = fake_v5_transactions_for_network(network, blocks)
+            .rev()
+            .next()
+            .expect("At least one fake V5 transaction in the test vectors");
+        if transaction
+            .expiry_height()
+            .expect("V5 must have expiry_height")
+            < nu5_activation_height
+        {
+            let expiry_height = transaction.expiry_height_mut();
+            *expiry_height = nu5_activation_height;
+        }
 
-    let expected_hash = transaction.unmined_id();
-    let expiry_height = transaction
-        .expiry_height()
-        .expect("V5 must have expiry_height");
+        let expected_hash = transaction.unmined_id();
+        let expiry_height = transaction
+            .expiry_height()
+            .expect("V5 must have expiry_height");
 
-    let result = verifier
-        .oneshot(Request::Block {
-            transaction: Arc::new(transaction),
-            known_utxos: Arc::new(HashMap::new()),
-            height: expiry_height,
-            time: chrono::MAX_DATETIME,
-        })
-        .await;
+        let result = verifier
+            .oneshot(Request::Block {
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                height: expiry_height,
+                time: chrono::MAX_DATETIME,
+            })
+            .await;
 
-    assert_eq!(
-        result.expect("unexpected error response").tx_id(),
-        expected_hash
-    );
+        assert_eq!(
+            result.expect("unexpected error response").tx_id(),
+            expected_hash
+        );
+    })
 }
 
 /// Test if V4 transaction with transparent funds is accepted.
@@ -767,7 +770,7 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
 #[test]
 fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected() {
     zebra_test::init();
-    zebra_test::RUNTIME.block_on(async {
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
         let network_upgrade = NetworkUpgrade::Canopy;
 
@@ -832,7 +835,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
 #[test]
 fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejected() {
     zebra_test::init();
-    zebra_test::RUNTIME.block_on(async {
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
         let network_upgrade = NetworkUpgrade::Canopy;
 
@@ -1357,75 +1360,78 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
 }
 
 /// Test if signed V4 transaction with a dummy [`sprout::JoinSplit`] is accepted.
-/// - Test if an unsigned V4 transaction with a dummy [`sprout::JoinSplit`] is rejected.
 ///
 /// This test verifies if the transaction verifier correctly accepts a signed transaction.
-#[tokio::test(flavor = "multi_thread")]
-async fn v4_with_signed_sprout_transfer_is_accepted() {
+#[test]
+fn v4_with_signed_sprout_transfer_is_accepted() {
     zebra_test::init();
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+        let network = Network::Mainnet;
 
-    let network = Network::Mainnet;
+        let (height, transaction) = test_transactions(network)
+            .rev()
+            .filter(|(_, transaction)| {
+                !transaction.is_coinbase() && transaction.inputs().is_empty()
+            })
+            .find(|(_, transaction)| transaction.sprout_groth16_joinsplits().next().is_some())
+            .expect("No transaction found with Groth16 JoinSplits");
 
-    let (height, transaction) = test_transactions(network)
-        .rev()
-        .filter(|(_, transaction)| !transaction.is_coinbase() && transaction.inputs().is_empty())
-        .find(|(_, transaction)| transaction.sprout_groth16_joinsplits().next().is_some())
-        .expect("No transaction found with Groth16 JoinSplits");
+        let expected_hash = transaction.unmined_id();
 
-    let expected_hash = transaction.unmined_id();
+        // Initialize the verifier
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let verifier = Verifier::new(network, state_service);
 
-    // Initialize the verifier
-    let state_service =
-        service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(network, state_service);
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction,
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+                time: chrono::MAX_DATETIME,
+            })
+            .await;
 
-    // Test the transaction verifier
-    let result = verifier
-        .clone()
-        .oneshot(Request::Block {
-            transaction,
-            known_utxos: Arc::new(HashMap::new()),
-            height,
-            time: chrono::MAX_DATETIME,
-        })
-        .await;
-
-    assert_eq!(
-        result.expect("unexpected error response").tx_id(),
-        expected_hash
-    );
+        assert_eq!(
+            result.expect("unexpected error response").tx_id(),
+            expected_hash
+        );
+    })
 }
 
 /// Test if an V4 transaction with a modified [`sprout::JoinSplit`] is rejected.
 ///
 /// This test verifies if the transaction verifier correctly rejects the transaction because of the
 /// invalid JoinSplit.
-#[tokio::test(flavor = "multi_thread")]
-async fn v4_with_modified_joinsplit_is_rejected() {
+#[test]
+fn v4_with_modified_joinsplit_is_rejected() {
     zebra_test::init();
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+        v4_with_joinsplit_is_rejected_for_modification(
+            JoinSplitModification::CorruptSignature,
+            // TODO: Fix error downcast
+            // Err(TransactionError::Ed25519(ed25519::Error::InvalidSignature))
+            TransactionError::InternalDowncastError(
+                "downcast to known transaction error type failed, original error: InvalidSignature"
+                    .to_string(),
+            ),
+        )
+        .await;
 
-    v4_with_joinsplit_is_rejected_for_modification(
-        JoinSplitModification::CorruptSignature,
-        // TODO: Fix error downcast
-        // Err(TransactionError::Ed25519(ed25519::Error::InvalidSignature))
-        TransactionError::InternalDowncastError(
-            "downcast to known transaction error type failed, original error: InvalidSignature"
-                .to_string(),
-        ),
-    )
-    .await;
+        v4_with_joinsplit_is_rejected_for_modification(
+            JoinSplitModification::CorruptProof,
+            TransactionError::Groth16("proof verification failed".to_string()),
+        )
+        .await;
 
-    v4_with_joinsplit_is_rejected_for_modification(
-        JoinSplitModification::CorruptProof,
-        TransactionError::Groth16("proof verification failed".to_string()),
-    )
-    .await;
-
-    v4_with_joinsplit_is_rejected_for_modification(
-        JoinSplitModification::ZeroProof,
-        TransactionError::MalformedGroth16("invalid G1".to_string()),
-    )
-    .await;
+        v4_with_joinsplit_is_rejected_for_modification(
+            JoinSplitModification::ZeroProof,
+            TransactionError::MalformedGroth16("invalid G1".to_string()),
+        )
+        .await;
+    })
 }
 
 async fn v4_with_joinsplit_is_rejected_for_modification(
@@ -1468,7 +1474,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
 #[test]
 fn v4_with_sapling_spends() {
     zebra_test::init();
-    zebra_test::RUNTIME.block_on(async {
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
         let (height, transaction) = test_transactions(network)
@@ -1508,7 +1514,7 @@ fn v4_with_sapling_spends() {
 #[test]
 fn v4_with_duplicate_sapling_spends() {
     zebra_test::init();
-    zebra_test::RUNTIME.block_on(async {
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
         let (height, mut transaction) = test_transactions(network)
@@ -1550,43 +1556,46 @@ fn v4_with_duplicate_sapling_spends() {
 }
 
 /// Test if a V4 transaction with Sapling outputs but no spends is accepted by the verifier.
-#[tokio::test(flavor = "multi_thread")]
-async fn v4_with_sapling_outputs_and_no_spends() {
+#[test]
+fn v4_with_sapling_outputs_and_no_spends() {
     zebra_test::init();
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+        let network = Network::Mainnet;
 
-    let network = Network::Mainnet;
+        let (height, transaction) = test_transactions(network)
+            .rev()
+            .filter(|(_, transaction)| {
+                !transaction.is_coinbase() && transaction.inputs().is_empty()
+            })
+            .find(|(_, transaction)| {
+                transaction.sapling_spends_per_anchor().next().is_none()
+                    && transaction.sapling_outputs().next().is_some()
+            })
+            .expect("No transaction found with Sapling outputs and no Sapling spends");
 
-    let (height, transaction) = test_transactions(network)
-        .rev()
-        .filter(|(_, transaction)| !transaction.is_coinbase() && transaction.inputs().is_empty())
-        .find(|(_, transaction)| {
-            transaction.sapling_spends_per_anchor().next().is_none()
-                && transaction.sapling_outputs().next().is_some()
-        })
-        .expect("No transaction found with Sapling outputs and no Sapling spends");
+        let expected_hash = transaction.unmined_id();
 
-    let expected_hash = transaction.unmined_id();
+        // Initialize the verifier
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let verifier = Verifier::new(network, state_service);
 
-    // Initialize the verifier
-    let state_service =
-        service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new(network, state_service);
+        // Test the transaction verifier
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction,
+                known_utxos: Arc::new(HashMap::new()),
+                height,
+                time: chrono::MAX_DATETIME,
+            })
+            .await;
 
-    // Test the transaction verifier
-    let result = verifier
-        .clone()
-        .oneshot(Request::Block {
-            transaction,
-            known_utxos: Arc::new(HashMap::new()),
-            height,
-            time: chrono::MAX_DATETIME,
-        })
-        .await;
-
-    assert_eq!(
-        result.expect("unexpected error response").tx_id(),
-        expected_hash
-    );
+        assert_eq!(
+            result.expect("unexpected error response").tx_id(),
+            expected_hash
+        );
+    })
 }
 
 /// Test if a V5 transaction with Sapling spends is accepted by the verifier.
@@ -1595,7 +1604,7 @@ async fn v4_with_sapling_outputs_and_no_spends() {
 #[should_panic]
 fn v5_with_sapling_spends() {
     zebra_test::init();
-    zebra_test::RUNTIME.block_on(async {
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
         let nu5_activation = NetworkUpgrade::Nu5.activation_height(network);
 
@@ -1642,7 +1651,7 @@ fn v5_with_sapling_spends() {
 #[test]
 fn v5_with_duplicate_sapling_spends() {
     zebra_test::init();
-    zebra_test::RUNTIME.block_on(async {
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
         let mut transaction =
@@ -1688,7 +1697,7 @@ fn v5_with_duplicate_sapling_spends() {
 #[test]
 fn v5_with_duplicate_orchard_action() {
     zebra_test::init();
-    zebra_test::RUNTIME.block_on(async {
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
         // Find a transaction with no inputs or outputs to use as base
