@@ -1421,11 +1421,29 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         lightwalletd
             .expect_stdout_line_matches("([Aa]dding block to cache)|([Ww]aiting for block)")?;
 
-        // Wait for lightwalletd to sync to Zebra's tip
+        // Wait for lightwalletd to sync to Zebra's tip.
         //
-        // TODO: re-enable this code when lightwalletd hangs are fixed
-        #[cfg(lightwalletd_hang_fix)]
-        lightwalletd.expect_stdout_line_matches("[Ww]aiting for block")?;
+        // TODO: after the lightwalletd hangs are fixed, fail the test on errors or timeouts
+        if cfg!(lightwalletd_hang_fix) {
+            lightwalletd.expect_stdout_line_matches("[Ww]aiting for block")?;
+        } else {
+            // To work around a hang bug, we run the test until:
+            // - lightwalletd starts waiting for blocks (best case scenario)
+            // - lightwalletd syncs to near the tip (workaround, cached state image is usable)
+            // - the test times out with an error, but we ignore it
+            //   (workaround, cached state might be usable, slow, or might fail other tests)
+            //
+            // TODO: update the regex to `1[8-9][0-9]{5}` when mainnet reaches block 1_800_000
+            let log_result = lightwalletd.expect_stdout_line_matches(
+                "([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block)",
+            );
+            if log_result.is_err() {
+                tracing::warn!(
+                    ?log_result,
+                    "ignoring a lightwalletd test failure, to work around a lightwalletd hang bug",
+                );
+            }
+        }
 
         // Check Zebra is still at the tip (also clears and prints Zebra's logs)
         zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
@@ -1436,8 +1454,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         // adityapk00/lightwalletd logs mempool changes, but zcash/lightwalletd doesn't.
         //
         // TODO: re-enable this code when lightwalletd hangs are fixed
-        #[cfg(lightwalletd_hang_fix)]
-        {
+        if cfg!(lightwalletd_hang_fix) {
             lightwalletd.expect_stdout_line_matches(regex::escape(
                 "Block hash changed, clearing mempool clients",
             ))?;
