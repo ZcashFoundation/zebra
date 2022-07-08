@@ -251,6 +251,9 @@ impl Description for (&JoinSplit<Groth16Proof>, &ed25519::VerificationKeyBytes) 
     /// This is not yet officially documented; see the reference implementation:
     /// <https://github.com/zcash/librustzcash/blob/0ec7f97c976d55e1a194a37b27f247e8887fca1d/zcash_proofs/src/sprout.rs#L152-L166>
     /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
+    //
+    // The borrows are actually needed to avoid taking ownership
+    #[allow(clippy::needless_borrow)]
     fn primary_inputs(&self) -> Vec<jubjub::Fq> {
         let (joinsplit, joinsplit_pub_key) = self;
 

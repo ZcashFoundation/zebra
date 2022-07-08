@@ -2,7 +2,7 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{collections::HashSet, pin::Pin, sync::Arc, task::Poll, time::Duration};
+use std::{cmp::max, collections::HashSet, pin::Pin, sync::Arc, task::Poll, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -14,7 +14,7 @@ use tower::{
 };
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, Height},
     chain_tip::ChainTip,
     parameters::genesis_hash,
 };
@@ -57,7 +57,7 @@ const FANOUT: usize = 3;
 /// retries may be concurrent, inner retries are sequential.
 const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
 
-/// A lower bound on the user-specified lookahead limit.
+/// A lower bound on the user-specified checkpoint verification concurrency limit.
 ///
 /// Set to the maximum checkpoint interval, so the pipeline holds around a checkpoint's
 /// worth of blocks.
@@ -76,14 +76,20 @@ const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
 /// Once these malicious blocks start failing validation, the syncer will cancel all
 /// the pending download and verify tasks, drop all the blocks, and start a new
 /// ObtainTips with a new set of peers.
-pub const MIN_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
+pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 
 /// The default for the user-specified lookahead limit.
 ///
-/// See [`MIN_LOOKAHEAD_LIMIT`] for details.
+/// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
 ///
 /// TODO: increase to `MAX_CHECKPOINT_HEIGHT_GAP * 5`, after we implement orchard batching
-pub const DEFAULT_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 3;
+pub const DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT: usize =
+    zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 3;
+
+/// A lower bound on the user-specified concurrency limit.
+///
+/// If the concurrency limit is 0, Zebra can't download or verify any blocks.
+pub const MIN_CONCURRENCY_LIMIT: usize = 1;
 
 /// The expected maximum number of hashes in an ObtainTips or ExtendTips response.
 ///
@@ -91,7 +97,7 @@ pub const DEFAULT_LOOKAHEAD_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGH
 /// but still limit the number of blocks in the pipeline between the downloader and
 /// the state.
 ///
-/// See [`MIN_LOOKAHEAD_LIMIT`] for details.
+/// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
 pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
 
 /// Controls how long we wait for a tips response to return.
@@ -214,13 +220,21 @@ where
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     // Configuration
+    //
     /// The genesis hash for the configured network
     genesis_hash: block::Hash,
 
-    /// The configured lookahead limit, after applying the minimum limit.
-    lookahead_limit: usize,
+    /// The largest block height for the checkpoint verifier, based on the current config.
+    max_checkpoint_height: Height,
+
+    /// The configured checkpoint verification concurrency limit, after applying the minimum limit.
+    checkpoint_verify_concurrency_limit: usize,
+
+    /// The configured full verification concurrency limit, after applying the minimum limit.
+    full_verify_concurrency_limit: usize,
 
     // Services
+    //
     /// A network service which is used to perform ObtainTips and ExtendTips
     /// requests.
     ///
@@ -246,6 +260,7 @@ where
     latest_chain_tip: ZSTip,
 
     // Internal sync state
+    //
     /// The tips that the syncer is currently following.
     prospective_tips: HashSet<CheckedTip>,
 
@@ -291,11 +306,44 @@ where
     /// Also returns a [`SyncStatus`] to check if the syncer has likely reached the chain tip.
     pub fn new(
         config: &ZebradConfig,
+        max_checkpoint_height: Height,
         peers: ZN,
         verifier: ZV,
         state: ZS,
         latest_chain_tip: ZSTip,
     ) -> (Self, SyncStatus) {
+        let mut download_concurrency_limit = config.sync.download_concurrency_limit;
+        let mut checkpoint_verify_concurrency_limit =
+            config.sync.checkpoint_verify_concurrency_limit;
+        let mut full_verify_concurrency_limit = config.sync.full_verify_concurrency_limit;
+
+        if download_concurrency_limit < MIN_CONCURRENCY_LIMIT {
+            warn!(
+                "configured download concurrency limit {} too low, increasing to {}",
+                config.sync.download_concurrency_limit, MIN_CONCURRENCY_LIMIT,
+            );
+
+            download_concurrency_limit = MIN_CONCURRENCY_LIMIT;
+        }
+
+        if checkpoint_verify_concurrency_limit < MIN_CHECKPOINT_CONCURRENCY_LIMIT {
+            warn!(
+                "configured checkpoint verify concurrency limit {} too low, increasing to {}",
+                config.sync.checkpoint_verify_concurrency_limit, MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            );
+
+            checkpoint_verify_concurrency_limit = MIN_CHECKPOINT_CONCURRENCY_LIMIT;
+        }
+
+        if full_verify_concurrency_limit < MIN_CONCURRENCY_LIMIT {
+            warn!(
+                "configured full verify concurrency limit {} too low, increasing to {}",
+                config.sync.full_verify_concurrency_limit, MIN_CONCURRENCY_LIMIT,
+            );
+
+            full_verify_concurrency_limit = MIN_CONCURRENCY_LIMIT;
+        }
+
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
         // The Hedge middleware is the outermost layer, hedging requests
         // between two retry-wrapped networks.  The innermost timeout
@@ -306,12 +354,9 @@ where
         // abstracts away spurious failures from individual peers
         // making a less-fallible network service, and the Hedge layer
         // tries to reduce latency of that less-fallible service.
-        //
-        // XXX add ServiceBuilder::hedge() so this becomes
-        // ServiceBuilder::new().hedge(...).retry(...)...
         let block_network = Hedge::new(
             ServiceBuilder::new()
-                .concurrency_limit(config.sync.max_concurrent_block_requests)
+                .concurrency_limit(download_concurrency_limit)
                 .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
                 .timeout(BLOCK_DOWNLOAD_TIMEOUT)
                 .service(peers),
@@ -324,27 +369,23 @@ where
         // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
 
-        let mut lookahead_limit = config.sync.lookahead_limit;
-        if lookahead_limit < MIN_LOOKAHEAD_LIMIT {
-            warn!(
-                "configured lookahead limit {} too low, increasing to {}",
-                config.sync.lookahead_limit, MIN_LOOKAHEAD_LIMIT,
-            );
-
-            lookahead_limit = MIN_LOOKAHEAD_LIMIT;
-        }
-
         let (sync_status, recent_syncs) = SyncStatus::new();
 
         let new_syncer = Self {
             genesis_hash: genesis_hash(config.network.network),
-            lookahead_limit,
+            max_checkpoint_height,
+            checkpoint_verify_concurrency_limit,
+            full_verify_concurrency_limit,
             tip_network,
             downloads: Box::pin(Downloads::new(
                 block_network,
                 verifier,
                 latest_chain_tip.clone(),
-                lookahead_limit,
+                // TODO: change the download lookahead for full verification?
+                max(
+                    checkpoint_verify_concurrency_limit,
+                    full_verify_concurrency_limit,
+                ),
             )),
             state,
             latest_chain_tip,
@@ -397,58 +438,62 @@ where
             state_tip = ?self.latest_chain_tip.best_tip_height(),
             "starting sync, obtaining new tips"
         );
-        if let Err(e) = self.obtain_tips().await {
+        let mut extra_hashes = self.obtain_tips().await.map_err(|e| {
             info!("temporary error obtaining tips: {:#}", e);
-            return Err(e);
-        }
+            e
+        })?;
         self.update_metrics();
 
-        while !self.prospective_tips.is_empty() {
+        while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
             // Check whether any block tasks are currently ready:
             while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
-                Self::handle_block_response(rsp)?;
+                self.handle_block_response(rsp)?;
             }
             self.update_metrics();
 
-            // If we have too many pending tasks, wait for some to finish.
-            //
-            // Starting to wait is interesting, but logging each wait can be
-            // very verbose.
-            if self.downloads.in_flight() > self.lookahead_limit {
-                tracing::info!(
-                    tips.len = self.prospective_tips.len(),
-                    in_flight = self.downloads.in_flight(),
-                    lookahead_limit = self.lookahead_limit,
-                    "waiting for pending blocks",
-                );
-            }
-            while self.downloads.in_flight() > self.lookahead_limit {
+            while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) {
                 trace!(
                     tips.len = self.prospective_tips.len(),
                     in_flight = self.downloads.in_flight(),
-                    lookahead_limit = self.lookahead_limit,
+                    extra_hashes = extra_hashes.len(),
+                    lookahead_limit = self.lookahead_limit(extra_hashes.len()),
                     state_tip = ?self.latest_chain_tip.best_tip_height(),
                     "waiting for pending blocks",
                 );
 
                 let response = self.downloads.next().await.expect("downloads is nonempty");
 
-                Self::handle_block_response(response)?;
+                self.handle_block_response(response)?;
                 self.update_metrics();
             }
 
-            // Once we're below the lookahead limit, we can keep extending the tips.
-            info!(
-                tips.len = self.prospective_tips.len(),
-                in_flight = self.downloads.in_flight(),
-                lookahead_limit = self.lookahead_limit,
-                state_tip = ?self.latest_chain_tip.best_tip_height(),
-                "extending tips",
-            );
+            // Once we're below the lookahead limit, we can request more blocks or hashes.
+            if !extra_hashes.is_empty() {
+                debug!(
+                    tips.len = self.prospective_tips.len(),
+                    in_flight = self.downloads.in_flight(),
+                    extra_hashes = extra_hashes.len(),
+                    lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                    state_tip = ?self.latest_chain_tip.best_tip_height(),
+                    "requesting more blocks",
+                );
 
-            if let Err(e) = self.extend_tips().await {
-                info!("temporary error extending tips: {:#}", e);
-                return Err(e);
+                let response = self.request_blocks(extra_hashes).await;
+                extra_hashes = Self::handle_hash_response(response)?;
+            } else {
+                info!(
+                    tips.len = self.prospective_tips.len(),
+                    in_flight = self.downloads.in_flight(),
+                    extra_hashes = extra_hashes.len(),
+                    lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                    state_tip = ?self.latest_chain_tip.best_tip_height(),
+                    "extending tips",
+                );
+
+                extra_hashes = self.extend_tips().await.map_err(|e| {
+                    info!("temporary error extending tips: {:#}", e);
+                    e
+                })?;
             }
             self.update_metrics();
         }
@@ -461,7 +506,7 @@ where
     /// Given a block_locator list fan out request for subsequent hashes to
     /// multiple peers
     #[instrument(skip(self))]
-    async fn obtain_tips(&mut self) -> Result<(), Report> {
+    async fn obtain_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
         let block_locator = self
             .state
             .ready()
@@ -604,13 +649,12 @@ where
         self.recent_syncs.push_obtain_tips_length(new_downloads);
 
         let response = self.request_blocks(download_set).await;
-        Self::handle_response(response)?;
 
-        Ok(())
+        Self::handle_hash_response(response).map_err(Into::into)
     }
 
     #[instrument(skip(self))]
-    async fn extend_tips(&mut self) -> Result<(), Report> {
+    async fn extend_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
         let tips = std::mem::take(&mut self.prospective_tips);
 
         let mut download_set = IndexSet::new();
@@ -742,9 +786,8 @@ where
         self.recent_syncs.push_extend_tips_length(new_downloads);
 
         let response = self.request_blocks(download_set).await;
-        Self::handle_response(response)?;
 
-        Ok(())
+        Self::handle_hash_response(response).map_err(Into::into)
     }
 
     /// Download and verify the genesis block, if it isn't currently known to
@@ -766,7 +809,9 @@ where
             let response = self.downloads.next().await.expect("downloads is nonempty");
 
             match response {
-                Ok(hash) => trace!(?hash, "verified and committed block to state"),
+                Ok(response) => self
+                    .handle_block_response(Ok(response))
+                    .expect("never returns Err for Ok"),
                 Err(error) => {
                     // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
                     if Self::should_restart_sync(&error) {
@@ -789,34 +834,92 @@ where
         Ok(())
     }
 
-    /// Queue download and verify tasks for each block that isn't currently known to our node
+    /// Queue download and verify tasks for each block that isn't currently known to our node.
+    ///
+    /// TODO: turn obtain and extend tips into a separate task, which sends hashes via a channel?
     async fn request_blocks(
         &mut self,
-        hashes: IndexSet<block::Hash>,
-    ) -> Result<(), BlockDownloadVerifyError> {
-        debug!(hashes.len = hashes.len(), "requesting blocks");
+        mut hashes: IndexSet<block::Hash>,
+    ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
+        let lookahead_limit = self.lookahead_limit(hashes.len());
+
+        debug!(
+            hashes.len = hashes.len(),
+            ?lookahead_limit,
+            "requesting blocks",
+        );
+
+        let extra_hashes = if hashes.len() > lookahead_limit {
+            hashes.split_off(lookahead_limit)
+        } else {
+            IndexSet::new()
+        };
+
         for hash in hashes.into_iter() {
             self.downloads.download_and_verify(hash).await?;
         }
 
-        Ok(())
+        Ok(extra_hashes)
+    }
+
+    /// The configured lookahead limit, based on the currently verified height,
+    /// and the number of hashes we haven't queued yet..
+    fn lookahead_limit(&self, new_hashes: usize) -> usize {
+        let max_checkpoint_height: usize = self
+            .max_checkpoint_height
+            .0
+            .try_into()
+            .expect("fits in usize");
+
+        // When the state is empty, we want to verify using checkpoints
+        let verified_height: usize = self
+            .latest_chain_tip
+            .best_tip_height()
+            .unwrap_or(Height(0))
+            .0
+            .try_into()
+            .expect("fits in usize");
+
+        if verified_height >= max_checkpoint_height {
+            self.full_verify_concurrency_limit
+        } else if (verified_height + new_hashes) >= max_checkpoint_height {
+            // If we're just about to start full verification, allow enough for the remaining checkpoint,
+            // and also enough for a separate full verification lookahead.
+            let checkpoint_hashes = verified_height + new_hashes - max_checkpoint_height;
+
+            self.full_verify_concurrency_limit + checkpoint_hashes
+        } else {
+            self.checkpoint_verify_concurrency_limit
+        }
     }
 
     /// Handles a response for a requested block.
     ///
-    /// Returns `Ok` if the block was successfully verified and committed to the state, or if an
-    /// expected error occurred, so that the synchronization can continue normally.
-    ///
-    /// Returns `Err` if an unexpected error occurred, to force the synchronizer to restart.
+    /// See [`Self::handle_response`] for more details.
     fn handle_block_response(
-        response: Result<block::Hash, BlockDownloadVerifyError>,
+        &mut self,
+        response: Result<(Height, block::Hash), BlockDownloadVerifyError>,
     ) -> Result<(), BlockDownloadVerifyError> {
         match response {
-            Ok(hash) => trace!(?hash, "verified and committed block to state"),
-            Err(_) => return Self::handle_response(response.map(|_| ())),
-        }
+            Ok((height, hash)) => {
+                trace!(?height, ?hash, "verified and committed block to state");
 
-        Ok(())
+                Ok(())
+            }
+            Err(_) => Self::handle_response(response),
+        }
+    }
+
+    /// Handles a response to block hash submission, passing through any extra hashes.
+    ///
+    /// See [`Self::handle_response`] for more details.
+    fn handle_hash_response(
+        response: Result<IndexSet<block::Hash>, BlockDownloadVerifyError>,
+    ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
+        match response {
+            Ok(extra_hashes) => Ok(extra_hashes),
+            Err(_) => Self::handle_response(response).map(|()| IndexSet::new()),
+        }
     }
 
     /// Handles a response to a syncer request.
@@ -825,23 +928,26 @@ where
     /// so that the synchronization can continue normally.
     ///
     /// Returns `Err` if an unexpected error occurred, to force the synchronizer to restart.
-    fn handle_response(
-        response: Result<(), BlockDownloadVerifyError>,
+    fn handle_response<T>(
+        response: Result<T, BlockDownloadVerifyError>,
     ) -> Result<(), BlockDownloadVerifyError> {
-        if let Err(error) = response {
-            // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
-            if Self::should_restart_sync(&error) {
-                return Err(error);
+        match response {
+            Ok(_t) => Ok(()),
+            Err(error) => {
+                // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
+                if Self::should_restart_sync(&error) {
+                    Err(error)
+                } else {
+                    Ok(())
+                }
             }
         }
-
-        Ok(())
     }
 
     /// Returns `true` if the hash is present in the state, and `false`
     /// if the hash is not present in the state.
     ///
-    /// BUG: check if the hash is in any chain (#862)
+    /// TODO BUG: check if the hash is in any chain (#862)
     /// Depth only checks the main chain.
     async fn state_contains(&mut self, hash: block::Hash) -> Result<bool, Report> {
         match self

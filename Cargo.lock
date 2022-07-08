@@ -231,7 +231,7 @@ dependencies = [
  "futures-core",
  "futures-task",
  "futures-util",
- "pin-project 1.0.10",
+ "pin-project 1.0.11",
  "rustc_version",
  "tokio",
 ]
@@ -3310,11 +3310,11 @@ dependencies = [
 
 [[package]]
 name = "pin-project"
-version = "1.0.10"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58ad3879ad3baf4e44784bc6a718a8698867bb991f8ce24d1bcbe2cfb4c3a75e"
+checksum = "78203e83c48cffbe01e4a2d35d566ca4de445d79a85372fc64e378bfc812a260"
 dependencies = [
- "pin-project-internal 1.0.10",
+ "pin-project-internal 1.0.11",
 ]
 
 [[package]]
@@ -3330,9 +3330,9 @@ dependencies = [
 
 [[package]]
 name = "pin-project-internal"
-version = "1.0.10"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "744b6f092ba29c3650faf274db506afd39944f48420f6c86b17cfe0ee1cb36bb"
+checksum = "710faf75e1b33345361201d36d04e98ac1ed8909151a017ed384700836104c74"
 dependencies = [
  "proc-macro2 1.0.36",
  "quote 1.0.15",
@@ -3429,7 +3429,7 @@ dependencies = [
  "atomic",
  "crossbeam-queue",
  "futures",
- "pin-project 1.0.10",
+ "pin-project 1.0.11",
  "static_assertions",
  "thiserror",
 ]
@@ -5003,7 +5003,7 @@ dependencies = [
  "hyper",
  "hyper-timeout",
  "percent-encoding",
- "pin-project 1.0.10",
+ "pin-project 1.0.11",
  "prost",
  "prost-derive",
  "tokio",
@@ -5116,7 +5116,7 @@ dependencies = [
  "futures",
  "humantime-serde",
  "itertools",
- "pin-project 1.0.10",
+ "pin-project 1.0.11",
  "rand 0.8.5",
  "retry-error",
  "serde",
@@ -5230,7 +5230,7 @@ dependencies = [
  "futures",
  "humantime-serde",
  "itertools",
- "pin-project 1.0.10",
+ "pin-project 1.0.11",
  "rand 0.8.5",
  "retain_mut",
  "serde",
@@ -5400,7 +5400,7 @@ dependencies = [
  "async_executors",
  "futures",
  "native-tls",
- "pin-project 1.0.10",
+ "pin-project 1.0.11",
  "tokio",
  "tokio-native-tls",
  "tokio-util 0.6.9",
@@ -5426,7 +5426,7 @@ dependencies = [
  "futures-util",
  "hdrhistogram",
  "indexmap",
- "pin-project 1.0.10",
+ "pin-project 1.0.11",
  "pin-project-lite",
  "rand 0.8.5",
  "slab",
@@ -5445,7 +5445,7 @@ dependencies = [
  "ed25519-zebra",
  "futures",
  "futures-core",
- "pin-project 1.0.10",
+ "pin-project 1.0.11",
  "rand 0.8.5",
  "tokio",
  "tokio-test",
@@ -5507,7 +5507,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4546773ffeab9e4ea02b8872faa49bb616a80a7da66afc2f32688943f97efa7"
 dependencies = [
  "futures-util",
- "pin-project 1.0.10",
+ "pin-project 1.0.11",
  "tokio",
  "tokio-test",
  "tower-layer",
@@ -5575,7 +5575,7 @@ version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97d095ae15e245a057c8e8451bab9b3ee1e1f68e9ba2b4fbc18d0ac5237835f2"
 dependencies = [
- "pin-project 1.0.10",
+ "pin-project 1.0.11",
  "tracing",
 ]
 
@@ -6400,7 +6400,7 @@ dependencies = [
  "lazy_static",
  "metrics",
  "ordered-map",
- "pin-project 1.0.10",
+ "pin-project 1.0.11",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
@@ -6569,7 +6569,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "num-integer",
  "once_cell",
- "pin-project 1.0.10",
+ "pin-project 1.0.11",
  "proptest",
  "proptest-derive",
  "prost",
