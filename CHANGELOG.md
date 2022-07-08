@@ -5,20 +5,35 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
 
-## Next Release (Draft)
+## [Zebra 1.0.0-beta.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.13) - 2022-07-08
 
-This release improves Zebra's sync and verification performance under heavy load.
-(TODO - complete the summary.)
+This release fixes a bug in the halo2 verification process of Zebra that was causing a big performance issue near the blockchain tip.
+In addition, this release improves Zebra's sync and verification performance under heavy load.
 
 ### Configuration Changes
 
-- Split the checkpoint and full verification [`sync` concurrency options](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html) (#4726):
+- Split the checkpoint and full verification [`sync` concurrency options](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html) (#4726 #4758):
   - Add a new `full_verify_concurrency_limit`
   - Rename `max_concurrent_block_requests` to `download_concurrency_limit`
   - Rename `lookahead_limit` to `checkpoint_verify_concurrency_limit`
   For backwards compatibility, the old names are still accepted as aliases.
 
-(TODO - insert changelog here)
+### Changed
+
+- Update column family names to match Zebra's database design (#4639)
+
+### Fixed
+
+- Only verify halo2 proofs once per transaction (#4752)
+- Add limits to rejection message and reason (#4687)
+
+#### CI
+
+- Workaround lightwalletd hangs by waiting until we're near the tip (#4763)
+- Split out Canopy logs into a separate job (#4730)
+- Make full sync go all the way to the tip (#4709)
+- Split Docker logs into sprout, other checkpoints, and full validation (#4704)
+
 
 ## [Zebra 1.0.0-beta.12](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.12) - 2022-06-29
 
