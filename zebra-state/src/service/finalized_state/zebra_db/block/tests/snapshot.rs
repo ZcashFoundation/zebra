@@ -220,7 +220,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             .expect("the genesis block in the database has an Orchard tree");
 
         assert_eq!(*sapling_tree, sapling::tree::NoteCommitmentTree::default());
-        assert_eq!(orchard_tree, orchard::tree::NoteCommitmentTree::default());
+        assert_eq!(*orchard_tree, orchard::tree::NoteCommitmentTree::default());
 
         // Blocks
         let mut stored_block_hashes = Vec::new();

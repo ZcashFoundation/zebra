@@ -152,8 +152,7 @@ where
     // state, we check the most efficient alternative first. (`chain` is always
     // in memory, but `db` stores blocks on disk, with a memory cache.)
     chain
-        .and_then(|chain| chain.as_ref().orchard_tree(hash_or_height).cloned())
-        .map(Arc::new)
+        .and_then(|chain| chain.as_ref().orchard_tree(hash_or_height))
         .or_else(|| db.orchard_tree(hash_or_height))
 }
 
