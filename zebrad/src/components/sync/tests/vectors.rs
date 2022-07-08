@@ -6,7 +6,7 @@ use color_eyre::Report;
 use futures::{Future, FutureExt};
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, Height},
     chain_tip::mock::{MockChainTip, MockChainTipSender},
     serialization::ZcashDeserializeInto,
 };
@@ -966,6 +966,7 @@ fn setup() -> (
 
     let (chain_sync, sync_status) = ChainSync::new(
         &config,
+        Height(0),
         peer_set.clone(),
         chain_verifier.clone(),
         state_service.clone(),

@@ -36,7 +36,7 @@ pub fn default_test_config() -> Result<ZebradConfig> {
 
     let sync = SyncSection {
         // Avoid downloading unnecessary blocks.
-        lookahead_limit: sync::MIN_LOOKAHEAD_LIMIT,
+        checkpoint_verify_concurrency_limit: sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
         ..SyncSection::default()
     };
 

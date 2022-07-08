@@ -67,8 +67,6 @@
 //!
 //! Some of the diagnostic features are optional, and need to be enabled at compile-time.
 
-use std::cmp::max;
-
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
@@ -119,13 +117,16 @@ impl StartCmd {
         let inbound = ServiceBuilder::new()
             .load_shed()
             .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
-            .service(Inbound::new(setup_rx));
+            .service(Inbound::new(
+                config.sync.full_verify_concurrency_limit,
+                setup_rx,
+            ));
 
         let (peer_set, address_book) =
             zebra_network::init(config.network.clone(), inbound, latest_chain_tip.clone()).await;
 
         info!("initializing verifiers");
-        let (chain_verifier, tx_verifier, mut groth16_download_handle) =
+        let (chain_verifier, tx_verifier, mut groth16_download_handle, max_checkpoint_height) =
             zebra_consensus::chain::init(
                 config.consensus.clone(),
                 config.network.network,
@@ -137,6 +138,7 @@ impl StartCmd {
         info!("initializing syncer");
         let (syncer, sync_status) = ChainSync::new(
             &config,
+            max_checkpoint_height,
             peer_set.clone(),
             chain_verifier.clone(),
             state.clone(),
@@ -342,15 +344,19 @@ impl StartCmd {
     fn state_buffer_bound() -> usize {
         let config = app_config().clone();
 
+        // Ignore the checkpoint verify limit, because it is very large.
+        //
         // TODO: do we also need to account for concurrent use across services?
         //       we could multiply the maximum by 3/2, or add a fixed constant
-        max(
-            config.sync.max_concurrent_block_requests,
-            max(
-                inbound::downloads::MAX_INBOUND_CONCURRENCY,
-                mempool::downloads::MAX_INBOUND_CONCURRENCY,
-            ),
-        )
+        [
+            config.sync.download_concurrency_limit,
+            config.sync.full_verify_concurrency_limit,
+            inbound::downloads::MAX_INBOUND_CONCURRENCY,
+            mempool::downloads::MAX_INBOUND_CONCURRENCY,
+        ]
+        .into_iter()
+        .max()
+        .unwrap()
     }
 }
 
