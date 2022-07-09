@@ -5,7 +5,7 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
 
-## [Zebra 1.0.0-beta.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.13) - 2022-07-08
+## [Zebra 1.0.0-beta.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.13) - 2022-07-11
 
 This release fixes a bug in the halo2 verification process of Zebra that was causing a big performance issue near the blockchain tip.
 In addition, this release improves Zebra's sync and verification performance under heavy load.
