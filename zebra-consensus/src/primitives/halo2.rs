@@ -21,9 +21,36 @@ use tower_fallback::Fallback;
 #[cfg(test)]
 mod tests;
 
+/* TODO: implement batch verification
+
+/// The type of the batch verifier.
+type BatchVerifier = plonk::BatchVerifier<vesta::Affine>;
+ */
+
+/// The type of verification results.
+type VerifyResult = Result<(), Halo2Error>;
+
+/// The type of the batch sender channel.
+type Sender = watch::Sender<Option<VerifyResult>>;
+
+/* TODO: implement batch verification
+
+/// The type of a raw verifying key.
+/// This is the key used to verify batches.
+pub type BatchVerifyingKey = VerifyingKey<vesta::Affine>;
+ */
+/// Temporary substitute type for fake batch verification.
+///
+/// TODO: implement batch verification
+pub type BatchVerifyingKey = ItemVerifyingKey;
+
+/// The type of a prepared verifying key.
+/// This is the key used to verify individual items.
+pub type ItemVerifyingKey = VerifyingKey;
+
 lazy_static::lazy_static! {
     /// The halo2 proof verifying key.
-    pub static ref VERIFYING_KEY: VerifyingKey = VerifyingKey::build();
+    pub static ref VERIFYING_KEY: ItemVerifyingKey = ItemVerifyingKey::build();
 }
 
 // === TEMPORARY BATCH HALO2 SUBSTITUTE ===
@@ -45,7 +72,7 @@ impl Item {
     ///
     /// This is useful (in combination with `Item::clone`) for implementing
     /// fallback logic when batch verification fails.
-    pub fn verify_single(&self, vk: &VerifyingKey) -> Result<(), halo2::plonk::Error> {
+    pub fn verify_single(&self, vk: &ItemVerifyingKey) -> Result<(), halo2::plonk::Error> {
         self.proof.verify(vk, &self.instances[..])
     }
 }
@@ -66,7 +93,7 @@ impl BatchVerifier {
     pub fn verify<R: RngCore + CryptoRng>(
         self,
         _rng: R,
-        vk: &VerifyingKey,
+        vk: &ItemVerifyingKey,
     ) -> Result<(), halo2::plonk::Error> {
         for item in self.queue {
             item.verify_single(vk)?;
@@ -150,10 +177,7 @@ impl From<halo2::plonk::Error> for Halo2Error {
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
 pub static VERIFIER: Lazy<
-    Fallback<
-        Batch<Verifier, Item>,
-        ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), Halo2Error>>>,
-    >,
+    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> BoxFuture<'static, VerifyResult>>>,
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
@@ -171,14 +195,8 @@ pub static VERIFIER: Lazy<
         // to erase the result type.
         // (We can't use BoxCloneService to erase the service type, because it is !Sync.)
         tower::service_fn(
-            (|item: Item| {
-                // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-                tokio::task::spawn_blocking(move || {
-                    item.verify_single(&VERIFYING_KEY).map_err(Halo2Error::from)
-                })
-                .map(|join_result| join_result.expect("panic in ed25519 fallback verifier"))
-                .boxed()
-            }) as fn(_) -> _,
+            (|item: Item| Verifier::verify_single_spawning(item, &VERIFYING_KEY).boxed())
+                as fn(_) -> _,
         ),
     )
 });
@@ -195,35 +213,81 @@ pub struct Verifier {
     /// The halo2 proof verification key.
     ///
     /// Making this 'static makes managing lifetimes much easier.
-    vk: &'static VerifyingKey,
+    vk: &'static ItemVerifyingKey,
 
     /// A channel for broadcasting the result of a batch to the futures for each batch item.
     ///
     /// Each batch gets a newly created channel, so there is only ever one result sent per channel.
     /// Tokio doesn't have a oneshot multi-consumer channel, so we use a watch channel.
-    tx: watch::Sender<Option<Result<(), Halo2Error>>>,
+    tx: Sender,
 }
 
 impl Verifier {
-    #[allow(dead_code)]
-    fn new(vk: &'static VerifyingKey) -> Self {
+    fn new(vk: &'static ItemVerifyingKey) -> Self {
         let batch = BatchVerifier::default();
         let (tx, _) = watch::channel(None);
         Self { batch, vk, tx }
     }
 
-    /// Flush the batch and return the result via the channel
-    fn flush(&mut self) {
+    /// Returns the batch verifier and channel sender from `self`,
+    /// replacing them with a new empty batch.
+    fn take(&mut self) -> (BatchVerifier, &'static BatchVerifyingKey, Sender) {
+        // Use a new verifier and channel for each batch.
         let batch = mem::take(&mut self.batch);
+
+        let (tx, _) = watch::channel(None);
+        let tx = mem::replace(&mut self.tx, tx);
+
+        (batch, self.vk, tx)
+    }
+
+    /// Synchronously process the batch, and send the result using the channel sender.
+    /// This function blocks until the batch is completed.
+    fn verify(batch: BatchVerifier, vk: &'static BatchVerifyingKey, tx: Sender) {
+        let result = batch.verify(thread_rng(), vk).map_err(Halo2Error::from);
+        let _ = tx.send(Some(result));
+    }
+
+    /// Flush the batch using a thread pool, and return the result via the channel.
+    /// This function blocks until the batch is completed on the thread pool.
+    fn flush_blocking(&mut self) {
+        let (batch, vk, tx) = self.take();
+
+        // # Correctness
+        //
+        // Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+        //
+        // TODO: replace with the rayon thread pool
+        tokio::task::block_in_place(|| Self::verify(batch, vk, tx));
+    }
+
+    /// Flush the batch using a thread pool, and return the result via the channel.
+    /// This function returns a future that becomes ready when the batch is completed.
+    fn flush_spawning(
+        batch: BatchVerifier,
+        vk: &'static BatchVerifyingKey,
+        tx: Sender,
+    ) -> impl Future<Output = ()> {
+        // # Correctness
+        //
+        // Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+        //
+        // TODO: spawn on the rayon thread pool inside spawn_blocking
+        tokio::task::spawn_blocking(move || Self::verify(batch, vk, tx))
+            .map(|join_result| join_result.expect("panic in halo2 batch verifier"))
+    }
+
+    /// Verify a single item using a thread pool, and return the result.
+    /// This function returns a future that becomes ready when the item is completed.
+    fn verify_single_spawning(
+        item: Item,
+        pvk: &'static ItemVerifyingKey,
+    ) -> impl Future<Output = VerifyResult> {
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         //
-        // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
-        let result = tokio::task::block_in_place(|| batch.verify(thread_rng(), self.vk));
-        let _ = self.tx.send(Some(result.map_err(Halo2Error::from)));
-
-        // Use a new channel for each batch.
-        let (tx, _) = watch::channel(None);
-        let _ = mem::replace(&mut self.tx, tx);
+        // TODO: spawn on the rayon thread pool inside spawn_blocking
+        tokio::task::spawn_blocking(move || item.verify_single(pvk).map_err(Halo2Error::from))
+            .map(|join_result| join_result.expect("panic in halo2 fallback verifier"))
     }
 }
 
@@ -241,7 +305,7 @@ impl fmt::Debug for Verifier {
 impl Service<BatchControl<Item>> for Verifier {
     type Response = ();
     type Error = Halo2Error;
-    type Future = Pin<Box<dyn Future<Output = Result<(), Halo2Error>> + Send + 'static>>;
+    type Future = Pin<Box<dyn Future<Output = VerifyResult> + Send + 'static>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -280,10 +344,11 @@ impl Service<BatchControl<Item>> for Verifier {
             }
 
             BatchControl::Flush => {
-                tracing::trace!("got flush command");
-                self.flush();
+                tracing::trace!("got halo2 flush command");
 
-                Box::pin(async { Ok(()) })
+                let (batch, vk, tx) = self.take();
+
+                Box::pin(Self::flush_spawning(batch, vk, tx).map(Ok))
             }
         }
     }
@@ -292,6 +357,9 @@ impl Service<BatchControl<Item>> for Verifier {
 impl Drop for Verifier {
     fn drop(&mut self) {
         // We need to flush the current batch in case there are still any pending futures.
-        self.flush();
+        // This blocks the current thread and any futures running on it, until the batch is complete.
+        //
+        // TODO: move the batch onto the rayon thread pool, then drop the verifier immediately.
+        self.flush_blocking()
     }
 }

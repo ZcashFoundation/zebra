@@ -10,7 +10,7 @@ use std::{
 
 use bellman::{
     gadgets::multipack,
-    groth16::{batch, VerifyingKey},
+    groth16::{batch, PreparedVerifyingKey, VerifyingKey},
     VerificationError,
 };
 use bls12_381::Bls12;
@@ -42,6 +42,27 @@ pub use params::{Groth16Parameters, GROTH16_PARAMETERS};
 
 use crate::error::TransactionError;
 
+/// The type of the batch verifier.
+type BatchVerifier = batch::Verifier<Bls12>;
+
+/// The type of verification results.
+type VerifyResult = Result<(), VerificationError>;
+
+/// The type of the batch sender channel.
+type Sender = watch::Sender<Option<VerifyResult>>;
+
+/// The type of the batch item.
+/// This is a Groth16 verification item.
+pub type Item = batch::Item<Bls12>;
+
+/// The type of a raw verifying key.
+/// This is the key used to verify batches.
+pub type BatchVerifyingKey = VerifyingKey<Bls12>;
+
+/// The type of a prepared verifying key.
+/// This is the key used to verify individual items.
+pub type ItemVerifyingKey = PreparedVerifyingKey<Bls12>;
+
 /// Global batch verification context for Groth16 proofs of Spend statements.
 ///
 /// This service transparently batches contemporaneous proof verifications,
@@ -51,10 +72,7 @@ use crate::error::TransactionError;
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
 pub static SPEND_VERIFIER: Lazy<
-    Fallback<
-        Batch<Verifier, Item>,
-        ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), VerificationError>>>,
-    >,
+    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> BoxFuture<'static, VerifyResult>>>,
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
@@ -73,11 +91,10 @@ pub static SPEND_VERIFIER: Lazy<
         // (We can't use BoxCloneService to erase the service type, because it is !Sync.)
         tower::service_fn(
             (|item: Item| {
-                // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-                tokio::task::spawn_blocking(|| {
-                    item.verify_single(&GROTH16_PARAMETERS.sapling.spend_prepared_verifying_key)
-                })
-                .map(|join_result| join_result.expect("panic in sapling spend fallback verifier"))
+                Verifier::verify_single_spawning(
+                    item,
+                    &GROTH16_PARAMETERS.sapling.spend_prepared_verifying_key,
+                )
                 .boxed()
             }) as fn(_) -> _,
         ),
@@ -93,10 +110,7 @@ pub static SPEND_VERIFIER: Lazy<
 /// you should call `.clone()` on the global handle to create a local, mutable
 /// handle.
 pub static OUTPUT_VERIFIER: Lazy<
-    Fallback<
-        Batch<Verifier, Item>,
-        ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), VerificationError>>>,
-    >,
+    Fallback<Batch<Verifier, Item>, ServiceFn<fn(Item) -> BoxFuture<'static, VerifyResult>>>,
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
@@ -110,11 +124,10 @@ pub static OUTPUT_VERIFIER: Lazy<
         // See the note on [`SPEND_VERIFIER`] for details.
         tower::service_fn(
             (|item: Item| {
-                // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-                tokio::task::spawn_blocking(|| {
-                    item.verify_single(&GROTH16_PARAMETERS.sapling.output_prepared_verifying_key)
-                })
-                .map(|join_result| join_result.expect("panic in sapling output fallback verifier"))
+                Verifier::verify_single_spawning(
+                    item,
+                    &GROTH16_PARAMETERS.sapling.output_prepared_verifying_key,
+                )
                 .boxed()
             }) as fn(_) -> _,
         ),
@@ -137,13 +150,15 @@ pub static JOINSPLIT_VERIFIER: Lazy<
     // See the note on [`SPEND_VERIFIER`] for details.
     tower::service_fn(
         (|item: Item| {
-            // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-            tokio::task::spawn_blocking(|| {
-                item.verify_single(&GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key)
+            Verifier::verify_single_spawning(
+                item,
+                &GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key,
+            )
+            .map(|result| {
+                result
                     .map_err(|e| TransactionError::Groth16(e.to_string()))
                     .map_err(tower_fallback::BoxedError::from)
             })
-            .map(|join_result| join_result.expect("panic in joinsplit fallback verifier"))
             .boxed()
         }) as fn(_) -> _,
     )
@@ -309,9 +324,6 @@ impl Description for (&JoinSplit<Groth16Proof>, &ed25519::VerificationKeyBytes) 
     }
 }
 
-/// A Groth16 verification item, used as the request type of the service.
-pub type Item = batch::Item<Bls12>;
-
 /// A wrapper to allow a TryFrom blanket implementation of the [`Description`]
 /// trait for the [`Item`] struct.
 /// See <https://github.com/rust-lang/rust/issues/50133> for more details.
@@ -347,42 +359,87 @@ where
 /// completion, and reporting results.
 pub struct Verifier {
     /// A batch verifier for groth16 proofs.
-    batch: batch::Verifier<Bls12>,
+    batch: BatchVerifier,
 
     /// The proof verification key.
     ///
     /// Making this 'static makes managing lifetimes much easier.
-    vk: &'static VerifyingKey<Bls12>,
+    vk: &'static BatchVerifyingKey,
 
     /// A channel for broadcasting the result of a batch to the futures for each batch item.
     ///
     /// Each batch gets a newly created channel, so there is only ever one result sent per channel.
     /// Tokio doesn't have a oneshot multi-consumer channel, so we use a watch channel.
-    tx: watch::Sender<Option<Result<(), VerificationError>>>,
+    tx: Sender,
 }
 
 impl Verifier {
-    fn new(vk: &'static VerifyingKey<Bls12>) -> Self {
-        let batch = batch::Verifier::default();
+    /// Create and return a new verifier using the verification key `vk`.
+    fn new(vk: &'static BatchVerifyingKey) -> Self {
+        let batch = BatchVerifier::default();
         let (tx, _) = watch::channel(None);
         Self { batch, vk, tx }
     }
 
-    /// Flush the batch and return the result via the channel
-    fn flush(&mut self) {
+    /// Returns the batch verifier and channel sender from `self`,
+    /// replacing them with a new empty batch.
+    fn take(&mut self) -> (BatchVerifier, &'static BatchVerifyingKey, Sender) {
+        // Use a new verifier and channel for each batch.
         let batch = mem::take(&mut self.batch);
+
+        let (tx, _) = watch::channel(None);
+        let tx = mem::replace(&mut self.tx, tx);
+
+        (batch, self.vk, tx)
+    }
+
+    /// Synchronously process the batch, and send the result using the channel sender.
+    /// This function blocks until the batch is completed.
+    fn verify(batch: BatchVerifier, vk: &'static BatchVerifyingKey, tx: Sender) {
+        let result = batch.verify(thread_rng(), vk);
+        let _ = tx.send(Some(result));
+    }
+
+    /// Flush the batch using a thread pool, and return the result via the channel.
+    /// This function blocks until the batch is completed on the thread pool.
+    fn flush_blocking(&mut self) {
+        let (batch, vk, tx) = self.take();
 
         // # Correctness
         //
         // Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         //
-        // TODO: use spawn_blocking to avoid blocking code running concurrently in this task
-        let result = tokio::task::block_in_place(|| batch.verify(thread_rng(), self.vk));
-        let _ = self.tx.send(Some(result));
+        // TODO: replace with the rayon thread pool
+        tokio::task::block_in_place(|| Self::verify(batch, vk, tx));
+    }
 
-        // Use a new channel for each batch.
-        let (tx, _) = watch::channel(None);
-        let _ = mem::replace(&mut self.tx, tx);
+    /// Flush the batch using a thread pool, and return the result via the channel.
+    /// This function returns a future that becomes ready when the batch is completed.
+    fn flush_spawning(
+        batch: BatchVerifier,
+        vk: &'static BatchVerifyingKey,
+        tx: Sender,
+    ) -> impl Future<Output = ()> {
+        // # Correctness
+        //
+        // Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+        //
+        // TODO: spawn on the rayon thread pool inside spawn_blocking
+        tokio::task::spawn_blocking(move || Self::verify(batch, vk, tx))
+            .map(|join_result| join_result.expect("panic in groth16 batch verifier"))
+    }
+
+    /// Verify a single item using a thread pool, and return the result.
+    /// This function returns a future that becomes ready when the item is completed.
+    fn verify_single_spawning(
+        item: Item,
+        pvk: &'static ItemVerifyingKey,
+    ) -> impl Future<Output = VerifyResult> {
+        // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+        //
+        // TODO: spawn on the rayon thread pool inside spawn_blocking
+        tokio::task::spawn_blocking(move || item.verify_single(pvk))
+            .map(|join_result| join_result.expect("panic in groth16 fallback verifier"))
     }
 }
 
@@ -400,7 +457,7 @@ impl fmt::Debug for Verifier {
 impl Service<BatchControl<Item>> for Verifier {
     type Response = ();
     type Error = VerificationError;
-    type Future = Pin<Box<dyn Future<Output = Result<(), VerificationError>> + Send + 'static>>;
+    type Future = Pin<Box<dyn Future<Output = VerifyResult> + Send + 'static>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -440,11 +497,11 @@ impl Service<BatchControl<Item>> for Verifier {
             }
 
             BatchControl::Flush => {
-                tracing::trace!("got flush command");
+                tracing::trace!("got groth16 flush command");
 
-                self.flush();
+                let (batch, vk, tx) = self.take();
 
-                Box::pin(async { Ok(()) })
+                Box::pin(Self::flush_spawning(batch, vk, tx).map(Ok))
             }
         }
     }
@@ -453,6 +510,9 @@ impl Service<BatchControl<Item>> for Verifier {
 impl Drop for Verifier {
     fn drop(&mut self) {
         // We need to flush the current batch in case there are still any pending futures.
-        self.flush()
+        // This blocks the current thread and any futures running on it, until the batch is complete.
+        //
+        // TODO: move the batch onto the rayon thread pool, then drop the verifier immediately.
+        self.flush_blocking()
     }
 }
