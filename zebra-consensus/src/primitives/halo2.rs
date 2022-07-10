@@ -21,6 +21,26 @@ use tower_fallback::Fallback;
 #[cfg(test)]
 mod tests;
 
+/// Adjusted batch size for halo2 batches.
+///
+/// Unlike other batch verifiers, halo2 has aggregate proofs.
+/// This means that there can be hundreds of actions verified by some proofs,
+/// but just one action in others.
+///
+/// To compensate for larger proofs, we decrease the batch size.
+///
+/// We also decrease the batch size for these reasons:
+/// - the default number of actions in `zcashd` is 2,
+/// - halo2 proofs take longer to verify than Sapling proofs, and
+/// - transactions with many actions generate very large proofs.
+///
+/// # TODO
+///
+/// Count each halo2 action as a batch item.
+/// We could increase the batch item count by the action count each time a batch request
+/// is received, which would reduce batch size, but keep the batch queue size larger.
+const HALO2_MAX_BATCH_SIZE: usize = 2;
+
 /* TODO: implement batch verification
 
 /// The type of the batch verifier.
@@ -182,7 +202,7 @@ pub static VERIFIER: Lazy<
     Fallback::new(
         Batch::new(
             Verifier::new(&VERIFYING_KEY),
-            super::MAX_BATCH_SIZE,
+            HALO2_MAX_BATCH_SIZE,
             super::MAX_BATCH_LATENCY,
         ),
         // We want to fallback to individual verification if batch verification fails,
