@@ -11,7 +11,10 @@ use std::{
 use futures::future;
 use tokio::time::{timeout, Duration};
 
-use zebra_chain::parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING};
+use zebra_chain::{
+    block::Height,
+    parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING},
+};
 use zebra_network::constants::{
     DEFAULT_CRAWL_NEW_PEER_INTERVAL, HANDSHAKE_TIMEOUT, INVENTORY_ROTATION_INTERVAL,
 };
@@ -163,6 +166,7 @@ fn request_genesis_is_rate_limited() {
     // start the sync
     let (mut chain_sync, _) = ChainSync::new(
         &ZebradConfig::default(),
+        Height(0),
         peer_service,
         verifier_service,
         state_service,

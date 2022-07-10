@@ -167,6 +167,8 @@ fn add_with_diff_constraints() -> Result<()> {
 }
 
 #[test]
+// The borrows are actually needed to call the correct trait impl
+#[allow(clippy::needless_borrow)]
 fn deserialize_checks_bounds() -> Result<()> {
     zebra_test::init();
 

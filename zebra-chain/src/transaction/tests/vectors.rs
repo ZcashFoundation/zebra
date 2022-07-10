@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+//! Fixed test vectors for transactions.
 
 use chrono::{DateTime, NaiveDateTime, Utc};
 use color_eyre::eyre::Result;
@@ -275,7 +275,7 @@ fn deserialize_large_transaction() {
 fn empty_v5_round_trip() {
     zebra_test::init();
 
-    let tx: &Transaction = &*EMPTY_V5_TX;
+    let tx: &Transaction = &EMPTY_V5_TX;
 
     let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
     let tx2: &Transaction = &data
@@ -327,7 +327,7 @@ fn empty_v4_round_trip() {
 fn empty_v5_librustzcash_round_trip() {
     zebra_test::init();
 
-    let tx: &Transaction = &*EMPTY_V5_TX;
+    let tx: &Transaction = &EMPTY_V5_TX;
     let _alt_tx: zcash_primitives::transaction::Transaction = tx.try_into().expect(
         "librustzcash deserialization might work for empty zebra serialized transactions. \
         Hint: if empty transactions fail, but other transactions work, delete this test",
@@ -572,6 +572,8 @@ fn zip244_round_trip() -> Result<()> {
         let reencoded = transaction.zcash_serialize_to_vec()?;
         assert_eq!(test.tx, reencoded);
 
+        // The borrow is actually needed to call the correct trait impl
+        #[allow(clippy::needless_borrow)]
         let _alt_tx: zcash_primitives::transaction::Transaction = (&transaction)
             .try_into()
             .expect("librustzcash deserialization must work for zebra serialized transactions");

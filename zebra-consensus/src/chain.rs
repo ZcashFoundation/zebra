@@ -27,7 +27,7 @@ use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Span};
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, Height},
     parameters::Network,
 };
 
@@ -163,7 +163,8 @@ where
 /// config parameter and if the download is not already started.
 ///
 /// Returns a block verifier, transaction verifier,
-/// and the Groth16 parameter download task [`JoinHandle`].
+/// the Groth16 parameter download task [`JoinHandle`],
+/// and the maximum configured checkpoint verification height.
 ///
 /// The consensus configuration is specified by `config`, and the Zcash network
 /// to verify blocks for is specified by `network`.
@@ -203,6 +204,7 @@ pub async fn init<S>(
         transaction::Request,
     >,
     JoinHandle<()>,
+    Height,
 )
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -266,5 +268,10 @@ where
 
     let chain = Buffer::new(BoxService::new(chain), VERIFIER_BUFFER_BOUND);
 
-    (chain, transaction, groth16_download_handle)
+    (
+        chain,
+        transaction,
+        groth16_download_handle,
+        max_checkpoint_height,
+    )
 }
