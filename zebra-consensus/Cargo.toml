@@ -13,10 +13,10 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "ze
 blake2b_simd = "1.0.0"
 bellman = "0.13.0"
 bls12_381 = "0.7.0"
+halo2 = { package = "halo2_proofs", version = "0.2.0" }
 jubjub = "0.9.0"
 rand = { version = "0.8.5", package = "rand" }
-
-halo2 = { package = "halo2_proofs", version = "0.2.0" }
+rayon = "1.5.3"
 
 chrono = "0.4.19"
 dirs = "4.0.0"
