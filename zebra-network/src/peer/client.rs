@@ -58,7 +58,7 @@ pub struct Client {
     pub(crate) version: Version,
 
     /// A handle to the task responsible for connecting to the peer.
-    pub(crate) connection_task: JoinHandle<()>,
+    pub(crate) connection_task: JoinHandle<Result<(), BoxError>>,
 
     /// A handle to the task responsible for sending periodic heartbeats.
     pub(crate) heartbeat_task: JoinHandle<Result<(), BoxError>>,
@@ -488,7 +488,7 @@ impl Client {
                 // Connection task is still running.
                 Ok(())
             }
-            Poll::Ready(Ok(())) => {
+            Poll::Ready(Ok(_)) => {
                 // Connection task stopped unexpectedly, without panicking.
                 self.set_task_exited_error("connection", PeerError::ConnectionTaskExited)
             }
@@ -524,10 +524,8 @@ impl Client {
     /// Poll for space in the shared request sender channel.
     fn poll_request(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), SharedPeerError>> {
         if ready!(self.server_tx.poll_ready(cx)).is_err() {
-            Poll::Ready(Err(self
-                .error_slot
-                .try_get_error()
-                .expect("failed servers must set their error slot")))
+            // TODO: change this error variant to what correspond (or create new variant)
+            Poll::Ready(Err(SharedPeerError::from(PeerError::ClientDropped)))
         } else if let Some(error) = self.error_slot.try_get_error() {
             Poll::Ready(Err(error))
         } else {
@@ -603,11 +601,8 @@ impl Service<Request> for Client {
                 if e.is_disconnected() {
                     let ClientRequest { tx, .. } = e.into_inner();
                     let _ = tx.send(Err(PeerError::ConnectionClosed.into()));
-                    future::ready(Err(self
-                        .error_slot
-                        .try_get_error()
-                        .expect("failed servers must set their error slot")))
-                    .boxed()
+                    // TODO: check this error variant
+                    future::ready(Err(SharedPeerError::from(PeerError::ConnectionClosed))).boxed()
                 } else {
                     // sending fails when there's not enough
                     // channel space, but we called poll_ready

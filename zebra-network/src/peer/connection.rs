@@ -540,7 +540,7 @@ where
     ///
     /// `peer_rx` is a channel for receiving Zcash [`Message`]s from the connected peer.
     /// The corresponding peer message receiver is [`Connection.peer_tx`].
-    pub async fn run<Rx>(mut self, mut peer_rx: Rx)
+    pub async fn run<Rx>(mut self, mut peer_rx: Rx) -> Result<(), BoxError>
     where
         Rx: Stream<Item = Result<Message, SerializationError>> + Unpin,
     {
@@ -783,6 +783,8 @@ where
         );
 
         self.update_state_metrics(error.expect("checked is_some").to_string());
+
+        Ok(())
     }
 
     /// Fail this connection.
