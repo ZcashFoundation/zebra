@@ -9,6 +9,7 @@ edition = "2021"
 futures = "0.3.21"
 futures-core = "0.3.21"
 pin-project = "1.0.10"
+rayon = "1.5.3"
 tokio = { version = "1.19.2", features = ["time", "sync", "tracing", "macros"] }
 tokio-util = "0.7.3"
 tower = { version = "0.4.13", features = ["util", "buffer"] }
@@ -24,7 +25,6 @@ tokio = { version = "1.19.2", features = ["full", "tracing", "test-util"] }
 tokio-test = "0.4.2"
 tower-fallback = { path = "../tower-fallback/" }
 tower-test = "0.4.0"
-tracing = "0.1.31"
 
 zebra-consensus = { path = "../zebra-consensus/" }
 zebra-test = { path = "../zebra-test/" }

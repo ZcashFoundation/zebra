@@ -5446,6 +5446,7 @@ dependencies = [
  "futures-core",
  "pin-project 1.0.11",
  "rand 0.8.5",
+ "rayon",
  "tokio",
  "tokio-test",
  "tokio-util 0.7.3",

@@ -13,7 +13,7 @@ async fn wakes_pending_waiters_on_close() {
 
     let (service, mut handle) = mock::pair::<_, ()>();
 
-    let (mut service, worker) = Batch::pair(service, 1, Duration::from_secs(1));
+    let (mut service, worker) = Batch::pair(service, 1, 1, Duration::from_secs(1));
     let mut worker = task::spawn(worker.run());
 
     // // keep the request in the worker
@@ -72,7 +72,7 @@ async fn wakes_pending_waiters_on_failure() {
 
     let (service, mut handle) = mock::pair::<_, ()>();
 
-    let (mut service, worker) = Batch::pair(service, 1, Duration::from_secs(1));
+    let (mut service, worker) = Batch::pair(service, 1, 1, Duration::from_secs(1));
     let mut worker = task::spawn(worker.run());
 
     // keep the request in the worker

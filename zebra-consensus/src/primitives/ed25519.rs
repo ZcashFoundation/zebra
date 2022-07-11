@@ -49,6 +49,7 @@ pub static VERIFIER: Lazy<
         Batch::new(
             Verifier::default(),
             super::MAX_BATCH_SIZE,
+            None,
             super::MAX_BATCH_LATENCY,
         ),
         // We want to fallback to individual verification if batch verification fails,

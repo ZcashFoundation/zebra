@@ -61,7 +61,7 @@ async fn batch_flushes_on_max_items() -> Result<(), Report> {
     // flushing is happening based on hitting max_items.
     //
     // Create our own verifier, so we don't shut down a shared verifier used by other tests.
-    let verifier = Batch::new(Ed25519Verifier::default(), 10, Duration::from_secs(1000));
+    let verifier = Batch::new(Ed25519Verifier::default(), 10, 5, Duration::from_secs(1000));
     timeout(Duration::from_secs(1), sign_and_verify(verifier, 100, None))
         .await
         .map_err(|e| eyre!(e))?
@@ -79,7 +79,12 @@ async fn batch_flushes_on_max_latency() -> Result<(), Report> {
     // flushing is happening based on hitting max_latency.
     //
     // Create our own verifier, so we don't shut down a shared verifier used by other tests.
-    let verifier = Batch::new(Ed25519Verifier::default(), 100, Duration::from_millis(500));
+    let verifier = Batch::new(
+        Ed25519Verifier::default(),
+        100,
+        10,
+        Duration::from_millis(500),
+    );
     timeout(Duration::from_secs(1), sign_and_verify(verifier, 10, None))
         .await
         .map_err(|e| eyre!(e))?
@@ -94,7 +99,12 @@ async fn fallback_verification() -> Result<(), Report> {
 
     // Create our own verifier, so we don't shut down a shared verifier used by other tests.
     let verifier = Fallback::new(
-        Batch::new(Ed25519Verifier::default(), 10, Duration::from_millis(100)),
+        Batch::new(
+            Ed25519Verifier::default(),
+            10,
+            1,
+            Duration::from_millis(100),
+        ),
         tower::service_fn(|item: Ed25519Item| async move { item.verify_single() }),
     );
 

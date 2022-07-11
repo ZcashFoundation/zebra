@@ -80,6 +80,7 @@ pub static SPEND_VERIFIER: Lazy<
         Batch::new(
             Verifier::new(&GROTH16_PARAMETERS.sapling.spend.vk),
             super::MAX_BATCH_SIZE,
+            None,
             super::MAX_BATCH_LATENCY,
         ),
         // We want to fallback to individual verification if batch verification fails,
@@ -118,6 +119,7 @@ pub static OUTPUT_VERIFIER: Lazy<
         Batch::new(
             Verifier::new(&GROTH16_PARAMETERS.sapling.output.vk),
             super::MAX_BATCH_SIZE,
+            None,
             super::MAX_BATCH_LATENCY,
         ),
         // We want to fallback to individual verification if batch verification

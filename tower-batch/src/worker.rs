@@ -68,6 +68,9 @@ where
     T: Service<BatchControl<Request>>,
     T::Error: Into<crate::BoxError>,
 {
+    /// Creates a new batch worker.
+    ///
+    /// See [`Service::new()`](crate::Service::new) for details.
     pub(crate) fn new(
         service: T,
         rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
@@ -92,6 +95,7 @@ where
         (error_handle, worker)
     }
 
+    /// Process a single worker request.
     async fn process_req(&mut self, req: Request, tx: message::Tx<T::Future>) {
         if let Some(ref failed) = self.failed {
             tracing::trace!("notifying caller about worker failure");
@@ -118,6 +122,7 @@ where
         }
     }
 
+    /// Tells the inner service to flush the current batch.
     async fn flush_service(&mut self) {
         if let Err(e) = self
             .service
@@ -132,6 +137,9 @@ where
         tokio::task::yield_now().await;
     }
 
+    /// Run loop for batch requests, which implements the batch policies.
+    ///
+    /// See [`Service::new()`](crate::Service::new) for details.
     pub async fn run(mut self) {
         // The timer is started when the first entry of a new batch is
         // submitted, so that the batch latency of all entries is at most
@@ -205,12 +213,13 @@ where
         }
     }
 
+    /// Register an inner service failure.
+    ///
+    /// The underlying service failed when we called `poll_ready` on it with the given `error`. We
+    /// need to communicate this to all the `Buffer` handles. To do so, we wrap up the error in
+    /// an `Arc`, send that `Arc<E>` to all pending requests, and store it so that subsequent
+    /// requests will also fail with the same error.
     fn failed(&mut self, error: crate::BoxError) {
-        // The underlying service failed when we called `poll_ready` on it with the given `error`. We
-        // need to communicate this to all the `Buffer` handles. To do so, we wrap up the error in
-        // an `Arc`, send that `Arc<E>` to all pending requests, and store it so that subsequent
-        // requests will also fail with the same error.
-
         // Note that we need to handle the case where some error_handle is concurrently trying to send us
         // a request. We need to make sure that *either* the send of the request fails *or* it
         // receives an error on the `oneshot` it constructed. Specifically, we want to avoid the
