@@ -157,21 +157,23 @@ where
                 },
                 Some(sleep) => {
                     // Wait on either a new message or the batch timer.
+                    //
                     // If both are ready, end the batch now, because the timer has elapsed.
+                    // If the timer elapses, any pending messages are preserved:
+                    // https://docs.rs/tokio/latest/tokio/sync/mpsc/struct.UnboundedReceiver.html#cancel-safety
                     tokio::select! {
                         biased;
 
+                        // The batch timer elapsed.
                         () = sleep => {
-                            // The batch timer elapsed.
-                            // XXX(hdevalence): what span should instrument this?
+                            // TODO: use a batch-specific span to instrument this future.
                             self.flush_service().await;
+
+                            // Now we have an empty batch.
                             timer = None;
                             pending_items = 0;
                         }
 
-                        // If both branches are ready, the timer elapses,
-                        // but the pending message is preserved:
-                        // https://docs.rs/tokio/latest/tokio/sync/mpsc/struct.UnboundedReceiver.html#cancel-safety
                         maybe_msg = self.rx.recv() => match maybe_msg {
                             Some(msg) => {
                                 let span = msg.span;
@@ -182,8 +184,9 @@ where
                                 pending_items += 1;
                                 // Check whether we have too many pending items.
                                 if pending_items >= self.max_items {
-                                    // XXX(hdevalence): what span should instrument this?
+                                    // TODO: use a batch-specific span to instrument this future.
                                     self.flush_service().await;
+
                                     // Now we have an empty batch.
                                     timer = None;
                                     pending_items = 0;
