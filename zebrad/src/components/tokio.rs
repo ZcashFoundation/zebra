@@ -5,7 +5,7 @@
 //! - blocking network and file tasks, via [`spawn_blocking`](tokio::task::spawn_blocking).
 //!
 //! The rayon thread pool is used for:
-//! - long-running CPU-bound tasks like cryptography, via [`rayon::spawn`].
+//! - long-running CPU-bound tasks like cryptography, via [`rayon::spawn_fifo`].
 
 use std::{future::Future, time::Duration};
 

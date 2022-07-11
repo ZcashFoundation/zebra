@@ -17,6 +17,8 @@ use bls12_381::Bls12;
 use futures::{future::BoxFuture, FutureExt};
 use once_cell::sync::Lazy;
 use rand::thread_rng;
+
+use rayon::prelude::*;
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
 
@@ -401,32 +403,35 @@ impl Verifier {
     }
 
     /// Flush the batch using a thread pool, and return the result via the channel.
-    /// This function blocks until the batch is completed on the thread pool.
+    /// This returns immediately, usually before the batch is completed.
     fn flush_blocking(&mut self) {
         let (batch, vk, tx) = self.take();
 
-        // # Correctness
+        // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         //
-        // Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        //
-        // TODO: replace with the rayon thread pool
-        tokio::task::block_in_place(|| Self::verify(batch, vk, tx));
+        // We don't care about execution order here, because this method is only called on drop.
+        tokio::task::block_in_place(|| rayon::spawn_fifo(|| Self::verify(batch, vk, tx)));
     }
 
     /// Flush the batch using a thread pool, and return the result via the channel.
-    /// This function returns a future that becomes ready when the batch is completed.
+    ///
+    /// This function returns a future that becomes ready when the batch has been queued,
+    /// which is usually before the batch is completed.
     fn flush_spawning(
         batch: BatchVerifier,
         vk: &'static BatchVerifyingKey,
         tx: Sender,
     ) -> impl Future<Output = ()> {
-        // # Correctness
-        //
-        // Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        //
-        // TODO: spawn on the rayon thread pool inside spawn_blocking
-        tokio::task::spawn_blocking(move || Self::verify(batch, vk, tx))
-            .map(|join_result| join_result.expect("panic in groth16 batch verifier"))
+        // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+        tokio::task::spawn_blocking(move || {
+            // TODO:
+            // - spawn batches so rayon executes them in FIFO order
+            //   possible implementation: return a closure in a Future,
+            //   then run it using scope_fifo() in the worker task,
+            //   limiting the number of concurrent batches to the number of rayon threads
+            rayon::spawn_fifo(move || Self::verify(batch, vk, tx))
+        })
+        .map(|join_result| join_result.expect("panic in groth16 batch verifier"))
     }
 
     /// Verify a single item using a thread pool, and return the result.
@@ -436,10 +441,19 @@ impl Verifier {
         pvk: &'static ItemVerifyingKey,
     ) -> impl Future<Output = VerifyResult> {
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        //
-        // TODO: spawn on the rayon thread pool inside spawn_blocking
-        tokio::task::spawn_blocking(move || item.verify_single(pvk))
-            .map(|join_result| join_result.expect("panic in groth16 fallback verifier"))
+        tokio::task::spawn_blocking(move || {
+            // Rayon doesn't have a spawn function that returns a value,
+            // so we use a parallel iterator instead.
+            //
+            // TODO:
+            // - when a batch fails, spawn all its individual items into rayon using Vec::par_iter()
+            // - spawn fallback individual verifications so rayon executes them in FIFO order,
+            //   using Vec::par_iter() within a scope_fifo()
+            rayon::iter::once(item)
+                .map(move |item| item.verify_single(pvk))
+                .collect()
+        })
+        .map(|join_result| join_result.expect("panic in groth16 fallback verifier"))
     }
 }
 
@@ -510,9 +524,7 @@ impl Service<BatchControl<Item>> for Verifier {
 impl Drop for Verifier {
     fn drop(&mut self) {
         // We need to flush the current batch in case there are still any pending futures.
-        // This blocks the current thread and any futures running on it, until the batch is complete.
-        //
-        // TODO: move the batch onto the rayon thread pool, then drop the verifier immediately.
+        // This returns immediately, usually before the batch is completed.
         self.flush_blocking()
     }
 }
