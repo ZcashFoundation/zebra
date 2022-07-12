@@ -6,6 +6,7 @@ use std::{
     fmt,
     future::Future,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    panic,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -1013,9 +1014,20 @@ where
             Ok(client)
         };
 
-        // Spawn a new task to drive this handshake.
+        // Spawn a new task to drive this handshake, forwarding panics to the calling task.
         tokio::spawn(fut.instrument(negotiator_span))
-            .map(|x: Result<Result<Client, HandshakeError>, JoinError>| Ok(x??))
+            .map(
+                |join_result: Result<Result<Client, HandshakeError>, JoinError>| {
+                    match join_result {
+                        Ok(handshake_result) => handshake_result.map_err(Into::into),
+                        Err(join_error) => match join_error.try_into_panic() {
+                            // Forward panics to the calling task
+                            Ok(panic_reason) => panic::resume_unwind(panic_reason),
+                            Err(join_error) => Err(join_error.into()),
+                        },
+                    }
+                },
+            )
             .boxed()
     }
 }
