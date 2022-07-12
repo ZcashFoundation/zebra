@@ -289,21 +289,21 @@ where
                 addr,
                 connection_tracker,
             };
+            let outbound_connector = outbound_connector.clone();
 
-            // Construct a connector future but do not drive it yet ...
-            let outbound_connector_future = outbound_connector
-                .clone()
-                .oneshot(req)
-                .map_err(move |e| (addr, e));
-
-            // ... instead, spawn a new task to handle this connector
+            // Spawn a new task to make the outbound connection.
             tokio::spawn(
                 async move {
                     // Only spawn one outbound connector per `MIN_PEER_CONNECTION_INTERVAL`,
                     // sleeping for an interval according to its index in the list.
                     sleep(constants::MIN_PEER_CONNECTION_INTERVAL.saturating_mul(i as u32)).await;
 
-                    outbound_connector_future.await
+                    // As soon as we create the connector future,
+                    // the handshake starts running as a spawned task.
+                    outbound_connector
+                        .oneshot(req)
+                        .map_err(move |e| (addr, e))
+                        .await
                 }
                 .in_current_span(),
             )
