@@ -297,13 +297,16 @@ where
                 .map_err(move |e| (addr, e));
 
             // ... instead, spawn a new task to handle this connector
-            tokio::spawn(async move {
-                // Only spawn one outbound connector per `MIN_PEER_CONNECTION_INTERVAL`,
-                // sleeping for an interval according to its index in the list.
-                sleep(constants::MIN_PEER_CONNECTION_INTERVAL.saturating_mul(i as u32)).await;
+            tokio::spawn(
+                async move {
+                    // Only spawn one outbound connector per `MIN_PEER_CONNECTION_INTERVAL`,
+                    // sleeping for an interval according to its index in the list.
+                    sleep(constants::MIN_PEER_CONNECTION_INTERVAL.saturating_mul(i as u32)).await;
 
-                outbound_connector_future.await
-            })
+                    outbound_connector_future.await
+                }
+                .in_current_span(),
+            )
         })
         .collect();
 
