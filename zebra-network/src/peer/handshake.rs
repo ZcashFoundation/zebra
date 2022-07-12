@@ -18,7 +18,7 @@ use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::broadcast,
     task::JoinError,
-    time::{timeout, Instant},
+    time::{error, timeout, Instant},
 };
 use tokio_stream::wrappers::IntervalStream;
 use tokio_util::codec::Framed;
@@ -808,10 +808,6 @@ where
                 "negotiating protocol version with remote peer"
             );
 
-            // CORRECTNESS
-            //
-            // As a defence-in-depth against hangs, every send() or next() on peer_conn
-            // should be wrapped in a timeout.
             let mut peer_conn = Framed::new(
                 data_stream,
                 Codec::builder()
@@ -821,20 +817,17 @@ where
             );
 
             // Wrap the entire initial connection setup in a timeout.
-            let (remote_version, remote_services, remote_canonical_addr) = timeout(
-                constants::HANDSHAKE_TIMEOUT,
-                negotiate_version(
-                    &mut peer_conn,
-                    &connected_addr,
-                    config,
-                    nonces,
-                    user_agent,
-                    our_services,
-                    relay,
-                    minimum_peer_version,
-                ),
+            let (remote_version, remote_services, remote_canonical_addr) = negotiate_version(
+                &mut peer_conn,
+                &connected_addr,
+                config,
+                nonces,
+                user_agent,
+                our_services,
+                relay,
+                minimum_peer_version,
             )
-            .await??;
+            .await?;
 
             // If we've learned potential peer addresses from an inbound
             // connection or handshake, add those addresses to our address book.
@@ -1015,12 +1008,20 @@ where
             Ok(client)
         };
 
+        // Correctness: As a defence-in-depth against hangs, wrap the entire handshake in a timeout.
+        let fut = timeout(constants::HANDSHAKE_TIMEOUT, fut);
+
         // Spawn a new task to drive this handshake, forwarding panics to the calling task.
         tokio::spawn(fut.instrument(negotiator_span))
             .map(
-                |join_result: Result<Result<Client, HandshakeError>, JoinError>| {
+                |join_result: Result<
+                    Result<Result<Client, HandshakeError>, error::Elapsed>,
+                    JoinError,
+                >| {
                     match join_result {
-                        Ok(handshake_result) => handshake_result.map_err(Into::into),
+                        Ok(Ok(Ok(connection_client))) => Ok(connection_client),
+                        Ok(Ok(Err(handshake_error))) => Err(handshake_error.into()),
+                        Ok(Err(timeout_error)) => Err(timeout_error.into()),
                         Err(join_error) => match join_error.try_into_panic() {
                             // Forward panics to the calling task
                             Ok(panic_reason) => panic::resume_unwind(panic_reason),
