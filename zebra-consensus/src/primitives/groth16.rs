@@ -449,7 +449,7 @@ impl Verifier {
             // TODO:
             // - when a batch fails, spawn all its individual items into rayon using Vec::par_iter()
             // - spawn fallback individual verifications so rayon executes them in FIFO order,
-            //   using Vec::par_iter() within a scope_fifo()
+            //   if possible
             rayon::iter::once(item)
                 .map(move |item| item.verify_single(pvk))
                 .collect()
