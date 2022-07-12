@@ -875,8 +875,9 @@ where
 
             debug!("constructing client, spawning server");
 
-            // These channels should not be cloned more than they are
-            // in this block, see constants.rs for more.
+            // These channels communicate between the inbound and outbound halves of the connection,
+            // and between the different connection tasks. We create separate tasks and channels
+            // for each new connection.
             let (server_tx, server_rx) = futures::channel::mpsc::channel(0);
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let error_slot = ErrorSlot::default();
