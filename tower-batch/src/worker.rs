@@ -35,26 +35,33 @@ where
     T: Service<BatchControl<Request>>,
     T::Error: Into<crate::BoxError>,
 {
+    // Batch management
+    //
     /// A semaphore-bounded channel for receiving requests from the batch wrapper service.
     rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
 
     /// The wrapped service that processes batches.
     service: T,
 
+    // Errors and termination
+    //
     /// An error that's populated on permanent service failure.
     failed: Option<ServiceError>,
 
     /// A shared error handle that's populated on permanent service failure.
     error_handle: ErrorHandle,
 
-    /// The maximum number of items allowed in a batch.
-    max_items: usize,
-
-    /// The maximum delay before processing a batch with fewer than `max_items`.
-    max_latency: std::time::Duration,
-
     /// A cloned copy of the wrapper service's semaphore, used to close the semaphore.
     close: PollSemaphore,
+
+    // Config
+    //
+    /// The maximum number of items allowed in a batch.
+    max_items_in_batch: usize,
+
+
+    /// The maximum delay before processing a batch with fewer than `max_items_in_batch`.
+    max_latency: std::time::Duration,
 }
 
 /// Get the error out
@@ -74,7 +81,7 @@ where
     pub(crate) fn new(
         service: T,
         rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
-        max_items: usize,
+        max_items_in_batch: usize,
         max_latency: std::time::Duration,
         close: PollSemaphore,
     ) -> (ErrorHandle, Worker<T, Request>) {
@@ -85,11 +92,11 @@ where
         let worker = Worker {
             rx,
             service,
-            error_handle: error_handle.clone(),
             failed: None,
-            max_items,
-            max_latency,
+            error_handle: error_handle.clone(),
             close,
+            max_items_in_batch,
+            max_latency,
         };
 
         (error_handle, worker)
@@ -191,7 +198,7 @@ where
                                     .await;
                                 pending_items += 1;
                                 // Check whether we have too many pending items.
-                                if pending_items >= self.max_items {
+                                if pending_items >= self.max_items_in_batch {
                                     // TODO: use a batch-specific span to instrument this future.
                                     self.flush_service().await;
 

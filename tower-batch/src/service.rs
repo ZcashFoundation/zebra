@@ -29,7 +29,7 @@ use super::{
 /// The maximum number of batches in the queue.
 ///
 /// This avoids having very large queues on machines with hundreds or thousands of cores.
-pub const MAX_BATCHES_IN_QUEUE: usize = 64;
+pub const QUEUE_BATCH_LIMIT: usize = 64;
 
 /// Allows batch processing of requests.
 ///
@@ -38,6 +38,8 @@ pub struct Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
 {
+    // Batch management
+    //
     /// A custom-bounded channel for sending requests to the batch worker.
     ///
     /// Note: this actually _is_ bounded, but rather than using Tokio's unbounded
@@ -59,6 +61,8 @@ where
     /// A semaphore permit that allows this service to send one message on `tx`.
     permit: Option<OwnedSemaphorePermit>,
 
+    // Errors
+    //
     /// An error handle shared between all service clones for the same worker.
     error_handle: ErrorHandle,
 
@@ -77,6 +81,7 @@ where
         f.debug_struct(name)
             .field("tx", &self.tx)
             .field("semaphore", &self.semaphore)
+            .field("permit", &self.permit)
             .field("error_handle", &self.error_handle)
             .field("worker_handle", &self.worker_handle)
             .finish()
@@ -94,9 +99,10 @@ where
     /// batch of requests. These parameters control this policy:
     ///
     /// * `max_items_in_batch` gives the maximum number of items per batch.
-    /// * `max_batches_in_queue` is an upper bound on the number of batches in the queue.
-    ///   If this is `None`, the `Batch` uses the current number of [`rayon`] threads.
-    ///   The final value is automatically limited to [`MAX_BATCHES_IN_QUEUE`].
+    /// * `max_batches` is an upper bound on the number of batches in the queue,
+    ///   and the number of concurrently executing batches.
+    ///   If this is `None`, we use the current number of [`rayon`] threads.
+    ///   The number of batches in the queue is also limited by [`QUEUE_BATCH_LIMIT`].
     /// * `max_latency` gives the maximum latency for a batch item to start verifying.
     ///
     /// The default Tokio executor is used to run the given service, which means
@@ -104,7 +110,7 @@ where
     pub fn new(
         service: T,
         max_items_in_batch: usize,
-        max_batches_in_queue: impl Into<Option<usize>>,
+        max_batches: impl Into<Option<usize>>,
         max_latency: std::time::Duration,
     ) -> Self
     where
@@ -113,12 +119,7 @@ where
         T::Error: Send + Sync,
         Request: Send + 'static,
     {
-        let (mut batch, worker) = Self::pair(
-            service,
-            max_items_in_batch,
-            max_batches_in_queue,
-            max_latency,
-        );
+        let (mut batch, worker) = Self::pair(service, max_items_in_batch, max_batches, max_latency);
 
         let span = info_span!("batch worker", kind = std::any::type_name::<T>());
 
@@ -151,7 +152,7 @@ where
     pub fn pair(
         service: T,
         max_items_in_batch: usize,
-        max_batches_in_queue: impl Into<Option<usize>>,
+        max_batches: impl Into<Option<usize>>,
         max_latency: std::time::Duration,
     ) -> (Self, Worker<T, Request>)
     where
@@ -163,10 +164,10 @@ where
 
         // Clamp config to sensible values.
         let max_items_in_batch = max(max_items_in_batch, 1);
-        let max_batches_in_queue = max_batches_in_queue
+        let max_batches = max_batches
             .into()
             .unwrap_or_else(rayon::current_num_threads);
-        let num_cpus = max_batches_in_queue.clamp(1, MAX_BATCHES_IN_QUEUE);
+        let max_batches_in_queue = max_batches.clamp(1, QUEUE_BATCH_LIMIT);
 
         // The semaphore bound limits the maximum number of concurrent requests
         // (specifically, requests which got a `Ready` from `poll_ready`, but haven't
@@ -176,7 +177,7 @@ where
         // This helps keep all CPUs filled with work: there is one batch executing, and another ready to go.
         //
         // TODO: work out how to split CPU between verifiers
-        let semaphore = Semaphore::new(max_items_in_batch * num_cpus);
+        let semaphore = Semaphore::new(max_items_in_batch * max_batches_in_queue);
         let semaphore = PollSemaphore::new(Arc::new(semaphore));
 
         let (error_handle, worker) = Worker::new(

@@ -15,33 +15,30 @@ use super::{service::Batch, BatchControl};
 /// See the module documentation for more details.
 pub struct BatchLayer<Request> {
     max_items_in_batch: usize,
-    max_batches_in_queue: Option<usize>,
+    max_batches: Option<usize>,
     max_latency: std::time::Duration,
 
-    _p: PhantomData<fn(Request)>,
+    // TODO: is the variance correct here?
+    // https://doc.rust-lang.org/1.33.0/nomicon/subtyping.html#variance
+    // https://doc.rust-lang.org/nomicon/phantom-data.html#table-of-phantomdata-patterns
+    _handles_requests: PhantomData<fn(Request)>,
 }
 
 impl<Request> BatchLayer<Request> {
     /// Creates a new `BatchLayer`.
     ///
     /// The wrapper is responsible for telling the inner service when to flush a
-    /// batch of requests. These parameters control this policy:
-    ///
-    /// * `max_items_in_batch` gives the maximum number of items per batch.
-    /// * `max_batches_in_queue` is an upper bound on the number of batches in the queue.
-    ///   If this is `None`, the `Batch` uses the current number of [`rayon`] threads.
-    ///   The final value is automatically limited to [`MAX_BATCHES_IN_QUEUE`].
-    /// * `max_latency` gives the maximum latency for a batch item to start verifying.
+    /// batch of requests. See [`Batch::new()`] for details.
     pub fn new(
         max_items_in_batch: usize,
-        max_batches_in_queue: impl Into<Option<usize>>,
+        max_batches: impl Into<Option<usize>>,
         max_latency: std::time::Duration,
     ) -> Self {
         BatchLayer {
             max_items_in_batch,
-            max_batches_in_queue: max_batches_in_queue.into(),
+            max_batches: max_batches.into(),
             max_latency,
-            _p: PhantomData,
+            _handles_requests: PhantomData,
         }
     }
 }
@@ -59,7 +56,7 @@ where
         Batch::new(
             service,
             self.max_items_in_batch,
-            self.max_batches_in_queue,
+            self.max_batches,
             self.max_latency,
         )
     }
@@ -69,7 +66,7 @@ impl<Request> fmt::Debug for BatchLayer<Request> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("BufferLayer")
             .field("max_items_in_batch", &self.max_items_in_batch)
-            .field("max_batches_in_queue", &self.max_batches_in_queue)
+            .field("max_batches", &self.max_batches)
             .field("max_latency", &self.max_latency)
             .finish()
     }
