@@ -425,7 +425,6 @@ impl Verifier {
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         tokio::task::spawn_blocking(move || {
             // TODO:
-            // - spawn multiple batches at the same time
             // - spawn batches so rayon executes them in FIFO order
             //   possible implementation: return a closure in a Future,
             //   then run it using scope_fifo() in the worker task,

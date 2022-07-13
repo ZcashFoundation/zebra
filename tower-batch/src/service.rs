@@ -91,6 +91,7 @@ where
 impl<T, Request> Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
+    T::Future: Send + 'static,
     T::Error: Into<crate::BoxError>,
 {
     /// Creates a new `Batch` wrapping `service`.
@@ -175,8 +176,7 @@ where
         //
         // We choose a bound that allows callers to check readiness for one batch per rayon CPU thread.
         // This helps keep all CPUs filled with work: there is one batch executing, and another ready to go.
-        //
-        // TODO: work out how to split CPU between verifiers
+        // Often there is only one verifier running, when that happens we want it to take all the cores.
         let semaphore = Semaphore::new(max_items_in_batch * max_batches_in_queue);
         let semaphore = PollSemaphore::new(Arc::new(semaphore));
 
@@ -184,9 +184,11 @@ where
             service,
             rx,
             max_items_in_batch,
+            max_batches,
             max_latency,
             semaphore.clone(),
         );
+
         let batch = Batch {
             tx,
             semaphore,
@@ -218,6 +220,7 @@ where
 impl<T, Request> Service<Request> for Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
+    T::Future: Send + 'static,
     T::Error: Into<crate::BoxError>,
 {
     type Response = T::Response;

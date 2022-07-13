@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use futures::future::TryFutureExt;
+use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use pin_project::pin_project;
 use tokio::{
     sync::mpsc,
@@ -33,6 +33,7 @@ use super::{
 pub struct Worker<T, Request>
 where
     T: Service<BatchControl<Request>>,
+    T::Future: Send + 'static,
     T::Error: Into<crate::BoxError>,
 {
     // Batch management
@@ -42,6 +43,9 @@ where
 
     /// The wrapped service that processes batches.
     service: T,
+
+    /// The batches that the worker is concurrently executing.
+    concurrent_batches: FuturesUnordered<BoxFuture<'static, Result<T::Response, T::Error>>>,
 
     // Errors and termination
     //
@@ -59,6 +63,8 @@ where
     /// The maximum number of items allowed in a batch.
     max_items_in_batch: usize,
 
+    /// The maximum number of batches that are allowed to run concurrently.
+    max_concurrent_batches: usize,
 
     /// The maximum delay before processing a batch with fewer than `max_items_in_batch`.
     max_latency: std::time::Duration,
@@ -73,6 +79,7 @@ pub(crate) struct ErrorHandle {
 impl<T, Request> Worker<T, Request>
 where
     T: Service<BatchControl<Request>>,
+    T::Future: Send + 'static,
     T::Error: Into<crate::BoxError>,
 {
     /// Creates a new batch worker.
@@ -82,6 +89,7 @@ where
         service: T,
         rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
         max_items_in_batch: usize,
+        max_concurrent_batches: usize,
         max_latency: std::time::Duration,
         close: PollSemaphore,
     ) -> (ErrorHandle, Worker<T, Request>) {
@@ -92,10 +100,12 @@ where
         let worker = Worker {
             rx,
             service,
+            concurrent_batches: FuturesUnordered::new(),
             failed: None,
             error_handle: error_handle.clone(),
             close,
             max_items_in_batch,
+            max_concurrent_batches,
             max_latency,
         };
 
@@ -129,20 +139,28 @@ where
         }
     }
 
-    /// Tells the inner service to flush the current batch.
+    /// Tell the inner service to flush the current batch.
+    ///
+    /// Waits until the inner service is ready,
+    /// then stores a future which resolves when the batch finishes.
     async fn flush_service(&mut self) {
-        if let Err(e) = self
-            .service
-            .ready()
-            .and_then(|svc| svc.call(BatchControl::Flush))
-            .await
-        {
-            self.failed(e.into());
+        let ready_service = self.service.ready().await;
+        match ready_service {
+            Ok(ready_service) => {
+                let flush_future = ready_service.call(BatchControl::Flush);
+                self.concurrent_batches.push(flush_future.boxed());
+            }
+            Err(error) => {
+                self.failed(error.into());
+            }
         }
-
-        // Correctness: allow other tasks to run at the end of every batch.
-        tokio::task::yield_now().await;
     }
+
+    /* TODO: let other tasks run while we're waiting
+       // Correctness: allow other tasks to run at the end of every batch.
+       tokio::task::yield_now().await;
+
+    */
 
     /// Run loop for batch requests, which implements the batch policies.
     ///
@@ -220,6 +238,19 @@ where
         }
     }
 
+    /// Handle errors from the inner service or the batches it spawns.
+    ///
+    /// Returns the response, or `None` on error.
+    fn handle_error<U>(&mut self, result: Result<U, T::Error>) -> Option<U> {
+        match result {
+            Ok(response) => Some(response),
+            Err(error) => {
+                self.failed(error.into());
+                None
+            }
+        }
+    }
+
     /// Register an inner service failure.
     ///
     /// The underlying service failed when we called `poll_ready` on it with the given `error`. We
@@ -279,6 +310,7 @@ impl Clone for ErrorHandle {
 impl<T, Request> PinnedDrop for Worker<T, Request>
 where
     T: Service<BatchControl<Request>>,
+    T::Future: Send + 'static,
     T::Error: Into<crate::BoxError>,
 {
     fn drop(mut self: Pin<&mut Self>) {
@@ -290,5 +322,18 @@ where
 
         // Stop accepting reservations
         self.close.close();
+
+        // Clear any finished batches, ignoring any errors.
+        // Ignore any batches that are still executing, because we can't cancel them.
+        //
+        // now_or_never() can stop futures waking up, but that's ok here,
+        // because we're manually polling, then dropping the stream.
+        while let Some(Some(_)) = self
+            .as_mut()
+            .project()
+            .concurrent_batches
+            .next()
+            .now_or_never()
+        {}
     }
 }
