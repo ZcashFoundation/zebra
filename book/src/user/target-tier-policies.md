@@ -215,15 +215,12 @@ target. We hold tier 1 targets to our highest standard of requirements.
 
 A proposed new tier 1 target must be reviewed and approved by the core
 engineering team based on these requirements. In addition, the release team must
-approve the viability and value of supporting the target. For a tier 1 target,
-this will typically take place via a full RFC proposing the target, to be
-jointly reviewed and approved by the core engineering team and release team.
+approve the viability and value of supporting the target.
 
 In addition, the devops team must approve the integration of the target
 into Continuous Integration (CI), and the tier 1 CI-related requirements. This
-review and approval may take place in a PR adding the target to CI, by an
-devops team member reporting the outcome of a team discussion, or by
-including the devops team in the RFC proposing the target.
+review and approval may take place in a PR adding the target to CI, by a devops
+team member reporting the outcome of a team discussion.
 
 - Tier 1 targets must have substantial, widespread interest within the
   developer community, and must serve the ongoing needs of multiple production
@@ -271,18 +268,15 @@ including the devops team in the RFC proposing the target.
 - All requirements for tier 2 apply.
 
 A tier 1 target may be demoted if it no longer meets these requirements but
-still meets the requirements for a lower tier. Any proposal for demotion of a
-tier 1 target requires a full RFC process, with approval by the compiler and
-release teams. Any such proposal will be communicated widely to the Zebra
-community, both when initially proposed and before being dropped from a stable
-release. A tier 1 target is highly unlikely to be directly removed without
-first being demoted to tier 2 or tier 3. (The amount of time between such
-communication and the next stable release may depend on the nature and severity
-of the failed requirement, the timing of its discovery, whether the target has
-been part of a stable release yet, and whether the demotion or removal can be a
-planned and scheduled action.)
+still meets the requirements for a lower tier. Any such proposal will be
+communicated widely to the Zebra community, both when initially proposed and
+before being dropped from a stable release. A tier 1 target is highly unlikely
+to be directly removed without first being demoted to tier 2 or tier 3.
+(The amount of time between such communication and the next stable release may
+depend on the nature and severity of the failed requirement, the timing of its
+discovery, whether the target has been part of a stable release yet, and whether
+the demotion or removal can be a planned and scheduled action.)
 
 Raising the baseline expectations of a tier 1 target (such as the minimum CPU
 features or OS version required) requires the approval of the core engineering
-team and release teams, and should be widely communicated as well, but does not
-necessarily require a full RFC.
+team and release teams, and should be widely communicated as well.
