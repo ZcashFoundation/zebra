@@ -36,7 +36,7 @@ overridden by a stronger requirement.
 
 While these criteria attempt to document the policy, that policy still involves
 human judgment. Targets must fulfill the spirit of the requirements as well, as
-determined by the judgment of the approving teams. Neither this policy nor any
+determined by the judgment of the Zebra team. Neither this policy nor any
 decisions made regarding targets shall create any binding agreement or estoppel
 by any party.
 
@@ -48,11 +48,7 @@ Note that a target must have already received approval for the next lower tier,
 and spent a reasonable amount of time at that tier, before making a proposal
 for promotion to the next higher tier; this is true even if a target meets the
 requirements for several tiers at once. This policy leaves the precise
-interpretation of "reasonable amount of time" up to the approving teams; those
-teams may scale the amount of time required based on their confidence in the
-target and its demonstrated track record at its current tier. At a minimum,
-multiple stable releases of Zebra should typically occur between promotions of a
-target.
+interpretation of "reasonable amount of time" up to the Zebra team.
 
 The availability or tier of a target in stable Zebra is not a hard stability
 guarantee about the future availability or tier of that target. Higher-level
@@ -65,10 +61,9 @@ affect existing stable releases, only current development and future releases.
 In this policy, the words "must" and "must not" specify absolute requirements
 that a target must meet to qualify for a tier. The words "should" and "should
 not" specify requirements that apply in almost all cases, but for which the
-approving teams may grant an exception for good reason. The word "may"
-indicates something entirely optional, and does not indicate guidance or
-recommendations. This language is based on [IETF RFC
-2119](https://tools.ietf.org/html/rfc2119).
+Zebra team may grant an exception for good reason. The word "may" indicates
+something entirely optional, and does not indicate guidance or recommendations.
+This language is based on [IETF RFC 2119](https://tools.ietf.org/html/rfc2119).
 
 ## Tier 3 target policy
 
@@ -174,7 +169,7 @@ by a devops team member reporting the outcome of a team discussion.
     target's value will take this limitation into account.
 - The target must build reliably in CI, for all components that Zebra's CI
   considers mandatory.
-- The approving teams may additionally require that a subset of tests pass in
+- The Zebra team may additionally require that a subset of tests pass in
   CI, such as enough to build a functional "hello world" program, `./x.py test
   --no-run`, or equivalent "smoke tests". In particular, this requirement may
   apply if the tests in question provide substantial value via early detection
@@ -225,7 +220,7 @@ team member reporting the outcome of a team discussion.
 - Tier 1 targets must have substantial, widespread interest within the
   developer community, and must serve the ongoing needs of multiple production
   users of Zebra across multiple organizations or projects. These requirements
-  are subjective, and determined by consensus of the approving teams. A tier 1
+  are subjective, and determined by consensus of the Zebra team. A tier 1
   target may be demoted or removed if it becomes obsolete or no longer meets
   this requirement.
 - The target maintainer team must include at least 2 developers.
@@ -247,7 +242,7 @@ team member reporting the outcome of a team discussion.
   - Such resources may be provided via cloud systems, via emulation, or via
     physical hardware.
   - If the target requires the use of emulation to meet any of the tier
-    requirements, the approving teams for those requirements must have high
+    requirements, the Zebra team for those requirements must have high
     confidence in the accuracy of the emulation, such that discrepancies
     between emulation and native operation that affect test results will
     constitute a high-priority bug in either the emulation or the
@@ -278,5 +273,5 @@ discovery, whether the target has been part of a stable release yet, and whether
 the demotion or removal can be a planned and scheduled action.)
 
 Raising the baseline expectations of a tier 1 target (such as the minimum CPU
-features or OS version required) requires the approval of the core engineering
-team and release teams, and should be widely communicated as well.
+features or OS version required) requires the approval of the Zebra team, and
+should be widely communicated as well.
