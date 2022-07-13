@@ -21,8 +21,8 @@ platform | notes
 Tier 2 platforms can be thought of as "guaranteed to build". The Zebra project
 builds in CI for each tier 2 platform, and automated builds ensure that each
 tier 2 platform builds after each change. Not all automated tests are run so it's
-not guaranteed to produce a working build, but tier 2 platforms often work to
-quite a good degree and patches are always welcome!
+not guaranteed to produce a working build, and official builds are not available,
+but tier 2 platforms often work to quite a good degree and patches are always welcome!
 
 For the full requirements, see [Tier 2 platform policy](platform-tier-policy.md#tier-2-platform-policy) in the Platform Tier Policy.
 
