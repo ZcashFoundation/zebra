@@ -273,8 +273,8 @@ where
 
         let mut inner = self.error_handle.inner.lock().unwrap();
 
+        // Ignore duplicate failures
         if inner.is_some() {
-            // Future::poll was called after we've already errored out!
             return;
         }
 
@@ -325,11 +325,12 @@ where
         // Fail pending tasks
         self.failed(Closed::new().into());
 
-        // Clear queued requests
-        while self.rx.try_recv().is_ok() {}
-
-        // Stop accepting reservations
-        self.close.close();
+        // Fail queued requests
+        while let Ok(msg) = self.rx.try_recv() {
+            let _ = msg
+                .tx
+                .send(Err(self.failed.as_ref().expect("just set failed").clone()));
+        }
 
         // Clear any finished batches, ignoring any errors.
         // Ignore any batches that are still executing, because we can't cancel them.
