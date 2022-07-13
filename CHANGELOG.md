@@ -7,25 +7,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-beta.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.13) - 2022-07-11
 
-This release fixes a bug in the halo2 verification process of Zebra that was causing a big performance issue near the blockchain tip.
-In addition, this release improves Zebra's sync and verification performance under heavy load.
+This release fixes multiple bugs in proof and signature verification, which were causing big performance issues near the blockchain tip.
+It also improves Zebra's sync performance and reliability under heavy load.
 
 ### Configuration Changes
 
-- Split the checkpoint and full verification [`sync` concurrency options](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html) (#4726 #4758):
+- Split the checkpoint and full verification [`sync` concurrency options](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html) (#4726, #4758):
   - Add a new `full_verify_concurrency_limit`
   - Rename `max_concurrent_block_requests` to `download_concurrency_limit`
   - Rename `lookahead_limit` to `checkpoint_verify_concurrency_limit`
   For backwards compatibility, the old names are still accepted as aliases.
+- Add a new `parallel_cpu_threads` [`sync` concurrency option](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html) (#4776).
+  This option sets the number of threads to use for CPU-bound tasks, such as proof and signature verification.
+  By default, Zebra uses all available CPU cores.
+
+### Added
+
+- Add a `rayon` thread pool for CPU-bound tasks (#4776)
+- Run multiple cryptographic batches concurrently within each verifier (#4776)
 
 ### Changed
 
 - Update column family names to match Zebra's database design (#4639)
+- Update Zebra's mainnet and testnet checkpoints (#4777)
+- Process more blocks and batch items concurrently, so there's a batch ready for each available CPU (#4776)
 
 ### Fixed
 
 - Only verify halo2 proofs once per transaction (#4752)
-- Add limits to rejection message and reason (#4687)
+- Use a separate channel for each cryptographic batch, to avoid dropped batch results (#4750)
+- Improve batch fairness and latency under heavy load (#4750, #4776)
+- Run all verifier cryptography on blocking CPU-bound threads, using `tokio` and `rayon`  (#4750, #4776)
+- Use `tokio`'s `PollSemaphore`, instead of an outdated `Semaphore` impl (#4750)
+- Check batch worker tasks for panics and task termination (#4750, #4777)
+- Limit the length of the `reject` network message's `message` and `reason` fields (#4687)
 
 #### CI
 
