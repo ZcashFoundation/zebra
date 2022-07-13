@@ -4,8 +4,6 @@ name: CI Docker
 # so they can be skipped when the modified files make the actual workflow run.
 on:
   pull_request:
-    branches:
-      - main
     paths-ignore:
       # code and tests
       - '**/*.rs'
