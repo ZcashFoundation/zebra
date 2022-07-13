@@ -48,6 +48,17 @@ where
     /// The wrapped service that processes batches.
     service: T,
 
+    /// The number of pending items sent to `service`, since the last batch flush.
+    pending_items: usize,
+
+    /// The timer for the pending batch, if it has any items.
+    ///
+    /// The timer is started when the first entry of a new batch is
+    /// submitted, so that the batch latency of all entries is at most
+    /// self.max_latency. However, we don't keep the timer running unless
+    /// there is a pending request to prevent wakeups on idle services.
+    pending_batch_timer: Option<Pin<Box<Sleep>>>,
+
     /// The batches that the worker is concurrently executing.
     concurrent_batches: FuturesUnordered<BoxFuture<'static, Result<T::Response, T::Error>>>,
 
@@ -104,6 +115,8 @@ where
         let worker = Worker {
             rx,
             service,
+            pending_items: 0,
+            pending_batch_timer: None,
             concurrent_batches: FuturesUnordered::new(),
             failed: None,
             error_handle: error_handle.clone(),
@@ -128,6 +141,8 @@ where
             Ok(svc) => {
                 let rsp = svc.call(req.into());
                 let _ = tx.send(Ok(rsp));
+
+                self.pending_items += 1;
             }
             Err(e) => {
                 self.failed(e.into());
@@ -154,6 +169,10 @@ where
             Ok(ready_service) => {
                 let flush_future = ready_service.call(BatchControl::Flush);
                 self.concurrent_batches.push(flush_future.boxed());
+
+                // Now we have an empty batch.
+                self.pending_items = 0;
+                self.pending_batch_timer = None;
             }
             Err(error) => {
                 self.failed(error.into());
@@ -170,13 +189,6 @@ where
     ///
     /// See [`Service::new()`](crate::Service::new) for details.
     pub async fn run(mut self) {
-        // The timer is started when the first entry of a new batch is
-        // submitted, so that the batch latency of all entries is at most
-        // self.max_latency. However, we don't keep the timer running unless
-        // there is a pending request to prevent wakeups on idle services.
-        let mut timer: Option<Pin<Box<Sleep>>> = None;
-        let mut pending_items = 0usize;
-
         loop {
             // Wait on either a new message or the batch timer.
             //
@@ -201,15 +213,11 @@ where
                     }
                 },
 
-                Some(()) = OptionFuture::from(timer.as_mut()), if timer.as_ref().is_some() => {
+                Some(()) = OptionFuture::from(self.pending_batch_timer.as_mut()), if self.pending_batch_timer.as_ref().is_some() => {
                     tracing::trace!("batch timer expired");
 
                     // TODO: use a batch-specific span to instrument this future.
                     self.flush_service().await;
-
-                    // Now we have an empty batch.
-                    timer = None;
-                    pending_items = 0;
                 },
 
                 maybe_msg = self.rx.recv(), if self.can_spawn_new_batches() => match maybe_msg {
@@ -222,23 +230,18 @@ where
                             // Apply the provided span to request processing.
                             .instrument(span)
                             .await;
-                        pending_items += 1;
 
                         // Check whether we have too many pending items.
-                        if pending_items >= self.max_items_in_batch {
+                        if self.pending_items >= self.max_items_in_batch {
                             tracing::trace!("batch is full");
 
                             // TODO: use a batch-specific span to instrument this future.
                             self.flush_service().await;
-
-                            // Now we have an empty batch.
-                            timer = None;
-                            pending_items = 0;
-                        } else if pending_items == 1 {
+                        } else if self.pending_items == 1 {
                             tracing::trace!("batch is new, starting timer");
 
                             // The first message in a new batch.
-                            timer = Some(Box::pin(sleep(self.max_latency)));
+                            self.pending_batch_timer = Some(Box::pin(sleep(self.max_latency)));
                         } else {
                             tracing::trace!("waiting for full batch or batch timer");
                         }
@@ -284,6 +287,9 @@ where
         tracing::trace!("worker failure: waking pending requests so they can be failed");
         self.rx.close();
         self.close.close();
+
+        // We don't schedule any batches on an errored service
+        self.pending_batch_timer = None;
 
         // By closing the mpsc::Receiver, we know that that the run() loop will
         // drain all pending requests. We just need to make sure that any
