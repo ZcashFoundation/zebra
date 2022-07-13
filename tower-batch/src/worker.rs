@@ -5,7 +5,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
+use futures::{
+    future::{BoxFuture, OptionFuture},
+    stream::FuturesUnordered,
+    FutureExt, StreamExt,
+};
 use pin_project::pin_project;
 use tokio::{
     sync::mpsc,
@@ -115,26 +119,23 @@ where
     /// Process a single worker request.
     async fn process_req(&mut self, req: Request, tx: message::Tx<T::Future>) {
         if let Some(ref failed) = self.failed {
-            tracing::trace!("notifying caller about worker failure");
+            tracing::trace!("notifying batch request caller about worker failure");
             let _ = tx.send(Err(failed.clone()));
-        } else {
-            match self.service.ready().await {
-                Ok(svc) => {
-                    let rsp = svc.call(req.into());
-                    let _ = tx.send(Ok(rsp));
-                }
-                Err(e) => {
-                    self.failed(e.into());
-                    let _ = tx.send(Err(self
-                        .failed
-                        .as_ref()
-                        .expect("Worker::failed did not set self.failed?")
-                        .clone()));
+            return;
+        }
 
-                    // Wake any tasks waiting on channel capacity.
-                    tracing::debug!("waking pending tasks");
-                    self.close.close();
-                }
+        match self.service.ready().await {
+            Ok(svc) => {
+                let rsp = svc.call(req.into());
+                let _ = tx.send(Ok(rsp));
+            }
+            Err(e) => {
+                self.failed(e.into());
+                let _ = tx.send(Err(self
+                    .failed
+                    .as_ref()
+                    .expect("Worker::failed did not set self.failed?")
+                    .clone()));
             }
         }
     }
@@ -144,8 +145,12 @@ where
     /// Waits until the inner service is ready,
     /// then stores a future which resolves when the batch finishes.
     async fn flush_service(&mut self) {
-        let ready_service = self.service.ready().await;
-        match ready_service {
+        if self.failed.is_some() {
+            tracing::trace!("worker failure: skipping flush");
+            return;
+        }
+
+        match self.service.ready().await {
             Ok(ready_service) => {
                 let flush_future = ready_service.call(BatchControl::Flush);
                 self.concurrent_batches.push(flush_future.boxed());
@@ -172,68 +177,65 @@ where
         // there is a pending request to prevent wakeups on idle services.
         let mut timer: Option<Pin<Box<Sleep>>> = None;
         let mut pending_items = 0usize;
+
         loop {
-            match timer.as_mut() {
-                None => match self.rx.recv().await {
-                    // The first message in a new batch.
+            // Wait on either a new message or the batch timer.
+            //
+            // If both are ready, end the batch now, because the timer has elapsed.
+            // If the timer elapses, any pending messages are preserved:
+            // https://docs.rs/tokio/latest/tokio/sync/mpsc/struct.UnboundedReceiver.html#cancel-safety
+            tokio::select! {
+                biased;
+
+                // The batch timer elapsed.
+                Some(()) = OptionFuture::from(timer.as_mut()), if timer.as_ref().is_some() => {
+                    tracing::trace!("batch timer expired");
+
+                    // TODO: use a batch-specific span to instrument this future.
+                    self.flush_service().await;
+
+                    // Now we have an empty batch.
+                    timer = None;
+                    pending_items = 0;
+                }
+
+                maybe_msg = self.rx.recv() => match maybe_msg {
                     Some(msg) => {
+                        tracing::trace!("batch message received");
+
                         let span = msg.span;
+
                         self.process_req(msg.request, msg.tx)
-                            // Apply the provided span to request processing
+                            // Apply the provided span to request processing.
                             .instrument(span)
                             .await;
-                        timer = Some(Box::pin(sleep(self.max_latency)));
-                        pending_items = 1;
-                    }
-                    // No more messages, ever.
-                    None => return,
-                },
-                Some(sleep) => {
-                    // Wait on either a new message or the batch timer.
-                    //
-                    // If both are ready, end the batch now, because the timer has elapsed.
-                    // If the timer elapses, any pending messages are preserved:
-                    // https://docs.rs/tokio/latest/tokio/sync/mpsc/struct.UnboundedReceiver.html#cancel-safety
-                    tokio::select! {
-                        biased;
+                        pending_items += 1;
 
-                        // The batch timer elapsed.
-                        () = sleep => {
+                        // Check whether we have too many pending items.
+                        if pending_items >= self.max_items_in_batch {
+                            tracing::trace!("batch is full");
+
                             // TODO: use a batch-specific span to instrument this future.
                             self.flush_service().await;
 
                             // Now we have an empty batch.
                             timer = None;
                             pending_items = 0;
+                        } else if pending_items == 1 {
+                            tracing::trace!("batch is new, starting timer");
+
+                            // The first message in a new batch.
+                            timer = Some(Box::pin(sleep(self.max_latency)));
+                        } else {
+                            tracing::trace!("waiting for full batch or batch timer");
                         }
-
-                        maybe_msg = self.rx.recv() => match maybe_msg {
-                            Some(msg) => {
-                                let span = msg.span;
-                                self.process_req(msg.request, msg.tx)
-                                    // Apply the provided span to request processing.
-                                    .instrument(span)
-                                    .await;
-                                pending_items += 1;
-                                // Check whether we have too many pending items.
-                                if pending_items >= self.max_items_in_batch {
-                                    // TODO: use a batch-specific span to instrument this future.
-                                    self.flush_service().await;
-
-                                    // Now we have an empty batch.
-                                    timer = None;
-                                    pending_items = 0;
-                                } else {
-                                    // The timer is still running.
-                                }
-                            }
-                            None => {
-                                // No more messages, ever.
-                                return;
-                            }
-                        },
                     }
-                }
+                    None => {
+                        tracing::trace!("batch channel closed and emptied, exiting worker task");
+
+                        return;
+                    }
+                },
             }
         }
     }
@@ -258,6 +260,8 @@ where
     /// an `Arc`, send that `Arc<E>` to all pending requests, and store it so that subsequent
     /// requests will also fail with the same error.
     fn failed(&mut self, error: crate::BoxError) {
+        tracing::debug!(?error, "batch worker error");
+
         // Note that we need to handle the case where some error_handle is concurrently trying to send us
         // a request. We need to make sure that *either* the send of the request fails *or* it
         // receives an error on the `oneshot` it constructed. Specifically, we want to avoid the
@@ -277,7 +281,9 @@ where
         *inner = Some(error.clone());
         drop(inner);
 
+        tracing::trace!("worker failure: waking pending requests so they can be failed");
         self.rx.close();
+        self.close.close();
 
         // By closing the mpsc::Receiver, we know that that the run() loop will
         // drain all pending requests. We just need to make sure that any
@@ -314,6 +320,8 @@ where
     T::Error: Into<crate::BoxError>,
 {
     fn drop(mut self: Pin<&mut Self>) {
+        tracing::trace!("dropping batch worker");
+
         // Fail pending tasks
         self.failed(Closed::new().into());
 
