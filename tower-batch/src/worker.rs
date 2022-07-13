@@ -187,7 +187,14 @@ where
             tokio::select! {
                 biased;
 
-                // The batch timer elapsed.
+                batch_result = self.concurrent_batches.next(), if !self.concurrent_batches.is_empty() => match batch_result.expect("only returns None when empty") {
+                    Ok(_response) => tracing::trace!("batch finished executing"),
+                    Err(error) => {
+                        tracing::trace!("batch execution failed");
+                        self.failed(error.into());
+                    }
+                },
+
                 Some(()) = OptionFuture::from(timer.as_mut()), if timer.as_ref().is_some() => {
                     tracing::trace!("batch timer expired");
 
@@ -197,7 +204,7 @@ where
                     // Now we have an empty batch.
                     timer = None;
                     pending_items = 0;
-                }
+                },
 
                 maybe_msg = self.rx.recv() => match maybe_msg {
                     Some(msg) => {
@@ -236,19 +243,6 @@ where
                         return;
                     }
                 },
-            }
-        }
-    }
-
-    /// Handle errors from the inner service or the batches it spawns.
-    ///
-    /// Returns the response, or `None` on error.
-    fn handle_error<U>(&mut self, result: Result<U, T::Error>) -> Option<U> {
-        match result {
-            Ok(response) => Some(response),
-            Err(error) => {
-                self.failed(error.into());
-                None
             }
         }
     }

@@ -47,6 +47,7 @@ impl<S, Request> Layer<S> for BatchLayer<Request>
 where
     S: Service<BatchControl<Request>> + Send + 'static,
     S::Future: Send,
+    S::Response: Send,
     S::Error: Into<crate::BoxError> + Send + Sync,
     Request: Send + 'static,
 {

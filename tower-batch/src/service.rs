@@ -117,6 +117,7 @@ where
     where
         T: Send + 'static,
         T::Future: Send,
+        T::Response: Send,
         T::Error: Send + Sync,
         Request: Send + 'static,
     {
