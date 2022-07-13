@@ -229,11 +229,14 @@ impl Default for SyncSection {
             // This default is deliberately very low, so Zebra can verify a few large blocks in under 60 seconds,
             // even on machines with only a few cores.
             //
-            // This lets users see the committed block height changing in every progress log.
+            // This lets users see the committed block height changing in every progress log,
+            // and avoids hangs due to out-of-order verifications flooding the CPUs.
             //
-            // TODO: when we implement orchard proof batching, try increasing to 20 or more
-            //       limit full verification concurrency based on block transaction counts?
-            full_verify_concurrency_limit: 5,
+            // TODO:
+            // - limit full verification concurrency based on block transaction counts?
+            // - move more disk work to blocking tokio threads,
+            //   and CPU work to the rayon thread pool inside blocking tokio threads
+            full_verify_concurrency_limit: 20,
 
             // Use one thread per CPU.
             //
