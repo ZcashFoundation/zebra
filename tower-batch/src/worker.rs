@@ -161,11 +161,10 @@ where
         }
     }
 
-    /* TODO: let other tasks run while we're waiting
-       // Correctness: allow other tasks to run at the end of every batch.
-       tokio::task::yield_now().await;
-
-    */
+    /// Is the current number of concurrent batches above the configured limit?
+    fn can_spawn_new_batches(&self) -> bool {
+        self.concurrent_batches.len() < self.max_concurrent_batches
+    }
 
     /// Run loop for batch requests, which implements the batch policies.
     ///
@@ -188,7 +187,14 @@ where
                 biased;
 
                 batch_result = self.concurrent_batches.next(), if !self.concurrent_batches.is_empty() => match batch_result.expect("only returns None when empty") {
-                    Ok(_response) => tracing::trace!("batch finished executing"),
+                    Ok(_response) => {
+                        tracing::trace!("batch finished executing");
+
+                        /* TODO: let other tasks run while we're waiting
+                        // Correctness: allow other tasks to run at the end of every batch.
+                        tokio::task::yield_now().await;
+                         */
+                    }
                     Err(error) => {
                         tracing::trace!("batch execution failed");
                         self.failed(error.into());
@@ -206,7 +212,7 @@ where
                     pending_items = 0;
                 },
 
-                maybe_msg = self.rx.recv() => match maybe_msg {
+                maybe_msg = self.rx.recv(), if self.can_spawn_new_batches() => match maybe_msg {
                     Some(msg) => {
                         tracing::trace!("batch message received");
 
