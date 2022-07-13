@@ -22,9 +22,9 @@ The Zcash Foundation provides three tiers of platform support, modeled after the
   and pass tests.
 
 Adding a new tier 3 platform imposes minimal requirements; but we focus
-primarily on avoiding disruption to other ongoing Zebra development.
+primarily on avoiding disruption to ongoing Zebra development.
 
-Tier 2 and tier 1 platforms place work on Zebra project developers as a whole,
+Tier 2 and tier 1 platforms place work on Zcash Foundation developers as a whole,
 to avoid breaking the platform. These tiers require commensurate and ongoing
 efforts from the maintainers of the platform, to demonstrate value and to
 minimize any disruptions to ongoing Zebra development.
