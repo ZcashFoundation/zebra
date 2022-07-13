@@ -134,9 +134,8 @@ by a devops team member reporting the outcome of a team discussion.
 - The platform must document its baseline expectations for the features or
   versions of CPUs, operating systems, libraries, runtime environments, and
   similar.
-- Tier 2 platforms must not leave any significant portions of Zebra unimplemented
-  or stubbed out, unless they cannot possibly be
-  supported on the platform.
+- Tier 2 platforms must not leave any significant portions of Zebra unimplemented,
+  unless they cannot possibly be supported on the platform.
   - The right approach to handling a missing feature from a platform may depend
     on whether the platform seems likely to develop the feature in the future. In
     some cases, a platform may be co-developed along with Zebra support, and Zebra
