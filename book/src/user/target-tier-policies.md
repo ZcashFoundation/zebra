@@ -73,31 +73,11 @@ we place minimal requirements on the introduction of targets.
 - A tier 3 target must have a designated developer or developers (the "target
   maintainers") on record to be CCed when issues arise regarding the target.
   (The mechanism to track and CC such developers may evolve over time.)
-- Targets must use naming consistent with any existing targets; for instance, a
-  target for the same CPU or OS as an existing Zebra target should use the same
-  name for that CPU or OS. Targets should normally use the same names and
-  naming conventions as used elsewhere in the broader ecosystem beyond Zebra
-  (such as in other toolchains), unless they have a very good reason to
-  diverge. Changing the name of a target can be highly disruptive, especially
-  once the target reaches a higher tier, so getting the name right is important
-  even for a tier 3 target.
-  - Target names should not introduce undue confusion or ambiguity unless
-    absolutely necessary to maintain ecosystem compatibility. For example, if
-    the name of the target makes people extremely likely to form incorrect
-    beliefs about what it targets, the name should be changed or augmented to
-    disambiguate it.
-- Neither this policy nor any decisions made regarding targets shall create any
-  binding agreement or estoppel by any party. If any member of an approving
-  Zebra team serves as one of the maintainers of a target, or has any legal or
-  employment requirement (explicit or implicit) that might affect their
-  decisions regarding a target, they must recuse themselves from any approval
-  decisions regarding the target's tier status, though they may otherwise
-  participate in discussions.
-- The target must provide documentation for the Zebra community explaining how
-  to build for the target, using cross-compilation if possible. If the target
-  supports running binaries, or running tests (even if they do not pass), the
-  documentation must explain how to run such binaries or tests for the target,
-  using emulation if possible or dedicated hardware if necessary.
+- Target names should not introduce undue confusion or ambiguity unless
+  absolutely necessary to maintain ecosystem compatibility. For example, if
+  the name of the target makes people extremely likely to form incorrect
+  beliefs about what it targets, the name should be changed or augmented to
+  disambiguate it.
 - Tier 3 targets must not impose burden on the authors of pull requests, or
   other developers in the community, to maintain the target. In particular,
   do not post comments (automated or manual) on a PR that derail or suggest a
@@ -153,7 +133,7 @@ by a devops team member reporting the outcome of a team discussion.
 - The target must document its baseline expectations for the features or
   versions of CPUs, operating systems, libraries, runtime environments, and
   similar.
-- Tier 2 targets must not leave any significant portions of `zebra` unimplemented
+- Tier 2 targets must not leave any significant portions of Zebra unimplemented
   or stubbed out, unless they cannot possibly be
   supported on the target.
   - The right approach to handling a missing feature from a target may depend
@@ -223,7 +203,6 @@ team member reporting the outcome of a team discussion.
   are subjective, and determined by consensus of the Zebra team. A tier 1
   target may be demoted or removed if it becomes obsolete or no longer meets
   this requirement.
-- The target maintainer team must include at least 2 developers.
 - The target must build and pass tests reliably in CI, for all components that
   Zebra's CI considers mandatory.
   - The target must not disable an excessive number of tests or pieces of tests
