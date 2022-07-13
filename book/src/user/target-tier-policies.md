@@ -1,35 +1,36 @@
-# Target Tier Policy
+# Platform Tier Policy
 
 ## Table of Contents
 
-- [Target Tier Policy](#target-tier-policy)
+- [Platform Tier Policy](#platform-tier-policy)
   - [Table of Contents](#table-of-contents)
   - [General](#general)
-  - [Tier 3 target policy](#tier-3-target-policy)
-  - [Tier 2 target policy](#tier-2-target-policy)
-  - [Tier 1 target policy](#tier-1-target-policy)
+  - [Tier 3 platform policy](#tier-3-platform-policy)
+  - [Tier 2 platform policy](#tier-2-platform-policy)
+  - [Tier 1 platform policy](#tier-1-platform-policy)
 
 ## General
 
-Zebra provides three tiers of target support:
+The Zcash Foundation provides three tiers of platform support, modeled after the
+[Rust Target Tier Policy](https://doc.rust-lang.org/stable/rustc/target-tier-policy.html):
 
-- Zebra provides no guarantees about tier 3 targets; they exist in the codebase,
-  but may or may not build.
-- Zebra's continuous integration checks that tier 2 targets will always build,
+- The Zcash Foundation provides no guarantees about tier 3 platforms; they exist
+  in the codebase, but may or may not build.
+- Zebra's continuous integration checks that tier 2 platforms will always build,
   but they may or may not pass tests.
-- Zebra's continuous integration checks that tier 1 targets will always build
+- Zebra's continuous integration checks that tier 1 platforms will always build
   and pass tests.
 
-Adding a new tier 3 target imposes minimal requirements; but we focus primarily
-on avoiding disruption to other ongoing Zebra development.
+Adding a new tier 3 platform imposes minimal requirements; but we focus
+primarily on avoiding disruption to other ongoing Zebra development.
 
-Tier 2 and tier 1 targets place work on Zebra project developers as a whole, to
-avoid breaking the target. These tiers require commensurate and ongoing efforts
-from the maintainers of the target, to demonstrate value and to minimize any
-disruptions to ongoing Zebra development.
+Tier 2 and tier 1 platforms place work on Zebra project developers as a whole,
+to avoid breaking the platform. These tiers require commensurate and ongoing
+efforts from the maintainers of the platform, to demonstrate value and to
+minimize any disruptions to ongoing Zebra development.
 
-This policy defines the requirements for accepting a proposed target at a given
-level of support.
+This policy defines the requirements for accepting a proposed platform at a
+given level of support.
 
 Each tier is based on all the requirements from the previous tier, unless
 overridden by a stronger requirement.
@@ -37,203 +38,195 @@ overridden by a stronger requirement.
 While these criteria attempt to document the policy, that policy still involves
 human judgment. Targets must fulfill the spirit of the requirements as well, as
 determined by the judgment of the Zebra team. Neither this policy nor any
-decisions made regarding targets shall create any binding agreement or estoppel
-by any party.
+decisions made regarding platforms shall create any binding agreement or
+estoppel by any party.
 
-For a list of all supported targets and their corresponding tiers ("tier 3",
+For a list of all supported platforms and their corresponding tiers ("tier 3",
 "tier 2", or "tier 1"), see
 [platform support](platform-support.md).
 
-Note that a target must have already received approval for the next lower tier,
-and spent a reasonable amount of time at that tier, before making a proposal
-for promotion to the next higher tier; this is true even if a target meets the
-requirements for several tiers at once. This policy leaves the precise
-interpretation of "reasonable amount of time" up to the Zebra team.
+Note that a platform must have already received approval for the next lower
+tier, and spent a reasonable amount of time at that tier, before making a
+proposal for promotion to the next higher tier; this is true even if a platform
+meets the requirements for several tiers at once. This policy leaves the
+precise interpretation of "reasonable amount of time" up to the Zebra team.
 
-The availability or tier of a target in stable Zebra is not a hard stability
-guarantee about the future availability or tier of that target. Higher-level
-target tiers are an increasing commitment to the support of a target, and we
-will take that commitment and potential disruptions into account when
-evaluating the potential demotion or removal of a target that has been part of
-a stable release. The promotion or demotion of a target will not generally
+The availability or tier of a platform in stable Zebra is not a hard stability
+guarantee about the future availability or tier of that platform. Higher-level
+platform tiers are an increasing commitment to the support of a platform, and
+we will take that commitment and potential disruptions into account when
+evaluating the potential demotion or removal of a platform that has been part
+of a stable release. The promotion or demotion of a platform will not generally
 affect existing stable releases, only current development and future releases.
 
 In this policy, the words "must" and "must not" specify absolute requirements
-that a target must meet to qualify for a tier. The words "should" and "should
+that a platform must meet to qualify for a tier. The words "should" and "should
 not" specify requirements that apply in almost all cases, but for which the
 Zebra team may grant an exception for good reason. The word "may" indicates
 something entirely optional, and does not indicate guidance or recommendations.
 This language is based on [IETF RFC 2119](https://tools.ietf.org/html/rfc2119).
 
-## Tier 3 target policy
+## Tier 3 platform policy
 
-At this tier, the Zebra project provides no official support for a target, so
-we place minimal requirements on the introduction of targets.
+At this tier, the Zebra project provides no official support for a platform, so
+we place minimal requirements on the introduction of platforms.
 
-- A tier 3 target must have a designated developer or developers (the "target
-  maintainers") on record to be CCed when issues arise regarding the target.
+- A tier 3 platform must have a designated developer or developers (the "platform
+  maintainers") on record to be CCed when issues arise regarding the platform.
   (The mechanism to track and CC such developers may evolve over time.)
 - Target names should not introduce undue confusion or ambiguity unless
   absolutely necessary to maintain ecosystem compatibility. For example, if
-  the name of the target makes people extremely likely to form incorrect
+  the name of the platform makes people extremely likely to form incorrect
   beliefs about what it targets, the name should be changed or augmented to
   disambiguate it.
-- Tier 3 targets must not impose burden on the authors of pull requests, or
-  other developers in the community, to maintain the target. In particular,
+- Tier 3 platforms must not impose burden on the authors of pull requests, or
+  other developers in the community, to maintain the platform. In particular,
   do not post comments (automated or manual) on a PR that derail or suggest a
-  block on the PR based on a tier 3 target. Do not send automated messages or
+  block on the PR based on a tier 3 platform. Do not send automated messages or
   notifications (via any medium, including via `@`) to a PR author or others
-  involved with a PR regarding a tier 3 target, unless they have opted into
+  involved with a PR regarding a tier 3 platform, unless they have opted into
   such messages.
-- Patches adding or updating tier 3 targets must not break any existing tier 2
-  or tier 1 target, and must not knowingly break another tier 3 target without
+- Patches adding or updating tier 3 platforms must not break any existing tier 2
+  or tier 1 platform, and must not knowingly break another tier 3 platform without
   approval of either the core engineering team or the maintainers of the other
-  tier 3 target.
+  tier 3 platform.
 
-If a tier 3 target stops meeting these requirements, or the target maintainers
-no longer have interest or time, or the target shows no signs of activity and
-has not built for some time, or removing the target would improve the quality
+If a tier 3 platform stops meeting these requirements, or the platform maintainers
+no longer have interest or time, or the platform shows no signs of activity and
+has not built for some time, or removing the platform would improve the quality
 of the Zebra codebase, we may post a PR to remove it; any such PR will be CCed
-to the target maintainers (and potentially other people who have previously
-worked on the target), to check potential interest in improving the situation.
+to the platform maintainers (and potentially other people who have previously
+worked on the platform), to check potential interest in improving the situation.
 
-## Tier 2 target policy
+## Tier 2 platform policy
 
-At this tier, the Zebra project guarantees that a target builds, and will reject
-patches that fail to build on a target. Thus, we place requirements that ensure
-the target will not block forward progress of the Zebra project.
+At this tier, the Zebra project guarantees that a platform builds, and will reject
+patches that fail to build on a platform. Thus, we place requirements that ensure
+the platform will not block forward progress of the Zebra project.
 
-A proposed new tier 2 target must be reviewed and approved by the core
+A proposed new tier 2 platform must be reviewed and approved by the core
 engineering team based on these requirements.
 
-In addition, the devops team must approve the integration of the target
+In addition, the devops team must approve the integration of the platform
 into Continuous Integration (CI), and the tier 2 CI-related requirements. This
-review and approval may take place in a PR adding the target to CI, or simply
+review and approval may take place in a PR adding the platform to CI, or simply
 by a devops team member reporting the outcome of a team discussion.
 
-- A tier 2 target must have value to people other than its maintainers. (It may
-  still be a niche target, but it must not be exclusively useful for an
+- A tier 2 platform must have value to people other than its maintainers. (It may
+  still be a niche platform, but it must not be exclusively useful for an
   inherently closed group.)
-- A tier 2 target must have a designated team of developers (the "target
-  maintainers") available to consult on target-specific build-breaking issues,
-  or if necessary to develop target-specific language or library implementation
+- A tier 2 platform must have a designated team of developers (the "platform
+  maintainers") available to consult on platform-specific build-breaking issues,
+  or if necessary to develop platform-specific language or library implementation
   details. This team must have at least 1 developer.
-- The target must not place undue burden on Zebra developers not specifically
-  concerned with that target. Zebra developers are expected to not gratuitously
-  break a tier 2 target, but are not expected to become experts in every tier 2
-  target, and are not expected to provide target-specific implementations for
-  every tier 2 target.
-- The target must provide documentation for the Zebra community explaining how
-  to build for the target using cross-compilation, and explaining how to run
-  tests for the target. If at all possible, this documentation should show how
-  to run Zebra programs and tests for the target using emulation, to allow
-  anyone to do so. If the target cannot be feasibly emulated, the documentation
+- The platform must not place undue burden on Zebra developers not specifically
+  concerned with that platform. Zebra developers are expected to not gratuitously
+  break a tier 2 platform, but are not expected to become experts in every tier 2
+  platform, and are not expected to provide platform-specific implementations for
+  every tier 2 platform.
+- The platform must provide documentation for the Zcash community explaining how
+  to build for the platform using cross-compilation, and explaining how to run
+  tests for the platform. If at all possible, this documentation should show how
+  to run Zebra programs and tests for the platform using emulation, to allow
+  anyone to do so. If the platform cannot be feasibly emulated, the documentation
   should explain how to obtain and work with physical hardware, cloud systems,
   or equivalent.
-- The target must document its baseline expectations for the features or
+- The platform must document its baseline expectations for the features or
   versions of CPUs, operating systems, libraries, runtime environments, and
   similar.
-- Tier 2 targets must not leave any significant portions of Zebra unimplemented
+- Tier 2 platforms must not leave any significant portions of Zebra unimplemented
   or stubbed out, unless they cannot possibly be
-  supported on the target.
-  - The right approach to handling a missing feature from a target may depend
-    on whether the target seems likely to develop the feature in the future. In
-    some cases, a target may be co-developed along with Zebra support, and Zebra
-    may gain new features on the target as that target gains the capabilities
+  supported on the platform.
+  - The right approach to handling a missing feature from a platform may depend
+    on whether the platform seems likely to develop the feature in the future. In
+    some cases, a platform may be co-developed along with Zebra support, and Zebra
+    may gain new features on the platform as that platform gains the capabilities
     to support those features.
-  - As an exception, a target identical to an existing tier 1 target except for
-    lower baseline expectations for the OS, CPU, or similar, may propose to
-    qualify as tier 2 (but not higher) without support for `std` if the target
-    will primarily be used in `no_std` applications, to reduce the support
-    burden for the standard library. In this case, evaluation of the proposed
-    target's value will take this limitation into account.
-- The target must build reliably in CI, for all components that Zebra's CI
+- The platform must build reliably in CI, for all components that Zebra's CI
   considers mandatory.
 - The Zebra team may additionally require that a subset of tests pass in
-  CI, such as enough to build a functional "hello world" program, `./x.py test
-  --no-run`, or equivalent "smoke tests". In particular, this requirement may
-  apply if the tests in question provide substantial value via early detection
-  of critical problems.
-- Building the target in CI must not take substantially longer than the current
-  slowest target in CI, and should not substantially raise the maintenance
+  CI. In particular, this requirement may apply if the tests in question provide
+  substantial value via early detection of critical problems.
+- Building the platform in CI must not take substantially longer than the current
+  slowest platform in CI, and should not substantially raise the maintenance
   burden of the CI infrastructure. This requirement is subjective, to be
   evaluated by the devops team, and will take the community importance
-  of the target into account.
-- Tier 2 targets should, if at all possible, support cross-compiling. Tier 2
-  targets should not require using the target as the host for builds, even if
-  the target supports host tools.
-- Tier 2 targets must not impose burden on the authors of pull requests, or
-  other developers in the community, to ensure that tests pass for the target.
+  of the platform into account.
+- Tier 2 platforms should, if at all possible, support cross-compiling. Tier 2
+  platforms should not require using the platform as the host for builds, even
+  if the platform supports host tools.
+- Tier 2 platforms must not impose burden on the authors of pull requests, or
+  other developers in the community, to ensure that tests pass for the platform.
   In particular, do not post comments (automated or manual) on a PR that derail
-  or suggest a block on the PR based on tests failing for the target. Do not
+  or suggest a block on the PR based on tests failing for the platform. Do not
   send automated messages or notifications (via any medium, including via `@`)
   to a PR author or others involved with a PR regarding the PR breaking tests
-  on a tier 2 target, unless they have opted into such messages.
-- The target maintainers should regularly run the testsuite for the target, and
-  should fix any test failures in a reasonably timely fashion.
+  on a tier 2 platform, unless they have opted into such messages.
+- The platform maintainers should regularly run the testsuite for the platform,
+  and should fix any test failures in a reasonably timely fashion.
 - All requirements for tier 3 apply.
 
-A tier 2 target may be demoted or removed if it no longer meets these
-requirements. Any proposal for demotion or removal will be CCed to the target
-maintainers, and will be communicated widely to the Zebra community before being
+A tier 2 platform may be demoted or removed if it no longer meets these
+requirements. Any proposal for demotion or removal will be CCed to the platform
+maintainers, and will be communicated widely to the Zcash community before being
 dropped from a stable release. (The amount of time between such communication
 and the next stable release may depend on the nature and severity of the failed
-requirement, the timing of its discovery, whether the target has been part of a
+requirement, the timing of its discovery, whether the platform has been part of a
 stable release yet, and whether the demotion or removal can be a planned and
 scheduled action.)
 
-## Tier 1 target policy
+## Tier 1 platform policy
 
-At this tier, the Zebra project guarantees that a target builds and passes all
+At this tier, the Zebra project guarantees that a platform builds and passes all
 tests, and will reject patches that fail to build or pass the testsuite on a
-target. We hold tier 1 targets to our highest standard of requirements.
+platform. We hold tier 1 platforms to our highest standard of requirements.
 
-A proposed new tier 1 target must be reviewed and approved by the core
+A proposed new tier 1 platform must be reviewed and approved by the core
 engineering team based on these requirements. In addition, the release team must
-approve the viability and value of supporting the target.
+approve the viability and value of supporting the platform.
 
-In addition, the devops team must approve the integration of the target
+In addition, the devops team must approve the integration of the platform
 into Continuous Integration (CI), and the tier 1 CI-related requirements. This
-review and approval may take place in a PR adding the target to CI, by a devops
-team member reporting the outcome of a team discussion.
+review and approval may take place in a PR adding the platform to CI, by a
+devops team member reporting the outcome of a team discussion.
 
-- Tier 1 targets must have substantial, widespread interest within the
+- Tier 1 platforms must have substantial, widespread interest within the
   developer community, and must serve the ongoing needs of multiple production
   users of Zebra across multiple organizations or projects. These requirements
   are subjective, and determined by consensus of the Zebra team. A tier 1
-  target may be demoted or removed if it becomes obsolete or no longer meets
+  platform may be demoted or removed if it becomes obsolete or no longer meets
   this requirement.
-- The target must build and pass tests reliably in CI, for all components that
+- The platform must build and pass tests reliably in CI, for all components that
   Zebra's CI considers mandatory.
-  - The target must not disable an excessive number of tests or pieces of tests
+  - The platform must not disable an excessive number of tests or pieces of tests
     in the testsuite in order to do so. This is a subjective requirement.
-- Building the target and running the testsuite for the target must not take
-  substantially longer than other targets, and should not substantially raise
+- Building the platform and running the testsuite for the platform must not take
+  substantially longer than other platforms, and should not substantially raise
   the maintenance burden of the CI infrastructure.
-  - In particular, if building the target takes a reasonable amount of time,
-    but the target cannot run the testsuite in a timely fashion due to low
+  - In particular, if building the platform takes a reasonable amount of time,
+    but the platform cannot run the testsuite in a timely fashion due to low
     performance of either native code or accurate emulation, that alone may
-    prevent the target from qualifying as tier 1.
+    prevent the platform from qualifying as tier 1.
 - If running the testsuite requires additional infrastructure (such as physical
-  systems running the target), the target maintainers must arrange to provide
+  systems running the platform), the platform maintainers must arrange to provide
   such resources to the Zebra project, to the satisfaction and approval of the
   Zebra devops team.
   - Such resources may be provided via cloud systems, via emulation, or via
     physical hardware.
-  - If the target requires the use of emulation to meet any of the tier
+  - If the platform requires the use of emulation to meet any of the tier
     requirements, the Zebra team for those requirements must have high
     confidence in the accuracy of the emulation, such that discrepancies
     between emulation and native operation that affect test results will
     constitute a high-priority bug in either the emulation or the
-    implementation of the target.
-  - If it is not possible to run the target via emulation, these resources must
-    additionally be sufficient for the Zebra devops team to make them
+    implementation of the platform.
+  - If it is not possible to run the platform via emulation, these resources
+    must additionally be sufficient for the Zebra devops team to make them
     available for access by Zebra team members, for the purposes of development
-    and testing. (Note that the responsibility for doing target-specific
-    development to keep the target well maintained remains with the target
+    and testing. (Note that the responsibility for doing platform-specific
+    development to keep the platform well maintained remains with the platform
     maintainers. This requirement ensures that it is possible for other
-    Zebra developers to test the target, but does not obligate other Zebra
-    developers to make target-specific fixes.)
+    Zebra developers to test the platform, but does not obligate other Zebra
+    developers to make platform-specific fixes.)
   - Resources provided for CI and similar infrastructure must be available for
     continuous exclusive use by the Zebra project. Resources provided
     for access by Zebra team members for development and testing must be
@@ -241,16 +234,16 @@ team member reporting the outcome of a team discussion.
     continuous basis when not in use.
 - All requirements for tier 2 apply.
 
-A tier 1 target may be demoted if it no longer meets these requirements but
+A tier 1 platform may be demoted if it no longer meets these requirements but
 still meets the requirements for a lower tier. Any such proposal will be
-communicated widely to the Zebra community, both when initially proposed and
-before being dropped from a stable release. A tier 1 target is highly unlikely
+communicated widely to the Zcash community, both when initially proposed and
+before being dropped from a stable release. A tier 1 platform is highly unlikely
 to be directly removed without first being demoted to tier 2 or tier 3.
 (The amount of time between such communication and the next stable release may
 depend on the nature and severity of the failed requirement, the timing of its
-discovery, whether the target has been part of a stable release yet, and whether
-the demotion or removal can be a planned and scheduled action.)
+discovery, whether the platform has been part of a stable release yet, and
+whether the demotion or removal can be a planned and scheduled action.)
 
-Raising the baseline expectations of a tier 1 target (such as the minimum CPU
+Raising the baseline expectations of a tier 1 platform (such as the minimum CPU
 features or OS version required) requires the approval of the Zebra team, and
 should be widely communicated as well.
