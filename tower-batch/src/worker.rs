@@ -131,9 +131,12 @@ where
 
     /// Process a single worker request.
     async fn process_req(&mut self, req: Request, tx: message::Tx<T::Future>) {
-        if let Some(ref failed) = self.failed {
-            tracing::trace!("notifying batch request caller about worker failure");
-            let _ = tx.send(Err(failed.clone()));
+        if let Some(ref error) = self.failed {
+            tracing::trace!(
+                ?error,
+                "notifying batch request caller about worker failure",
+            );
+            let _ = tx.send(Err(error.clone()));
             return;
         }
 
@@ -200,7 +203,12 @@ where
 
                 batch_result = self.concurrent_batches.next(), if !self.concurrent_batches.is_empty() => match batch_result.expect("only returns None when empty") {
                     Ok(_response) => {
-                        tracing::trace!("batch finished executing");
+                        tracing::trace!(
+                            pending_items = self.pending_items,
+                            batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
+                            running_batches = self.concurrent_batches.len(),
+                            "batch finished executing",
+                        );
 
                         /* TODO: let other tasks run while we're waiting
                         // Correctness: allow other tasks to run at the end of every batch.
@@ -208,13 +216,19 @@ where
                          */
                     }
                     Err(error) => {
-                        tracing::trace!("batch execution failed");
-                        self.failed(error.into());
+                        let error = error.into();
+                        tracing::trace!(?error, "batch execution failed");
+                        self.failed(error);
                     }
                 },
 
                 Some(()) = OptionFuture::from(self.pending_batch_timer.as_mut()), if self.pending_batch_timer.as_ref().is_some() => {
-                    tracing::trace!("batch timer expired");
+                    tracing::trace!(
+                        pending_items = self.pending_items,
+                        batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
+                        running_batches = self.concurrent_batches.len(),
+                        "batch timer expired",
+                    );
 
                     // TODO: use a batch-specific span to instrument this future.
                     self.flush_service().await;
@@ -222,7 +236,12 @@ where
 
                 maybe_msg = self.rx.recv(), if self.can_spawn_new_batches() => match maybe_msg {
                     Some(msg) => {
-                        tracing::trace!("batch message received");
+                        tracing::trace!(
+                            pending_items = self.pending_items,
+                            batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
+                            running_batches = self.concurrent_batches.len(),
+                            "batch message received",
+                        );
 
                         let span = msg.span;
 
@@ -233,17 +252,32 @@ where
 
                         // Check whether we have too many pending items.
                         if self.pending_items >= self.max_items_in_batch {
-                            tracing::trace!("batch is full");
+                            tracing::trace!(
+                                pending_items = self.pending_items,
+                                batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
+                                running_batches = self.concurrent_batches.len(),
+                                "batch is full",
+                            );
 
                             // TODO: use a batch-specific span to instrument this future.
                             self.flush_service().await;
                         } else if self.pending_items == 1 {
-                            tracing::trace!("batch is new, starting timer");
+                            tracing::trace!(
+                                pending_items = self.pending_items,
+                                batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
+                                running_batches = self.concurrent_batches.len(),
+                                "batch is new, starting timer",
+                            );
 
                             // The first message in a new batch.
                             self.pending_batch_timer = Some(Box::pin(sleep(self.max_latency)));
                         } else {
-                            tracing::trace!("waiting for full batch or batch timer");
+                            tracing::trace!(
+                                pending_items = self.pending_items,
+                                batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
+                                running_batches = self.concurrent_batches.len(),
+                                "waiting for full batch or batch timer",
+                            );
                         }
                     }
                     None => {
@@ -284,7 +318,10 @@ where
         *inner = Some(error.clone());
         drop(inner);
 
-        tracing::trace!("worker failure: waking pending requests so they can be failed");
+        tracing::trace!(
+            ?error,
+            "worker failure: waking pending requests so they can be failed",
+        );
         self.rx.close();
         self.close.close();
 
@@ -326,7 +363,13 @@ where
     T::Error: Into<crate::BoxError>,
 {
     fn drop(mut self: Pin<&mut Self>) {
-        tracing::trace!("dropping batch worker");
+        tracing::trace!(
+            pending_items = self.pending_items,
+            batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
+            running_batches = self.concurrent_batches.len(),
+            error = ?self.failed,
+            "dropping batch worker",
+        );
 
         // Fail pending tasks
         self.failed(Closed::new().into());
