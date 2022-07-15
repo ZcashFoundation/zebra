@@ -222,10 +222,17 @@ where
         // CORRECTNESS
         //
         // If we acquire a permit, then there's enough buffer capacity to send a new request.
-        // Otherwise, we need to wait for capacity.
+        // Otherwise, we need to wait for capacity. When that happens, `poll_acquire()` registers
+        // this task for wakeup when the next permit is available, or when the semaphore is closed.
         //
-        // Correctness: Registers this task for wakeup when the next permit is available,
-        // or when the semaphore is closed.
+        // When `poll_ready()` is called multiple times, and channel capacity is 1,
+        // avoid deadlocks by dropping any previous permit before acquiring another one.
+        // This also stops tasks holding a permit after an error.
+        //
+        // Calling `poll_ready()` multiple times can make tasks lose their previous permit
+        // to another concurrent task.
+        self.permit = None;
+
         let permit = ready!(self.semaphore.poll_acquire(cx));
         if let Some(permit) = permit {
             // Calling poll_ready() more than once will drop any previous permit,
