@@ -41,6 +41,7 @@ It also improves Zebra's sync performance and reliability under heavy load.
 - Use `tokio`'s `PollSemaphore`, instead of an outdated `Semaphore` impl (#4750)
 - Check batch worker tasks for panics and task termination (#4750, #4777)
 - Limit the length of the `reject` network message's `message` and `reason` fields (#4687)
+- Change the `bitvec` dependency from 1.0.0 to 1.0.1, to fix a performance regression (#4769)
 
 #### CI
 
