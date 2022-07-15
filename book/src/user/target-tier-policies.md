@@ -125,12 +125,11 @@ by a devops team member reporting the outcome of a team discussion.
   platform, and are not expected to provide platform-specific implementations for
   every tier 2 platform.
 - The platform must provide documentation for the Zcash community explaining how
-  to build for the platform using cross-compilation, and explaining how to run
-  tests for the platform. If at all possible, this documentation should show how
-  to run Zebra programs and tests for the platform using emulation, to allow
-  anyone to do so. If the platform cannot be feasibly emulated, the documentation
-  should explain how to obtain and work with physical hardware, cloud systems,
-  or equivalent.
+  to build for their platform, and explaining how to run tests for the platform.
+  If at all possible, this documentation should show how to run Zebra programs
+  and tests for the platform using emulation, to allow anyone to do so. If the
+  platform cannot be feasibly emulated, the documentation should explain how to
+  obtain and work with physical hardware, cloud systems, or equivalent.
 - The platform must document its baseline expectations for the features or
   versions of CPUs, operating systems, libraries, runtime environments, and
   similar.
@@ -204,8 +203,7 @@ devops team member reporting the outcome of a team discussion.
   the maintenance burden of the CI infrastructure.
   - In particular, if building the platform takes a reasonable amount of time,
     but the platform cannot run the testsuite in a timely fashion due to low
-    performance of either native code or accurate emulation, that alone may
-    prevent the platform from qualifying as tier 1.
+    performance, that alone may prevent the platform from qualifying as tier 1.
 - If running the testsuite requires additional infrastructure (such as physical
   systems running the platform), the platform maintainers must arrange to provide
   such resources to the Zebra project, to the satisfaction and approval of the
