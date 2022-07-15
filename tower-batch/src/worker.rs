@@ -209,11 +209,6 @@ where
                             running_batches = self.concurrent_batches.len(),
                             "batch finished executing",
                         );
-
-                        /* TODO: let other tasks run while we're waiting
-                        // Correctness: allow other tasks to run at the end of every batch.
-                        tokio::task::yield_now().await;
-                         */
                     }
                     Err(error) => {
                         let error = error.into();
