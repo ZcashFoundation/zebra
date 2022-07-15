@@ -31,6 +31,7 @@ It also improves Zebra's sync performance and reliability under heavy load.
 - Update column family names to match Zebra's database design (#4639)
 - Update Zebra's mainnet and testnet checkpoints (#4777)
 - Process more blocks and batch items concurrently, so there's a batch ready for each available CPU (#4776)
+- Wrap note commitment trees in an `Arc`, to reduce CPU and memory usage (#4757)
 
 ### Fixed
 
