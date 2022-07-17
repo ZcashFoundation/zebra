@@ -1,6 +1,6 @@
 //! Tests for verifying simple Halo2 proofs with the async verifier
 
-use std::convert::TryInto;
+use std::future::ready;
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use tower::ServiceExt;
@@ -130,7 +130,7 @@ where
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn verify_generated_halo2_proofs() {
     zebra_test::init();
 
@@ -196,7 +196,7 @@ where
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn correctly_err_on_invalid_halo2_proofs() {
     zebra_test::init();
 

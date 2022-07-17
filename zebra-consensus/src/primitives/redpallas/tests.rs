@@ -45,7 +45,7 @@ where
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn batch_flushes_on_max_items() -> Result<()> {
     use tokio::time::timeout;
 
@@ -59,7 +59,7 @@ async fn batch_flushes_on_max_items() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn batch_flushes_on_max_latency() -> Result<()> {
     use tokio::time::timeout;
 

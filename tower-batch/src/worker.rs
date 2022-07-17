@@ -1,3 +1,5 @@
+//! Batch worker item handling and run loop implementation.
+
 use std::{
     pin::Pin,
     sync::{Arc, Mutex},
@@ -9,10 +11,9 @@ use tokio::{
     sync::mpsc,
     time::{sleep, Sleep},
 };
+use tokio_util::sync::PollSemaphore;
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
-
-use crate::semaphore;
 
 use super::{
     error::{Closed, ServiceError},
@@ -34,18 +35,31 @@ where
     T: Service<BatchControl<Request>>,
     T::Error: Into<crate::BoxError>,
 {
+    /// A semaphore-bounded channel for receiving requests from the batch wrapper service.
     rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
+
+    /// The wrapped service that processes batches.
     service: T,
+
+    /// An error that's populated on permanent service failure.
     failed: Option<ServiceError>,
-    handle: Handle,
+
+    /// A shared error handle that's populated on permanent service failure.
+    error_handle: ErrorHandle,
+
+    /// The maximum number of items allowed in a batch.
     max_items: usize,
+
+    /// The maximum delay before processing a batch with fewer than `max_items`.
     max_latency: std::time::Duration,
-    close: Option<semaphore::Close>,
+
+    /// A cloned copy of the wrapper service's semaphore, used to close the semaphore.
+    close: PollSemaphore,
 }
 
 /// Get the error out
 #[derive(Debug)]
-pub(crate) struct Handle {
+pub(crate) struct ErrorHandle {
     inner: Arc<Mutex<Option<ServiceError>>>,
 }
 
@@ -59,23 +73,23 @@ where
         rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
         max_items: usize,
         max_latency: std::time::Duration,
-        close: semaphore::Close,
-    ) -> (Handle, Worker<T, Request>) {
-        let handle = Handle {
+        close: PollSemaphore,
+    ) -> (ErrorHandle, Worker<T, Request>) {
+        let error_handle = ErrorHandle {
             inner: Arc::new(Mutex::new(None)),
         };
 
         let worker = Worker {
             rx,
             service,
-            handle: handle.clone(),
+            error_handle: error_handle.clone(),
             failed: None,
             max_items,
             max_latency,
-            close: Some(close),
+            close,
         };
 
-        (handle, worker)
+        (error_handle, worker)
     }
 
     async fn process_req(&mut self, req: Request, tx: message::Tx<T::Future>) {
@@ -97,10 +111,8 @@ where
                         .clone()));
 
                     // Wake any tasks waiting on channel capacity.
-                    if let Some(close) = self.close.take() {
-                        tracing::debug!("waking pending tasks");
-                        close.close();
-                    }
+                    tracing::debug!("waking pending tasks");
+                    self.close.close();
                 }
             }
         }
@@ -115,6 +127,9 @@ where
         {
             self.failed(e.into());
         }
+
+        // Correctness: allow other tasks to run at the end of every batch.
+        tokio::task::yield_now().await;
     }
 
     pub async fn run(mut self) {
@@ -142,8 +157,23 @@ where
                 },
                 Some(sleep) => {
                     // Wait on either a new message or the batch timer.
-                    // If both are ready, select! chooses one of them at random.
+                    //
+                    // If both are ready, end the batch now, because the timer has elapsed.
+                    // If the timer elapses, any pending messages are preserved:
+                    // https://docs.rs/tokio/latest/tokio/sync/mpsc/struct.UnboundedReceiver.html#cancel-safety
                     tokio::select! {
+                        biased;
+
+                        // The batch timer elapsed.
+                        () = sleep => {
+                            // TODO: use a batch-specific span to instrument this future.
+                            self.flush_service().await;
+
+                            // Now we have an empty batch.
+                            timer = None;
+                            pending_items = 0;
+                        }
+
                         maybe_msg = self.rx.recv() => match maybe_msg {
                             Some(msg) => {
                                 let span = msg.span;
@@ -154,8 +184,9 @@ where
                                 pending_items += 1;
                                 // Check whether we have too many pending items.
                                 if pending_items >= self.max_items {
-                                    // XXX(hdevalence): what span should instrument this?
+                                    // TODO: use a batch-specific span to instrument this future.
                                     self.flush_service().await;
+
                                     // Now we have an empty batch.
                                     timer = None;
                                     pending_items = 0;
@@ -168,13 +199,6 @@ where
                                 return;
                             }
                         },
-                        () = sleep => {
-                            // The batch timer elapsed.
-                            // XXX(hdevalence): what span should instrument this?
-                            self.flush_service().await;
-                            timer = None;
-                            pending_items = 0;
-                        }
                     }
                 }
             }
@@ -187,7 +211,7 @@ where
         // an `Arc`, send that `Arc<E>` to all pending requests, and store it so that subsequent
         // requests will also fail with the same error.
 
-        // Note that we need to handle the case where some handle is concurrently trying to send us
+        // Note that we need to handle the case where some error_handle is concurrently trying to send us
         // a request. We need to make sure that *either* the send of the request fails *or* it
         // receives an error on the `oneshot` it constructed. Specifically, we want to avoid the
         // case where we send errors to all outstanding requests, and *then* the caller sends its
@@ -196,7 +220,7 @@ where
         // sending the error to all outstanding requests.
         let error = ServiceError::new(error);
 
-        let mut inner = self.handle.inner.lock().unwrap();
+        let mut inner = self.error_handle.inner.lock().unwrap();
 
         if inner.is_some() {
             // Future::poll was called after we've already errored out!
@@ -216,20 +240,20 @@ where
     }
 }
 
-impl Handle {
+impl ErrorHandle {
     pub(crate) fn get_error_on_closed(&self) -> crate::BoxError {
         self.inner
             .lock()
-            .unwrap()
+            .expect("previous task panicked while holding the error handle mutex")
             .as_ref()
             .map(|svc_err| svc_err.clone().into())
             .unwrap_or_else(|| Closed::new().into())
     }
 }
 
-impl Clone for Handle {
-    fn clone(&self) -> Handle {
-        Handle {
+impl Clone for ErrorHandle {
+    fn clone(&self) -> ErrorHandle {
+        ErrorHandle {
             inner: self.inner.clone(),
         }
     }
@@ -242,8 +266,13 @@ where
     T::Error: Into<crate::BoxError>,
 {
     fn drop(mut self: Pin<&mut Self>) {
-        if let Some(close) = self.as_mut().close.take() {
-            close.close();
-        }
+        // Fail pending tasks
+        self.failed(Closed::new().into());
+
+        // Clear queued requests
+        while self.rx.try_recv().is_ok() {}
+
+        // Stop accepting reservations
+        self.close.close();
     }
 }

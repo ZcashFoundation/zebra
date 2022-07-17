@@ -5449,11 +5449,13 @@ dependencies = [
  "rand 0.8.5",
  "tokio",
  "tokio-test",
+ "tokio-util 0.7.3",
  "tower",
  "tower-fallback",
  "tower-test",
  "tracing",
  "tracing-futures",
+ "zebra-consensus",
  "zebra-test",
 ]
 
