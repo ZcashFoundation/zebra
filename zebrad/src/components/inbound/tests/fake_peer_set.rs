@@ -132,6 +132,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
 
     // use the first transaction that is not coinbase
     let tx = block.transactions[1].clone();
+    let test_transaction_id = tx.unmined_id();
 
     let (
         inbound_service,
@@ -163,24 +164,26 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
             Amount::zero(),
         )));
     });
-    let (response, _) = futures::join!(request, verification);
-    match response {
-        Ok(Response::Nil) => (),
-        _ => unreachable!("`PushTransaction` requests should always respond `Ok(Nil)`"),
-    };
+
+    let (push_response, _) = futures::join!(request, verification);
+
+    assert_eq!(
+        push_response.expect("unexpected error response from inbound service"),
+        Response::Nil,
+        "`PushTransaction` requests should always respond `Ok(Nil)`",
+    );
 
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
-    let request = inbound_service
+    let mempool_response = inbound_service
         .clone()
         .oneshot(Request::MempoolTransactionIds)
         .await;
 
-    match request {
-        Ok(Response::TransactionIds(response)) => assert_eq!(response, vec![tx.unmined_id()]),
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
-        ),
-    };
+    assert_eq!(
+        mempool_response.expect("unexpected error response from mempool"),
+        Response::TransactionIds(vec![test_transaction_id]),
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+    );
 
     // Make sure there is an additional request broadcasting the
     // inserted transaction to peers.
@@ -260,27 +263,26 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
             Amount::zero(),
         )));
     });
-    let (response, _, _) = futures::join!(request, peer_set_responder, verification);
 
-    match response {
-        Ok(Response::Nil) => (),
-        _ => unreachable!("`AdvertiseTransactionIds` requests should always respond `Ok(Nil)`"),
-    };
+    let (advertise_response, _, _) = futures::join!(request, peer_set_responder, verification);
+
+    assert_eq!(
+        advertise_response.expect("unexpected error response from inbound service"),
+        Response::Nil,
+        "`AdvertiseTransactionIds` requests should always respond `Ok(Nil)`",
+    );
 
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
-    let request = inbound_service
+    let mempool_response = inbound_service
         .clone()
         .oneshot(Request::MempoolTransactionIds)
         .await;
 
-    match request {
-        Ok(Response::TransactionIds(response)) => {
-            assert_eq!(response, vec![test_transaction_id])
-        }
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
-        ),
-    };
+    assert_eq!(
+        mempool_response.expect("unexpected error response from mempool"),
+        Response::TransactionIds(vec![test_transaction_id]),
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+    );
 
     // Make sure there is an additional request broadcasting the
     // inserted transaction to peers.
@@ -357,26 +359,26 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             Amount::zero(),
         )));
     });
-    let (response, _) = futures::join!(request, verification);
-    match response {
-        Ok(Response::Nil) => (),
-        _ => unreachable!("`PushTransaction` requests should always respond `Ok(Nil)`"),
-    };
+
+    let (push_response, _) = futures::join!(request, verification);
+
+    assert_eq!(
+        push_response.expect("unexpected error response from inbound service"),
+        Response::Nil,
+        "`PushTransaction` requests should always respond `Ok(Nil)`",
+    );
 
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
-    let request = inbound_service
+    let mempool_response = inbound_service
         .clone()
         .oneshot(Request::MempoolTransactionIds)
         .await;
 
-    match request {
-        Ok(Response::TransactionIds(response)) => {
-            assert_eq!(response, vec![tx1_id])
-        }
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
-        ),
-    };
+    assert_eq!(
+        mempool_response.expect("unexpected error response from mempool"),
+        Response::TransactionIds(vec![tx1_id]),
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+    );
 
     // Add a new block to the state (make the chain tip advance)
     let block_two: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
