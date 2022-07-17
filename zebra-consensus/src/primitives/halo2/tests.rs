@@ -151,6 +151,7 @@ async fn verify_generated_halo2_proofs() {
         Batch::new(
             Verifier::new(&VERIFYING_KEY),
             crate::primitives::MAX_BATCH_SIZE,
+            None,
             crate::primitives::MAX_BATCH_LATENCY,
         ),
         tower::service_fn(
@@ -217,6 +218,7 @@ async fn correctly_err_on_invalid_halo2_proofs() {
         Batch::new(
             Verifier::new(&VERIFYING_KEY),
             crate::primitives::MAX_BATCH_SIZE,
+            None,
             crate::primitives::MAX_BATCH_LATENCY,
         ),
         tower::service_fn(

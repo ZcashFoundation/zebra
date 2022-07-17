@@ -75,6 +75,7 @@ async fn verify_sapling_groth16() {
         Batch::new(
             Verifier::new(&GROTH16_PARAMETERS.sapling.spend.vk),
             crate::primitives::MAX_BATCH_SIZE,
+            None,
             crate::primitives::MAX_BATCH_LATENCY,
         ),
         tower::service_fn(
@@ -87,6 +88,7 @@ async fn verify_sapling_groth16() {
         Batch::new(
             Verifier::new(&GROTH16_PARAMETERS.sapling.output.vk),
             crate::primitives::MAX_BATCH_SIZE,
+            None,
             crate::primitives::MAX_BATCH_LATENCY,
         ),
         tower::service_fn(
@@ -179,6 +181,7 @@ async fn correctly_err_on_invalid_output_proof() {
         Batch::new(
             Verifier::new(&GROTH16_PARAMETERS.sapling.output.vk),
             crate::primitives::MAX_BATCH_SIZE,
+            None,
             crate::primitives::MAX_BATCH_LATENCY,
         ),
         tower::service_fn(

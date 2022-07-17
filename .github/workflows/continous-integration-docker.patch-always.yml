@@ -7,8 +7,6 @@ name: CI Docker
 
 on:
   pull_request:
-    branches:
-      - main
 
 jobs:
   regenerate-stateful-disks:

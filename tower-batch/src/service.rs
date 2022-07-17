@@ -1,6 +1,7 @@
 //! Wrapper service for batching items to an underlying service.
 
 use std::{
+    cmp::max,
     fmt,
     future::Future,
     pin::Pin,
@@ -25,6 +26,11 @@ use super::{
     BatchControl,
 };
 
+/// The maximum number of batches in the queue.
+///
+/// This avoids having very large queues on machines with hundreds or thousands of cores.
+pub const QUEUE_BATCH_LIMIT: usize = 64;
+
 /// Allows batch processing of requests.
 ///
 /// See the crate documentation for more details.
@@ -32,6 +38,8 @@ pub struct Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
 {
+    // Batch management
+    //
     /// A custom-bounded channel for sending requests to the batch worker.
     ///
     /// Note: this actually _is_ bounded, but rather than using Tokio's unbounded
@@ -53,6 +61,8 @@ where
     /// A semaphore permit that allows this service to send one message on `tx`.
     permit: Option<OwnedSemaphorePermit>,
 
+    // Errors
+    //
     /// An error handle shared between all service clones for the same worker.
     error_handle: ErrorHandle,
 
@@ -71,6 +81,7 @@ where
         f.debug_struct(name)
             .field("tx", &self.tx)
             .field("semaphore", &self.semaphore)
+            .field("permit", &self.permit)
             .field("error_handle", &self.error_handle)
             .field("worker_handle", &self.worker_handle)
             .finish()
@@ -80,26 +91,37 @@ where
 impl<T, Request> Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
+    T::Future: Send + 'static,
     T::Error: Into<crate::BoxError>,
 {
     /// Creates a new `Batch` wrapping `service`.
     ///
     /// The wrapper is responsible for telling the inner service when to flush a
-    /// batch of requests.  Two parameters control this policy:
+    /// batch of requests. These parameters control this policy:
     ///
-    /// * `max_items` gives the maximum number of items per batch.
-    /// * `max_latency` gives the maximum latency for a batch item.
+    /// * `max_items_in_batch` gives the maximum number of items per batch.
+    /// * `max_batches` is an upper bound on the number of batches in the queue,
+    ///   and the number of concurrently executing batches.
+    ///   If this is `None`, we use the current number of [`rayon`] threads.
+    ///   The number of batches in the queue is also limited by [`QUEUE_BATCH_LIMIT`].
+    /// * `max_latency` gives the maximum latency for a batch item to start verifying.
     ///
     /// The default Tokio executor is used to run the given service, which means
     /// that this method must be called while on the Tokio runtime.
-    pub fn new(service: T, max_items: usize, max_latency: std::time::Duration) -> Self
+    pub fn new(
+        service: T,
+        max_items_in_batch: usize,
+        max_batches: impl Into<Option<usize>>,
+        max_latency: std::time::Duration,
+    ) -> Self
     where
         T: Send + 'static,
         T::Future: Send,
+        T::Response: Send,
         T::Error: Send + Sync,
         Request: Send + 'static,
     {
-        let (mut batch, worker) = Self::pair(service, max_items, max_latency);
+        let (mut batch, worker) = Self::pair(service, max_items_in_batch, max_batches, max_latency);
 
         let span = info_span!("batch worker", kind = std::any::type_name::<T>());
 
@@ -131,7 +153,8 @@ where
     /// `Batch` and the background `Worker` that you can then spawn.
     pub fn pair(
         service: T,
-        max_items: usize,
+        max_items_in_batch: usize,
+        max_batches: impl Into<Option<usize>>,
         max_latency: std::time::Duration,
     ) -> (Self, Worker<T, Request>)
     where
@@ -141,16 +164,32 @@ where
     {
         let (tx, rx) = mpsc::unbounded_channel();
 
+        // Clamp config to sensible values.
+        let max_items_in_batch = max(max_items_in_batch, 1);
+        let max_batches = max_batches
+            .into()
+            .unwrap_or_else(rayon::current_num_threads);
+        let max_batches_in_queue = max_batches.clamp(1, QUEUE_BATCH_LIMIT);
+
         // The semaphore bound limits the maximum number of concurrent requests
         // (specifically, requests which got a `Ready` from `poll_ready`, but haven't
         // used their semaphore reservation in a `call` yet).
-        // We choose a bound that allows callers to check readiness for every item in
-        // a batch, then actually submit those items.
-        let semaphore = Semaphore::new(max_items);
+        //
+        // We choose a bound that allows callers to check readiness for one batch per rayon CPU thread.
+        // This helps keep all CPUs filled with work: there is one batch executing, and another ready to go.
+        // Often there is only one verifier running, when that happens we want it to take all the cores.
+        let semaphore = Semaphore::new(max_items_in_batch * max_batches_in_queue);
         let semaphore = PollSemaphore::new(Arc::new(semaphore));
 
-        let (error_handle, worker) =
-            Worker::new(service, rx, max_items, max_latency, semaphore.clone());
+        let (error_handle, worker) = Worker::new(
+            service,
+            rx,
+            max_items_in_batch,
+            max_batches,
+            max_latency,
+            semaphore.clone(),
+        );
+
         let batch = Batch {
             tx,
             semaphore,
@@ -182,6 +221,7 @@ where
 impl<T, Request> Service<Request> for Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
+    T::Future: Send + 'static,
     T::Error: Into<crate::BoxError>,
 {
     type Response = T::Response;

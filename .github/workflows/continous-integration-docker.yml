@@ -23,8 +23,6 @@ on:
         required: true
 
   pull_request:
-    branches:
-      - main
     paths:
       # code and tests
       - '**/*.rs'
