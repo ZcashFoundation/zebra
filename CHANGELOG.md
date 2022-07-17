@@ -32,6 +32,7 @@ It also improves Zebra's sync performance and reliability under heavy load.
 - Update Zebra's mainnet and testnet checkpoints (#4777)
 - Process more blocks and batch items concurrently, so there's a batch ready for each available CPU (#4776)
 - Wrap note commitment trees in an `Arc`, to reduce CPU and memory usage (#4757)
+- Increment `tokio` dependency from 1.19.2 to 1.20.0, to improve diagnostics (#4780)
 
 ### Fixed
 
@@ -43,6 +44,7 @@ It also improves Zebra's sync performance and reliability under heavy load.
 - Check batch worker tasks for panics and task termination (#4750, #4777)
 - Limit the length of the `reject` network message's `message` and `reason` fields (#4687)
 - Change the `bitvec` dependency from 1.0.0 to 1.0.1, to fix a performance regression (#4769)
+- Fix an occasional panic when a `zebra-network` connection closes (#4782)
 
 #### CI
 
