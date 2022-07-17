@@ -209,6 +209,9 @@ impl ClientRequestReceiver {
         // The request stream terminates, because the sender is closed,
         // and the channel has a limited capacity.
         // Task notifications are not required, because the sender is closed.
+        //
+        // Despite what its documentation says, we've seen futures::channel::mpsc::Receiver::try_next()
+        // return an error after the channel is closed.
         self.inner.try_next().ok()?.map(Into::into)
     }
 }
