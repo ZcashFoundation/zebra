@@ -201,7 +201,6 @@ impl ClientRequestReceiver {
     /// Closing the channel ensures that:
     /// - the request stream terminates, and
     /// - task notifications are not required.
-    #[allow(clippy::unwrap_in_result)]
     pub fn close_and_flush_next(&mut self) -> Option<InProgressClientRequest> {
         self.inner.close();
 
@@ -210,10 +209,10 @@ impl ClientRequestReceiver {
         // The request stream terminates, because the sender is closed,
         // and the channel has a limited capacity.
         // Task notifications are not required, because the sender is closed.
-        self.inner
-            .try_next()
-            .expect("channel is closed")
-            .map(Into::into)
+        //
+        // Despite what its documentation says, we've seen futures::channel::mpsc::Receiver::try_next()
+        // return an error after the channel is closed.
+        self.inner.try_next().ok()?.map(Into::into)
     }
 }
 
