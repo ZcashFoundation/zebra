@@ -15,9 +15,9 @@ ensures that each tier 1 platform builds and passes tests after each change.
 
 For the full requirements, see [Tier 1 platform policy](platform-tier-policy.md#tier-1-platform-policy) in the Platform Tier Policy.
 
-| platform | os | notes | artifacts
-| -------|-------|-------|-------
-| `x86_64-unknown-linux-gnu` | Debian 11.4 | 64-bit (rust 1.62.0) | Docker
+| platform | os | notes | rust | artifacts
+| -------|-------|-------|-------|-------
+| `x86_64-unknown-linux-gnu` | Debian 11.4 | 64-bit | 1.62.0 | Docker
 
 ## Tier 2
 
@@ -30,10 +30,10 @@ welcome!
 
 For the full requirements, see [Tier 2 platform policy](platform-tier-policy.md#tier-2-platform-policy) in the Platform Tier Policy.
 
-| platform | os | notes | artifacts
-| -------|-------|-------|-------
-| `x86_64-apple-darwin` | macOS 11 | 64-bit (rust 1.62.0) | N/A
-| `x86_64-unknown-linux-gnu` | Ubuntu 20.04 | 64-bit (rust 1.62.0 and beta) | N/A
+| platform | os | notes | rust | artifacts
+| -------|-------|-------|-------|-------
+| `x86_64-apple-darwin` | macOS 11 | 64-bit | 1.62.0 | N/A
+| `x86_64-unknown-linux-gnu` | Ubuntu 20.04 | 64-bit | 1.62.0 and beta | N/A
 
 ## Tier 3
 
@@ -43,6 +43,6 @@ work. Official builds are not available.
 
 For the full requirements, see [Tier 3 platform policy](platform-tier-policy.md#tier-3-platform-policy) in the Platform Tier Policy.
 
-| platform | os | notes | artifacts
-| -------|-------|-------|-------
-| `aarch64-unknown-linux-gnu` | Debian 11.4 | 64-bit (rust 1.62.0) | N/A
+| platform | os | notes | rust | artifacts
+| -------|-------|-------|-------|-------
+| `aarch64-unknown-linux-gnu` | Debian 11.4 | 64-bit | 1.62.0 | N/A
