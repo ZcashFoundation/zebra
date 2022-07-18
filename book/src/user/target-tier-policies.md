@@ -85,9 +85,8 @@ we place minimal requirements on the introduction of platforms.
   involved with a PR regarding a tier 3 platform, unless they have opted into
   such messages.
 - Patches adding or updating tier 3 platforms must not break any existing tier 2
-  or tier 1 platform, and must not knowingly break another tier 3 platform without
-  approval of either the core engineering team or the maintainers of the other
-  tier 3 platform.
+  or tier 1 platform, and must not knowingly break another tier 3 platform
+  without approval of either the Zebra team of the other tier 3 platform.
 
 If a tier 3 platform stops meeting these requirements, or the platform maintainers
 no longer have interest or time, or the platform shows no signs of activity and
@@ -102,8 +101,8 @@ At this tier, the Zebra project guarantees that a platform builds, and will reje
 patches that fail to build on a platform. Thus, we place requirements that ensure
 the platform will not block forward progress of the Zebra project.
 
-A proposed new tier 2 platform must be reviewed and approved by the core
-engineering team based on these requirements.
+A proposed new tier 2 platform must be reviewed and approved by Zebra team based
+on these requirements.
 
 In addition, the devops team must approve the integration of the platform
 into Continuous Integration (CI), and the tier 2 CI-related requirements. This
@@ -177,9 +176,9 @@ At this tier, the Zebra project guarantees that a platform builds and passes all
 tests, and will reject patches that fail to build or pass the testsuite on a
 platform. We hold tier 1 platforms to our highest standard of requirements.
 
-A proposed new tier 1 platform must be reviewed and approved by the core
-engineering team based on these requirements. In addition, the release team must
-approve the viability and value of supporting the platform.
+A proposed new tier 1 platform must be reviewed and approved by the Zebra team
+based on these requirements. In addition, the release team must approve the
+viability and value of supporting the platform.
 
 In addition, the devops team must approve the integration of the platform
 into Continuous Integration (CI), and the tier 1 CI-related requirements. This
