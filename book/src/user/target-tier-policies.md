@@ -37,9 +37,7 @@ overridden by a stronger requirement.
 
 While these criteria attempt to document the policy, that policy still involves
 human judgment. Targets must fulfill the spirit of the requirements as well, as
-determined by the judgment of the Zebra team. Neither this policy nor any
-decisions made regarding platforms shall create any binding agreement or
-estoppel by any party.
+determined by the judgment of the Zebra team.
 
 For a list of all supported platforms and their corresponding tiers ("tier 3",
 "tier 2", or "tier 1"), see
