@@ -9,7 +9,7 @@ use tower::{layer::Layer, timeout::TimeoutLayer, Service};
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
-    serialization::ZcashDeserialize,
+    serialization::{ZcashDeserialize, ZcashDeserializeInto},
 };
 use zebra_state as zs;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
@@ -36,7 +36,9 @@ const VERIFY_TIMEOUT_SECONDS: u64 = 10;
 /// The generated block should fail validation.
 pub fn block_no_transactions() -> Block {
     Block {
-        header: block::Header::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap(),
+        header: zebra_test::vectors::DUMMY_HEADER[..]
+            .zcash_deserialize_into()
+            .unwrap(),
         transactions: Vec::new(),
     }
 }

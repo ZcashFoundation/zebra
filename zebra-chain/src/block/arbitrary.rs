@@ -359,7 +359,7 @@ impl Arbitrary for Block {
 
         (Header::arbitrary_with(ledger_state), transactions_strategy)
             .prop_map(move |(header, transactions)| Self {
-                header,
+                header: header.into(),
                 transactions,
             })
             .boxed()
@@ -431,7 +431,7 @@ impl Block {
             for (height, block) in vec.iter_mut() {
                 // fixup the previous block hash
                 if let Some(previous_block_hash) = previous_block_hash {
-                    block.header.previous_block_hash = previous_block_hash;
+                    Arc::make_mut(&mut block.header).previous_block_hash = previous_block_hash;
                 }
 
                 let mut new_transactions = Vec::new();
@@ -471,18 +471,21 @@ impl Block {
                         .activation_height(current.network)
                         .unwrap();
                     let nu5_height = NetworkUpgrade::Nu5.activation_height(current.network);
+
                     match current_height.cmp(&heartwood_height) {
                         std::cmp::Ordering::Less => {
                             // In pre-Heartwood blocks this is the Sapling note commitment tree root.
                             // We don't validate it since we checkpoint on Canopy, but it
                             // needs to be well-formed, i.e. smaller than 𝑞_J, so we
                             // arbitrarily set it to 1.
-                            block.header.commitment_bytes = [0u8; 32];
-                            block.header.commitment_bytes[0] = 1;
+                            let block_header = Arc::make_mut(&mut block.header);
+                            block_header.commitment_bytes = [0u8; 32];
+                            block_header.commitment_bytes[0] = 1;
                         }
                         std::cmp::Ordering::Equal => {
                             // The Heartwood activation block has a hardcoded all-zeroes commitment.
-                            block.header.commitment_bytes = [0u8; 32];
+                            let block_header = Arc::make_mut(&mut block.header);
+                            block_header.commitment_bytes = [0u8; 32];
                         }
                         std::cmp::Ordering::Greater => {
                             // Set the correct commitment bytes according to the network upgrade.
@@ -498,9 +501,11 @@ impl Block {
                                         &history_tree_root,
                                         &auth_data_root,
                                     );
-                                block.header.commitment_bytes = hash_block_commitments.into();
+                                let block_header = Arc::make_mut(&mut block.header);
+                                block_header.commitment_bytes = hash_block_commitments.into();
                             } else {
-                                block.header.commitment_bytes = history_tree_root.into();
+                                let block_header = Arc::make_mut(&mut block.header);
+                                block_header.commitment_bytes = history_tree_root.into();
                             }
                         }
                     }

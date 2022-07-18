@@ -477,6 +477,12 @@ impl StateService {
         read::block(self.mem.best_chain(), self.disk.db(), hash_or_height)
     }
 
+    /// Returns the [`block::Header`] with [`Hash`](zebra_chain::block::Hash) or
+    /// [`Height`](zebra_chain::block::Height), if it exists in the current best chain.
+    pub fn best_block_header(&self, hash_or_height: HashOrHeight) -> Option<Arc<block::Header>> {
+        read::block_header(self.mem.best_chain(), self.disk.db(), hash_or_height)
+    }
+
     /// Returns the [`Transaction`] with [`transaction::Hash`],
     /// if it exists in the current best chain.
     pub fn best_transaction(&self, hash: transaction::Hash) -> Option<Arc<Transaction>> {
@@ -516,6 +522,8 @@ impl StateService {
     /// - they are not in the best chain, or
     /// - their block fails contextual validation.
     pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
+        // We ignore any UTXOs in FinalizedState.queued_by_prev_hash,
+        // because it is only used during checkpoint verification.
         self.mem
             .any_utxo(outpoint)
             .or_else(|| self.queued_blocks.utxo(outpoint))
@@ -918,17 +926,10 @@ impl Service<Request> for StateService {
                 let res: Vec<_> = res
                     .iter()
                     .map(|&hash| {
-                        let block = self
-                            .best_block(hash.into())
-                            .expect("block for found hash is in the best chain");
-                        block::CountedHeader {
-                            transaction_count: block
-                                .transactions
-                                .len()
-                                .try_into()
-                                .expect("transaction count has already been validated"),
-                            header: block.header,
-                        }
+                        let header = self
+                            .best_block_header(hash.into())
+                            .expect("block header for found hash is in the best chain");
+                        block::CountedHeader { header }
                     })
                     .collect();
                 async move { Ok(Response::BlockHeaders(res)) }.boxed()

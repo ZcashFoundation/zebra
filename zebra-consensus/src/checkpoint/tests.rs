@@ -1,22 +1,23 @@
 //! Tests for checkpoint-based block verification
 
-use super::*;
-
-use super::types::Progress::*;
-use super::types::TargetHeight::*;
+use std::{cmp::min, mem::drop, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::{
     future::TryFutureExt,
     stream::{FuturesUnordered, StreamExt},
 };
-use std::{cmp::min, convert::TryInto, mem::drop, time::Duration};
 use tokio::time::timeout;
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::parameters::Network::*;
 use zebra_chain::serialization::ZcashDeserialize;
+
+use super::{
+    types::{Progress::*, TargetHeight::*},
+    *,
+};
 
 /// The timeout we apply to each verify future during testing.
 ///
@@ -505,11 +506,11 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
     let good_block0 =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
     let good_block0_hash = good_block0.hash();
+
     // Change the header hash
     let mut bad_block0 = good_block0.clone();
-    let mut bad_block0 = Arc::make_mut(&mut bad_block0);
-    bad_block0.header.version = 0;
-    let bad_block0: Arc<Block> = bad_block0.clone().into();
+    let bad_block0_mut = Arc::make_mut(&mut bad_block0);
+    Arc::make_mut(&mut bad_block0_mut.header).version = 0;
 
     // Make a checkpoint list containing the genesis block checkpoint
     let genesis_checkpoint_list: BTreeMap<block::Height, block::Hash> =

@@ -1,6 +1,6 @@
 //! Tests for block verification
 
-use std::{convert::TryFrom, sync::Arc};
+use std::sync::Arc;
 
 use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
@@ -53,7 +53,7 @@ static INVALID_TIME_BLOCK_TRANSCRIPT: Lazy<
         .checked_add_signed(chrono::Duration::hours(3))
         .ok_or_else(|| eyre!("overflow when calculating 3 hours in the future"))
         .unwrap();
-    block.header.time = three_hours_in_the_future;
+    Arc::make_mut(&mut block.header).time = three_hours_in_the_future;
 
     vec![(Arc::new(block), Err(ExpectedTranscriptError::Any))]
 });
@@ -65,7 +65,7 @@ static INVALID_HEADER_SOLUTION_TRANSCRIPT: Lazy<
         Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..]).unwrap();
 
     // Change nonce to something invalid
-    block.header.nonce = [0; 32];
+    Arc::make_mut(&mut block.header).nonce = [0; 32];
 
     vec![(Arc::new(block), Err(ExpectedTranscriptError::Any))]
 });
@@ -77,7 +77,7 @@ static INVALID_COINBASE_TRANSCRIPT: Lazy<
 
     // Test 1: Empty transaction
     let block1 = Block {
-        header,
+        header: header.into(),
         transactions: Vec::new(),
     };
 
@@ -88,7 +88,7 @@ static INVALID_COINBASE_TRANSCRIPT: Lazy<
         .unwrap();
     transactions.push(tx);
     let block2 = Block {
-        header,
+        header: header.into(),
         transactions,
     };
 
@@ -205,7 +205,7 @@ fn difficulty_validation_failure() -> Result<(), Report> {
     let hash = block.hash();
 
     // Set the difficulty field to an invalid value
-    block.header.difficulty_threshold = INVALID_COMPACT_DIFFICULTY;
+    Arc::make_mut(&mut block.header).difficulty_threshold = INVALID_COMPACT_DIFFICULTY;
 
     // Validate the block
     let result =
@@ -440,7 +440,7 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
     // Build new block
     let transactions: Vec<Arc<zebra_chain::transaction::Transaction>> = vec![Arc::new(tx)];
     let block = Block {
-        header: block.header,
+        header: block.header.clone(),
         transactions,
     };
 
@@ -618,7 +618,7 @@ fn merkle_root_fake_v5_for_network(network: Network) -> Result<(), Report> {
         // Replace the merkle root so that it matches the modified transactions.
         // This test provides some transaction id and merkle root coverage,
         // but we also need to test against zcashd test vectors.
-        block.header.merkle_root = transaction_hashes.iter().cloned().collect();
+        Arc::make_mut(&mut block.header).merkle_root = transaction_hashes.iter().cloned().collect();
 
         check::merkle_root_validity(network, &block, &transaction_hashes)
             .expect("merkle root should be valid for this block");
