@@ -14,8 +14,8 @@
 The Zcash Foundation provides three tiers of platform support, modeled after the
 [Rust Target Tier Policy](https://doc.rust-lang.org/stable/rustc/target-tier-policy.html):
 
-- The Zcash Foundation provides no guarantees about tier 3 platforms; they exist
-  in the codebase, but may or may not build.
+- The Zcash Foundation provides no guarantees about tier 3 platforms; they may
+  or may not build with the actual codebase.
 - Zebra's continuous integration checks that tier 2 platforms will always build,
   but they may or may not pass tests.
 - Zebra's continuous integration checks that tier 1 platforms will always build
