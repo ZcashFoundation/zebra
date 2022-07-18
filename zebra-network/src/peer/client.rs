@@ -19,15 +19,13 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use tower::Service;
 
 use crate::{
-    peer::error::AlreadyErrored,
+    peer::error::{AlreadyErrored, ErrorSlot, PeerError, SharedPeerError},
     peer_set::InventoryChange,
     protocol::{
         external::{types::Version, InventoryHash},
         internal::{Request, Response},
     },
 };
-
-use super::{ErrorSlot, PeerError, SharedPeerError};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod tests;
@@ -203,7 +201,6 @@ impl ClientRequestReceiver {
     /// Closing the channel ensures that:
     /// - the request stream terminates, and
     /// - task notifications are not required.
-    #[allow(clippy::unwrap_in_result)]
     pub fn close_and_flush_next(&mut self) -> Option<InProgressClientRequest> {
         self.inner.close();
 
@@ -212,10 +209,10 @@ impl ClientRequestReceiver {
         // The request stream terminates, because the sender is closed,
         // and the channel has a limited capacity.
         // Task notifications are not required, because the sender is closed.
-        self.inner
-            .try_next()
-            .expect("channel is closed")
-            .map(Into::into)
+        //
+        // Despite what its documentation says, we've seen futures::channel::mpsc::Receiver::try_next()
+        // return an error after the channel is closed.
+        self.inner.try_next().ok()?.map(Into::into)
     }
 }
 
@@ -491,11 +488,12 @@ impl Client {
 
     /// Poll for space in the shared request sender channel.
     fn poll_request(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), SharedPeerError>> {
-        if ready!(self.server_tx.poll_ready(cx)).is_err() {
+        let server_result = ready!(self.server_tx.poll_ready(cx));
+        if server_result.is_err() {
             Poll::Ready(Err(self
                 .error_slot
                 .try_get_error()
-                .expect("failed servers must set their error slot")))
+                .unwrap_or_else(|| PeerError::ConnectionTaskExited.into())))
         } else if let Some(error) = self.error_slot.try_get_error() {
             Poll::Ready(Err(error))
         } else {
@@ -569,13 +567,15 @@ impl Service<Request> for Client {
         }) {
             Err(e) => {
                 if e.is_disconnected() {
-                    let ClientRequest { tx, .. } = e.into_inner();
-                    let _ = tx.send(Err(PeerError::ConnectionClosed.into()));
-                    future::ready(Err(self
+                    let peer_error = self
                         .error_slot
                         .try_get_error()
-                        .expect("failed servers must set their error slot")))
-                    .boxed()
+                        .unwrap_or_else(|| PeerError::ConnectionTaskExited.into());
+
+                    let ClientRequest { tx, .. } = e.into_inner();
+                    let _ = tx.send(Err(peer_error.clone()));
+
+                    future::ready(Err(peer_error)).boxed()
                 } else {
                     // sending fails when there's not enough
                     // channel space, but we called poll_ready

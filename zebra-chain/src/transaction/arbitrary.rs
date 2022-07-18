@@ -959,7 +959,7 @@ pub fn fake_v5_transactions_for_network<'b>(
             .transactions
             .into_iter()
             .map(move |transaction| {
-                transaction_to_fake_v5(&*transaction, network, block::Height(*height))
+                transaction_to_fake_v5(&transaction, network, block::Height(*height))
             })
             .map(Transaction::from)
     })

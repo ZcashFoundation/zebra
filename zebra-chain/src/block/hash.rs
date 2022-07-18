@@ -97,6 +97,14 @@ impl<'a> From<&'a Header> for Hash {
     }
 }
 
+impl From<Header> for Hash {
+    // The borrow is actually needed to use From<&Header>
+    #[allow(clippy::needless_borrow)]
+    fn from(block_header: Header) -> Self {
+        (&block_header).into()
+    }
+}
+
 impl ZcashSerialize for Hash {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0)?;

@@ -1,7 +1,7 @@
 //! Checks for whether cited anchors are previously-computed note commitment
 //! tree roots.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use zebra_chain::sprout;
 
@@ -29,7 +29,7 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
         if transaction.has_sprout_joinsplit_data() {
             let mut interstitial_trees: HashMap<
                 sprout::tree::Root,
-                sprout::tree::NoteCommitmentTree,
+                Arc<sprout::tree::NoteCommitmentTree>,
             > = HashMap::new();
 
             for joinsplit in transaction.sprout_groth16_joinsplits() {
@@ -90,11 +90,13 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
                     }
                 };
 
+                let input_tree_inner = Arc::make_mut(&mut input_tree);
+
                 tracing::debug!(?joinsplit.anchor, "validated sprout anchor");
 
                 // Add new anchors to the interstitial note commitment tree.
                 for cm in joinsplit.commitments {
-                    input_tree
+                    input_tree_inner
                         .append(cm)
                         .expect("note commitment should be appendable to the tree");
                 }
