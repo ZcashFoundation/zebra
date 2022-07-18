@@ -173,6 +173,9 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
         "`PushTransaction` requests should always respond `Ok(Nil)`",
     );
 
+    // Wait for the mempool to store the transaction
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
     let mempool_response = inbound_service
         .clone()
@@ -272,6 +275,9 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         "`AdvertiseTransactionIds` requests should always respond `Ok(Nil)`",
     );
 
+    // Wait for the mempool to store the transaction
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
     let mempool_response = inbound_service
         .clone()
@@ -368,6 +374,9 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         "`PushTransaction` requests should always respond `Ok(Nil)`",
     );
 
+    // Wait for the mempool to store the transaction
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
     let mempool_response = inbound_service
         .clone()
@@ -458,27 +467,31 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             Amount::zero(),
         )));
     });
-    let (response, _) = futures::join!(request, verification);
-    match response {
-        Ok(Response::Nil) => (),
-        _ => unreachable!("`PushTransaction` requests should always respond `Ok(Nil)`"),
-    };
+
+    let (push_response, _) = futures::join!(request, verification);
+
+    assert_eq!(
+        push_response.expect("unexpected error response from inbound service"),
+        Response::Nil,
+        "`PushTransaction` requests should always respond `Ok(Nil)`",
+    );
+
+    // Wait for the mempool to store the transaction
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
-    let request = inbound_service
+    let mempool_response = inbound_service
         .clone()
         .oneshot(Request::MempoolTransactionIds)
         .await;
 
     // Only tx2 will be in the mempool while tx1 was expired
-    match request {
-        Ok(Response::TransactionIds(response)) => {
-            assert_eq!(response, vec![tx2_id])
-        }
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
-        ),
-    };
+    assert_eq!(
+        mempool_response.expect("unexpected error response from mempool"),
+        Response::TransactionIds(vec![tx2_id]),
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+    );
+
     // Check if tx1 was added to the rejected list as well
     let response = mempool
         .clone()
