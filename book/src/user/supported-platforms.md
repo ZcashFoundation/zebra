@@ -33,7 +33,7 @@ For the full requirements, see [Tier 2 platform policy](platform-tier-policy.md#
 | platform | os | notes | rust | artifacts
 | -------|-------|-------|-------|-------
 | `x86_64-apple-darwin` | macOS 11 | 64-bit | 1.62.0 | N/A
-| `x86_64-unknown-linux-gnu` | Ubuntu 20.04 | 64-bit | 1.62.0 and beta | N/A
+| `x86_64-unknown-linux-gnu` | Ubuntu 20.04 | 64-bit | 1.62.0, beta | N/A
 
 ## Tier 3
 
