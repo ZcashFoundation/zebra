@@ -109,13 +109,11 @@ into Continuous Integration (CI), and the tier 2 CI-related requirements. This
 review and approval may take place in a PR adding the platform to CI, or simply
 by a devops team member reporting the outcome of a team discussion.
 
-- A tier 2 platform must have value to people other than its maintainers. (It may
-  still be a niche platform, but it must not be exclusively useful for an
-  inherently closed group.)
+- Tier 2 platforms must implement all the Zcash consensus rules.
+  Other Zebra features and binaries may be disabled, on a case-by-case basis.
 - A tier 2 platform must have a designated team of developers (the "platform
-  maintainers") available to consult on platform-specific build-breaking issues,
-  or if necessary to develop platform-specific language or library implementation
-  details. This team must have at least 1 developer.
+  maintainers") available to consult on platform-specific build-breaking issues.
+  This team must have at least 1 developer.
 - The platform must not place undue burden on Zebra developers not specifically
   concerned with that platform. Zebra developers are expected to not gratuitously
   break a tier 2 platform, but are not expected to become experts in every tier 2
@@ -128,15 +126,7 @@ by a devops team member reporting the outcome of a team discussion.
   platform cannot be feasibly emulated, the documentation should document the
   required physical hardware or cloud systems.
 - The platform must document its baseline expectations for the features or
-  versions of CPUs, operating systems, libraries, runtime environments, and
-  similar.
-- Tier 2 platforms must not leave any significant portions of Zebra unimplemented,
-  unless they cannot possibly be supported on the platform.
-  - The right approach to handling a missing feature from a platform may depend
-    on whether the platform seems likely to develop the feature in the future. In
-    some cases, a platform may be co-developed along with Zebra support, and Zebra
-    may gain new features on the platform as that platform gains the capabilities
-    to support those features.
+  versions of CPUs, operating systems, and any other dependencies.
 - The platform must build reliably in CI, for all components that Zebra's CI
   considers mandatory.
 - The Zebra team may additionally require that a subset of tests pass in
@@ -147,9 +137,6 @@ by a devops team member reporting the outcome of a team discussion.
   burden of the CI infrastructure. This requirement is subjective, to be
   evaluated by the devops team, and will take the community importance
   of the platform into account.
-- Tier 2 platforms should, if at all possible, support cross-compiling. Tier 2
-  platforms should not require using the platform as the host for builds, even
-  if the platform supports host tools.
 - Tier 2 platforms must not impose burden on the authors of pull requests, or
   other developers in the community, to ensure that tests pass for the platform.
   In particular, do not post comments (automated or manual) on a PR that derail
@@ -185,8 +172,13 @@ into Continuous Integration (CI), and the tier 1 CI-related requirements. This
 review and approval may take place in a PR adding the platform to CI, by a
 devops team member reporting the outcome of a team discussion.
 
-- Tier 1 platforms must have substantial, widespread interest within the
-  developer community, and must serve the ongoing needs of multiple production
+- Tier 1 platforms must implement Zebra's standard production feature set,
+  including the network protocol, mempool, cached state, and RPCs.
+  Exceptions may be made on a case-by-case basis.
+  - Zebra must have reasonable security, performance, and robustness on that platform.
+    These requirements are subjective, and determined by consensus of the Zebra team.
+  - Internal developer tools and manual testing tools may be disabled for that platform.
+- The platform must serve the ongoing needs of multiple production
   users of Zebra across multiple organizations or projects. These requirements
   are subjective, and determined by consensus of the Zebra team. A tier 1
   platform may be demoted or removed if it becomes obsolete or no longer meets
@@ -211,8 +203,8 @@ devops team member reporting the outcome of a team discussion.
     requirements, the Zebra team must have high
     confidence in the accuracy of the emulation, such that discrepancies
     between emulation and native operation that affect test results will
-    constitute a high-priority bug in either the emulation or the
-    implementation of the platform.
+    constitute a high-priority bug in either the emulation, the Rust
+    implementation of the platform, or the Zebra implementation for the platform.
   - If it is not possible to run the platform via emulation, these resources
     must additionally be sufficient for the Zebra devops team to make them
     available for access by Zebra team members, for the purposes of development
