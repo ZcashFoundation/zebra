@@ -10,63 +10,33 @@ use crate::{
     PreparedBlock, ValidateContextError,
 };
 
-/// Checks that the Sprout, Sapling, and Orchard anchors specified by
-/// transactions in this block have been computed previously within the context
-/// of its parent chain. We do not check any anchors in checkpointed blocks,
-/// which avoids JoinSplits<BCTV14Proof>
+/// Checks the final Sapling and Orchard anchors specified by transactions in this
+/// `prepared` block.
 ///
-/// Sprout anchors may refer to some earlier block's final treestate (like
-/// Sapling and Orchard do exclusively) _or_ to the interstitial output
-/// treestate of any prior `JoinSplit` _within the same transaction_.
+/// This method checks for anchors computed from the final treestate of each block in
+/// the `parent_chain` or `finalized_state`.
+///
+/// Sprout anchors may also refer to the interstitial output treestate of any prior
+/// `JoinSplit` _within the same transaction_.
+///
+/// This function fetches and returns the Sprout final treestates from the state,
+/// so [`sprout_anchors_refer_to_interstitial_treestates()`] can check Sprout
+/// final and interstitial treestates without accessing the disk.
 #[tracing::instrument(skip(finalized_state, parent_chain, prepared))]
-pub(crate) fn anchors_refer_to_earlier_treestates(
+pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
     finalized_state: &ZebraDb,
     parent_chain: &Chain,
     prepared: &PreparedBlock,
-) -> Result<(), ValidateContextError> {
+) -> Result<HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>, ValidateContextError>
+{
+    let mut sprout_final_treestates = HashMap::new();
+
     for transaction in prepared.block.transactions.iter() {
         // Sprout JoinSplits, with interstitial treestates to check as well.
         if transaction.has_sprout_joinsplit_data() {
-            let mut interstitial_trees: HashMap<
-                sprout::tree::Root,
-                Arc<sprout::tree::NoteCommitmentTree>,
-            > = HashMap::new();
-
             for joinsplit in transaction.sprout_groth16_joinsplits() {
-                // Check all anchor sets, including the one for interstitial
-                // anchors.
-                //
-                // The anchor is checked and the matching tree is obtained,
-                // which is used to create the interstitial tree state for this
-                // JoinSplit:
-                //
-                // > For each JoinSplit description in a transaction, an
-                // > interstitial output treestate is constructed which adds the
-                // > note commitments and nullifiers specified in that JoinSplit
-                // > description to the input treestate referred to by its
-                // > anchor. This interstitial output treestate is available for
-                // > use as the anchor of subsequent JoinSplit descriptions in
-                // > the same transaction.
-                //
-                // <https://zips.z.cash/protocol/protocol.pdf#joinsplit>
-                //
-                // # Consensus
-                //
-                // > The anchor of each JoinSplit description in a transaction
-                // > MUST refer to either some earlier block’s final Sprout
-                // > treestate, or to the interstitial output treestate of any
-                // > prior JoinSplit description in the same transaction.
-                //
-                // > For the first JoinSplit description of a transaction, the
-                // > anchor MUST be the output Sprout treestate of a previous
-                // > block.
-                //
-                // <https://zips.z.cash/protocol/protocol.pdf#joinsplit>
-                //
-                // Note that in order to satisfy the latter consensus rule above,
-                // [`interstitial_trees`] is always empty in the first iteration
-                // of the loop.
-                let input_tree = interstitial_trees
+                // Fetch and return final anchor sets, avoiding duplicate fetches
+                let input_tree = sprout_final_treestates
                     .get(&joinsplit.anchor)
                     .cloned()
                     .or_else(|| {
@@ -80,30 +50,11 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
                             })
                     });
 
-                let mut input_tree = match input_tree {
-                    Some(tree) => tree,
-                    None => {
-                        tracing::warn!(?joinsplit.anchor, ?prepared.height, ?prepared.hash, "failed to find sprout anchor");
-                        return Err(ValidateContextError::UnknownSproutAnchor {
-                            anchor: joinsplit.anchor,
-                        });
-                    }
-                };
-
-                let input_tree_inner = Arc::make_mut(&mut input_tree);
-
-                tracing::debug!(?joinsplit.anchor, "validated sprout anchor");
-
-                // Add new anchors to the interstitial note commitment tree.
-                for cm in joinsplit.commitments {
-                    input_tree_inner
-                        .append(cm)
-                        .expect("note commitment should be appendable to the tree");
+                if let Some(input_tree) = input_tree {
+                    sprout_final_treestates.insert(input_tree.root(), input_tree);
                 }
 
-                interstitial_trees.insert(input_tree.root(), input_tree);
-
-                tracing::debug!(?joinsplit.anchor, "observed sprout anchor");
+                tracing::debug!(?joinsplit.anchor, "observed sprout final treestate anchor");
             }
         }
 
@@ -163,6 +114,97 @@ pub(crate) fn anchors_refer_to_earlier_treestates(
             }
 
             tracing::debug!(?orchard_shielded_data.shared_anchor, "validated orchard anchor");
+        }
+    }
+
+    Ok(sprout_final_treestates)
+}
+
+/// Checks the Sprout anchors specified by transactions in this `prepared` block.
+///
+/// Sprout anchors may refer to some earlier block's final treestate (like
+/// Sapling and Orchard do exclusively) _or_ to the interstitial output
+/// treestate of any prior `JoinSplit` _within the same transaction_.
+///
+/// This method checks for anchors computed from the final and interstitial treestates of
+/// each transaction in the `prepared` block, using the supplied `sprout_final_treestates`.
+#[tracing::instrument(skip(sprout_final_treestates, prepared))]
+pub(crate) fn sprout_anchors_refer_to_treestates(
+    sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
+    prepared: &PreparedBlock,
+) -> Result<(), ValidateContextError> {
+    for transaction in prepared.block.transactions.iter() {
+        // Sprout JoinSplits, with interstitial treestates to check as well.
+        if transaction.has_sprout_joinsplit_data() {
+            let mut interstitial_trees: HashMap<
+                sprout::tree::Root,
+                Arc<sprout::tree::NoteCommitmentTree>,
+            > = HashMap::new();
+
+            for joinsplit in transaction.sprout_groth16_joinsplits() {
+                // Check all anchor sets, including the one for interstitial
+                // anchors.
+                //
+                // The anchor is checked and the matching tree is obtained,
+                // which is used to create the interstitial tree state for this
+                // JoinSplit:
+                //
+                // > For each JoinSplit description in a transaction, an
+                // > interstitial output treestate is constructed which adds the
+                // > note commitments and nullifiers specified in that JoinSplit
+                // > description to the input treestate referred to by its
+                // > anchor. This interstitial output treestate is available for
+                // > use as the anchor of subsequent JoinSplit descriptions in
+                // > the same transaction.
+                //
+                // <https://zips.z.cash/protocol/protocol.pdf#joinsplit>
+                //
+                // # Consensus
+                //
+                // > The anchor of each JoinSplit description in a transaction
+                // > MUST refer to either some earlier block’s final Sprout
+                // > treestate, or to the interstitial output treestate of any
+                // > prior JoinSplit description in the same transaction.
+                //
+                // > For the first JoinSplit description of a transaction, the
+                // > anchor MUST be the output Sprout treestate of a previous
+                // > block.
+                //
+                // <https://zips.z.cash/protocol/protocol.pdf#joinsplit>
+                //
+                // Note that in order to satisfy the latter consensus rule above,
+                // [`interstitial_trees`] is always empty in the first iteration
+                // of the loop.
+                let input_tree = interstitial_trees
+                    .get(&joinsplit.anchor)
+                    .cloned()
+                    .or_else(|| sprout_final_treestates.get(&joinsplit.anchor).cloned());
+
+                let mut input_tree = match input_tree {
+                    Some(tree) => tree,
+                    None => {
+                        tracing::debug!(?joinsplit.anchor, ?prepared.height, ?prepared.hash, "failed to find sprout anchor");
+                        return Err(ValidateContextError::UnknownSproutAnchor {
+                            anchor: joinsplit.anchor,
+                        });
+                    }
+                };
+
+                let input_tree_inner = Arc::make_mut(&mut input_tree);
+
+                tracing::debug!(?joinsplit.anchor, "validated sprout anchor");
+
+                // Add new anchors to the interstitial note commitment tree.
+                for cm in joinsplit.commitments {
+                    input_tree_inner
+                        .append(cm)
+                        .expect("note commitment should be appendable to the tree");
+                }
+
+                interstitial_trees.insert(input_tree.root(), input_tree);
+
+                tracing::debug!(?joinsplit.anchor, "observed sprout anchor");
+            }
         }
     }
 

@@ -205,6 +205,9 @@ impl NonFinalizedState {
         prepared: PreparedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
+        // Reads from disk
+        //
+        // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,
             &new_chain.unspent_utxos(),
@@ -212,18 +215,25 @@ impl NonFinalizedState {
             finalized_state,
         )?;
 
+        // CPU-heavy cryptography
         check::prepared_block_commitment_is_valid_for_chain_history(
             &prepared,
             self.network,
             &new_chain.history_tree,
         )?;
 
-        check::anchors::anchors_refer_to_earlier_treestates(
-            finalized_state,
-            &new_chain,
-            &prepared,
-        )?;
+        // Reads from disk
+        let sprout_final_treestates =
+            check::anchors::sapling_orchard_anchors_refer_to_final_treestates(
+                finalized_state,
+                &new_chain,
+                &prepared,
+            )?;
 
+        // CPU-heavy cryptography
+        check::anchors::sprout_anchors_refer_to_treestates(sprout_final_treestates, &prepared)?;
+
+        // Quick check that doesn't read from disk
         let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
@@ -240,6 +250,8 @@ impl NonFinalizedState {
 
         // We're pretty sure the new block is valid,
         // so clone the inner chain if needed, then add the new block.
+        //
+        // CPU-heavy cryptography, multiple batches?
         Arc::try_unwrap(new_chain)
             .unwrap_or_else(|shared_chain| (*shared_chain).clone())
             .push(contextual)
