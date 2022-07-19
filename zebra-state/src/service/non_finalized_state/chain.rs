@@ -297,7 +297,13 @@ impl Chain {
         let sapling_nct = Arc::make_mut(&mut forked.sapling_note_commitment_tree);
         let orchard_nct = Arc::make_mut(&mut forked.orchard_note_commitment_tree);
 
-        // Rebuild the note commitment trees, starting from the finalized tip tree.
+        // Rebuild the note commitment and history trees, starting from the finalized tip tree.
+        //
+        // Note commitments and history trees are not removed from the Chain during a fork,
+        // because we don't support that operation yet. Instead, we recreate the tree
+        // from the finalized tip.
+        //
+        // TODO: remove trees and anchors above the fork, to save CPU time (#4794)
         for block in forked.blocks.values() {
             for transaction in block.block.transactions.iter() {
                 for sprout_note_commitment in transaction.sprout_note_commitments() {
@@ -1230,6 +1236,12 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         _position: RevertPosition,
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
+            // Note commitments are not removed from the Chain during a fork,
+            // because we don't support that operation yet. Instead, we
+            // recreate the tree from the finalized tip in Chain::fork().
+            //
+            // TODO: remove trees and anchors above the fork, to save CPU time (#4794)
+
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.sprout_nullifiers,
                 joinsplit_data.nullifiers(),
@@ -1277,9 +1289,11 @@ where
         _position: RevertPosition,
     ) {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
-            // Note commitments are not removed from the tree here because we
-            // don't support that operation yet. Instead, we recreate the tree
-            // from the finalized tip in `NonFinalizedState`.
+            // Note commitments are not removed from the Chain during a fork,
+            // because we don't support that operation yet. Instead, we
+            // recreate the tree from the finalized tip in Chain::fork().
+            //
+            // TODO: remove trees and anchors above the fork, to save CPU time (#4794)
 
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.sapling_nullifiers,
@@ -1322,9 +1336,11 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
         _position: RevertPosition,
     ) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
-            // Note commitments are not removed from the tree here because we
-            // don't support that operation yet. Instead, we recreate the tree
-            // from the finalized tip in NonFinalizedState.
+            // Note commitments are not removed from the Chain during a fork,
+            // because we don't support that operation yet. Instead, we
+            // recreate the tree from the finalized tip in Chain::fork().
+            //
+            // TODO: remove trees and anchors above the fork, to save CPU time (#4794)
 
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.orchard_nullifiers,
