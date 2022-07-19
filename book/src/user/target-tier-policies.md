@@ -91,7 +91,7 @@ we place minimal requirements on the introduction of platforms.
 If a tier 3 platform stops meeting these requirements, or the platform maintainers
 no longer have interest or time, or the platform shows no signs of activity and
 has not built for some time, or removing the platform would improve the quality
-of the Zebra codebase, we may post a PR to remove it; any such PR will be CCed
+of the Zebra codebase, we may post a PR to remove support for that platform. Any such PR will be CCed
 to the platform maintainers (and potentially other people who have previously
 worked on the platform), to check potential interest in improving the situation.
 
@@ -125,8 +125,8 @@ by a devops team member reporting the outcome of a team discussion.
   to build for their platform, and explaining how to run tests for the platform.
   If at all possible, this documentation should show how to run Zebra programs
   and tests for the platform using emulation, to allow anyone to do so. If the
-  platform cannot be feasibly emulated, the documentation should explain how to
-  obtain and work with physical hardware, cloud systems, or equivalent.
+  platform cannot be feasibly emulated, the documentation should document the
+  required physical hardware or cloud systems.
 - The platform must document its baseline expectations for the features or
   versions of CPUs, operating systems, libraries, runtime environments, and
   similar.
@@ -208,7 +208,7 @@ devops team member reporting the outcome of a team discussion.
   - Such resources may be provided via cloud systems, via emulation, or via
     physical hardware.
   - If the platform requires the use of emulation to meet any of the tier
-    requirements, the Zebra team for those requirements must have high
+    requirements, the Zebra team must have high
     confidence in the accuracy of the emulation, such that discrepancies
     between emulation and native operation that affect test results will
     constitute a high-priority bug in either the emulation or the
