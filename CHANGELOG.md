@@ -21,6 +21,11 @@ It also improves Zebra's sync performance and reliability under heavy load.
   This option sets the number of threads to use for CPU-bound tasks, such as proof and signature verification.
   By default, Zebra uses all available CPU cores.
 
+### Rust Compiler Bug Fixes
+
+- The Rust team has recently [fixed compilation bugs](https://blog.rust-lang.org/2022/07/19/Rust-1.62.1.html) in function coercions of `impl Trait` return types, and `async fn` lifetimes.
+  We recommend that you update your Rust compiler to release 1.62.1, and re-compile Zebra.=
+
 ### Added
 
 - Add a `rayon` thread pool for CPU-bound tasks (#4776)
