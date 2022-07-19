@@ -5,7 +5,7 @@ different set of guarantees. For more information on the policies for platforms
 at each tier, see the [Platform Tier Policy](platform-tier-policy.md).
 
 Platforms are identified by their Rust "target triple" which is a string composed by
-`<machine>-<vendor>-<operatingsystem>`.
+`<machine>-<vendor>-<operating system>`.
 
 ## Tier 1
 
