@@ -6,6 +6,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     ops::{Deref, RangeInclusive},
     sync::Arc,
+    time::Instant,
 };
 
 use mset::MultiSet;
@@ -293,10 +294,6 @@ impl Chain {
             forked.pop_tip();
         }
 
-        let sprout_nct = Arc::make_mut(&mut forked.sprout_note_commitment_tree);
-        let sapling_nct = Arc::make_mut(&mut forked.sapling_note_commitment_tree);
-        let orchard_nct = Arc::make_mut(&mut forked.orchard_note_commitment_tree);
-
         // Rebuild the note commitment and history trees, starting from the finalized tip tree.
         //
         // Note commitments and history trees are not removed from the Chain during a fork,
@@ -304,6 +301,18 @@ impl Chain {
         // from the finalized tip.
         //
         // TODO: remove trees and anchors above the fork, to save CPU time (#4794)
+        let fork_height = forked.non_finalized_tip_height();
+        let start_time = Instant::now();
+        info!(
+            ?fork_height,
+            ?fork_tip,
+            "starting to rebuild note commitment trees after a non-finalized chain fork",
+        );
+
+        let sprout_nct = Arc::make_mut(&mut forked.sprout_note_commitment_tree);
+        let sapling_nct = Arc::make_mut(&mut forked.sapling_note_commitment_tree);
+        let orchard_nct = Arc::make_mut(&mut forked.orchard_note_commitment_tree);
+
         for block in forked.blocks.values() {
             for transaction in block.block.transactions.iter() {
                 for sprout_note_commitment in transaction.sprout_note_commitments() {
@@ -344,6 +353,14 @@ impl Chain {
                 *orchard_root,
             )?;
         }
+
+        let rebuild_time = start_time.elapsed();
+        info!(
+            ?rebuild_time,
+            ?fork_height,
+            ?fork_tip,
+            "finished rebuilding note commitment trees after a non-finalized chain fork",
+        );
 
         Ok(Some(forked))
     }
