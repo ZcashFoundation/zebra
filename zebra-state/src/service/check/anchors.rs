@@ -205,6 +205,8 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
             Arc<sprout::tree::NoteCommitmentTree>,
         > = HashMap::new();
 
+        let joinsplit_count = transaction.sprout_groth16_joinsplits().count();
+
         for (joinsplit_index_in_tx, joinsplit) in
             transaction.sprout_groth16_joinsplits().enumerate()
         {
@@ -283,6 +285,12 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
                 "validated sprout anchor",
             );
 
+            // The last interstitial treestate in a transaction can never be used,
+            // so we avoid generating it.
+            if joinsplit_index_in_tx == joinsplit_count - 1 {
+                continue;
+            }
+
             let input_tree_inner = Arc::make_mut(&mut input_tree);
 
             // Add new anchors to the interstitial note commitment tree.
@@ -293,6 +301,7 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
             }
 
             interstitial_trees.insert(input_tree.root(), input_tree);
+
             tracing::debug!(
                 ?joinsplit.anchor,
                 ?joinsplit_index_in_tx,
