@@ -301,9 +301,12 @@ impl Chain {
         // from the finalized tip.
         //
         // TODO: remove trees and anchors above the fork, to save CPU time (#4794)
-        let fork_height = forked.non_finalized_tip_height();
         let start_time = Instant::now();
+        let rebuilt_block_count = forked.blocks.len();
+        let fork_height = forked.non_finalized_tip_height();
+
         info!(
+            ?rebuilt_block_count,
             ?fork_height,
             ?fork_tip,
             "starting to rebuild note commitment trees after a non-finalized chain fork",
@@ -355,8 +358,12 @@ impl Chain {
         }
 
         let rebuild_time = start_time.elapsed();
+        let rebuild_time_per_block =
+            rebuild_time / rebuilt_block_count.try_into().expect("fits in u32");
         info!(
             ?rebuild_time,
+            ?rebuild_time_per_block,
+            ?rebuilt_block_count,
             ?fork_height,
             ?fork_tip,
             "finished rebuilding note commitment trees after a non-finalized chain fork",
