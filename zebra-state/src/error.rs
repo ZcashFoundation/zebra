@@ -214,13 +214,13 @@ pub enum ValidateContextError {
         height: Option<block::Height>,
     },
 
-    #[error("error in Sprout note commitment tree")]
+    #[error("error updating Sprout note commitment tree")]
     SproutNoteCommitmentTreeError(#[from] zebra_chain::sprout::tree::NoteCommitmentTreeError),
 
-    #[error("error in Sapling note commitment tree")]
+    #[error("error updating Sapling note commitment tree")]
     SaplingNoteCommitmentTreeError(#[from] zebra_chain::sapling::tree::NoteCommitmentTreeError),
 
-    #[error("error in Orchard note commitment tree")]
+    #[error("error updating Orchard note commitment tree")]
     OrchardNoteCommitmentTreeError(#[from] zebra_chain::orchard::tree::NoteCommitmentTreeError),
 
     #[error("error building the history tree")]
@@ -229,17 +229,41 @@ pub enum ValidateContextError {
     #[error("block contains an invalid commitment")]
     InvalidBlockCommitment(#[from] block::CommitmentError),
 
-    #[error("unknown Sprout anchor: {anchor:?}")]
+    #[error(
+        "unknown Sprout anchor: {anchor:?},\n\
+         {height:?}, index in block: {tx_index_in_block:?}, {transaction_hash:?}"
+    )]
     #[non_exhaustive]
-    UnknownSproutAnchor { anchor: sprout::tree::Root },
+    UnknownSproutAnchor {
+        anchor: sprout::tree::Root,
+        height: block::Height,
+        tx_index_in_block: usize,
+        transaction_hash: transaction::Hash,
+    },
 
-    #[error("unknown Sapling anchor: {anchor:?}")]
+    #[error(
+        "unknown Sapling anchor: {anchor:?},\n\
+         {height:?}, index in block: {tx_index_in_block:?}, {transaction_hash:?}"
+    )]
     #[non_exhaustive]
-    UnknownSaplingAnchor { anchor: sapling::tree::Root },
+    UnknownSaplingAnchor {
+        anchor: sapling::tree::Root,
+        height: block::Height,
+        tx_index_in_block: usize,
+        transaction_hash: transaction::Hash,
+    },
 
-    #[error("unknown Orchard anchor: {anchor:?}")]
+    #[error(
+        "unknown Orchard anchor: {anchor:?},\n\
+         {height:?}, index in block: {tx_index_in_block:?}, {transaction_hash:?}"
+    )]
     #[non_exhaustive]
-    UnknownOrchardAnchor { anchor: orchard::tree::Root },
+    UnknownOrchardAnchor {
+        anchor: orchard::tree::Root,
+        height: block::Height,
+        tx_index_in_block: usize,
+        transaction_hash: transaction::Hash,
+    },
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

@@ -31,30 +31,36 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
 {
     let mut sprout_final_treestates = HashMap::new();
 
-    for transaction in prepared.block.transactions.iter() {
+    for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
         // Sprout JoinSplits, with interstitial treestates to check as well.
         if transaction.has_sprout_joinsplit_data() {
-            for joinsplit in transaction.sprout_groth16_joinsplits() {
-                // Fetch and return final anchor sets, avoiding duplicate fetches
-                let input_tree = sprout_final_treestates
+            for (joinsplit_index_in_tx, joinsplit) in
+                transaction.sprout_groth16_joinsplits().enumerate()
+            {
+                // Avoid duplicate fetches
+                if sprout_final_treestates.contains_key(&joinsplit.anchor) {
+                    continue;
+                }
+
+                // Fetch and return final anchor sets
+                let input_tree = parent_chain
+                    .sprout_trees_by_anchor
                     .get(&joinsplit.anchor)
                     .cloned()
                     .or_else(|| {
-                        parent_chain
-                            .sprout_trees_by_anchor
-                            .get(&joinsplit.anchor)
-                            .cloned()
-                            .or_else(|| {
-                                finalized_state
-                                    .sprout_note_commitment_tree_by_anchor(&joinsplit.anchor)
-                            })
+                        finalized_state.sprout_note_commitment_tree_by_anchor(&joinsplit.anchor)
                     });
 
                 if let Some(input_tree) = input_tree {
+                    tracing::debug!(
+                        ?joinsplit.anchor,
+                        ?joinsplit_index_in_tx,
+                        ?tx_index_in_block,
+                        height = ?prepared.height,
+                        "observed sprout final treestate anchor",
+                    );
                     sprout_final_treestates.insert(input_tree.root(), input_tree);
                 }
-
-                tracing::debug!(?joinsplit.anchor, "observed sprout final treestate anchor");
             }
         }
 
@@ -76,16 +82,33 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
         //
         // The "earlier treestate" check is implemented here.
         if transaction.has_sapling_shielded_data() {
-            for anchor in transaction.sapling_anchors() {
-                tracing::debug!(?anchor, "observed sapling anchor");
+            for (anchor_index_in_tx, anchor) in transaction.sapling_anchors().enumerate() {
+                tracing::debug!(
+                    ?anchor,
+                    ?anchor_index_in_tx,
+                    ?tx_index_in_block,
+                    height = ?prepared.height,
+                    "observed sapling anchor",
+                );
 
                 if !parent_chain.sapling_anchors.contains(&anchor)
                     && !finalized_state.contains_sapling_anchor(&anchor)
                 {
-                    return Err(ValidateContextError::UnknownSaplingAnchor { anchor });
+                    return Err(ValidateContextError::UnknownSaplingAnchor {
+                        anchor,
+                        height: prepared.height,
+                        tx_index_in_block,
+                        transaction_hash: prepared.transaction_hashes[tx_index_in_block],
+                    });
                 }
 
-                tracing::debug!(?anchor, "validated sapling anchor");
+                tracing::debug!(
+                    ?anchor,
+                    ?anchor_index_in_tx,
+                    ?tx_index_in_block,
+                    height = ?prepared.height,
+                    "validated sapling anchor",
+                );
             }
         }
 
@@ -101,7 +124,12 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
         //
         // <https://zips.z.cash/protocol/protocol.pdf#actions>
         if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
-            tracing::debug!(?orchard_shielded_data.shared_anchor, "observed orchard anchor");
+            tracing::debug!(
+                ?orchard_shielded_data.shared_anchor,
+                ?tx_index_in_block,
+                height = ?prepared.height,
+                "observed orchard anchor",
+            );
 
             if !parent_chain
                 .orchard_anchors
@@ -110,12 +138,27 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
             {
                 return Err(ValidateContextError::UnknownOrchardAnchor {
                     anchor: orchard_shielded_data.shared_anchor,
+                    height: prepared.height,
+                    tx_index_in_block,
+                    transaction_hash: prepared.transaction_hashes[tx_index_in_block],
                 });
             }
 
-            tracing::debug!(?orchard_shielded_data.shared_anchor, "validated orchard anchor");
+            tracing::debug!(
+                ?orchard_shielded_data.shared_anchor,
+                ?tx_index_in_block,
+                height = ?prepared.height,
+                "validated orchard anchor",
+            );
         }
     }
+
+    tracing::trace!(
+        sprout_final_treestate_count = ?sprout_final_treestates.len(),
+        ?sprout_final_treestates,
+        height = ?prepared.height,
+        "returning sprout final treestate anchors",
+    );
 
     Ok(sprout_final_treestates)
 }
@@ -133,7 +176,14 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
     sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
     prepared: &PreparedBlock,
 ) -> Result<(), ValidateContextError> {
-    for transaction in prepared.block.transactions.iter() {
+    tracing::trace!(
+        sprout_final_treestate_count = ?sprout_final_treestates.len(),
+        ?sprout_final_treestates,
+        height = ?prepared.height,
+        "received sprout final treestate anchors",
+    );
+
+    for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
         // Sprout JoinSplits, with interstitial treestates to check as well.
         if transaction.has_sprout_joinsplit_data() {
             let mut interstitial_trees: HashMap<
@@ -141,7 +191,9 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
                 Arc<sprout::tree::NoteCommitmentTree>,
             > = HashMap::new();
 
-            for joinsplit in transaction.sprout_groth16_joinsplits() {
+            for (joinsplit_index_in_tx, joinsplit) in
+                transaction.sprout_groth16_joinsplits().enumerate()
+            {
                 // Check all anchor sets, including the one for interstitial
                 // anchors.
                 //
@@ -180,19 +232,44 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
                     .cloned()
                     .or_else(|| sprout_final_treestates.get(&joinsplit.anchor).cloned());
 
+                tracing::trace!(
+                    ?input_tree,
+                    final_lookup = ?sprout_final_treestates.get(&joinsplit.anchor),
+                    interstitial_lookup = ?interstitial_trees.get(&joinsplit.anchor),
+                    interstitial_tree_count = ?interstitial_trees.len(),
+                    ?interstitial_trees,
+                    height = ?prepared.height,
+                    "looked up sprout treestate anchor",
+                );
+
                 let mut input_tree = match input_tree {
                     Some(tree) => tree,
                     None => {
-                        tracing::debug!(?joinsplit.anchor, ?prepared.height, ?prepared.hash, "failed to find sprout anchor");
+                        tracing::debug!(
+                            ?joinsplit.anchor,
+                            ?joinsplit_index_in_tx,
+                            ?tx_index_in_block,
+                            height = ?prepared.height,
+                            "failed to find sprout anchor",
+                        );
                         return Err(ValidateContextError::UnknownSproutAnchor {
                             anchor: joinsplit.anchor,
+                            height: prepared.height,
+                            tx_index_in_block,
+                            transaction_hash: prepared.transaction_hashes[tx_index_in_block],
                         });
                     }
                 };
 
-                let input_tree_inner = Arc::make_mut(&mut input_tree);
+                tracing::debug!(
+                    ?joinsplit.anchor,
+                    ?joinsplit_index_in_tx,
+                    ?tx_index_in_block,
+                    height = ?prepared.height,
+                    "validated sprout anchor",
+                );
 
-                tracing::debug!(?joinsplit.anchor, "validated sprout anchor");
+                let input_tree_inner = Arc::make_mut(&mut input_tree);
 
                 // Add new anchors to the interstitial note commitment tree.
                 for cm in joinsplit.commitments {
@@ -202,8 +279,13 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
                 }
 
                 interstitial_trees.insert(input_tree.root(), input_tree);
-
-                tracing::debug!(?joinsplit.anchor, "observed sprout anchor");
+                tracing::debug!(
+                    ?joinsplit.anchor,
+                    ?joinsplit_index_in_tx,
+                    ?tx_index_in_block,
+                    height = ?prepared.height,
+                    "observed sprout interstitial anchor",
+                );
             }
         }
     }
