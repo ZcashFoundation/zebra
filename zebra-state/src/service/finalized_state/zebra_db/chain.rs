@@ -79,6 +79,7 @@ impl DiskWriteBatch {
 
         let FinalizedBlock { block, height, .. } = finalized;
 
+        // TODO: run this CPU-intensive cryptography in a parallel rayon thread, if it shows up in profiles
         let history_tree_mut = Arc::make_mut(&mut history_tree);
         history_tree_mut.push(self.network(), block.clone(), sapling_root, orchard_root)?;
 

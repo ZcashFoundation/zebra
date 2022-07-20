@@ -288,9 +288,8 @@ impl DiskWriteBatch {
 
         let FinalizedBlock { height, .. } = finalized;
 
-        let sprout_root = note_commitment_trees.sprout.root();
-        let sapling_root = note_commitment_trees.sapling.root();
-        let orchard_root = note_commitment_trees.orchard.root();
+        let (sprout_root, sapling_root, orchard_root) =
+            Self::note_commitment_roots_parallel(note_commitment_trees.clone());
 
         // Compute the new anchors and index them
         // Note: if the root hasn't changed, we write the same value again.
@@ -327,6 +326,17 @@ impl DiskWriteBatch {
         );
 
         self.prepare_history_batch(db, finalized, sapling_root, orchard_root, history_tree)
+    }
+
+    /// Calculate the note commitment tree roots using parallel `rayon` threads.
+    fn note_commitment_roots_parallel(
+        note_commitment_trees: NoteCommitmentTrees,
+    ) -> (sprout::tree::Root, sapling::tree::Root, orchard::tree::Root) {
+        let sprout_root = note_commitment_trees.sprout.root();
+        let sapling_root = note_commitment_trees.sapling.root();
+        let orchard_root = note_commitment_trees.orchard.root();
+
+        (sprout_root, sapling_root, orchard_root)
     }
 
     /// Prepare a database batch containing the initial note commitment trees,
