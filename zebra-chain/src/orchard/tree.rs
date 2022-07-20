@@ -34,6 +34,11 @@ use crate::serialization::{
     serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
+/// The type that is used to update the note commitment tree.
+///
+/// Unfortunately, this is not the same as `orchard::NoteCommitment`.
+pub type NoteCommitmentUpdate = pallas::Base;
+
 pub(super) const MERKLE_DEPTH: usize = 32;
 
 /// MerkleCRH^Orchard Hash Function
@@ -302,7 +307,7 @@ impl NoteCommitmentTree {
     ///
     /// Returns an error if the tree is full.
     #[allow(clippy::unwrap_in_result)]
-    pub fn append(&mut self, cm_x: pallas::Base) -> Result<(), NoteCommitmentTreeError> {
+    pub fn append(&mut self, cm_x: NoteCommitmentUpdate) -> Result<(), NoteCommitmentTreeError> {
         if self.inner.append(&cm_x.into()) {
             // Invalidate cached root
             let cached_root = self

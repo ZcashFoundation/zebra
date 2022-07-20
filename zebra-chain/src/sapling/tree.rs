@@ -38,6 +38,11 @@ use crate::serialization::{
     serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
+/// The type that is used to update the note commitment tree.
+///
+/// Unfortunately, this is not the same as `sapling::NoteCommitment`.
+pub type NoteCommitmentUpdate = jubjub::Fq;
+
 pub(super) const MERKLE_DEPTH: usize = 32;
 
 /// MerkleCRH^Sapling Hash Function
@@ -307,7 +312,7 @@ impl NoteCommitmentTree {
     ///
     /// Returns an error if the tree is full.
     #[allow(clippy::unwrap_in_result)]
-    pub fn append(&mut self, cm_u: jubjub::Fq) -> Result<(), NoteCommitmentTreeError> {
+    pub fn append(&mut self, cm_u: NoteCommitmentUpdate) -> Result<(), NoteCommitmentTreeError> {
         if self.inner.append(&cm_u.into()) {
             // Invalidate cached root
             let cached_root = self
