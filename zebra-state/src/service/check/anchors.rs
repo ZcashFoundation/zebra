@@ -38,28 +38,44 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
                 transaction.sprout_groth16_joinsplits().enumerate()
             {
                 // Avoid duplicate fetches
-                if sprout_final_treestates.contains_key(&joinsplit.anchor) {
-                    continue;
-                }
+                if !sprout_final_treestates.contains_key(&joinsplit.anchor) {
+                    // Fetch and return final anchor sets
+                    let input_tree = parent_chain
+                        .sprout_trees_by_anchor
+                        .get(&joinsplit.anchor)
+                        .cloned()
+                        .or_else(|| {
+                            finalized_state.sprout_note_commitment_tree_by_anchor(&joinsplit.anchor)
+                        });
 
-                // Fetch and return final anchor sets
-                let input_tree = parent_chain
-                    .sprout_trees_by_anchor
-                    .get(&joinsplit.anchor)
-                    .cloned()
-                    .or_else(|| {
-                        finalized_state.sprout_note_commitment_tree_by_anchor(&joinsplit.anchor)
-                    });
+                    if let Some(input_tree) = input_tree {
+                        /* TODO:
+                             - fix tests that generate incorrect root data
+                             - assert that roots match the fetched tree during tests
+                             - move this CPU-intensive check to sprout_anchors_refer_to_treestates()
 
-                if let Some(input_tree) = input_tree {
-                    tracing::debug!(
-                        ?joinsplit.anchor,
-                        ?joinsplit_index_in_tx,
-                        ?tx_index_in_block,
-                        height = ?prepared.height,
-                        "observed sprout final treestate anchor",
-                    );
-                    sprout_final_treestates.insert(input_tree.root(), input_tree);
+                        assert_eq!(
+                            input_tree.root(),
+                            joinsplit.anchor,
+                            "anchor and fetched input tree root did not match:\n\
+                             anchor: {anchor:?},\n\
+                             input tree root: {input_tree_root:?},\n\
+                             input_tree: {input_tree:?}",
+                            anchor = joinsplit.anchor
+                        );
+                         */
+
+                        sprout_final_treestates.insert(joinsplit.anchor, input_tree);
+
+                        tracing::debug!(
+                            sprout_final_treestate_count = ?sprout_final_treestates.len(),
+                            ?joinsplit.anchor,
+                            ?joinsplit_index_in_tx,
+                            ?tx_index_in_block,
+                            height = ?prepared.height,
+                            "observed sprout final treestate anchor",
+                        );
+                    }
                 }
             }
         }
