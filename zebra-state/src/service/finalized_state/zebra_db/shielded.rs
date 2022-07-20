@@ -332,11 +332,35 @@ impl DiskWriteBatch {
     fn note_commitment_roots_parallel(
         note_commitment_trees: NoteCommitmentTrees,
     ) -> (sprout::tree::Root, sapling::tree::Root, orchard::tree::Root) {
-        let sprout_root = note_commitment_trees.sprout.root();
-        let sapling_root = note_commitment_trees.sapling.root();
-        let orchard_root = note_commitment_trees.orchard.root();
+        let NoteCommitmentTrees {
+            sprout,
+            sapling,
+            orchard,
+        } = note_commitment_trees;
 
-        (sprout_root, sapling_root, orchard_root)
+        let mut sprout_root = None;
+        let mut sapling_root = None;
+        let mut orchard_root = None;
+
+        rayon::in_place_scope_fifo(|scope| {
+            scope.spawn_fifo(|_scope| {
+                sprout_root = Some(sprout.root());
+            });
+
+            scope.spawn_fifo(|_scope| {
+                sapling_root = Some(sapling.root());
+            });
+
+            scope.spawn_fifo(|_scope| {
+                orchard_root = Some(orchard.root());
+            });
+        });
+
+        (
+            sprout_root.expect("scope has finished"),
+            sapling_root.expect("scope has finished"),
+            orchard_root.expect("scope has finished"),
+        )
     }
 
     /// Prepare a database batch containing the initial note commitment trees,
