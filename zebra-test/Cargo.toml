@@ -22,6 +22,10 @@ tower = { version = "0.4.13", features = ["util"] }
 futures = "0.3.21"
 
 color-eyre = "0.6.1"
+# This is a transitive dependency via color-eyre.
+# Enable a feature that makes tinyvec compile much faster.
+tinyvec = { version = "1.5.1", features = ["rustc_1_55"] }
+
 owo-colors = "3.4.0"
 spandoc = "0.2.2"
 thiserror = "1.0.31"

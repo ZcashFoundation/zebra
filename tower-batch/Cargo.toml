@@ -18,6 +18,10 @@ tracing-futures = "0.2.5"
 
 [dev-dependencies]
 color-eyre = "0.6.1"
+# This is a transitive dependency via color-eyre.
+# Enable a feature that makes tinyvec compile much faster.
+tinyvec = { version = "1.5.1", features = ["rustc_1_55"] }
+
 ed25519-zebra = "3.0.0"
 rand = { version = "0.8.5", package = "rand" }
 
