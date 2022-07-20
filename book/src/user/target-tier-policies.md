@@ -137,13 +137,11 @@ by a devops team member reporting the outcome of a team discussion.
   burden of the CI infrastructure. This requirement is subjective, to be
   evaluated by the devops team, and will take the community importance
   of the platform into account.
-- Tier 2 platforms must not impose burden on the authors of pull requests, or
-  other developers in the community, to ensure that tests pass for the platform.
-  In particular, do not post comments (automated or manual) on a PR that derail
-  or suggest a block on the PR based on tests failing for the platform. Do not
-  send automated messages or notifications (via any medium, including via `@`)
-  to a PR author or others involved with a PR regarding the PR breaking tests
-  on a tier 2 platform, unless they have opted into such messages.
+- Test failures on tier 2 platforms will be handled on a case-by-case basis.
+  Depending on the severity of the failure, the Zebra team may decide to:
+  - disable the test on that platform,
+  - require a fix before the next release, or
+  - remove the platform from tier 2.
 - The platform maintainers should regularly run the testsuite for the platform,
   and should fix any test failures in a reasonably timely fashion.
 - All requirements for tier 3 apply.
