@@ -6,6 +6,7 @@ use std::{collections::HashMap, sync::Arc};
 use zebra_chain::sprout;
 
 use crate::{
+    request::ContextuallyValidBlock,
     service::{finalized_state::ZebraDb, non_finalized_state::Chain},
     PreparedBlock, ValidateContextError,
 };
@@ -178,7 +179,7 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
     Ok(sprout_final_treestates)
 }
 
-/// Checks the Sprout anchors specified by transactions in this `prepared` block.
+/// Checks the Sprout anchors specified by transactions in this `contextual` block.
 ///
 /// Sprout anchors may refer to some earlier block's final treestate (like
 /// Sapling and Orchard do exclusively) _or_ to the interstitial output
@@ -186,19 +187,19 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
 ///
 /// This method checks for anchors computed from the final and interstitial treestates of
 /// each transaction in the `prepared` block, using the supplied `sprout_final_treestates`.
-#[tracing::instrument(skip(sprout_final_treestates, prepared))]
+#[tracing::instrument(skip(sprout_final_treestates, contextual))]
 pub(crate) fn sprout_anchors_refer_to_treestates(
     sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
-    prepared: &PreparedBlock,
+    contextual: &ContextuallyValidBlock,
 ) -> Result<(), ValidateContextError> {
     tracing::trace!(
         sprout_final_treestate_count = ?sprout_final_treestates.len(),
         ?sprout_final_treestates,
-        height = ?prepared.height,
+        height = ?contextual.height,
         "received sprout final treestate anchors",
     );
 
-    for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
+    for (tx_index_in_block, transaction) in contextual.block.transactions.iter().enumerate() {
         // Sprout JoinSplits, with interstitial treestates to check as well.
         let mut interstitial_trees: HashMap<
             sprout::tree::Root,
@@ -254,7 +255,7 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
                 interstitial_lookup = ?interstitial_trees.get(&joinsplit.anchor),
                 interstitial_tree_count = ?interstitial_trees.len(),
                 ?interstitial_trees,
-                height = ?prepared.height,
+                height = ?contextual.height,
                 "looked up sprout treestate anchor",
             );
 
@@ -265,14 +266,14 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
                         ?joinsplit.anchor,
                         ?joinsplit_index_in_tx,
                         ?tx_index_in_block,
-                        height = ?prepared.height,
+                        height = ?contextual.height,
                         "failed to find sprout anchor",
                     );
                     return Err(ValidateContextError::UnknownSproutAnchor {
                         anchor: joinsplit.anchor,
-                        height: prepared.height,
+                        height: contextual.height,
                         tx_index_in_block,
-                        transaction_hash: prepared.transaction_hashes[tx_index_in_block],
+                        transaction_hash: contextual.transaction_hashes[tx_index_in_block],
                     });
                 }
             };
@@ -281,7 +282,7 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
                 ?joinsplit.anchor,
                 ?joinsplit_index_in_tx,
                 ?tx_index_in_block,
-                height = ?prepared.height,
+                height = ?contextual.height,
                 "validated sprout anchor",
             );
 
@@ -306,7 +307,7 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
                 ?joinsplit.anchor,
                 ?joinsplit_index_in_tx,
                 ?tx_index_in_block,
-                height = ?prepared.height,
+                height = ?contextual.height,
                 "observed sprout interstitial anchor",
             );
         }

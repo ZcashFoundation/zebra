@@ -2,7 +2,11 @@
 //!
 //! [RFC0005]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html
 
-use std::{collections::BTreeSet, mem, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashMap},
+    mem,
+    sync::Arc,
+};
 
 use zebra_chain::{
     block::{self, Block},
@@ -215,13 +219,6 @@ impl NonFinalizedState {
             finalized_state,
         )?;
 
-        // CPU-heavy cryptography
-        check::prepared_block_commitment_is_valid_for_chain_history(
-            &prepared,
-            self.network,
-            &new_chain.history_tree,
-        )?;
-
         // Reads from disk
         let sprout_final_treestates =
             check::anchors::sapling_orchard_anchors_refer_to_final_treestates(
@@ -229,9 +226,6 @@ impl NonFinalizedState {
                 &new_chain,
                 &prepared,
             )?;
-
-        // CPU-heavy cryptography
-        check::anchors::sprout_anchors_refer_to_treestates(sprout_final_treestates, &prepared)?;
 
         // Quick check that doesn't read from disk
         let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(
@@ -247,6 +241,27 @@ impl NonFinalizedState {
                 spent_utxo_count: spent_utxos.len(),
             }
         })?;
+
+        self.validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
+    }
+
+    /// Validate `contextual` and update `new_chain`, doing CPU-intensive work on parallel threads.
+    #[tracing::instrument(skip(self, new_chain, sprout_final_treestates))]
+    fn validate_and_update_parallel(
+        &self,
+        new_chain: Arc<Chain>,
+        contextual: ContextuallyValidBlock,
+        sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
+    ) -> Result<Arc<Chain>, ValidateContextError> {
+        // CPU-heavy cryptography
+        check::block_commitment_is_valid_for_chain_history(
+            contextual.block.clone(),
+            self.network,
+            &new_chain.history_tree,
+        )?;
+
+        // CPU-heavy cryptography
+        check::anchors::sprout_anchors_refer_to_treestates(sprout_final_treestates, &contextual)?;
 
         // We're pretty sure the new block is valid,
         // so clone the inner chain if needed, then add the new block.
