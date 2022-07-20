@@ -8,7 +8,7 @@ use proptest::prelude::*;
 use proptest_derive::Arbitrary;
 
 pub mod time;
-pub use time::humantime_seconds;
+pub use time::{humantime_milliseconds, humantime_seconds};
 
 /// Wrapper to override `Debug`, redirecting it to only output the type's name.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

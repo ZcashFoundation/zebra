@@ -15,6 +15,7 @@ use tracing::instrument;
 use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Height},
+    fmt::humantime_milliseconds,
     history_tree::HistoryTree,
     orchard,
     parameters::Network,
@@ -361,8 +362,8 @@ impl Chain {
         let rebuild_time_per_block =
             rebuild_time / rebuilt_block_count.try_into().expect("fits in u32");
         info!(
-            ?rebuild_time,
-            ?rebuild_time_per_block,
+            rebuild_time = ?humantime_milliseconds(rebuild_time),
+            rebuild_time_per_block = ?humantime_milliseconds(rebuild_time_per_block),
             ?rebuilt_block_count,
             ?fork_height,
             ?fork_tip,
