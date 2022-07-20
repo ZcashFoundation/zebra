@@ -185,6 +185,12 @@ devops team member reporting the outcome of a team discussion.
   this requirement.
 - The platform must build and pass tests reliably in CI, for all components that
   Zebra's CI considers mandatory.
+  - Test failures on tier 1 platforms will be handled on a case-by-case basis.
+    Depending on the severity of the failure, the Zebra team may decide to:
+    - disable the test on that platform,
+    - require a fix before the next release,
+    - require a fix before any other PRs merge, or
+    - remove the platform from tier 1.
   - The platform must not disable an excessive number of tests or pieces of tests
     in the testsuite in order to do so. This is a subjective requirement.
 - Building the platform and running the testsuite for the platform must not take
