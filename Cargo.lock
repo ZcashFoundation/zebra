@@ -6308,6 +6308,7 @@ dependencies = [
  "group",
  "halo2_proofs 0.2.0",
  "hex",
+ "humantime",
  "incrementalmerkletree",
  "itertools",
  "jubjub",

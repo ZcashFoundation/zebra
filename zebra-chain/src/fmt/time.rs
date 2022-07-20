@@ -1,4 +1,4 @@
-//! Formatting for traced values.
+//! Human-readable formats for times and durations.
 
 use std::time::Duration;
 
