@@ -84,7 +84,7 @@ pub struct Chain {
         BTreeMap<block::Height, Arc<orchard::tree::NoteCommitmentTree>>,
     /// The ZIP-221 history tree of the tip of this [`Chain`],
     /// including all finalized blocks, and the non-finalized `blocks` in this chain.
-    pub(crate) history_tree: HistoryTree,
+    pub(crate) history_tree: Arc<HistoryTree>,
 
     /// The Sprout anchors created by `blocks`.
     pub(crate) sprout_anchors: MultiSet<sprout::tree::Root>,
@@ -132,7 +132,7 @@ impl Chain {
         sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
         finalized_tip_chain_value_pools: ValueBalance<NonNegative>,
     ) -> Self {
         Self {
@@ -176,8 +176,6 @@ impl Chain {
     /// even if the blocks in the two chains are equal.
     #[cfg(test)]
     pub(crate) fn eq_internal_state(&self, other: &Chain) -> bool {
-        use zebra_chain::history_tree::NonEmptyHistoryTree;
-
         // blocks, heights, hashes
         self.blocks == other.blocks &&
             self.height_by_hash == other.height_by_hash &&
@@ -196,7 +194,7 @@ impl Chain {
             self.orchard_trees_by_height== other.orchard_trees_by_height &&
 
             // history tree
-            self.history_tree.as_ref().map(NonEmptyHistoryTree::hash) == other.history_tree.as_ref().map(NonEmptyHistoryTree::hash) &&
+            self.history_tree.as_ref().as_ref().map(|tree| tree.hash()) == other.history_tree.as_ref().as_ref().map(|other_tree| other_tree.hash()) &&
 
             // anchors
             self.sprout_anchors == other.sprout_anchors &&
@@ -278,7 +276,7 @@ impl Chain {
         sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
     ) -> Result<Option<Self>, ValidateContextError> {
         if !self.height_by_hash.contains_key(&fork_tip) {
             return Ok(None);
@@ -350,7 +348,8 @@ impl Chain {
                 .get(&block.height)
                 .expect("Orchard anchors must exist for pre-fork blocks");
 
-            forked.history_tree.push(
+            let history_tree_mut = Arc::make_mut(&mut forked.history_tree);
+            history_tree_mut.push(
                 self.network,
                 block.block.clone(),
                 *sapling_root,
@@ -674,7 +673,7 @@ impl Chain {
         sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
     ) -> Self {
         Chain {
             network: self.network,
@@ -862,7 +861,8 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         self.orchard_anchors.insert(orchard_root);
         self.orchard_anchors_by_height.insert(height, orchard_root);
 
-        self.history_tree.push(
+        let history_tree_mut = Arc::make_mut(&mut self.history_tree);
+        history_tree_mut.push(
             self.network,
             contextually_valid.block.clone(),
             sapling_root,

@@ -415,7 +415,7 @@ impl NonFinalizedState {
         sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         match self.find_chain(|chain| chain.non_finalized_tip_hash() == parent_hash) {
             // Clone the existing Arc<Chain> in the non-finalized state

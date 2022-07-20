@@ -229,7 +229,7 @@ impl ZebraDb {
     pub(in super::super) fn write_block(
         &mut self,
         finalized: FinalizedBlock,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
         network: Network,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
@@ -371,7 +371,7 @@ impl DiskWriteBatch {
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         mut note_commitment_trees: NoteCommitmentTrees,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
         let FinalizedBlock {

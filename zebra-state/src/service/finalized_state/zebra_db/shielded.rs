@@ -276,7 +276,7 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: &FinalizedBlock,
         note_commitment_trees: NoteCommitmentTrees,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
     ) -> Result<(), BoxError> {
         let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
