@@ -4,12 +4,15 @@ use std::{
     cmp::min,
     convert::TryInto,
     fmt,
+    future::Future,
     io::{Cursor, Read, Write},
 };
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::{BufMut, BytesMut};
 use chrono::{TimeZone, Utc};
+use futures::FutureExt;
+use tokio::sync::oneshot;
 use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
@@ -625,8 +628,15 @@ impl Codec {
         Ok(Message::NotFound(Vec::zcash_deserialize(reader)?))
     }
 
-    fn read_tx<R: Read>(&self, reader: R) -> Result<Message, Error> {
-        Ok(Message::Tx(Transaction::zcash_deserialize(reader)?.into()))
+    fn read_tx<R: Read + std::marker::Send + 'static>(&self, reader: R) -> Result<Message, Error> {
+        let (tx, rx) = oneshot::channel::<Result<Transaction, Error>>();
+
+        let _ = Self::deserialize_transaction_spawning(reader, tx);
+        let result = rx
+            .blocking_recv()
+            .expect("we just sent so we should have results");
+
+        Ok(Message::Tx(result?.into()))
     }
 
     fn read_mempool<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
@@ -673,6 +683,27 @@ impl Codec {
 
     fn read_filterclear<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
         Ok(Message::FilterClear)
+    }
+
+    /// TBA
+    fn deserialize_transaction_spawning<R: Read + std::marker::Send + 'static>(
+        reader: R,
+        tx: oneshot::Sender<Result<Transaction, Error>>,
+    ) -> impl Future<Output = ()> {
+        // Correctness: TBA
+        tokio::task::spawn_blocking(|| {
+            rayon::scope_fifo(|s| s.spawn_fifo(|_s| Self::deserialize_transaction(reader, tx)))
+        })
+        .map(|join_result| join_result.expect("panic in the transaction deserialization"))
+    }
+
+    /// TBA
+    fn deserialize_transaction<R: Read + std::marker::Send + 'static>(
+        reader: R,
+        tx: oneshot::Sender<Result<Transaction, Error>>,
+    ) {
+        let result = Transaction::zcash_deserialize(reader);
+        let _ = tx.send(result);
     }
 }
 

@@ -24,6 +24,7 @@ lazy_static = "1.4.0"
 ordered-map = "0.4.2"
 pin-project = "1.0.10"
 rand = { version = "0.8.5", package = "rand" }
+rayon = "1.5.3"
 regex = "1.5.6"
 serde = { version = "1.0.137", features = ["serde_derive"] }
 thiserror = "1.0.31"

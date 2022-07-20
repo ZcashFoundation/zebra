@@ -6408,6 +6408,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
+ "rayon",
  "regex",
  "serde",
  "static_assertions",
