@@ -242,35 +242,65 @@ impl NonFinalizedState {
             }
         })?;
 
-        self.validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
+        Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
     }
 
-    /// Validate `contextual` and update `new_chain`, doing CPU-intensive work on parallel threads.
-    #[tracing::instrument(skip(self, new_chain, sprout_final_treestates))]
+    /// Validate `contextual` and update `new_chain`, doing CPU-intensive work in parallel batches.
+    #[allow(clippy::unwrap_in_result)]
+    #[tracing::instrument(skip(new_chain, sprout_final_treestates))]
     fn validate_and_update_parallel(
-        &self,
         new_chain: Arc<Chain>,
         contextual: ContextuallyValidBlock,
         sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
     ) -> Result<Arc<Chain>, ValidateContextError> {
-        // CPU-heavy cryptography
-        check::block_commitment_is_valid_for_chain_history(
-            contextual.block.clone(),
-            self.network,
-            &new_chain.history_tree,
-        )?;
+        let mut block_commitment_result = None;
+        let mut sprout_anchor_result = None;
+        let mut chain_push_result = None;
 
-        // CPU-heavy cryptography
-        check::anchors::sprout_anchors_refer_to_treestates(sprout_final_treestates, &contextual)?;
+        // Clone function arguments for different threads
+        let block = contextual.block.clone();
+        let network = new_chain.network();
+        let history_tree = new_chain.history_tree.clone();
 
-        // We're pretty sure the new block is valid,
-        // so clone the inner chain if needed, then add the new block.
-        //
-        // CPU-heavy cryptography, multiple batches?
-        Arc::try_unwrap(new_chain)
-            .unwrap_or_else(|shared_chain| (*shared_chain).clone())
-            .push(contextual)
-            .map(Arc::new)
+        let block2 = contextual.block.clone();
+        let height = contextual.height;
+        let transaction_hashes = contextual.transaction_hashes.clone();
+
+        rayon::in_place_scope_fifo(|scope| {
+            scope.spawn_fifo(|_scope| {
+                block_commitment_result = Some(check::block_commitment_is_valid_for_chain_history(
+                    block,
+                    network,
+                    &history_tree,
+                ));
+            });
+
+            scope.spawn_fifo(|_scope| {
+                sprout_anchor_result = Some(check::anchors::sprout_anchors_refer_to_treestates(
+                    sprout_final_treestates,
+                    block2,
+                    height,
+                    transaction_hashes,
+                ));
+            });
+
+            // We're pretty sure the new block is valid,
+            // so clone the inner chain if needed, then add the new block.
+            //
+            // Pushing a block onto a Chain can launch additional parallel batches.
+            // TODO: should we pass _scope into Chain::push()?
+            scope.spawn_fifo(|_scope| {
+                let new_chain = Arc::try_unwrap(new_chain)
+                    .unwrap_or_else(|shared_chain| (*shared_chain).clone());
+                chain_push_result = Some(new_chain.push(contextual).map(Arc::new));
+            });
+        });
+
+        // Don't return the updated Chain unless all the parallel results were Ok
+        block_commitment_result.expect("scope has finished")?;
+        sprout_anchor_result.expect("scope has finished")?;
+
+        chain_push_result.expect("scope has finished")
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.

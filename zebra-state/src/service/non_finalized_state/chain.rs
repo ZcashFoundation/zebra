@@ -372,6 +372,11 @@ impl Chain {
         Ok(Some(forked))
     }
 
+    /// Returns the [`Network`] for this chain.
+    pub fn network(&self) -> Network {
+        self.network
+    }
+
     /// Returns the [`ContextuallyValidBlock`] with [`block::Hash`] or
     /// [`Height`](zebra_chain::block::Height), if it exists in this chain.
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<&ContextuallyValidBlock> {
