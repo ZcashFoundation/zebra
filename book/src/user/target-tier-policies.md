@@ -129,6 +129,8 @@ by a devops team member reporting the outcome of a team discussion.
   versions of CPUs, operating systems, and any other dependencies.
 - The platform must build reliably in CI, for all components that Zebra's CI
   considers mandatory.
+  - Since a working Rust compiler is required to build Zebra,
+    the platform must be a [Rust tier 1 platform](https://rust-lang.github.io/rustup-components-history/).
 - The Zebra team may additionally require that a subset of tests pass in
   CI. In particular, this requirement may apply if the tests in question provide
   substantial value via early detection of critical problems.
