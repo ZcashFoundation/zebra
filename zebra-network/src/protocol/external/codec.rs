@@ -572,7 +572,6 @@ impl Codec {
 
     fn read_block<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
         let result = Self::deserialize_block_spawning(reader);
-
         Ok(Message::Block(result?.into()))
     }
 
@@ -629,7 +628,6 @@ impl Codec {
 
     fn read_tx<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
         let result = Self::deserialize_transaction_spawning(reader);
-
         Ok(Message::Tx(result?.into()))
     }
 
@@ -679,14 +677,14 @@ impl Codec {
         Ok(Message::FilterClear)
     }
 
-    /// TBA
+    /// Given the reader, deserialize the transaction in the rayon thread pool.
     #[allow(clippy::unwrap_in_result)]
     fn deserialize_transaction_spawning<R: Read + std::marker::Send>(
         reader: R,
     ) -> Result<Transaction, Error> {
         let mut result = None;
 
-        // Correctness: TBA
+        // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         //
         // Since we use `block_in_place()`, other futures running on the connection task will be blocked:
         // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
@@ -703,12 +701,12 @@ impl Codec {
         result.expect("scope has already finished")
     }
 
-    /// TBA
+    /// Given the reader, deserialize the block in the rayon thread pool.
     #[allow(clippy::unwrap_in_result)]
     fn deserialize_block_spawning<R: Read + std::marker::Send>(reader: R) -> Result<Block, Error> {
         let mut result = None;
 
-        // Correctness: TBA
+        // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
         //
         // Since we use `block_in_place()`, other futures running on the connection task will be blocked:
         // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
