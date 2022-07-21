@@ -4,15 +4,12 @@ use std::{
     cmp::min,
     convert::TryInto,
     fmt,
-    future::Future,
     io::{Cursor, Read, Write},
 };
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::{BufMut, BytesMut};
 use chrono::{TimeZone, Utc};
-use futures::FutureExt;
-use tokio::sync::oneshot;
 use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
@@ -628,13 +625,8 @@ impl Codec {
         Ok(Message::NotFound(Vec::zcash_deserialize(reader)?))
     }
 
-    fn read_tx<R: Read + std::marker::Send + 'static>(&self, reader: R) -> Result<Message, Error> {
-        let (tx, rx) = oneshot::channel::<Result<Transaction, Error>>();
-
-        let _ = Self::deserialize_transaction_spawning(reader, tx);
-        let result = rx
-            .blocking_recv()
-            .expect("we just sent so we should have results");
+    fn read_tx<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
+        let result = Self::deserialize_transaction_spawning(reader);
 
         Ok(Message::Tx(result?.into()))
     }
@@ -686,24 +678,27 @@ impl Codec {
     }
 
     /// TBA
-    fn deserialize_transaction_spawning<R: Read + std::marker::Send + 'static>(
+    #[allow(clippy::unwrap_in_result)]
+    fn deserialize_transaction_spawning<R: Read + std::marker::Send>(
         reader: R,
-        tx: oneshot::Sender<Result<Transaction, Error>>,
-    ) -> impl Future<Output = ()> {
-        // Correctness: TBA
-        tokio::task::spawn_blocking(|| {
-            rayon::scope_fifo(|s| s.spawn_fifo(|_s| Self::deserialize_transaction(reader, tx)))
-        })
-        .map(|join_result| join_result.expect("panic in the transaction deserialization"))
-    }
+    ) -> Result<Transaction, Error> {
+        let mut result = None;
 
-    /// TBA
-    fn deserialize_transaction<R: Read + std::marker::Send + 'static>(
-        reader: R,
-        tx: oneshot::Sender<Result<Transaction, Error>>,
-    ) {
-        let result = Transaction::zcash_deserialize(reader);
-        let _ = tx.send(result);
+        // Correctness: TBA
+        //
+        // Since we use `block_in_place()`, other futures running on the connection task will be blocked:
+        // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
+        //
+        // We can't use `spawn_blocking()` because:
+        // - The `reader` has a lifetime (but we could replace it with a `Vec` of message data)
+        // - There is no way to check the blocking task's future for panics
+        tokio::task::block_in_place(|| {
+            rayon::in_place_scope_fifo(|s| {
+                s.spawn_fifo(|_s| result = Some(Transaction::zcash_deserialize(reader)))
+            })
+        });
+
+        result.expect("scope has already finished")
     }
 }
 
