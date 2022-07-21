@@ -511,7 +511,7 @@ fn rejection_restores_internal_state_genesis() -> Result<()> {
         prop_assert_eq!(state.best_tip(), reject_state.best_tip());
         prop_assert!(state.eq_internal_state(&reject_state));
 
-        bad_block.header.previous_block_hash = valid_tip_hash;
+        Arc::make_mut(&mut bad_block.header).previous_block_hash = valid_tip_hash;
         let bad_block = Arc::new(bad_block.0).prepare();
         let reject_result = reject_state.commit_block(bad_block, &finalized_state);
 

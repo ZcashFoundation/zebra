@@ -2,7 +2,7 @@
 //!
 //! TODO: move these tests into tests::vectors and tests::prop modules.
 
-use std::{convert::TryInto, env, sync::Arc};
+use std::{env, sync::Arc};
 
 use tower::{buffer::Buffer, util::BoxService};
 
@@ -40,12 +40,7 @@ async fn test_populated_state_responds_correctly(
     let block_headers: Vec<CountedHeader> = blocks
         .iter()
         .map(|block| CountedHeader {
-            header: block.header,
-            transaction_count: block
-                .transactions
-                .len()
-                .try_into()
-                .expect("test block transaction counts are valid"),
+            header: block.header.clone(),
         })
         .collect();
 
