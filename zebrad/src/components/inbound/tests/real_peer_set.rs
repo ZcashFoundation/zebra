@@ -336,7 +336,7 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
 ///
 /// Uses a Zebra network stack's peer set to query an isolated Zebra TCP connection,
 /// with an unrelated transaction test responder.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError> {
     // We respond with an unrelated transaction, so the peer gives up on the request.
     let unrelated_response: Transaction =
@@ -486,7 +486,7 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
 /// - returns a `NotFoundRegistry` error for repeated requests to a non-responsive peer.
 ///
 /// The requests are coming from the full stack to the isolated peer.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> {
     // We repeatedly respond with the same transaction, so the peer gives up on the second response.
     let repeated_tx: Transaction = zebra_test::vectors::DUMMY_TX1.zcash_deserialize_into()?;

@@ -969,7 +969,8 @@ mod tests {
     fn max_msg_size_round_trip() {
         use zebra_chain::serialization::ZcashDeserializeInto;
 
-        let rt = zebra_test::init_async();
+        //let rt = zebra_test::init_async();
+        zebra_test::init();
 
         // make tests with a Tx message
         let tx: Transaction = zebra_test::vectors::DUMMY_TX1
@@ -983,7 +984,7 @@ mod tests {
         let size = 85;
 
         // reducing the max size to body size - 1
-        rt.block_on(async {
+        zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
             let mut bytes = Vec::new();
             {
                 let mut fw = FramedWrite::new(
@@ -997,7 +998,7 @@ mod tests {
         });
 
         // send again with the msg body size as max size
-        let msg_bytes = rt.block_on(async {
+        let msg_bytes = zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
             let mut bytes = Vec::new();
             {
                 let mut fw = FramedWrite::new(
@@ -1012,7 +1013,7 @@ mod tests {
         });
 
         // receive with a reduced max size
-        rt.block_on(async {
+        zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
             let mut fr = FramedRead::new(
                 Cursor::new(&msg_bytes),
                 Codec::builder().with_max_body_len(size - 1).finish(),
@@ -1024,7 +1025,7 @@ mod tests {
         });
 
         // receive again with the tx size as max size
-        rt.block_on(async {
+        zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
             let mut fr = FramedRead::new(
                 Cursor::new(&msg_bytes),
                 Codec::builder().with_max_body_len(size).finish(),
