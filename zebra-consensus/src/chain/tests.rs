@@ -134,7 +134,7 @@ static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<
     )]
 });
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn verify_checkpoint_test() -> Result<(), Report> {
     verify_checkpoint(Config {
         checkpoint_sync: true,
@@ -204,7 +204,7 @@ async fn verify_fail_no_coinbase() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn round_trip_checkpoint_test() -> Result<(), Report> {
     round_trip_checkpoint().await
 }
@@ -229,7 +229,7 @@ async fn round_trip_checkpoint() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn verify_fail_add_block_checkpoint_test() -> Result<(), Report> {
     verify_fail_add_block_checkpoint().await
 }
