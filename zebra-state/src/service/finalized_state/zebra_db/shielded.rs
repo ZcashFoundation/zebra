@@ -251,10 +251,12 @@ impl DiskWriteBatch {
 
         let FinalizedBlock { height, .. } = finalized;
 
-        let (sprout_root, sapling_root, orchard_root) =
-            Self::note_commitment_roots_parallel(note_commitment_trees.clone());
+        // Use the cached values that were previously calculated in parallel.
+        let sprout_root = note_commitment_trees.sprout.root();
+        let sapling_root = note_commitment_trees.sapling.root();
+        let orchard_root = note_commitment_trees.orchard.root();
 
-        // Compute the new anchors and index them
+        // Index the new anchors.
         // Note: if the root hasn't changed, we write the same value again.
         self.zs_insert(&sprout_anchors, sprout_root, &note_commitment_trees.sprout);
         self.zs_insert(&sapling_anchors, sapling_root, ());
@@ -289,44 +291,6 @@ impl DiskWriteBatch {
         );
 
         self.prepare_history_batch(db, finalized, sapling_root, orchard_root, history_tree)
-    }
-
-    /// Calculate the note commitment tree roots using parallel `rayon` threads.
-    fn note_commitment_roots_parallel(
-        note_commitment_trees: NoteCommitmentTrees,
-    ) -> (sprout::tree::Root, sapling::tree::Root, orchard::tree::Root) {
-        let NoteCommitmentTrees {
-            sprout,
-            sapling,
-            orchard,
-        } = note_commitment_trees;
-
-        let mut sprout_root = None;
-        let mut sapling_root = None;
-        let mut orchard_root = None;
-
-        // TODO: consider doing these calculations after the trees are updated,
-        //       in the rayon scopes for each tree.
-        //       To do this, we need to make sure we only calculate the roots once.
-        rayon::in_place_scope_fifo(|scope| {
-            scope.spawn_fifo(|_scope| {
-                sprout_root = Some(sprout.root());
-            });
-
-            scope.spawn_fifo(|_scope| {
-                sapling_root = Some(sapling.root());
-            });
-
-            scope.spawn_fifo(|_scope| {
-                orchard_root = Some(orchard.root());
-            });
-        });
-
-        (
-            sprout_root.expect("scope has finished"),
-            sapling_root.expect("scope has finished"),
-            orchard_root.expect("scope has finished"),
-        )
     }
 
     /// Prepare a database batch containing the initial note commitment trees,

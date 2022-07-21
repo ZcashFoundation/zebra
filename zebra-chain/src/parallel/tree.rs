@@ -36,8 +36,8 @@ pub enum NoteCommitmentTreeError {
 }
 
 impl NoteCommitmentTrees {
-    /// Update these note commitment trees for the entire `block`,
-    /// using parallel `rayon` threads.
+    /// Updates the note commitment trees using the transactions in `block`,
+    /// then re-calculates the cached tree roots, using parallel `rayon` threads.
     ///
     /// If any of the tree updates cause an error,
     /// it will be returned at the end of the parallel batches.
@@ -128,6 +128,9 @@ impl NoteCommitmentTrees {
             sprout_nct.append(sprout_note_commitment)?;
         }
 
+        // Re-calculate and cache the tree root.
+        let _ = sprout_nct.root();
+
         Ok(sprout)
     }
 
@@ -142,6 +145,9 @@ impl NoteCommitmentTrees {
             sapling_nct.append(sapling_note_commitment)?;
         }
 
+        // Re-calculate and cache the tree root.
+        let _ = sapling_nct.root();
+
         Ok(sapling)
     }
 
@@ -155,6 +161,9 @@ impl NoteCommitmentTrees {
         for orchard_note_commitment in orchard_note_commitments {
             orchard_nct.append(orchard_note_commitment)?;
         }
+
+        // Re-calculate and cache the tree root.
+        let _ = orchard_nct.root();
 
         Ok(orchard)
     }
