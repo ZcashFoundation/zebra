@@ -116,8 +116,8 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
 }
 
 /// This function fetches and returns the Sprout final treestates from the state,
-/// so [`sprout_anchors_refer_to_interstitial_treestates()`] can check Sprout
-/// final and interstitial treestates without accessing the disk.
+/// so [`sprout_anchors_refer_to_treestates()`] can check Sprout final and interstitial treestates,
+/// without accessing the disk.
 ///
 /// Sprout anchors may also refer to the interstitial output treestate of any prior
 /// `JoinSplit` _within the same transaction_.

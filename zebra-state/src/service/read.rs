@@ -51,8 +51,7 @@ const FINALIZED_ADDRESS_INDEX_RETRIES: usize = 3;
 pub const ADDRESS_HEIGHTS_FULL_RANGE: RangeInclusive<Height> = Height(1)..=Height::MAX;
 
 /// Returns the [`Block`] with [`block::Hash`](zebra_chain::block::Hash) or
-/// [`Height`](zebra_chain::block::Height), if it exists in the non-finalized
-/// `chain` or finalized `db`.
+/// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
 pub(crate) fn block<C>(
     chain: Option<C>,
     db: &ZebraDb,
@@ -77,9 +76,8 @@ where
         .or_else(|| db.block(hash_or_height))
 }
 
-/// Returns the [`block:Header`] with [`block::Hash`](zebra_chain::block::Hash) or
-/// [`Height`](zebra_chain::block::Height), if it exists in the non-finalized
-/// `chain` or finalized `db`.
+/// Returns the [`block::Header`] with [`block::Hash`](zebra_chain::block::Hash) or
+/// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
 pub(crate) fn block_header<C>(
     chain: Option<C>,
     db: &ZebraDb,

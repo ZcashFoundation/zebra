@@ -99,7 +99,7 @@ where
 {
     /// Creates a new batch worker.
     ///
-    /// See [`Service::new()`](crate::Service::new) for details.
+    /// See [`Batch::new()`](crate::Batch::new) for details.
     pub(crate) fn new(
         service: T,
         rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
@@ -190,7 +190,7 @@ where
 
     /// Run loop for batch requests, which implements the batch policies.
     ///
-    /// See [`Service::new()`](crate::Service::new) for details.
+    /// See [`Batch::new()`](crate::Batch::new) for details.
     pub async fn run(mut self) {
         loop {
             // Wait on either a new message or the batch timer.
