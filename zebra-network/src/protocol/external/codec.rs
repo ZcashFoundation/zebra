@@ -570,8 +570,10 @@ impl Codec {
         Ok(Message::GetAddr)
     }
 
-    fn read_block<R: Read>(&self, reader: R) -> Result<Message, Error> {
-        Ok(Message::Block(Block::zcash_deserialize(reader)?.into()))
+    fn read_block<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
+        let result = Self::deserialize_block_spawning(reader);
+
+        Ok(Message::Block(result?.into()))
     }
 
     fn read_getblocks<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
@@ -695,6 +697,28 @@ impl Codec {
         tokio::task::block_in_place(|| {
             rayon::in_place_scope_fifo(|s| {
                 s.spawn_fifo(|_s| result = Some(Transaction::zcash_deserialize(reader)))
+            })
+        });
+
+        result.expect("scope has already finished")
+    }
+
+    /// TBA
+    #[allow(clippy::unwrap_in_result)]
+    fn deserialize_block_spawning<R: Read + std::marker::Send>(reader: R) -> Result<Block, Error> {
+        let mut result = None;
+
+        // Correctness: TBA
+        //
+        // Since we use `block_in_place()`, other futures running on the connection task will be blocked:
+        // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
+        //
+        // We can't use `spawn_blocking()` because:
+        // - The `reader` has a lifetime (but we could replace it with a `Vec` of message data)
+        // - There is no way to check the blocking task's future for panics
+        tokio::task::block_in_place(|| {
+            rayon::in_place_scope_fifo(|s| {
+                s.spawn_fifo(|_s| result = Some(Block::zcash_deserialize(reader)))
             })
         });
 
