@@ -18,72 +18,13 @@ use crate::{
 ///
 /// This method checks for anchors computed from the final treestate of each block in
 /// the `parent_chain` or `finalized_state`.
-///
-/// Sprout anchors may also refer to the interstitial output treestate of any prior
-/// `JoinSplit` _within the same transaction_.
-///
-/// This function fetches and returns the Sprout final treestates from the state,
-/// so [`sprout_anchors_refer_to_interstitial_treestates()`] can check Sprout
-/// final and interstitial treestates without accessing the disk.
-//
-// TODO: split this method into sprout, sapling, orchard
 #[tracing::instrument(skip(finalized_state, parent_chain, prepared))]
 pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
     finalized_state: &ZebraDb,
     parent_chain: &Chain,
     prepared: &PreparedBlock,
-) -> Result<HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>, ValidateContextError>
-{
-    let mut sprout_final_treestates = HashMap::new();
-
+) -> Result<(), ValidateContextError> {
     for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
-        // Fetch and return Sprout JoinSplit final treestates
-        for (joinsplit_index_in_tx, joinsplit) in
-            transaction.sprout_groth16_joinsplits().enumerate()
-        {
-            // Avoid duplicate fetches
-            if sprout_final_treestates.contains_key(&joinsplit.anchor) {
-                continue;
-            }
-
-            let input_tree = parent_chain
-                .sprout_trees_by_anchor
-                .get(&joinsplit.anchor)
-                .cloned()
-                .or_else(|| {
-                    finalized_state.sprout_note_commitment_tree_by_anchor(&joinsplit.anchor)
-                });
-
-            if let Some(input_tree) = input_tree {
-                /* TODO:
-                     - fix tests that generate incorrect root data
-                     - assert that roots match the fetched tree during tests
-                     - move this CPU-intensive check to sprout_anchors_refer_to_treestates()
-
-                assert_eq!(
-                    input_tree.root(),
-                    joinsplit.anchor,
-                    "anchor and fetched input tree root did not match:\n\
-                     anchor: {anchor:?},\n\
-                     input tree root: {input_tree_root:?},\n\
-                     input_tree: {input_tree:?}",
-                    anchor = joinsplit.anchor
-                );
-                 */
-
-                sprout_final_treestates.insert(joinsplit.anchor, input_tree);
-
-                tracing::debug!(
-                    sprout_final_treestate_count = ?sprout_final_treestates.len(),
-                    ?joinsplit.anchor,
-                    ?joinsplit_index_in_tx,
-                    ?tx_index_in_block,
-                    height = ?prepared.height,
-                    "observed sprout final treestate anchor",
-                );
-            }
-        }
-
         // Sapling Spends
         //
         // MUST refer to some earlier block’s final Sapling treestate.
@@ -171,6 +112,72 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
         }
     }
 
+    Ok(())
+}
+
+/// This function fetches and returns the Sprout final treestates from the state,
+/// so [`sprout_anchors_refer_to_interstitial_treestates()`] can check Sprout
+/// final and interstitial treestates without accessing the disk.
+///
+/// Sprout anchors may also refer to the interstitial output treestate of any prior
+/// `JoinSplit` _within the same transaction_.
+#[tracing::instrument(skip(finalized_state, parent_chain, prepared))]
+pub(crate) fn fetch_sprout_final_treestates(
+    finalized_state: &ZebraDb,
+    parent_chain: &Chain,
+    prepared: &PreparedBlock,
+) -> HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>> {
+    let mut sprout_final_treestates = HashMap::new();
+
+    for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
+        // Fetch and return Sprout JoinSplit final treestates
+        for (joinsplit_index_in_tx, joinsplit) in
+            transaction.sprout_groth16_joinsplits().enumerate()
+        {
+            // Avoid duplicate fetches
+            if sprout_final_treestates.contains_key(&joinsplit.anchor) {
+                continue;
+            }
+
+            let input_tree = parent_chain
+                .sprout_trees_by_anchor
+                .get(&joinsplit.anchor)
+                .cloned()
+                .or_else(|| {
+                    finalized_state.sprout_note_commitment_tree_by_anchor(&joinsplit.anchor)
+                });
+
+            if let Some(input_tree) = input_tree {
+                /* TODO:
+                     - fix tests that generate incorrect root data
+                     - assert that roots match the fetched tree during tests
+                     - move this CPU-intensive check to sprout_anchors_refer_to_treestates()
+
+                assert_eq!(
+                    input_tree.root(),
+                    joinsplit.anchor,
+                    "anchor and fetched input tree root did not match:\n\
+                     anchor: {anchor:?},\n\
+                     input tree root: {input_tree_root:?},\n\
+                     input_tree: {input_tree:?}",
+                    anchor = joinsplit.anchor
+                );
+                 */
+
+                sprout_final_treestates.insert(joinsplit.anchor, input_tree);
+
+                tracing::debug!(
+                    sprout_final_treestate_count = ?sprout_final_treestates.len(),
+                    ?joinsplit.anchor,
+                    ?joinsplit_index_in_tx,
+                    ?tx_index_in_block,
+                    height = ?prepared.height,
+                    "observed sprout final treestate anchor",
+                );
+            }
+        }
+    }
+
     tracing::trace!(
         sprout_final_treestate_count = ?sprout_final_treestates.len(),
         ?sprout_final_treestates,
@@ -178,7 +185,7 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
         "returning sprout final treestate anchors",
     );
 
-    Ok(sprout_final_treestates)
+    sprout_final_treestates
 }
 
 /// Checks the Sprout anchors specified by transactions in `block`.
