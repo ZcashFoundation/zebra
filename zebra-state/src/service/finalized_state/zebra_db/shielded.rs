@@ -15,10 +15,8 @@
 use std::sync::Arc;
 
 use zebra_chain::{
-    block::{Block, Height},
-    history_tree::HistoryTree,
-    orchard, sapling, sprout,
-    transaction::Transaction,
+    block::Height, history_tree::HistoryTree, orchard, parallel::tree::NoteCommitmentTrees,
+    sapling, sprout, transaction::Transaction,
 };
 
 use crate::{
@@ -29,14 +27,6 @@ use crate::{
     },
     BoxError,
 };
-
-/// An argument wrapper struct for note commitment trees.
-#[derive(Clone, Debug)]
-pub struct NoteCommitmentTrees {
-    sprout: Arc<sprout::tree::NoteCommitmentTree>,
-    sapling: Arc<sapling::tree::NoteCommitmentTree>,
-    orchard: Arc<orchard::tree::NoteCommitmentTree>,
-}
 
 impl ZebraDb {
     // Read shielded methods
@@ -199,7 +189,7 @@ impl DiskWriteBatch {
             self.prepare_nullifier_batch(db, transaction)?;
         }
 
-        DiskWriteBatch::update_note_commitment_trees_parallel(block, note_commitment_trees)?;
+        note_commitment_trees.update_trees_parallel(block)?;
 
         Ok(())
     }
@@ -232,133 +222,6 @@ impl DiskWriteBatch {
         }
 
         Ok(())
-    }
-
-    /// Update the supplied note commitment trees for the entire block,
-    /// using parallel `rayon` threads.
-    ///
-    /// If this method returns an error, it will be propagated,
-    /// and the batch should not be written to the database.
-    ///
-    /// # Errors
-    ///
-    /// - Propagates any errors from updating note commitment trees
-    pub fn update_note_commitment_trees_parallel(
-        block: &Arc<Block>,
-        note_commitment_trees: &mut NoteCommitmentTrees,
-    ) -> Result<(), BoxError> {
-        // Prepare arguments for parallel threads
-        let NoteCommitmentTrees {
-            sprout,
-            sapling,
-            orchard,
-        } = note_commitment_trees.clone();
-
-        let sprout_note_commitments: Vec<_> = block
-            .transactions
-            .iter()
-            .flat_map(|tx| tx.sprout_note_commitments())
-            .cloned()
-            .collect();
-        let sapling_note_commitments: Vec<_> = block
-            .transactions
-            .iter()
-            .flat_map(|tx| tx.sapling_note_commitments())
-            .cloned()
-            .collect();
-        let orchard_note_commitments: Vec<_> = block
-            .transactions
-            .iter()
-            .flat_map(|tx| tx.orchard_note_commitments())
-            .cloned()
-            .collect();
-
-        let mut sprout_result = None;
-        let mut sapling_result = None;
-        let mut orchard_result = None;
-
-        rayon::in_place_scope_fifo(|scope| {
-            if !sprout_note_commitments.is_empty() {
-                scope.spawn_fifo(|_scope| {
-                    sprout_result = Some(Self::update_sprout_note_commitment_tree(
-                        sprout,
-                        sprout_note_commitments,
-                    ));
-                });
-            }
-
-            if !sapling_note_commitments.is_empty() {
-                scope.spawn_fifo(|_scope| {
-                    sapling_result = Some(Self::update_sapling_note_commitment_tree(
-                        sapling,
-                        sapling_note_commitments,
-                    ));
-                });
-            }
-
-            if !orchard_note_commitments.is_empty() {
-                scope.spawn_fifo(|_scope| {
-                    orchard_result = Some(Self::update_orchard_note_commitment_tree(
-                        orchard,
-                        orchard_note_commitments,
-                    ));
-                });
-            }
-        });
-
-        if let Some(sprout_result) = sprout_result {
-            note_commitment_trees.sprout = sprout_result?;
-        }
-        if let Some(sapling_result) = sapling_result {
-            note_commitment_trees.sapling = sapling_result?;
-        }
-        if let Some(orchard_result) = orchard_result {
-            note_commitment_trees.orchard = orchard_result?;
-        }
-
-        Ok(())
-    }
-
-    /// Update the sprout note commitment tree.
-    fn update_sprout_note_commitment_tree(
-        mut sprout: Arc<sprout::tree::NoteCommitmentTree>,
-        sprout_note_commitments: Vec<sprout::NoteCommitment>,
-    ) -> Result<Arc<sprout::tree::NoteCommitmentTree>, BoxError> {
-        let sprout_nct = Arc::make_mut(&mut sprout);
-
-        for sprout_note_commitment in sprout_note_commitments {
-            sprout_nct.append(sprout_note_commitment)?;
-        }
-
-        Ok(sprout)
-    }
-
-    /// Update the sapling note commitment tree.
-    fn update_sapling_note_commitment_tree(
-        mut sapling: Arc<sapling::tree::NoteCommitmentTree>,
-        sapling_note_commitments: Vec<sapling::tree::NoteCommitmentUpdate>,
-    ) -> Result<Arc<sapling::tree::NoteCommitmentTree>, BoxError> {
-        let sapling_nct = Arc::make_mut(&mut sapling);
-
-        for sapling_note_commitment in sapling_note_commitments {
-            sapling_nct.append(sapling_note_commitment)?;
-        }
-
-        Ok(sapling)
-    }
-
-    /// Update the orchard note commitment tree.
-    fn update_orchard_note_commitment_tree(
-        mut orchard: Arc<orchard::tree::NoteCommitmentTree>,
-        orchard_note_commitments: Vec<orchard::tree::NoteCommitmentUpdate>,
-    ) -> Result<Arc<orchard::tree::NoteCommitmentTree>, BoxError> {
-        let orchard_nct = Arc::make_mut(&mut orchard);
-
-        for orchard_note_commitment in orchard_note_commitments {
-            orchard_nct.append(orchard_note_commitment)?;
-        }
-
-        Ok(orchard)
     }
 
     /// Prepare a database batch containing the note commitment and history tree updates

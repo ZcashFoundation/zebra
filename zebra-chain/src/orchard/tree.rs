@@ -11,7 +11,6 @@
 //! A root of a note commitment tree is associated with each treestate.
 
 #![allow(clippy::derive_hash_xor_eq)]
-#![allow(dead_code)]
 
 use std::{
     fmt,
@@ -253,8 +252,8 @@ impl<'de> serde::Deserialize<'de> for Node {
     }
 }
 
-#[allow(dead_code, missing_docs)]
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[derive(Error, Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[allow(missing_docs)]
 pub enum NoteCommitmentTreeError {
     #[error("The note commitment tree is full")]
     FullTree,
