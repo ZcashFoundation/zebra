@@ -442,6 +442,9 @@ impl DiskWriteBatch {
         let mut sapling_root = None;
         let mut orchard_root = None;
 
+        // TODO: consider doing these calculations after the trees are updated,
+        //       in the rayon scopes for each tree.
+        //       To do this, we need to make sure we only calculate the roots once.
         rayon::in_place_scope_fifo(|scope| {
             scope.spawn_fifo(|_scope| {
                 sprout_root = Some(sprout.root());

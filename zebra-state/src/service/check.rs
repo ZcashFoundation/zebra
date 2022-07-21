@@ -102,7 +102,7 @@ where
     Ok(())
 }
 
-/// Check that the `prepared` block is contextually valid for `network`, using
+/// Check that `block` is contextually valid for `network`, using
 /// the `history_tree` up to and including the previous block.
 #[tracing::instrument(skip(block, history_tree))]
 pub(crate) fn block_commitment_is_valid_for_chain_history(
