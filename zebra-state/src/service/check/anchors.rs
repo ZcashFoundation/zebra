@@ -120,7 +120,8 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
 /// without accessing the disk.
 ///
 /// Sprout anchors may also refer to the interstitial output treestate of any prior
-/// `JoinSplit` _within the same transaction_.
+/// `JoinSplit` _within the same transaction_; these are created on the fly
+/// in [`sprout_anchors_refer_to_treestates()`].
 #[tracing::instrument(skip(finalized_state, parent_chain, prepared))]
 pub(crate) fn fetch_sprout_final_treestates(
     finalized_state: &ZebraDb,
@@ -194,8 +195,10 @@ pub(crate) fn fetch_sprout_final_treestates(
 /// Sapling and Orchard do exclusively) _or_ to the interstitial output
 /// treestate of any prior `JoinSplit` _within the same transaction_.
 ///
-/// This method checks for anchors computed from the final and interstitial treestates of
-/// each transaction in the `prepared` block, using the supplied `sprout_final_treestates`.
+/// This method searches for anchors in the supplied `sprout_final_treestates`
+/// (which must be populated with all treestates pointed to in the `prepared` block;
+/// see [`fetch_sprout_final_treestates()`]); or in the interstitial
+/// treestates which are computed on the fly in this function.
 #[tracing::instrument(skip(sprout_final_treestates, block, transaction_hashes))]
 pub(crate) fn sprout_anchors_refer_to_treestates(
     sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
