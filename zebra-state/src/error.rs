@@ -1,3 +1,5 @@
+//! Error types for Zebra's state.
+
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -214,14 +216,8 @@ pub enum ValidateContextError {
         height: Option<block::Height>,
     },
 
-    #[error("error updating Sprout note commitment tree")]
-    SproutNoteCommitmentTreeError(#[from] zebra_chain::sprout::tree::NoteCommitmentTreeError),
-
-    #[error("error updating Sapling note commitment tree")]
-    SaplingNoteCommitmentTreeError(#[from] zebra_chain::sapling::tree::NoteCommitmentTreeError),
-
-    #[error("error updating Orchard note commitment tree")]
-    OrchardNoteCommitmentTreeError(#[from] zebra_chain::orchard::tree::NoteCommitmentTreeError),
+    #[error("error updating a note commitment tree")]
+    NoteCommitmentTreeError(#[from] zebra_chain::parallel::tree::NoteCommitmentTreeError),
 
     #[error("error building the history tree")]
     HistoryTreeError(#[from] HistoryTreeError),
