@@ -1,10 +1,13 @@
 //! Parallel note commitment tree update methods.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use thiserror::Error;
 
-use crate::{block::Block, orchard, sapling, sprout};
+use crate::{
+    block::{Block, Height},
+    orchard, sapling, sprout,
+};
 
 /// An argument wrapper struct for note commitment trees.
 #[derive(Clone, Debug)]
@@ -41,9 +44,31 @@ impl NoteCommitmentTrees {
     ///
     /// If any of the tree updates cause an error,
     /// it will be returned at the end of the parallel batches.
+    #[allow(clippy::unwrap_in_result)]
     pub fn update_trees_parallel(
         &mut self,
         block: &Arc<Block>,
+    ) -> Result<(), NoteCommitmentTreeError> {
+        self.update_trees_parallel_list(
+            [(
+                block
+                    .coinbase_height()
+                    .expect("height was already validated"),
+                block.clone(),
+            )]
+            .into_iter()
+            .collect(),
+        )
+    }
+
+    /// Updates the note commitment trees using the transactions in `block`,
+    /// then re-calculates the cached tree roots, using parallel `rayon` threads.
+    ///
+    /// If any of the tree updates cause an error,
+    /// it will be returned at the end of the parallel batches.
+    pub fn update_trees_parallel_list(
+        &mut self,
+        block_list: BTreeMap<Height, Arc<Block>>,
     ) -> Result<(), NoteCommitmentTreeError> {
         // Prepare arguments for parallel threads
         let NoteCommitmentTrees {
@@ -52,21 +77,21 @@ impl NoteCommitmentTrees {
             orchard,
         } = self.clone();
 
-        let sprout_note_commitments: Vec<_> = block
-            .transactions
-            .iter()
+        let sprout_note_commitments: Vec<_> = block_list
+            .values()
+            .flat_map(|block| block.transactions.iter())
             .flat_map(|tx| tx.sprout_note_commitments())
             .cloned()
             .collect();
-        let sapling_note_commitments: Vec<_> = block
-            .transactions
-            .iter()
+        let sapling_note_commitments: Vec<_> = block_list
+            .values()
+            .flat_map(|block| block.transactions.iter())
             .flat_map(|tx| tx.sapling_note_commitments())
             .cloned()
             .collect();
-        let orchard_note_commitments: Vec<_> = block
-            .transactions
-            .iter()
+        let orchard_note_commitments: Vec<_> = block_list
+            .values()
+            .flat_map(|block| block.transactions.iter())
             .flat_map(|tx| tx.orchard_note_commitments())
             .cloned()
             .collect();

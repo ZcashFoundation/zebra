@@ -290,20 +290,31 @@ impl Chain {
             history_tree,
         );
 
+        // Revert blocks above the fork
         while forked.non_finalized_tip_hash() != fork_tip {
             forked.pop_tip();
         }
 
-        // Rebuild the note commitment and history trees, starting from the finalized tip tree.
-        //
-        // Note commitments and history trees are not removed from the Chain during a fork,
-        // because we don't support that operation yet. Instead, we recreate the tree
-        // from the finalized tip.
-        //
-        // TODO: remove trees and anchors above the fork, to save CPU time (#4794)
+        // Rebuild trees from the finalized tip, because we haven't implemented reverts yet.
+        forked.rebuild_trees_parallel()?;
+
+        Ok(Some(forked))
+    }
+
+    /// Rebuild the note commitment and history trees after a chain fork,
+    /// starting from the finalized tip trees, using parallel `rayon` threads.
+    ///
+    /// Note commitments and history trees are not removed from the Chain during a fork,
+    /// because we don't support that operation yet. Instead, we recreate the tree
+    /// from the finalized tip.
+    ///
+    /// TODO: remove trees and anchors above the fork, to save CPU time (#4794)
+    #[allow(clippy::unwrap_in_result)]
+    pub fn rebuild_trees_parallel(&mut self) -> Result<(), ValidateContextError> {
         let start_time = Instant::now();
-        let rebuilt_block_count = forked.blocks.len();
-        let fork_height = forked.non_finalized_tip_height();
+        let rebuilt_block_count = self.blocks.len();
+        let fork_height = self.non_finalized_tip_height();
+        let fork_tip = self.non_finalized_tip_hash();
 
         info!(
             ?rebuilt_block_count,
@@ -312,58 +323,44 @@ impl Chain {
             "starting to rebuild note commitment trees after a non-finalized chain fork",
         );
 
-        let sprout_nct = Arc::make_mut(&mut forked.sprout_note_commitment_tree);
-        let sapling_nct = Arc::make_mut(&mut forked.sapling_note_commitment_tree);
-        let orchard_nct = Arc::make_mut(&mut forked.orchard_note_commitment_tree);
+        // Prepare data for parallel execution
+        let block_list = self
+            .blocks
+            .iter()
+            .map(|(height, block)| (*height, block.block.clone()))
+            .collect();
 
-        // Rebuild the note commitment and history trees, starting from the finalized tip tree.
-        //
-        // Note commitments and history trees are not removed from the Chain during a fork,
-        // because we don't support that operation yet. Instead, we recreate the tree
-        // from the finalized tip.
-        //
-        // TODO: remove trees and anchors above the fork, to save CPU time (#4794)
-        for block in forked.blocks.values() {
-            for transaction in block.block.transactions.iter() {
-                for sprout_note_commitment in transaction.sprout_note_commitments() {
-                    sprout_nct
-                        .append(*sprout_note_commitment)
-                        .expect("must work since it was already appended before the fork");
-                }
+        // TODO: use NoteCommitmentTrees to store the trees as well?
+        let mut nct = NoteCommitmentTrees {
+            sprout: self.sprout_note_commitment_tree.clone(),
+            sapling: self.sapling_note_commitment_tree.clone(),
+            orchard: self.orchard_note_commitment_tree.clone(),
+        };
 
-                for sapling_note_commitment in transaction.sapling_note_commitments() {
-                    sapling_nct
-                        .append(*sapling_note_commitment)
-                        .expect("must work since it was already appended before the fork");
-                }
+        let mut note_result = None;
+        let mut history_result = None;
 
-                for orchard_note_commitment in transaction.orchard_note_commitments() {
-                    orchard_nct
-                        .append(*orchard_note_commitment)
-                        .expect("must work since it was already appended before the fork");
-                }
-            }
+        // Run 4 tasks in parallel:
+        // - sprout, sapling, and orchard tree updates and (redundant) root calculations
+        // - history tree updates
+        rayon::in_place_scope_fifo(|scope| {
+            // Spawns a separate rayon task for each note commitment tree.
+            //
+            // TODO: skip the unused root calculations? (redundant after #4794)
+            note_result = Some(nct.update_trees_parallel_list(block_list));
 
-            // Note that anchors don't need to be recreated since they are already
-            // handled in revert_chain_state_with.
-            let sapling_root = forked
-                .sapling_anchors_by_height
-                .get(&block.height)
-                .expect("Sapling anchors must exist for pre-fork blocks");
+            scope.spawn_fifo(|_scope| {
+                history_result = Some(self.rebuild_history_tree());
+            });
+        });
 
-            let orchard_root = forked
-                .orchard_anchors_by_height
-                .get(&block.height)
-                .expect("Orchard anchors must exist for pre-fork blocks");
+        note_result.expect("scope has already finished")?;
+        history_result.expect("scope has already finished")?;
 
-            let history_tree_mut = Arc::make_mut(&mut forked.history_tree);
-            history_tree_mut.push(
-                self.network,
-                block.block.clone(),
-                *sapling_root,
-                *orchard_root,
-            )?;
-        }
+        // Update the note commitment trees in the chain.
+        self.sprout_note_commitment_tree = nct.sprout;
+        self.sapling_note_commitment_tree = nct.sapling;
+        self.orchard_note_commitment_tree = nct.orchard;
 
         let rebuild_time = start_time.elapsed();
         let rebuild_time_per_block =
@@ -377,7 +374,37 @@ impl Chain {
             "finished rebuilding note commitment trees after a non-finalized chain fork",
         );
 
-        Ok(Some(forked))
+        Ok(())
+    }
+
+    /// Rebuild the history tree after a chain fork.
+    ///
+    /// TODO: remove trees and anchors above the fork, to save CPU time (#4794)
+    #[allow(clippy::unwrap_in_result)]
+    pub fn rebuild_history_tree(&mut self) -> Result<(), ValidateContextError> {
+        for block in self.blocks.values() {
+            // Note that anchors don't need to be recreated since they are already
+            // handled in revert_chain_state_with.
+            let sapling_root = self
+                .sapling_anchors_by_height
+                .get(&block.height)
+                .expect("Sapling anchors must exist for pre-fork blocks");
+
+            let orchard_root = self
+                .orchard_anchors_by_height
+                .get(&block.height)
+                .expect("Orchard anchors must exist for pre-fork blocks");
+
+            let history_tree_mut = Arc::make_mut(&mut self.history_tree);
+            history_tree_mut.push(
+                self.network,
+                block.block.clone(),
+                *sapling_root,
+                *orchard_root,
+            )?;
+        }
+
+        Ok(())
     }
 
     /// Returns the [`Network`] for this chain.
