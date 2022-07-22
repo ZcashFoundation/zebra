@@ -208,7 +208,7 @@ fn out_of_order_committing_strategy() -> BoxedStrategy<Vec<Arc<Block>>> {
     Just(blocks).prop_shuffle().boxed()
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn empty_state_still_responds_to_requests() -> Result<()> {
     zebra_test::init();
 

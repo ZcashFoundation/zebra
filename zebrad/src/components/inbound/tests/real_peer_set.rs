@@ -120,7 +120,7 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
 /// Check that a network stack with an empty state responds to block requests with `notfound`.
 ///
 /// Uses a real Zebra network stack, with an isolated Zebra inbound TCP connection.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
     let (
         // real services
