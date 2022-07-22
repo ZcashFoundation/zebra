@@ -68,9 +68,11 @@ impl RpcServer {
                 MetaIoHandler::new(Compatibility::Both, TracingMiddleware);
             io.extend_with(rpc_impl.to_delegate());
 
+            // Use a different tokio executor from the rest of Zebra,
+            // so that large RPCs and any task handling bugs don't impact Zebra.
+            //
+            // TODO: make the number of RPC threads configurable?
             let server = ServerBuilder::new(io)
-                // use the same tokio executor as the rest of Zebra
-                .event_loop_executor(tokio::runtime::Handle::current())
                 .threads(1)
                 // TODO: disable this security check if we see errors from lightwalletd.
                 //.allowed_hosts(DomainsValidation::Disabled)
