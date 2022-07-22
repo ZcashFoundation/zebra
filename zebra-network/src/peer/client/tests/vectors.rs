@@ -80,7 +80,7 @@ async fn client_service_ready_heartbeat_exit() {
 
     let (mut client, mut harness) = ClientTestHarness::build().finish();
 
-    harness.set_error(PeerError::HeartbeatTaskExited);
+    harness.set_error(PeerError::HeartbeatTaskExited("some error".to_string()));
     harness.drop_heartbeat_shutdown_receiver();
 
     assert!(client.is_failed().await);
