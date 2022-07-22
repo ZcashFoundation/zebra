@@ -176,7 +176,7 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn verify_fail_no_coinbase_test() -> Result<(), Report> {
     verify_fail_no_coinbase().await
 }

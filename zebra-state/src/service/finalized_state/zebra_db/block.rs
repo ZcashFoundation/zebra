@@ -111,8 +111,11 @@ impl ZebraDb {
         // Manually fetch the entire block's transactions
         let mut transactions = Vec::new();
 
-        // TODO: is this loop more efficient if we store the number of transactions?
-        //       is the difference large enough to matter?
+        // TODO:
+        // - split disk reads from deserialization, and run deserialization in parallel,
+        //   this improves performance for blocks with multiple large shielded transactions
+        // - is this loop more efficient if we store the number of transactions?
+        // - is the difference large enough to matter?
         for tx_index in 0..=Transaction::max_allocation() {
             let tx_loc = TransactionLocation::from_u64(height, tx_index);
 

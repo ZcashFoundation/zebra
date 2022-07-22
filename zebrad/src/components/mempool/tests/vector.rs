@@ -543,7 +543,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
 }
 
 /// Check if a transaction that fails verification is rejected by the mempool.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     // Using the mainnet for now
     let network = Network::Mainnet;
@@ -554,8 +554,6 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     // Get transactions to use in the test
     let mut unmined_transactions = unmined_transactions_in_blocks(1..=2, network);
     let rejected_tx = unmined_transactions.next().unwrap().clone();
-
-    time::pause();
 
     // Enable the mempool
     mempool.enable(&mut recent_syncs).await;
@@ -614,7 +612,7 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
 }
 
 /// Check if a transaction that fails download is _not_ rejected.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     // Using the mainnet for now
     let network = Network::Mainnet;
@@ -625,8 +623,6 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     // Get transactions to use in the test
     let mut unmined_transactions = unmined_transactions_in_blocks(1..=2, network);
     let rejected_valid_tx = unmined_transactions.next().unwrap().clone();
-
-    time::pause();
 
     // Enable the mempool
     mempool.enable(&mut recent_syncs).await;
