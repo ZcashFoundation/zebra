@@ -314,12 +314,20 @@ proptest! {
     fn no_transaction_with_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(4, true, OVER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
     ) {
+        let tip_height = chain
+            .last()
+            .expect("chain contains at least one block")
+            .coinbase_height()
+            .expect("chain contains valid blocks");
+
         let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), network)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(
             response,
-            Err("giving up after checking too many blocks".into())
+            Err(format!(
+                "could not find any transactions in recent blocks: checked 1000 blocks back from {tip_height:?}",
+            ))
         );
     }
 
@@ -356,7 +364,7 @@ proptest! {
 
         prop_assert_eq!(
             response,
-            Err("inconsistent network upgrade found in transaction".into()),
+            Err("inconsistent network upgrade found in transaction: WrongTransactionConsensusBranchId".into()),
             "first: {:?}, last: {:?}",
             chain.first().map(|block| block.coinbase_height()),
             chain.last().map(|block| block.coinbase_height()),
