@@ -15,7 +15,8 @@
 use std::sync::Arc;
 
 use zebra_chain::{
-    block::Height, history_tree::HistoryTree, orchard, sapling, sprout, transaction::Transaction,
+    block::Height, history_tree::HistoryTree, orchard, parallel::tree::NoteCommitmentTrees,
+    sapling, sprout, transaction::Transaction,
 };
 
 use crate::{
@@ -26,14 +27,6 @@ use crate::{
     },
     BoxError,
 };
-
-/// An argument wrapper struct for note commitment trees.
-#[derive(Clone, Debug)]
-pub struct NoteCommitmentTrees {
-    sprout: Arc<sprout::tree::NoteCommitmentTree>,
-    sapling: Arc<sapling::tree::NoteCommitmentTree>,
-    orchard: Arc<orchard::tree::NoteCommitmentTree>,
-}
 
 impl ZebraDb {
     // Read shielded methods
@@ -194,9 +187,9 @@ impl DiskWriteBatch {
         // Index each transaction's shielded data
         for transaction in &block.transactions {
             self.prepare_nullifier_batch(db, transaction)?;
-
-            DiskWriteBatch::update_note_commitment_trees(transaction, note_commitment_trees)?;
         }
+
+        note_commitment_trees.update_trees_parallel(block)?;
 
         Ok(())
     }
@@ -231,36 +224,6 @@ impl DiskWriteBatch {
         Ok(())
     }
 
-    /// Updates the supplied note commitment trees.
-    ///
-    /// If this method returns an error, it will be propagated,
-    /// and the batch should not be written to the database.
-    ///
-    /// # Errors
-    ///
-    /// - Propagates any errors from updating note commitment trees
-    pub fn update_note_commitment_trees(
-        transaction: &Transaction,
-        note_commitment_trees: &mut NoteCommitmentTrees,
-    ) -> Result<(), BoxError> {
-        let sprout_nct = Arc::make_mut(&mut note_commitment_trees.sprout);
-        for sprout_note_commitment in transaction.sprout_note_commitments() {
-            sprout_nct.append(*sprout_note_commitment)?;
-        }
-
-        let sapling_nct = Arc::make_mut(&mut note_commitment_trees.sapling);
-        for sapling_note_commitment in transaction.sapling_note_commitments() {
-            sapling_nct.append(*sapling_note_commitment)?;
-        }
-
-        let orchard_nct = Arc::make_mut(&mut note_commitment_trees.orchard);
-        for orchard_note_commitment in transaction.orchard_note_commitments() {
-            orchard_nct.append(*orchard_note_commitment)?;
-        }
-
-        Ok(())
-    }
-
     /// Prepare a database batch containing the note commitment and history tree updates
     /// from `finalized.block`, and return it (without actually writing anything).
     ///
@@ -276,7 +239,7 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: &FinalizedBlock,
         note_commitment_trees: NoteCommitmentTrees,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
     ) -> Result<(), BoxError> {
         let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
@@ -288,11 +251,12 @@ impl DiskWriteBatch {
 
         let FinalizedBlock { height, .. } = finalized;
 
+        // Use the cached values that were previously calculated in parallel.
         let sprout_root = note_commitment_trees.sprout.root();
         let sapling_root = note_commitment_trees.sapling.root();
         let orchard_root = note_commitment_trees.orchard.root();
 
-        // Compute the new anchors and index them
+        // Index the new anchors.
         // Note: if the root hasn't changed, we write the same value again.
         self.zs_insert(&sprout_anchors, sprout_root, &note_commitment_trees.sprout);
         self.zs_insert(&sapling_anchors, sapling_root, ());

@@ -18,6 +18,7 @@ use zebra_chain::{
     fmt::humantime_milliseconds,
     history_tree::HistoryTree,
     orchard,
+    parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     primitives::Groth16Proof,
     sapling, sprout,
@@ -84,7 +85,7 @@ pub struct Chain {
         BTreeMap<block::Height, Arc<orchard::tree::NoteCommitmentTree>>,
     /// The ZIP-221 history tree of the tip of this [`Chain`],
     /// including all finalized blocks, and the non-finalized `blocks` in this chain.
-    pub(crate) history_tree: HistoryTree,
+    pub(crate) history_tree: Arc<HistoryTree>,
 
     /// The Sprout anchors created by `blocks`.
     pub(crate) sprout_anchors: MultiSet<sprout::tree::Root>,
@@ -132,7 +133,7 @@ impl Chain {
         sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
         finalized_tip_chain_value_pools: ValueBalance<NonNegative>,
     ) -> Self {
         Self {
@@ -176,8 +177,6 @@ impl Chain {
     /// even if the blocks in the two chains are equal.
     #[cfg(test)]
     pub(crate) fn eq_internal_state(&self, other: &Chain) -> bool {
-        use zebra_chain::history_tree::NonEmptyHistoryTree;
-
         // blocks, heights, hashes
         self.blocks == other.blocks &&
             self.height_by_hash == other.height_by_hash &&
@@ -196,7 +195,7 @@ impl Chain {
             self.orchard_trees_by_height== other.orchard_trees_by_height &&
 
             // history tree
-            self.history_tree.as_ref().map(NonEmptyHistoryTree::hash) == other.history_tree.as_ref().map(NonEmptyHistoryTree::hash) &&
+            self.history_tree.as_ref().as_ref().map(|tree| tree.hash()) == other.history_tree.as_ref().as_ref().map(|other_tree| other_tree.hash()) &&
 
             // anchors
             self.sprout_anchors == other.sprout_anchors &&
@@ -278,7 +277,7 @@ impl Chain {
         sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
     ) -> Result<Option<Self>, ValidateContextError> {
         if !self.height_by_hash.contains_key(&fork_tip) {
             return Ok(None);
@@ -291,20 +290,31 @@ impl Chain {
             history_tree,
         );
 
+        // Revert blocks above the fork
         while forked.non_finalized_tip_hash() != fork_tip {
             forked.pop_tip();
         }
 
-        // Rebuild the note commitment and history trees, starting from the finalized tip tree.
-        //
-        // Note commitments and history trees are not removed from the Chain during a fork,
-        // because we don't support that operation yet. Instead, we recreate the tree
-        // from the finalized tip.
-        //
-        // TODO: remove trees and anchors above the fork, to save CPU time (#4794)
+        // Rebuild trees from the finalized tip, because we haven't implemented reverts yet.
+        forked.rebuild_trees_parallel()?;
+
+        Ok(Some(forked))
+    }
+
+    /// Rebuild the note commitment and history trees after a chain fork,
+    /// starting from the finalized tip trees, using parallel `rayon` threads.
+    ///
+    /// Note commitments and history trees are not removed from the Chain during a fork,
+    /// because we don't support that operation yet. Instead, we recreate the tree
+    /// from the finalized tip.
+    ///
+    /// TODO: remove trees and anchors above the fork, to save CPU time (#4794)
+    #[allow(clippy::unwrap_in_result)]
+    pub fn rebuild_trees_parallel(&mut self) -> Result<(), ValidateContextError> {
         let start_time = Instant::now();
-        let rebuilt_block_count = forked.blocks.len();
-        let fork_height = forked.non_finalized_tip_height();
+        let rebuilt_block_count = self.blocks.len();
+        let fork_height = self.non_finalized_tip_height();
+        let fork_tip = self.non_finalized_tip_hash();
 
         info!(
             ?rebuilt_block_count,
@@ -313,50 +323,44 @@ impl Chain {
             "starting to rebuild note commitment trees after a non-finalized chain fork",
         );
 
-        let sprout_nct = Arc::make_mut(&mut forked.sprout_note_commitment_tree);
-        let sapling_nct = Arc::make_mut(&mut forked.sapling_note_commitment_tree);
-        let orchard_nct = Arc::make_mut(&mut forked.orchard_note_commitment_tree);
+        // Prepare data for parallel execution
+        let block_list = self
+            .blocks
+            .iter()
+            .map(|(height, block)| (*height, block.block.clone()))
+            .collect();
 
-        for block in forked.blocks.values() {
-            for transaction in block.block.transactions.iter() {
-                for sprout_note_commitment in transaction.sprout_note_commitments() {
-                    sprout_nct
-                        .append(*sprout_note_commitment)
-                        .expect("must work since it was already appended before the fork");
-                }
+        // TODO: use NoteCommitmentTrees to store the trees as well?
+        let mut nct = NoteCommitmentTrees {
+            sprout: self.sprout_note_commitment_tree.clone(),
+            sapling: self.sapling_note_commitment_tree.clone(),
+            orchard: self.orchard_note_commitment_tree.clone(),
+        };
 
-                for sapling_note_commitment in transaction.sapling_note_commitments() {
-                    sapling_nct
-                        .append(*sapling_note_commitment)
-                        .expect("must work since it was already appended before the fork");
-                }
+        let mut note_result = None;
+        let mut history_result = None;
 
-                for orchard_note_commitment in transaction.orchard_note_commitments() {
-                    orchard_nct
-                        .append(*orchard_note_commitment)
-                        .expect("must work since it was already appended before the fork");
-                }
-            }
+        // Run 4 tasks in parallel:
+        // - sprout, sapling, and orchard tree updates and (redundant) root calculations
+        // - history tree updates
+        rayon::in_place_scope_fifo(|scope| {
+            // Spawns a separate rayon task for each note commitment tree.
+            //
+            // TODO: skip the unused root calculations? (redundant after #4794)
+            note_result = Some(nct.update_trees_parallel_list(block_list));
 
-            // Note that anchors don't need to be recreated since they are already
-            // handled in revert_chain_state_with.
-            let sapling_root = forked
-                .sapling_anchors_by_height
-                .get(&block.height)
-                .expect("Sapling anchors must exist for pre-fork blocks");
+            scope.spawn_fifo(|_scope| {
+                history_result = Some(self.rebuild_history_tree());
+            });
+        });
 
-            let orchard_root = forked
-                .orchard_anchors_by_height
-                .get(&block.height)
-                .expect("Orchard anchors must exist for pre-fork blocks");
+        note_result.expect("scope has already finished")?;
+        history_result.expect("scope has already finished")?;
 
-            forked.history_tree.push(
-                self.network,
-                block.block.clone(),
-                *sapling_root,
-                *orchard_root,
-            )?;
-        }
+        // Update the note commitment trees in the chain.
+        self.sprout_note_commitment_tree = nct.sprout;
+        self.sapling_note_commitment_tree = nct.sapling;
+        self.orchard_note_commitment_tree = nct.orchard;
 
         let rebuild_time = start_time.elapsed();
         let rebuild_time_per_block =
@@ -370,7 +374,42 @@ impl Chain {
             "finished rebuilding note commitment trees after a non-finalized chain fork",
         );
 
-        Ok(Some(forked))
+        Ok(())
+    }
+
+    /// Rebuild the history tree after a chain fork.
+    ///
+    /// TODO: remove trees and anchors above the fork, to save CPU time (#4794)
+    #[allow(clippy::unwrap_in_result)]
+    pub fn rebuild_history_tree(&mut self) -> Result<(), ValidateContextError> {
+        for block in self.blocks.values() {
+            // Note that anchors don't need to be recreated since they are already
+            // handled in revert_chain_state_with.
+            let sapling_root = self
+                .sapling_anchors_by_height
+                .get(&block.height)
+                .expect("Sapling anchors must exist for pre-fork blocks");
+
+            let orchard_root = self
+                .orchard_anchors_by_height
+                .get(&block.height)
+                .expect("Orchard anchors must exist for pre-fork blocks");
+
+            let history_tree_mut = Arc::make_mut(&mut self.history_tree);
+            history_tree_mut.push(
+                self.network,
+                block.block.clone(),
+                *sapling_root,
+                *orchard_root,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Returns the [`Network`] for this chain.
+    pub fn network(&self) -> Network {
+        self.network
     }
 
     /// Returns the [`ContextuallyValidBlock`] with [`block::Hash`] or
@@ -674,7 +713,7 @@ impl Chain {
         sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
     ) -> Self {
         Chain {
             network: self.network,
@@ -704,43 +743,97 @@ impl Chain {
             chain_value_pools: self.chain_value_pools,
         }
     }
-}
 
-/// The revert position being performed on a chain.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-enum RevertPosition {
-    /// The chain root is being reverted via [`Chain::pop_root`], when a block
-    /// is finalized.
-    Root,
-
-    /// The chain tip is being reverted via [`Chain::pop_tip`],
-    /// when a chain is forked.
-    Tip,
-}
-
-/// Helper trait to organize inverse operations done on the [`Chain`] type.
-///
-/// Used to overload update and revert methods, based on the type of the argument,
-/// and the position of the removed block in the chain.
-///
-/// This trait was motivated by the length of the `push`, [`Chain::pop_root`],
-/// and [`Chain::pop_tip`] functions, and fear that it would be easy to
-/// introduce bugs when updating them, unless the code was reorganized to keep
-/// related operations adjacent to each other.
-trait UpdateWith<T> {
-    /// When `T` is added to the chain tip,
-    /// update [`Chain`] cumulative data members to add data that are derived from `T`.
-    fn update_chain_tip_with(&mut self, _: &T) -> Result<(), ValidateContextError>;
-
-    /// When `T` is removed from `position` in the chain,
-    /// revert [`Chain`] cumulative data members to remove data that are derived from `T`.
-    fn revert_chain_with(&mut self, _: &T, position: RevertPosition);
-}
-
-impl UpdateWith<ContextuallyValidBlock> for Chain {
+    /// Update the chain tip with the `contextually_valid` block,
+    /// running note commitment tree updates in parallel with other updates.
+    ///
+    /// Used to implement `update_chain_tip_with::<ContextuallyValidBlock>`.
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
     #[allow(clippy::unwrap_in_result)]
-    fn update_chain_tip_with(
+    fn update_chain_tip_with_block_parallel(
+        &mut self,
+        contextually_valid: &ContextuallyValidBlock,
+    ) -> Result<(), ValidateContextError> {
+        let height = contextually_valid.height;
+
+        // Prepare data for parallel execution
+        //
+        // TODO: use NoteCommitmentTrees to store the trees as well?
+        let mut nct = NoteCommitmentTrees {
+            sprout: self.sprout_note_commitment_tree.clone(),
+            sapling: self.sapling_note_commitment_tree.clone(),
+            orchard: self.orchard_note_commitment_tree.clone(),
+        };
+
+        let mut tree_result = None;
+        let mut partial_result = None;
+
+        // Run 4 tasks in parallel:
+        // - sprout, sapling, and orchard tree updates and root calculations
+        // - the rest of the Chain updates
+        rayon::in_place_scope_fifo(|scope| {
+            // Spawns a separate rayon task for each note commitment tree
+            tree_result = Some(nct.update_trees_parallel(&contextually_valid.block.clone()));
+
+            scope.spawn_fifo(|_scope| {
+                partial_result =
+                    Some(self.update_chain_tip_with_block_except_trees(contextually_valid));
+            });
+        });
+
+        tree_result.expect("scope has already finished")?;
+        partial_result.expect("scope has already finished")?;
+
+        // Update the note commitment trees in the chain.
+        self.sprout_note_commitment_tree = nct.sprout;
+        self.sapling_note_commitment_tree = nct.sapling;
+        self.orchard_note_commitment_tree = nct.orchard;
+
+        // Do the Chain updates with data dependencies on note commitment tree updates
+
+        // Update the note commitment trees indexed by height.
+        self.sapling_trees_by_height
+            .insert(height, self.sapling_note_commitment_tree.clone());
+        self.orchard_trees_by_height
+            .insert(height, self.orchard_note_commitment_tree.clone());
+
+        // Having updated all the note commitment trees and nullifier sets in
+        // this block, the roots of the note commitment trees as of the last
+        // transaction are the treestates of this block.
+        //
+        // Use the previously cached roots, which were calculated in parallel.
+        let sprout_root = self.sprout_note_commitment_tree.root();
+        self.sprout_anchors.insert(sprout_root);
+        self.sprout_anchors_by_height.insert(height, sprout_root);
+        self.sprout_trees_by_anchor
+            .insert(sprout_root, self.sprout_note_commitment_tree.clone());
+        let sapling_root = self.sapling_note_commitment_tree.root();
+        self.sapling_anchors.insert(sapling_root);
+        self.sapling_anchors_by_height.insert(height, sapling_root);
+
+        let orchard_root = self.orchard_note_commitment_tree.root();
+        self.orchard_anchors.insert(orchard_root);
+        self.orchard_anchors_by_height.insert(height, orchard_root);
+
+        // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
+        let history_tree_mut = Arc::make_mut(&mut self.history_tree);
+        history_tree_mut.push(
+            self.network,
+            contextually_valid.block.clone(),
+            sapling_root,
+            orchard_root,
+        )?;
+
+        Ok(())
+    }
+
+    /// Update the chain tip with the `contextually_valid` block,
+    /// except for the note commitment and history tree updates.
+    ///
+    /// Used to implement `update_chain_tip_with::<ContextuallyValidBlock>`.
+    #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
+    #[allow(clippy::unwrap_in_result)]
+    fn update_chain_tip_with_block_except_trees(
         &mut self,
         contextually_valid: &ContextuallyValidBlock,
     ) -> Result<(), ValidateContextError> {
@@ -840,39 +933,52 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.update_chain_tip_with(orchard_shielded_data)?;
         }
 
-        // Update the note commitment trees indexed by height.
-        self.sapling_trees_by_height
-            .insert(height, self.sapling_note_commitment_tree.clone());
-        self.orchard_trees_by_height
-            .insert(height, self.orchard_note_commitment_tree.clone());
-
-        // Having updated all the note commitment trees and nullifier sets in
-        // this block, the roots of the note commitment trees as of the last
-        // transaction are the treestates of this block.
-        let sprout_root = self.sprout_note_commitment_tree.root();
-        self.sprout_anchors.insert(sprout_root);
-        self.sprout_anchors_by_height.insert(height, sprout_root);
-        self.sprout_trees_by_anchor
-            .insert(sprout_root, self.sprout_note_commitment_tree.clone());
-        let sapling_root = self.sapling_note_commitment_tree.root();
-        self.sapling_anchors.insert(sapling_root);
-        self.sapling_anchors_by_height.insert(height, sapling_root);
-
-        let orchard_root = self.orchard_note_commitment_tree.root();
-        self.orchard_anchors.insert(orchard_root);
-        self.orchard_anchors_by_height.insert(height, orchard_root);
-
-        self.history_tree.push(
-            self.network,
-            contextually_valid.block.clone(),
-            sapling_root,
-            orchard_root,
-        )?;
-
         // update the chain value pool balances
         self.update_chain_tip_with(chain_value_pool_change)?;
 
         Ok(())
+    }
+}
+
+/// The revert position being performed on a chain.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+enum RevertPosition {
+    /// The chain root is being reverted via [`Chain::pop_root`], when a block
+    /// is finalized.
+    Root,
+
+    /// The chain tip is being reverted via [`Chain::pop_tip`],
+    /// when a chain is forked.
+    Tip,
+}
+
+/// Helper trait to organize inverse operations done on the [`Chain`] type.
+///
+/// Used to overload update and revert methods, based on the type of the argument,
+/// and the position of the removed block in the chain.
+///
+/// This trait was motivated by the length of the `push`, [`Chain::pop_root`],
+/// and [`Chain::pop_tip`] functions, and fear that it would be easy to
+/// introduce bugs when updating them, unless the code was reorganized to keep
+/// related operations adjacent to each other.
+trait UpdateWith<T> {
+    /// When `T` is added to the chain tip,
+    /// update [`Chain`] cumulative data members to add data that are derived from `T`.
+    fn update_chain_tip_with(&mut self, _: &T) -> Result<(), ValidateContextError>;
+
+    /// When `T` is removed from `position` in the chain,
+    /// revert [`Chain`] cumulative data members to remove data that are derived from `T`.
+    fn revert_chain_with(&mut self, _: &T, position: RevertPosition);
+}
+
+impl UpdateWith<ContextuallyValidBlock> for Chain {
+    #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
+    #[allow(clippy::unwrap_in_result)]
+    fn update_chain_tip_with(
+        &mut self,
+        contextually_valid: &ContextuallyValidBlock,
+    ) -> Result<(), ValidateContextError> {
+        self.update_chain_tip_with_block_parallel(contextually_valid)
     }
 
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
@@ -1235,11 +1341,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
-            let sprout_ncm = Arc::make_mut(&mut self.sprout_note_commitment_tree);
-
-            for cm in joinsplit_data.note_commitments() {
-                sprout_ncm.append(*cm)?;
-            }
+            // We do note commitment tree updates in parallel rayon threads.
 
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sprout_nullifiers,
@@ -1285,14 +1387,7 @@ where
         sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
-            let sapling_nct = Arc::make_mut(&mut self.sapling_note_commitment_tree);
-
-            // The `_u` here indicates that the Sapling note commitment is
-            // specified only by the `u`-coordinate of the Jubjub curve
-            // point `(u, v)`.
-            for cm_u in sapling_shielded_data.note_commitments() {
-                sapling_nct.append(*cm_u)?;
-            }
+            // We do note commitment tree updates in parallel rayon threads.
 
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sapling_nullifiers,
@@ -1335,11 +1430,7 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
         orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
-            let orchard_nct = Arc::make_mut(&mut self.orchard_note_commitment_tree);
-
-            for cm_x in orchard_shielded_data.note_commitments() {
-                orchard_nct.append(*cm_x)?;
-            }
+            // We do note commitment tree updates in parallel rayon threads.
 
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.orchard_nullifiers,

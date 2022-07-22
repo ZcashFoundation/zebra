@@ -180,8 +180,8 @@ impl<'de> serde::Deserialize<'de> for Node {
     }
 }
 
-#[allow(dead_code, missing_docs)]
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[derive(Error, Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[allow(missing_docs)]
 pub enum NoteCommitmentTreeError {
     #[error("the note commitment tree is full")]
     FullTree,

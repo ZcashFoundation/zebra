@@ -66,6 +66,7 @@ serde-big-array = "0.4.1"
 # Processing
 futures = "0.3.21"
 itertools = "0.10.3"
+rayon = "1.5.3"
 
 # ZF deps
 ed25519-zebra = "3.0.0"

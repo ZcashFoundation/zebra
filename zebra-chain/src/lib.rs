@@ -21,6 +21,7 @@ pub mod chain_tip;
 pub mod fmt;
 pub mod history_tree;
 pub mod orchard;
+pub mod parallel;
 pub mod parameters;
 pub mod primitives;
 pub mod sapling;
