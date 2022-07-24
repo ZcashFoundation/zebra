@@ -63,6 +63,12 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
+  test-update-sync:
+    name: Zebra tip update / Run update-to-tip test
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
   lightwalletd-rpc-test:
     name: Zebra tip JSON-RPC / Run fully-synced-rpc test
     runs-on: ubuntu-latest
