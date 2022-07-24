@@ -45,7 +45,11 @@ pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(2);
 /// The amount of time we wait for lightwalletd to update to the tip.
 ///
 /// The cached tip can be a few days old, and Zebra needs time to activate its mempool.
-pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = Duration::from_secs(20 * 60);
+///
+/// Currently, `zebrad` syncs are slower than `lightwalletd` syncs, so we re-use its timeout.
+///
+/// TODO: reduce to 20 minutes when `zebrad` sync performance improves
+pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = LIGHTWALLETD_FULL_SYNC_TIP_DELAY;
 
 /// The amount of time we wait for lightwalletd to do a full sync to the tip.
 ///
