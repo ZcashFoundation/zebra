@@ -295,9 +295,9 @@ impl StateService {
 
         while self.mem.best_chain_len() > crate::constants::MAX_BLOCK_REORG_HEIGHT {
             tracing::trace!("finalizing block past the reorg limit");
-            let finalized = self.mem.finalize();
+            let finalized_with_trees = self.mem.finalize();
             self.disk
-                .commit_finalized_direct(finalized, "best non-finalized chain root")
+                .commit_finalized_direct(finalized_with_trees, "best non-finalized chain root")
                 .expect(
                     "expected that errors would not occur when writing to disk or updating note commitment and history trees",
                 );
