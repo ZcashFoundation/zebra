@@ -27,7 +27,7 @@ use std::{
 use futures::future::FutureExt;
 use tokio::sync::{oneshot, watch};
 use tower::{util::BoxService, Service};
-use tracing::instrument;
+use tracing::{instrument, Instrument, Span};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use tower::buffer::Buffer;
@@ -782,13 +782,16 @@ impl Service<Request> for StateService {
                 // Since each block is spawned into its own task,
                 // there shouldn't be any other code running in the same task,
                 // so we don't need to worry about blocking it:
-                // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html#
-                let rsp_rx =
-                    tokio::task::block_in_place(|| self.queue_and_commit_non_finalized(prepared));
+                // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
+                let span = Span::current();
+                let rsp_rx = tokio::task::block_in_place(move || {
+                    span.in_scope(|| self.queue_and_commit_non_finalized(prepared))
+                });
 
                 // The work is all done, the future just waits on a channel for the result
                 timer.finish(module_path!(), line!(), "CommitBlock");
 
+                let span = Span::current();
                 async move {
                     rsp_rx
                         .await
@@ -801,6 +804,7 @@ impl Service<Request> for StateService {
                         .map(Response::Committed)
                         .map_err(Into::into)
                 }
+                .instrument(span)
                 .boxed()
             }
             Request::CommitFinalizedBlock(finalized) => {
@@ -821,12 +825,15 @@ impl Service<Request> for StateService {
                 // and written to disk.
                 //
                 // See the note in `CommitBlock` for more details.
-                let rsp_rx =
-                    tokio::task::block_in_place(|| self.queue_and_commit_finalized(finalized));
+                let span = Span::current();
+                let rsp_rx = tokio::task::block_in_place(move || {
+                    span.in_scope(|| self.queue_and_commit_finalized(finalized))
+                });
 
                 // The work is all done, the future just waits on a channel for the result
                 timer.finish(module_path!(), line!(), "CommitFinalizedBlock");
 
+                let span = Span::current();
                 async move {
                     rsp_rx
                         .await
@@ -841,6 +848,7 @@ impl Service<Request> for StateService {
                         .map(Response::Committed)
                         .map_err(Into::into)
                 }
+                .instrument(span)
                 .boxed()
             }
             Request::Depth(hash) => {
@@ -918,13 +926,16 @@ impl Service<Request> for StateService {
                 // # Performance
                 //
                 // Allow other async tasks to make progress while the transaction is being read from disk.
+                let span = Span::current();
                 tokio::task::spawn_blocking(move || {
-                    let rsp = read::transaction(best_chain, &db, hash);
+                    span.in_scope(|| {
+                        let rsp = read::transaction(best_chain, &db, hash);
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "Transaction");
 
-                    Ok(Response::Transaction(rsp.map(|(tx, _height)| tx)))
+                        Ok(Response::Transaction(rsp.map(|(tx, _height)| tx)))
+                    })
                 })
                 .map(|join_result| join_result.expect("panic in Request::Transaction"))
                 .boxed()
@@ -946,13 +957,16 @@ impl Service<Request> for StateService {
                 // # Performance
                 //
                 // Allow other async tasks to make progress while the block is being read from disk.
+                let span = Span::current();
                 tokio::task::spawn_blocking(move || {
-                    let rsp = read::block(best_chain, &db, hash_or_height);
+                    span.in_scope(move || {
+                        let rsp = read::block(best_chain, &db, hash_or_height);
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "Block");
 
-                    Ok(Response::Block(rsp))
+                        Ok(Response::Block(rsp))
+                    })
                 })
                 .map(|join_result| join_result.expect("panic in Request::Block"))
                 .boxed()
@@ -966,6 +980,7 @@ impl Service<Request> for StateService {
                 );
 
                 let timer = CodeTimer::start();
+                let span = Span::current();
 
                 let fut = self.pending_utxos.queue(outpoint);
 
@@ -976,7 +991,7 @@ impl Service<Request> for StateService {
                 // The future waits on a channel for a response.
                 timer.finish(module_path!(), line!(), "AwaitUtxo");
 
-                fut.boxed()
+                fut.instrument(span).boxed()
             }
             Request::FindBlockHashes { known_blocks, stop } => {
                 metrics::counter!(
@@ -1031,21 +1046,25 @@ impl Service<Request> for StateService {
                 //
                 // Now we have the chain hashes, we can read the headers concurrently,
                 // which allows other async tasks to make progress while data is being read from disk.
+                let span = Span::current();
                 tokio::task::spawn_blocking(move || {
-                    let res = res
-                        .iter()
-                        .map(|&hash| {
-                            let header = read::block_header(best_chain.clone(), &db, hash.into())
-                                .expect("block header for found hash is in the best chain");
+                    span.in_scope(move || {
+                        let res = res
+                            .iter()
+                            .map(|&hash| {
+                                let header =
+                                    read::block_header(best_chain.clone(), &db, hash.into())
+                                        .expect("block header for found hash is in the best chain");
 
-                            block::CountedHeader { header }
-                        })
-                        .collect();
+                                block::CountedHeader { header }
+                            })
+                            .collect();
 
-                    // Some of the work is done in the future.
-                    timer.finish(module_path!(), line!(), "FindBlockHeaders");
+                        // Some of the work is done in the future.
+                        timer.finish(module_path!(), line!(), "FindBlockHeaders");
 
-                    Ok(Response::BlockHeaders(res))
+                        Ok(Response::BlockHeaders(res))
+                    })
                 })
                 .map(|join_result| join_result.expect("panic in Request::FindBlockHeaders"))
                 .boxed()
@@ -1083,15 +1102,18 @@ impl Service<ReadRequest> for ReadStateService {
                 // # Performance
                 //
                 // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                let span = Span::current();
                 tokio::task::spawn_blocking(move || {
-                    let block = state.best_chain_receiver.with_watch_data(|best_chain| {
-                        read::block(best_chain, &state.db, hash_or_height)
-                    });
+                    span.in_scope(move || {
+                        let block = state.best_chain_receiver.with_watch_data(|best_chain| {
+                            read::block(best_chain, &state.db, hash_or_height)
+                        });
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Block");
 
-                    Ok(ReadResponse::Block(block))
+                        Ok(ReadResponse::Block(block))
+                    })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::Block"))
                 .boxed()
@@ -1113,16 +1135,19 @@ impl Service<ReadRequest> for ReadStateService {
                 // # Performance
                 //
                 // Allow other async tasks to make progress while concurrently reading transactions from disk.
+                let span = Span::current();
                 tokio::task::spawn_blocking(move || {
-                    let transaction_and_height =
-                        state.best_chain_receiver.with_watch_data(|best_chain| {
-                            read::transaction(best_chain, &state.db, hash)
-                        });
+                    span.in_scope(move || {
+                        let transaction_and_height =
+                            state.best_chain_receiver.with_watch_data(|best_chain| {
+                                read::transaction(best_chain, &state.db, hash)
+                            });
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Transaction");
 
-                    Ok(ReadResponse::Transaction(transaction_and_height))
+                        Ok(ReadResponse::Transaction(transaction_and_height))
+                    })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::Transaction"))
                 .boxed()
@@ -1143,15 +1168,19 @@ impl Service<ReadRequest> for ReadStateService {
                 // # Performance
                 //
                 // Allow other async tasks to make progress while concurrently reading trees from disk.
+                let span = Span::current();
                 tokio::task::spawn_blocking(move || {
-                    let sapling_tree = state.best_chain_receiver.with_watch_data(|best_chain| {
-                        read::sapling_tree(best_chain, &state.db, hash_or_height)
-                    });
+                    span.in_scope(move || {
+                        let sapling_tree =
+                            state.best_chain_receiver.with_watch_data(|best_chain| {
+                                read::sapling_tree(best_chain, &state.db, hash_or_height)
+                            });
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::SaplingTree");
 
-                    Ok(ReadResponse::SaplingTree(sapling_tree))
+                        Ok(ReadResponse::SaplingTree(sapling_tree))
+                    })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::SaplingTree"))
                 .boxed()
@@ -1172,15 +1201,19 @@ impl Service<ReadRequest> for ReadStateService {
                 // # Performance
                 //
                 // Allow other async tasks to make progress while concurrently reading trees from disk.
+                let span = Span::current();
                 tokio::task::spawn_blocking(move || {
-                    let orchard_tree = state.best_chain_receiver.with_watch_data(|best_chain| {
-                        read::orchard_tree(best_chain, &state.db, hash_or_height)
-                    });
+                    span.in_scope(move || {
+                        let orchard_tree =
+                            state.best_chain_receiver.with_watch_data(|best_chain| {
+                                read::orchard_tree(best_chain, &state.db, hash_or_height)
+                            });
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::OrchardTree");
 
-                    Ok(ReadResponse::OrchardTree(orchard_tree))
+                        Ok(ReadResponse::OrchardTree(orchard_tree))
+                    })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::OrchardTree"))
                 .boxed()
@@ -1205,10 +1238,12 @@ impl Service<ReadRequest> for ReadStateService {
                 // # Performance
                 //
                 // Allow other async tasks to make progress while concurrently reading transaction IDs from disk.
+                let span = Span::current();
                 tokio::task::spawn_blocking(move || {
-                    let tx_ids = state.best_chain_receiver.with_watch_data(|best_chain| {
-                        read::transparent_tx_ids(best_chain, &state.db, addresses, height_range)
-                    });
+                    span.in_scope(move || {
+                        let tx_ids = state.best_chain_receiver.with_watch_data(|best_chain| {
+                            read::transparent_tx_ids(best_chain, &state.db, addresses, height_range)
+                        });
 
                         // The work is done in the future.
                         timer.finish(
@@ -1217,7 +1252,8 @@ impl Service<ReadRequest> for ReadStateService {
                             "ReadRequest::TransactionIdsByAddresses",
                         );
 
-                    tx_ids.map(ReadResponse::AddressesTransactionIds)
+                        tx_ids.map(ReadResponse::AddressesTransactionIds)
+                    })
                 })
                 .map(|join_result| {
                     join_result.expect("panic in ReadRequest::TransactionIdsByAddresses")
@@ -1241,15 +1277,18 @@ impl Service<ReadRequest> for ReadStateService {
                 // # Performance
                 //
                 // Allow other async tasks to make progress while concurrently reading balances from disk.
+                let span = Span::current();
                 tokio::task::spawn_blocking(move || {
-                    let balance = state.best_chain_receiver.with_watch_data(|best_chain| {
-                        read::transparent_balance(best_chain, &state.db, addresses)
-                    })?;
+                    span.in_scope(move || {
+                        let balance = state.best_chain_receiver.with_watch_data(|best_chain| {
+                            read::transparent_balance(best_chain, &state.db, addresses)
+                        })?;
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::AddressBalance");
 
-                    Ok(ReadResponse::AddressBalance(balance))
+                        Ok(ReadResponse::AddressBalance(balance))
+                    })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::AddressBalance"))
                 .boxed()
@@ -1271,15 +1310,18 @@ impl Service<ReadRequest> for ReadStateService {
                 // # Performance
                 //
                 // Allow other async tasks to make progress while concurrently reading UTXOs from disk.
+                let span = Span::current();
                 tokio::task::spawn_blocking(move || {
-                    let utxos = state.best_chain_receiver.with_watch_data(|best_chain| {
-                        read::transparent_utxos(state.network, best_chain, &state.db, addresses)
-                    });
+                    span.in_scope(move || {
+                        let utxos = state.best_chain_receiver.with_watch_data(|best_chain| {
+                            read::transparent_utxos(state.network, best_chain, &state.db, addresses)
+                        });
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::UtxosByAddresses");
 
-                    utxos.map(ReadResponse::Utxos)
+                        utxos.map(ReadResponse::Utxos)
+                    })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::UtxosByAddresses"))
                 .boxed()
