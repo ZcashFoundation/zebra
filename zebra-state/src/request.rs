@@ -9,6 +9,8 @@ use std::{
 use zebra_chain::{
     amount::NegativeAllowed,
     block::{self, Block},
+    history_tree::HistoryTree,
+    parallel::tree::NoteCommitmentTrees,
     serialization::SerializationError,
     transaction,
     transparent::{self, utxos_from_ordered_utxos},
@@ -175,6 +177,43 @@ pub struct FinalizedBlock {
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
+}
+
+/// Wraps note commitment trees and the history tree together.
+pub struct Treestate {
+    /// Note commitment trees.
+    pub note_commitment_trees: NoteCommitmentTrees,
+    /// History tree.
+    pub history_tree: Arc<HistoryTree>,
+}
+
+/// Contains a block ready to be committed together with its associated
+/// treestate.
+///
+/// Zebra's non-finalized state passes this `struct` over to the finalized state
+/// when committing a block. The associated treestate is passed so that the
+/// finalized state does not have to retrieve the previous treestate from the
+/// database and recompute the new one.
+pub struct FinalizedBlockWithTrees {
+    /// A block ready to be committed.
+    pub finalized: FinalizedBlock,
+    /// The tresstate associated with the block.
+    pub treestate: Option<Treestate>,
+}
+
+impl From<Arc<Block>> for FinalizedBlockWithTrees {
+    fn from(block: Arc<Block>) -> Self {
+        Self::from(FinalizedBlock::from(block))
+    }
+}
+
+impl From<FinalizedBlock> for FinalizedBlockWithTrees {
+    fn from(block: FinalizedBlock) -> Self {
+        Self {
+            finalized: block,
+            treestate: None,
+        }
+    }
 }
 
 impl From<&PreparedBlock> for PreparedBlock {

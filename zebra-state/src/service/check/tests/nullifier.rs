@@ -82,7 +82,7 @@ proptest! {
         // randomly choose to commit the block to the finalized or non-finalized state
         if use_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone(), "test");
+            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
 
             // the block was committed
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
@@ -332,7 +332,7 @@ proptest! {
         // randomly choose to commit the next block to the finalized or non-finalized state
         if duplicate_in_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone(), "test");
+            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
 
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
@@ -416,7 +416,7 @@ proptest! {
         // randomly choose to commit the block to the finalized or non-finalized state
         if use_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone(), "test");
+            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
 
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
@@ -582,7 +582,7 @@ proptest! {
         // randomly choose to commit the next block to the finalized or non-finalized state
         if duplicate_in_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone(), "test");
+            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
 
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
@@ -660,7 +660,7 @@ proptest! {
         // randomly choose to commit the block to the finalized or non-finalized state
         if use_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone(), "test");
+            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
 
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());
@@ -834,7 +834,7 @@ proptest! {
         // randomly choose to commit the next block to the finalized or non-finalized state
         if duplicate_in_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone(), "test");
+            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
 
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
             prop_assert!(commit_result.is_ok());

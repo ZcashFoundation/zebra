@@ -176,7 +176,7 @@ proptest! {
         // randomly choose to commit the block to the finalized or non-finalized state
         if use_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone(), "test");
+            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
 
             // the block was committed
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
@@ -262,7 +262,7 @@ proptest! {
 
         if use_finalized_state_spend {
             let block2 = FinalizedBlock::from(Arc::new(block2));
-            let commit_result = state.disk.commit_finalized_direct(block2.clone(), "test");
+            let commit_result = state.disk.commit_finalized_direct(block2.clone().into(), "test");
 
             // the block was committed
             prop_assert_eq!(Some((Height(2), block2.hash)), state.best_tip());
@@ -591,7 +591,7 @@ proptest! {
 
         if use_finalized_state_spend {
             let block2 = FinalizedBlock::from(block2.clone());
-            let commit_result = state.disk.commit_finalized_direct(block2.clone(), "test");
+            let commit_result = state.disk.commit_finalized_direct(block2.clone().into(), "test");
 
             // the block was committed
             prop_assert_eq!(Some((Height(2), block2.hash)), state.best_tip());
@@ -846,7 +846,9 @@ fn new_state_with_mainnet_transparent_data(
 
     if use_finalized_state {
         let block1 = FinalizedBlock::from(block1.clone());
-        let commit_result = state.disk.commit_finalized_direct(block1.clone(), "test");
+        let commit_result = state
+            .disk
+            .commit_finalized_direct(block1.clone().into(), "test");
 
         // the block was committed
         assert_eq!(Some((Height(1), block1.hash)), state.best_tip());

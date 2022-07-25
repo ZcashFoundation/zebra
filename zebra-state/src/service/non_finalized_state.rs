@@ -12,12 +12,13 @@ use zebra_chain::{
     block::{self, Block},
     history_tree::HistoryTree,
     orchard,
+    parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     sapling, sprout, transparent,
 };
 
 use crate::{
-    request::ContextuallyValidBlock,
+    request::{ContextuallyValidBlock, FinalizedBlockWithTrees, Treestate},
     service::{check, finalized_state::ZebraDb},
     FinalizedBlock, PreparedBlock, ValidateContextError,
 };
@@ -80,7 +81,7 @@ impl NonFinalizedState {
 
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
-    pub fn finalize(&mut self) -> FinalizedBlock {
+    pub fn finalize(&mut self) -> FinalizedBlockWithTrees {
         // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
         // Neither of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
@@ -90,6 +91,17 @@ impl NonFinalizedState {
 
         // extract best chain
         let mut best_chain = chains.next_back().expect("there's at least one chain");
+
+        // Obtain the treestate associated with the block being finalized.
+        let treestate = Treestate {
+            note_commitment_trees: NoteCommitmentTrees {
+                sprout: best_chain.sprout_note_commitment_tree.clone(),
+                sapling: best_chain.sapling_note_commitment_tree.clone(),
+                orchard: best_chain.orchard_note_commitment_tree.clone(),
+            },
+            history_tree: best_chain.history_tree.clone(),
+        };
+
         // clone if required
         let write_best_chain = Arc::make_mut(&mut best_chain);
 
@@ -129,7 +141,12 @@ impl NonFinalizedState {
 
         self.update_metrics_for_chains();
 
-        finalizing.into()
+        // Add the treestate to the finalized block.
+        let finalized = FinalizedBlock::from(finalizing);
+        let mut finalized_with_trees = FinalizedBlockWithTrees::from(finalized);
+        finalized_with_trees.treestate = Some(treestate);
+
+        finalized_with_trees
     }
 
     /// Commit block to the non-finalized state, on top of:
