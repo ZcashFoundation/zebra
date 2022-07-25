@@ -1458,10 +1458,11 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
                     "([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block)",
                 );
                 if log_result.is_err() {
+                    // This error takes up about 100 lines, and looks like a panic message
                     tracing::warn!(
-                    ?log_result,
-                    "ignoring a lightwalletd test failure, to work around a lightwalletd hang bug",
-                );
+                        multi_line_error = ?log_result,
+                        "ignoring a lightwalletd test failure, to work around a lightwalletd hang bug",
+                    );
                 }
             }
         }

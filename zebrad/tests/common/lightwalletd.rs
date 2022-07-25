@@ -28,7 +28,7 @@ use super::{
     },
     launch::{
         ZebradTestDirExt, LIGHTWALLETD_DELAY, LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
-        LIGHTWALLETD_UPDATE_TIP_DELAY,
+        LIGHTWALLETD_UPDATE_TIP_DELAY, ZEBRAD_EXTRA_DELAY_FOR_LIGHTWALLETD_WORKAROUND,
     },
 };
 
@@ -364,11 +364,14 @@ impl LightwalletdTestType {
 
     /// Returns the `zebrad` timeout for this test type.
     pub fn zebrad_timeout(&self) -> Duration {
-        match self {
+        let base_timeout = match self {
             LaunchWithEmptyState => LIGHTWALLETD_DELAY,
             FullSyncFromGenesis { .. } => LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
             UpdateCachedState | UpdateZebraCachedStateNoRpc => LIGHTWALLETD_UPDATE_TIP_DELAY,
-        }
+        };
+
+        // If lightwalletd hangs and times out, Zebra needs a bit of extra time to finish
+        base_timeout + ZEBRAD_EXTRA_DELAY_FOR_LIGHTWALLETD_WORKAROUND
     }
 
     /// Returns the `lightwalletd` timeout for this test type.
@@ -380,7 +383,11 @@ impl LightwalletdTestType {
 
         // We use the same timeouts for zebrad and lightwalletd,
         // because the tests swap between checking zebrad and lightwalletd.
-        self.zebrad_timeout()
+        match self {
+            LaunchWithEmptyState => LIGHTWALLETD_DELAY,
+            FullSyncFromGenesis { .. } => LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
+            UpdateCachedState | UpdateZebraCachedStateNoRpc => LIGHTWALLETD_UPDATE_TIP_DELAY,
+        }
     }
 
     /// Returns Zebra log regexes that indicate the tests have failed,
