@@ -45,13 +45,25 @@ pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(2);
 /// The amount of time we wait for lightwalletd to update to the tip.
 ///
 /// The cached tip can be a few days old, and Zebra needs time to activate its mempool.
-pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = Duration::from_secs(20 * 60);
+///
+/// Currently, `zebrad` syncs are slower than `lightwalletd` syncs, so we re-use its timeout.
+///
+/// TODO: reduce to 20 minutes when `zebrad` sync performance improves
+pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = LIGHTWALLETD_FULL_SYNC_TIP_DELAY;
 
 /// The amount of time we wait for lightwalletd to do a full sync to the tip.
 ///
 /// `lightwalletd` takes about an hour to fully sync,
 /// and Zebra needs time to activate its mempool.
 pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = Duration::from_secs(90 * 60);
+
+/// The amount of extra time we wait for Zebra to sync to the tip,
+/// after we ignore a lightwalletd failure.
+///
+/// Zebra logs a status entry every minute, so there should be at least 4 in this interval.
+///
+/// TODO: remove this extra time when lightwalletd hangs are fixed
+pub const ZEBRAD_EXTRA_DELAY_FOR_LIGHTWALLETD_WORKAROUND: Duration = Duration::from_secs(5 * 60);
 
 /// Extension trait for methods on `tempfile::TempDir` for using it as a test
 /// directory for `zebrad`.
