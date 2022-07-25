@@ -32,10 +32,11 @@ impl CodeTimer {
     /// or when [`CodeTimer::finish()`] is called.
     #[track_caller]
     pub fn start() -> Self {
-        trace!("starting code timer",);
+        let start = Instant::now();
+        trace!(?start, "starting code timer");
 
         Self {
-            start: Instant::now(),
+            start,
             min_info_time: DEFAULT_MIN_INFO_TIME,
             min_warn_time: DEFAULT_MIN_WARN_TIME,
         }
@@ -43,35 +44,63 @@ impl CodeTimer {
 
     /// Finish timing the execution of a function, method, or other code region.
     #[track_caller]
-    pub fn finish(self) {
-        std::mem::drop(self);
+    pub fn finish<S>(self, module_path: &'static str, line: u32, description: impl Into<Option<S>>)
+    where
+        S: ToString,
+    {
+        self.finish_inner(Some(module_path), Some(line), description);
+    }
+
+    /// Finish timing the execution of a function, method, or other code region.
+    ///
+    /// This private method can be called from [`CodeTimer::finish()`] or `drop()`.
+    #[track_caller]
+    fn finish_inner<S>(
+        &self,
+        module_path: impl Into<Option<&'static str>>,
+        line: impl Into<Option<u32>>,
+        description: impl Into<Option<S>>,
+    ) where
+        S: ToString,
+    {
+        let execution = self.start.elapsed();
+        let execution_time = humantime_milliseconds(execution);
+
+        let module_path = module_path.into();
+        let line = line.into();
+        let description = description
+            .into()
+            .map(|desc| desc.to_string() + " ")
+            .unwrap_or_default();
+
+        if execution >= self.min_warn_time {
+            warn!(
+                ?execution_time,
+                ?module_path,
+                ?line,
+                "{description}code took a long time to execute",
+            );
+        } else if execution >= self.min_info_time {
+            info!(
+                ?execution_time,
+                ?module_path,
+                ?line,
+                "{description}code took longer than expected to execute",
+            );
+        } else {
+            trace!(
+                ?execution_time,
+                ?module_path,
+                ?line,
+                "{description}code timer finished",
+            );
+        }
     }
 }
 
 impl Drop for CodeTimer {
     #[track_caller]
     fn drop(&mut self) {
-        let execution = self.start.elapsed();
-        let execution_time = humantime_milliseconds(execution);
-
-        if execution >= self.min_warn_time {
-            warn!(
-                ?execution_time,
-                start_time = ?self.start,
-                "code took a long time to execute",
-            );
-        } else if execution >= self.min_info_time {
-            info!(
-                ?execution_time,
-                start_time = ?self.start,
-                "code took longer than expected to execute",
-            );
-        } else {
-            trace!(
-                ?execution_time,
-                start_time = ?self.start,
-                "finishing code timer",
-            );
-        }
+        self.finish_inner(None, None, "(dropped, cancelled, or aborted)")
     }
 }

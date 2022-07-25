@@ -168,13 +168,18 @@ impl StateService {
         network: Network,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         let timer = CodeTimer::start();
-
         let disk = FinalizedState::new(&config, network);
+        timer.finish(module_path!(), line!(), "opening finalized state database");
+
+        let timer = CodeTimer::start();
         let initial_tip = disk
             .db()
             .tip_block()
             .map(FinalizedBlock::from)
             .map(ChainTipBlock::from);
+        timer.finish(module_path!(), line!(), "fetching database tip");
+
+        let timer = CodeTimer::start();
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
 
@@ -195,8 +200,7 @@ impl StateService {
             chain_tip_sender,
             best_chain_sender,
         };
-        // The initialization work is done.
-        timer.finish();
+        timer.finish(module_path!(), line!(), "initializing state service");
 
         tracing::info!("starting legacy chain check");
         let timer = CodeTimer::start();
@@ -223,8 +227,7 @@ impl StateService {
             }
         }
         tracing::info!("no legacy chain found");
-        // The legacy chain check work is done.
-        timer.finish();
+        timer.finish(module_path!(), line!(), "legacy chain check");
 
         (state, read_only_service, latest_chain_tip, chain_tip_change)
     }
@@ -784,7 +787,7 @@ impl Service<Request> for StateService {
                     tokio::task::block_in_place(|| self.queue_and_commit_non_finalized(prepared));
 
                 // The work is all done, the future just waits on a channel for the result
-                timer.finish();
+                timer.finish(module_path!(), line!(), "CommitBlock");
 
                 async move {
                     rsp_rx
@@ -822,7 +825,7 @@ impl Service<Request> for StateService {
                     tokio::task::block_in_place(|| self.queue_and_commit_finalized(finalized));
 
                 // The work is all done, the future just waits on a channel for the result
-                timer.finish();
+                timer.finish(module_path!(), line!(), "CommitFinalizedBlock");
 
                 async move {
                     rsp_rx
@@ -854,7 +857,7 @@ impl Service<Request> for StateService {
                 let rsp = Ok(Response::Depth(self.best_depth(hash)));
 
                 // The work is all done, the future just returns the result.
-                timer.finish();
+                timer.finish(module_path!(), line!(), "Depth");
 
                 async move { rsp }.boxed()
             }
@@ -874,7 +877,7 @@ impl Service<Request> for StateService {
                 let rsp = Ok(Response::Tip(self.best_tip()));
 
                 // The work is all done, the future just returns the result.
-                timer.finish();
+                timer.finish(module_path!(), line!(), "Tip");
 
                 async move { rsp }.boxed()
             }
@@ -894,7 +897,7 @@ impl Service<Request> for StateService {
                 ));
 
                 // The work is all done, the future just returns the result.
-                timer.finish();
+                timer.finish(module_path!(), line!(), "BlockLocator");
 
                 async move { rsp }.boxed()
             }
@@ -918,8 +921,8 @@ impl Service<Request> for StateService {
                 tokio::task::spawn_blocking(move || {
                     let rsp = read::transaction(best_chain, &db, hash);
 
-                    // The work is done in the future.
-                    timer.finish();
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "Transaction");
 
                     Ok(Response::Transaction(rsp.map(|(tx, _height)| tx)))
                 })
@@ -946,8 +949,8 @@ impl Service<Request> for StateService {
                 tokio::task::spawn_blocking(move || {
                     let rsp = read::block(best_chain, &db, hash_or_height);
 
-                    // The work is done in the future.
-                    timer.finish();
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "Block");
 
                     Ok(Response::Block(rsp))
                 })
@@ -971,7 +974,7 @@ impl Service<Request> for StateService {
                 }
 
                 // The future waits on a channel for a response.
-                timer.finish();
+                timer.finish(module_path!(), line!(), "AwaitUtxo");
 
                 fut.boxed()
             }
@@ -992,7 +995,7 @@ impl Service<Request> for StateService {
                     self.find_best_chain_hashes(known_blocks, stop, MAX_FIND_BLOCK_HASHES_RESULTS);
 
                 // The work is all done, the future just returns the result.
-                timer.finish();
+                timer.finish(module_path!(), line!(), "FindBlockHashes");
 
                 async move { Ok(Response::BlockHashes(res)) }.boxed()
             }
@@ -1040,7 +1043,7 @@ impl Service<Request> for StateService {
                         .collect();
 
                     // Some of the work is done in the future.
-                    timer.finish();
+                    timer.finish(module_path!(), line!(), "FindBlockHeaders");
 
                     Ok(Response::BlockHeaders(res))
                 })
@@ -1085,8 +1088,8 @@ impl Service<ReadRequest> for ReadStateService {
                         read::block(best_chain, &state.db, hash_or_height)
                     });
 
-                    // The work is done in the future.
-                    timer.finish();
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::Block");
 
                     Ok(ReadResponse::Block(block))
                 })
@@ -1116,8 +1119,8 @@ impl Service<ReadRequest> for ReadStateService {
                             read::transaction(best_chain, &state.db, hash)
                         });
 
-                    // The work is done in the future.
-                    timer.finish();
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::Transaction");
 
                     Ok(ReadResponse::Transaction(transaction_and_height))
                 })
@@ -1145,8 +1148,8 @@ impl Service<ReadRequest> for ReadStateService {
                         read::sapling_tree(best_chain, &state.db, hash_or_height)
                     });
 
-                    // The work is done in the future.
-                    timer.finish();
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::SaplingTree");
 
                     Ok(ReadResponse::SaplingTree(sapling_tree))
                 })
@@ -1174,8 +1177,8 @@ impl Service<ReadRequest> for ReadStateService {
                         read::orchard_tree(best_chain, &state.db, hash_or_height)
                     });
 
-                    // The work is done in the future.
-                    timer.finish();
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::OrchardTree");
 
                     Ok(ReadResponse::OrchardTree(orchard_tree))
                 })
@@ -1207,8 +1210,12 @@ impl Service<ReadRequest> for ReadStateService {
                         read::transparent_tx_ids(best_chain, &state.db, addresses, height_range)
                     });
 
-                    // The work is done in the future.
-                    timer.finish();
+                        // The work is done in the future.
+                        timer.finish(
+                            module_path!(),
+                            line!(),
+                            "ReadRequest::TransactionIdsByAddresses",
+                        );
 
                     tx_ids.map(ReadResponse::AddressesTransactionIds)
                 })
@@ -1239,8 +1246,8 @@ impl Service<ReadRequest> for ReadStateService {
                         read::transparent_balance(best_chain, &state.db, addresses)
                     })?;
 
-                    // The work is done in the future.
-                    timer.finish();
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::AddressBalance");
 
                     Ok(ReadResponse::AddressBalance(balance))
                 })
@@ -1269,8 +1276,8 @@ impl Service<ReadRequest> for ReadStateService {
                         read::transparent_utxos(state.network, best_chain, &state.db, addresses)
                     });
 
-                    // The work is done in the future.
-                    timer.finish();
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::UtxosByAddresses");
 
                     utxos.map(ReadResponse::Utxos)
                 })

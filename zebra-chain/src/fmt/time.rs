@@ -2,6 +2,8 @@
 
 use std::time::Duration;
 
+// TODO: rename these functions to duration_*
+
 /// Returns a human-friendly formatted string for the whole number of seconds in `duration`.
 pub fn humantime_seconds(duration: impl Into<Duration>) -> String {
     let duration = duration.into();
