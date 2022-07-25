@@ -1036,6 +1036,7 @@ impl Service<Request> for StateService {
                 let timer = CodeTimer::start();
 
                 // TODO: move this work into the future, like Block and Transaction?
+                //       return heights instead, to improve lookup performance?
                 let res = self.find_best_chain_hashes(known_blocks, stop, count);
 
                 // And prepare data for concurrent execution

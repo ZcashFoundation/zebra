@@ -2,6 +2,20 @@
 
 use std::time::Duration;
 
+/// The minimum amount of time displayed with only seconds (no milliseconds).
+pub const MIN_SECONDS_ONLY_TIME: Duration = Duration::from_secs(5);
+
+/// Returns a human-friendly formatted string for the whole number of seconds in `duration`.
+pub fn duration_short(duration: impl Into<Duration>) -> String {
+    let duration = duration.into();
+
+    if duration >= MIN_SECONDS_ONLY_TIME {
+        humantime_seconds(duration)
+    } else {
+        humantime_milliseconds(duration)
+    }
+}
+
 // TODO: rename these functions to duration_*
 
 /// Returns a human-friendly formatted string for the whole number of seconds in `duration`.

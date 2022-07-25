@@ -4,7 +4,7 @@
 
 use std::time::{Duration, Instant};
 
-use crate::fmt::humantime_milliseconds;
+use crate::fmt::duration_short;
 
 /// The default minimum info-level message time.
 pub const DEFAULT_MIN_INFO_TIME: Duration = Duration::from_secs(5);
@@ -78,7 +78,7 @@ impl CodeTimer {
         self.has_finished = true;
 
         let execution = self.start.elapsed();
-        let execution_time = humantime_milliseconds(execution);
+        let execution_time = duration_short(execution);
 
         let module_path = module_path.into();
         let line = line.into();
