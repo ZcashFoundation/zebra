@@ -23,6 +23,9 @@ pub struct CodeTimer {
 
     /// The minimum duration for warning messages.
     min_warn_time: Duration,
+
+    /// `true` if this timer has finished.
+    has_finished: bool,
 }
 
 impl CodeTimer {
@@ -39,13 +42,18 @@ impl CodeTimer {
             start,
             min_info_time: DEFAULT_MIN_INFO_TIME,
             min_warn_time: DEFAULT_MIN_WARN_TIME,
+            has_finished: false,
         }
     }
 
     /// Finish timing the execution of a function, method, or other code region.
     #[track_caller]
-    pub fn finish<S>(self, module_path: &'static str, line: u32, description: impl Into<Option<S>>)
-    where
+    pub fn finish<S>(
+        mut self,
+        module_path: &'static str,
+        line: u32,
+        description: impl Into<Option<S>>,
+    ) where
         S: ToString,
     {
         self.finish_inner(Some(module_path), Some(line), description);
@@ -56,13 +64,19 @@ impl CodeTimer {
     /// This private method can be called from [`CodeTimer::finish()`] or `drop()`.
     #[track_caller]
     fn finish_inner<S>(
-        &self,
+        &mut self,
         module_path: impl Into<Option<&'static str>>,
         line: impl Into<Option<u32>>,
         description: impl Into<Option<S>>,
     ) where
         S: ToString,
     {
+        if self.has_finished {
+            return;
+        }
+
+        self.has_finished = true;
+
         let execution = self.start.elapsed();
         let execution_time = humantime_milliseconds(execution);
 
