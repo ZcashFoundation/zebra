@@ -18,7 +18,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::{ContextuallyValidBlock, FinalizedBlockWithTrees, Treestate},
+    request::{ContextuallyValidBlock, FinalizedWithTrees, Treestate},
     service::{check, finalized_state::ZebraDb},
     FinalizedBlock, PreparedBlock, ValidateContextError,
 };
@@ -81,7 +81,7 @@ impl NonFinalizedState {
 
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
-    pub fn finalize(&mut self) -> FinalizedBlockWithTrees {
+    pub fn finalize(&mut self) -> FinalizedWithTrees {
         // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
         // Neither of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
@@ -143,7 +143,7 @@ impl NonFinalizedState {
 
         // Add the treestate to the finalized block.
         let finalized = FinalizedBlock::from(finalizing);
-        let mut finalized_with_trees = FinalizedBlockWithTrees::from(finalized);
+        let mut finalized_with_trees = FinalizedWithTrees::from(finalized);
         finalized_with_trees.treestate = Some(treestate);
 
         finalized_with_trees

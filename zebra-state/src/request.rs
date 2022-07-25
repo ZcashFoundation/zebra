@@ -194,20 +194,20 @@ pub struct Treestate {
 /// when committing a block. The associated treestate is passed so that the
 /// finalized state does not have to retrieve the previous treestate from the
 /// database and recompute the new one.
-pub struct FinalizedBlockWithTrees {
+pub struct FinalizedWithTrees {
     /// A block ready to be committed.
     pub finalized: FinalizedBlock,
     /// The tresstate associated with the block.
     pub treestate: Option<Treestate>,
 }
 
-impl From<Arc<Block>> for FinalizedBlockWithTrees {
+impl From<Arc<Block>> for FinalizedWithTrees {
     fn from(block: Arc<Block>) -> Self {
         Self::from(FinalizedBlock::from(block))
     }
 }
 
-impl From<FinalizedBlock> for FinalizedBlockWithTrees {
+impl From<FinalizedBlock> for FinalizedWithTrees {
     fn from(block: FinalizedBlock) -> Self {
         Self {
             finalized: block,
