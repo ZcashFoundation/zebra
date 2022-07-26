@@ -53,7 +53,7 @@ pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = Duration::from_secs(60 * 60)
 /// The amount of time we wait for lightwalletd to do a full sync to the tip.
 ///
 /// See [`LIGHTWALLETD_UPDATE_TIP_DELAY`] for details.
-pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = Duration::from_secs(90 * 60);
+pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = Duration::from_secs(150 * 60);
 
 /// The amount of extra time we wait for Zebra to sync to the tip,
 /// after we ignore a lightwalletd failure.
