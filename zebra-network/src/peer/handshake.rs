@@ -1137,7 +1137,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
     // slow rate, and shutdown is a oneshot. If both futures
     // are ready, we want the shutdown to take priority over
     // sending a useless heartbeat.
-    let result = match future::select(shutdown_rx, heartbeat_run_loop).await {
+    match future::select(shutdown_rx, heartbeat_run_loop).await {
         Either::Left((Ok(CancelHeartbeatTask), _unused_run_loop)) => {
             tracing::trace!("shutting down because Client requested shut down");
             handle_heartbeat_shutdown(
@@ -1164,9 +1164,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
 
             result
         }
-    };
-
-    result
+    }
 }
 
 /// Send periodical heartbeats to `server_tx`, and update the peer status through
