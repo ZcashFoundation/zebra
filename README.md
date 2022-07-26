@@ -95,7 +95,7 @@ cargo install --features=<name> ...
 The recommended requirements for compiling and running `zebrad` are:
 - 4+ CPU cores
 - 16+ GB RAM
-- 50GB+ available disk space for building binaries and storing finalized state
+- 100GB+ available disk space for building binaries and storing cached chain state
 - 100+ Mbps network connections
 
 We continuously test that our builds and tests pass on:
@@ -147,8 +147,8 @@ If this is a problem for you, please
 [open a ticket.](https://github.com/ZcashFoundation/zebra/issues/new/choose)
 
 `zebrad`'s typical mainnet network usage is:
-- Initial sync: 31 GB download
-- Ongoing updates: 10-100 MB upload and download per day, depending on peer requests
+- Initial sync: 40 GB download
+- Ongoing updates: 10 MB - 1 GB upload and download per day, depending on user-created transaction size, and peer requests
 
 Zebra also performs an initial sync every time its internal database version changes.
 
