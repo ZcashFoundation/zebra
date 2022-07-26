@@ -457,6 +457,18 @@ impl Chain {
             .get(tx_loc.index.as_usize())
     }
 
+    /// Returns the [`block::Hash`] for `height`, if it exists in this chain.
+    pub fn hash_by_height(&self, height: Height) -> Option<block::Hash> {
+        let hash = self.blocks.get(&height)?.hash;
+
+        Some(hash)
+    }
+
+    /// Returns the [`Height`] for `hash`, if it exists in this chain.
+    pub fn height_by_hash(&self, hash: block::Hash) -> Option<Height> {
+        self.height_by_hash.get(&hash).cloned()
+    }
+
     /// Returns the non-finalized tip block hash and height.
     #[allow(dead_code)]
     pub fn non_finalized_tip(&self) -> (block::Hash, block::Height) {
