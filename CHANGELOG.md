@@ -10,6 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 This release fixes multiple bugs in proof and signature verification, which were causing big performance issues near the blockchain tip.
 It also improves Zebra's sync performance and reliability under heavy load.
 
+### Disk and Network Usage Changes
+
+Zebra now uses around 50 - 100 GB of disk space, because many large transactions were recently added to the block chain.
+
+When there are a lot of large user-generated transactions on the network, Zebra can upload or download 1 GB or more per day.
+
 ### Configuration Changes
 
 - Split the checkpoint and full verification [`sync` concurrency options](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html) (#4726, #4758):
