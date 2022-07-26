@@ -36,7 +36,11 @@ impl CodeTimer {
     #[track_caller]
     pub fn start() -> Self {
         let start = Instant::now();
-        trace!(?start, "starting code timer");
+        trace!(
+            target: "run time",
+            ?start,
+            "started code timer",
+        );
 
         Self {
             start,
@@ -47,7 +51,6 @@ impl CodeTimer {
     }
 
     /// Finish timing the execution of a function, method, or other code region.
-    #[track_caller]
     pub fn finish<S>(
         mut self,
         module_path: &'static str,
@@ -62,7 +65,6 @@ impl CodeTimer {
     /// Finish timing the execution of a function, method, or other code region.
     ///
     /// This private method can be called from [`CodeTimer::finish()`] or `drop()`.
-    #[track_caller]
     fn finish_inner<S>(
         &mut self,
         module_path: impl Into<Option<&'static str>>,
@@ -78,42 +80,48 @@ impl CodeTimer {
         self.has_finished = true;
 
         let execution = self.start.elapsed();
-        let execution_time = duration_short(execution);
+        let time = duration_short(execution);
+        let time = time.as_str();
 
-        let module_path = module_path.into();
-        let line = line.into();
+        let module = module_path.into().unwrap_or_default();
+
+        let line = line.into().map(|line| line.to_string()).unwrap_or_default();
+        let line = line.as_str();
+
         let description = description
             .into()
-            .map(|desc| desc.to_string() + " ")
+            .map(|desc| desc.to_string())
             .unwrap_or_default();
 
         if execution >= self.min_warn_time {
             warn!(
-                ?execution_time,
-                ?module_path,
-                ?line,
-                "{description}code took a long time to execute",
+                target: "run time",
+                %time,
+                %module,
+                %line,
+                "very long {description}",
             );
         } else if execution >= self.min_info_time {
             info!(
-                ?execution_time,
-                ?module_path,
-                ?line,
-                "{description}code took longer than expected to execute",
+                target: "run time",
+                %time,
+                %module,
+                %line,
+                "long {description}",
             );
         } else {
             trace!(
-                ?execution_time,
-                ?module_path,
-                ?line,
-                "{description}code timer finished",
+                target: "run time",
+                %time,
+                %module,
+                %line,
+                "finished {description} code timer",
             );
         }
     }
 }
 
 impl Drop for CodeTimer {
-    #[track_caller]
     fn drop(&mut self) {
         self.finish_inner(None, None, "(dropped, cancelled, or aborted)")
     }
