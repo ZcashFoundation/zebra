@@ -311,16 +311,20 @@ impl LightwalletdTestType {
             default_test_config()
         };
 
-        if !self.needs_zebra_cached_state() {
-            return Some(config);
-        }
-
-        let zebra_state_path = self.zebrad_state_path(test_name)?;
-
         let mut config = match config {
             Ok(config) => config,
             Err(error) => return Some(Err(error)),
         };
+
+        // We want to preload the consensus parameters,
+        // except when we're doing the quick empty state test
+        config.consensus.debug_skip_parameter_preload = !self.needs_zebra_cached_state();
+
+        if !self.needs_zebra_cached_state() {
+            return Some(Ok(config));
+        }
+
+        let zebra_state_path = self.zebrad_state_path(test_name)?;
 
         config.sync.checkpoint_verify_concurrency_limit =
             zebrad::components::sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
