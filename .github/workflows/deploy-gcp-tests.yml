@@ -256,7 +256,7 @@ jobs:
       # - To ${{ inputs.zebra_state_dir || inputs.disk_prefix }} if not
       #
       # If there are multiple disks:
-      # - prefer images generated from the `main` branch, then any other branch
+      # - prefer images generated from this branch, then the `main` branch, then any other branch
       # - prefer newer images to older images
       #
       # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable
@@ -273,20 +273,28 @@ jobs:
               DISK_PREFIX=${{ inputs.zebra_state_dir || inputs.disk_prefix }}
           fi
 
-          # Try to find an image generated from the main branch
+          # Try to find an image generated from this branch and commit
           # Fields are listed in the "Create image from state disk" step
-          CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "main Disk: $CACHED_DISK_NAME"
+          BRANCH_DISK_NAME="${DISK_PREFIX}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
+          CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${BRANCH_DISK_NAME}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT} Disk: $CACHED_DISK_NAME"
+
+          if [[ -z "$CACHED_DISK_NAME" ]]; then
+              # Try to find an image generated from the main branch
+              CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+              echo "main Disk: $CACHED_DISK_NAME"
+          fi
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               # Try to find an image generated from any other branch
               CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-              echo "Disk: $CACHED_DISK_NAME"
+              echo "any branch Disk: $CACHED_DISK_NAME"
           fi
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               echo "No cached state disk available"
-              echo "Expected ${DISK_PREFIX}-(branch)-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
+              echo "Expected ${BRANCH_DISK_NAME}"
+              echo "Also searched for any commit on main, and any commit on any branch"
               echo "Cached state test jobs must depend on the cached state rebuild job"
               exit 1
           fi
