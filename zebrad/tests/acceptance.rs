@@ -1367,7 +1367,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         let lightwalletd = if test_type == LaunchWithEmptyState {
             ldir.spawn_lightwalletd_child(None, args![])?
         } else {
-            ldir.spawn_lightwalletd_child(lightwalletd_state_path, args![])?
+            ldir.spawn_lightwalletd_child(lightwalletd_state_path.clone(), args![])?
         };
 
         let mut lightwalletd = lightwalletd
@@ -1457,12 +1457,35 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
                 let log_result = lightwalletd.expect_stdout_line_matches(
                     "([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block)",
                 );
+
                 if log_result.is_err() {
                     // This error takes up about 100 lines, and looks like a panic message
                     tracing::warn!(
                         multi_line_error = ?log_result,
                         "ignoring a lightwalletd test failure, to work around a lightwalletd hang bug",
                     );
+
+                    // Try to re-launch `lightwalletd` to create a valid cached state,
+                    // but ignore any sync errors.
+                    //
+                    // TODO: when lightwalletd runs without hanging, remove this restart workaround
+                    tracing::info!("killing and restarting lightwalletd");
+                    let _ = lightwalletd.kill();
+
+                    // Wait for it to shut down
+                    std::thread::sleep(Duration::from_secs(5));
+
+                    let ldir = testdir()?;
+                    let ldir = ldir.with_lightwalletd_config(config.rpc.listen_addr.unwrap())?;
+                    let new_lightwalletd =
+                        ldir.spawn_lightwalletd_child(lightwalletd_state_path, args![])?;
+                    let new_lightwalletd =
+                        new_lightwalletd.with_timeout(test_type.lightwalletd_timeout());
+                    *lightwalletd = new_lightwalletd;
+
+                    lightwalletd.expect_stdout_line_matches(
+                        "([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block)",
+                    )?;
                 }
             }
         }
