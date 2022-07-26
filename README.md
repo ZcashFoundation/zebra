@@ -95,7 +95,7 @@ cargo install --features=<name> ...
 The recommended requirements for compiling and running `zebrad` are:
 - 4+ CPU cores
 - 16+ GB RAM
-- 100GB+ available disk space for building binaries and storing cached chain state
+- 100 GB+ available disk space for building binaries and storing cached chain state
 - 100+ Mbps network connections
 
 We continuously test that our builds and tests pass on:
