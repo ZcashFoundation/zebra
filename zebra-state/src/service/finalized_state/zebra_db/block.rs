@@ -73,6 +73,14 @@ impl ZebraDb {
         self.db.zs_get(&hash_by_height, &height)
     }
 
+    /// Returns `true` if `hash` is present in the finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn contains_hash(&self, hash: block::Hash) -> bool {
+        let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
+
+        self.db.zs_contains(&height_by_hash, &hash)
+    }
+
     /// Returns the height of the given block if it exists.
     #[allow(clippy::unwrap_in_result)]
     pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
