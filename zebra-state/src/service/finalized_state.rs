@@ -292,8 +292,33 @@ impl FinalizedState {
                 // Update the note commitment trees.
                 note_commitment_trees.update_trees_parallel(&finalized.block)?;
 
+                // Check the block commitment if the history tree was not
+                // supplied by the non-finalized state. Note that we don't do
+                // this check for history trees supplied by the non-finalized
+                // state because the non-finalized state checks the block
+                // commitment.
+                //
+                // For Nu5-onward, the block hash commits only to
+                // non-authorizing data (see ZIP-244). This checks the
+                // authorizing data commitment, making sure the entire block
+                // contents were committed to. The test is done here (and not
+                // during semantic validation) because it needs the history tree
+                // root. While it _is_ checked during contextual validation,
+                // that is not called by the checkpoint verifier, and keeping a
+                // history tree there would be harder to implement.
+                //
+                // TODO: run this CPU-intensive cryptography in a parallel rayon
+                // thread, if it shows up in profiles
+                check::block_commitment_is_valid_for_chain_history(
+                    finalized.block.clone(),
+                    self.network,
+                    &history_tree,
+                )?;
+
                 // Update the history tree.
-                // TODO: run this CPU-intensive cryptography in a parallel rayon thread, if it shows up in profiles
+                //
+                // TODO: run this CPU-intensive cryptography in a parallel rayon
+                // thread, if it shows up in profiles
                 let history_tree_mut = Arc::make_mut(&mut history_tree);
                 let sapling_root = note_commitment_trees.sapling.root();
                 let orchard_root = note_commitment_trees.orchard.root();
@@ -307,21 +332,6 @@ impl FinalizedState {
                 (history_tree, note_commitment_trees)
             }
         };
-
-        // Check the block commitment. For Nu5-onward, the block hash commits only
-        // to non-authorizing data (see ZIP-244). This checks the authorizing data
-        // commitment, making sure the entire block contents were committed to.
-        // The test is done here (and not during semantic validation) because it needs
-        // the history tree root. While it _is_ checked during contextual validation,
-        // that is not called by the checkpoint verifier, and keeping a history tree there
-        // would be harder to implement.
-        //
-        // TODO: run this CPU-intensive cryptography in a parallel rayon thread, if it shows up in profiles
-        check::block_commitment_is_valid_for_chain_history(
-            finalized.block.clone(),
-            self.network,
-            &history_tree,
-        )?;
 
         let finalized_height = finalized.height;
         let finalized_hash = finalized.hash;
