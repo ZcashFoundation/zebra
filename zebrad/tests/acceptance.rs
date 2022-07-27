@@ -1377,9 +1377,6 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         // Wait until `lightwalletd` has launched
         lightwalletd.expect_stdout_line_matches(regex::escape("Starting gRPC server"))?;
 
-        // Clear `zebrad` logs between each `lightwalletd` log check
-        zebrad.expect_stdout_line_matches(".*")?;
-
         // Check that `lightwalletd` is calling the expected Zebra RPCs
 
         // getblockchaininfo
@@ -1394,18 +1391,12 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
             )?;
         }
 
-        // Clear `zebrad` logs between each `lightwalletd` log check
-        zebrad.expect_stdout_line_matches(".*")?;
-
         if test_type.needs_lightwalletd_cached_state() {
             lightwalletd.expect_stdout_line_matches("Found [0-9]{7} blocks in cache")?;
         } else if !test_type.allow_lightwalletd_cached_state() {
             // Timeout the test if we're somehow accidentally using a cached state in our temp dir
             lightwalletd.expect_stdout_line_matches("Found 0 blocks in cache")?;
         }
-
-        // Clear `zebrad` logs between each `lightwalletd` log check
-        zebrad.expect_stdout_line_matches(".*")?;
 
         // getblock with the first Sapling block in Zebra's state
         //
@@ -1442,6 +1433,12 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     };
 
     if test_type.needs_zebra_cached_state() {
+        // Syncing can take a while, so clear some `zebrad` and `lightwalletd` logs first
+        zebrad.expect_stdout_line_matches("sync_percent")?;
+        if let Some(ref mut lightwalletd) = lightwalletd {
+            lightwalletd.expect_stdout_line_matches("CurrentPrice")?;
+        }
+
         // Wait for Zebra to sync its cached state to the chain tip
         zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
@@ -1450,60 +1447,8 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
             lightwalletd
                 .expect_stdout_line_matches("([Aa]dding block to cache)|([Ww]aiting for block)")?;
 
-            // Clear `zebrad` logs between each `lightwalletd` log check
-            zebrad.expect_stdout_line_matches(".*")?;
-
-            // Clear the `zebrad` logs a few times during the long sync, to avoid the log buffers filling up.
-            // These regexes need to match:
-            // - every 400,000 blocks during the full sync, and
-            // - the tip blocks during the update sync (or waiting for more blocks)
-            //
-            // TODO: switch to a non-blocking tracing logger, and remove this workaround
-
-            // Block 7??,??? or tip blocks 17??,???
-            let log_result = lightwalletd.expect_stdout_line_matches(
-                "([Aa]dding block to cache 1?[7-9][0-9]{5})|([Ww]aiting for block)",
-            );
-            if log_result.is_err() {
-                // This error takes up about 100 lines, and looks like a panic message
-                tracing::warn!(
-                    multi_line_error = ?log_result,
-                    "ignoring a lightwalletd test failure, to work around a lightwalletd hang bug",
-                );
-            }
-
-            // Clear `zebrad` logs between each `lightwalletd` log check
-            zebrad.expect_stdout_line_matches(".*")?;
-
-            // Block 11??,??? or tip blocks 17??,???
-            let log_result = lightwalletd.expect_stdout_line_matches(
-                "([Aa]dding block to cache 1[1-9][0-9]{5})|([Ww]aiting for block)",
-            );
-            if log_result.is_err() {
-                // This error takes up about 100 lines, and looks like a panic message
-                tracing::warn!(
-                    multi_line_error = ?log_result,
-                    "ignoring a lightwalletd test failure, to work around a lightwalletd hang bug",
-                );
-            }
-
-            // Clear `zebrad` logs between each `lightwalletd` log check
-            zebrad.expect_stdout_line_matches(".*")?;
-
-            // Block 15??,??? or tip blocks 17??,???
-            let log_result = lightwalletd.expect_stdout_line_matches(
-                "([Aa]dding block to cache 1[5-9][0-9]{5})|([Ww]aiting for block)",
-            );
-            if log_result.is_err() {
-                // This error takes up about 100 lines, and looks like a panic message
-                tracing::warn!(
-                    multi_line_error = ?log_result,
-                    "ignoring a lightwalletd test failure, to work around a lightwalletd hang bug",
-                );
-            }
-
-            // Clear `zebrad` logs between each `lightwalletd` log check
-            zebrad.expect_stdout_line_matches(".*")?;
+            // Syncing can take a while, so clear some `zebrad` logs first
+            zebrad.expect_stdout_line_matches("sync_percent")?;
 
             // Wait for lightwalletd to sync to Zebra's tip.
             //
@@ -1547,12 +1492,10 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
                         new_lightwalletd.with_timeout(test_type.lightwalletd_timeout());
                     *lightwalletd = new_lightwalletd;
 
+                    // TODO: update the regex to `1[8-9][0-9]{5}` when mainnet reaches block 1_800_000
                     lightwalletd.expect_stdout_line_matches(
                         "([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block)",
                     )?;
-
-                    // Clear `zebrad` logs between each `lightwalletd` log check
-                    zebrad.expect_stdout_line_matches(".*")?;
                 }
             }
         }
@@ -1572,8 +1515,8 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
                     "Block hash changed, clearing mempool clients",
                 ))?;
 
-                // Clear `zebrad` logs between each `lightwalletd` log check
-                zebrad.expect_stdout_line_matches(".*")?;
+                // Syncing can take a while, so clear some `zebrad` logs first
+                zebrad.expect_stdout_line_matches("sync_percent")?;
 
                 lightwalletd
                     .expect_stdout_line_matches(regex::escape("Adding new mempool txid"))?;
