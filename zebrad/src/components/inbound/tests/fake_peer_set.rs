@@ -404,14 +404,41 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     // Test transaction 1 is gossiped
     let mut hs = HashSet::new();
     hs.insert(tx1_id);
+
+    // Transaction and Block IDs are gossipped, in any order
+    let possible_requests = &mut [
+        Request::AdvertiseTransactionIds(hs),
+        Request::AdvertiseBlock(block_two.hash()),
+    ]
+    .to_vec();
+
     peer_set
-        .expect_request(Request::AdvertiseTransactionIds(hs))
+        .expect_request_that(|request| {
+            let is_possible = possible_requests.contains(request);
+
+            *possible_requests = possible_requests
+                .clone()
+                .into_iter()
+                .filter(|possible| possible != request)
+                .collect();
+
+            is_possible
+        })
         .await
         .respond(Response::Nil);
 
-    // Block is gossiped then
     peer_set
-        .expect_request(Request::AdvertiseBlock(block_two.hash()))
+        .expect_request_that(|request| {
+            let is_possible = possible_requests.contains(request);
+
+            *possible_requests = possible_requests
+                .clone()
+                .into_iter()
+                .filter(|possible| possible != request)
+                .collect();
+
+            is_possible
+        })
         .await
         .respond(Response::Nil);
 
