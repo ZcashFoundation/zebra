@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::{
     block::{Block, Height},
+    diagnostic::CodeTimer,
     orchard, sapling, sprout,
 };
 
@@ -49,7 +50,8 @@ impl NoteCommitmentTrees {
         &mut self,
         block: &Arc<Block>,
     ) -> Result<(), NoteCommitmentTreeError> {
-        self.update_trees_parallel_list(
+        let timer = CodeTimer::start();
+        let res = self.update_trees_parallel_list(
             [(
                 block
                     .coinbase_height()
@@ -58,7 +60,9 @@ impl NoteCommitmentTrees {
             )]
             .into_iter()
             .collect(),
-        )
+        );
+        timer.finish(module_path!(), line!(), "update_trees_parallel");
+        res
     }
 
     /// Updates the note commitment trees using the transactions in `block`,
@@ -70,6 +74,7 @@ impl NoteCommitmentTrees {
         &mut self,
         block_list: BTreeMap<Height, Arc<Block>>,
     ) -> Result<(), NoteCommitmentTreeError> {
+        let timer = CodeTimer::start();
         // Prepare arguments for parallel threads
         let NoteCommitmentTrees {
             sprout,
@@ -77,30 +82,40 @@ impl NoteCommitmentTrees {
             orchard,
         } = self.clone();
 
+        timer.finish(module_path!(), line!(), "update_trees_parallel_list 1");
+
+        let timer = CodeTimer::start();
         let sprout_note_commitments: Vec<_> = block_list
             .values()
             .flat_map(|block| block.transactions.iter())
             .flat_map(|tx| tx.sprout_note_commitments())
             .cloned()
             .collect();
+        timer.finish(module_path!(), line!(), "update_trees_parallel_list 2");
+        let timer = CodeTimer::start();
         let sapling_note_commitments: Vec<_> = block_list
             .values()
             .flat_map(|block| block.transactions.iter())
             .flat_map(|tx| tx.sapling_note_commitments())
             .cloned()
             .collect();
+        timer.finish(module_path!(), line!(), "update_trees_parallel_list 3");
+
+        let timer = CodeTimer::start();
         let orchard_note_commitments: Vec<_> = block_list
             .values()
             .flat_map(|block| block.transactions.iter())
             .flat_map(|tx| tx.orchard_note_commitments())
             .cloned()
             .collect();
+        timer.finish(module_path!(), line!(), "update_trees_parallel_list 4");
 
         let mut sprout_result = None;
         let mut sapling_result = None;
         let mut orchard_result = None;
 
         rayon::in_place_scope_fifo(|scope| {
+            let timer = CodeTimer::start();
             if !sprout_note_commitments.is_empty() {
                 scope.spawn_fifo(|_scope| {
                     sprout_result = Some(Self::update_sprout_note_commitment_tree(
@@ -109,7 +124,9 @@ impl NoteCommitmentTrees {
                     ));
                 });
             }
+            timer.finish(module_path!(), line!(), "update_trees_parallel_list 5");
 
+            let timer = CodeTimer::start();
             if !sapling_note_commitments.is_empty() {
                 scope.spawn_fifo(|_scope| {
                     sapling_result = Some(Self::update_sapling_note_commitment_tree(
@@ -118,7 +135,9 @@ impl NoteCommitmentTrees {
                     ));
                 });
             }
+            timer.finish(module_path!(), line!(), "update_trees_parallel_list 6");
 
+            let timer = CodeTimer::start();
             if !orchard_note_commitments.is_empty() {
                 scope.spawn_fifo(|_scope| {
                     orchard_result = Some(Self::update_orchard_note_commitment_tree(
@@ -127,17 +146,26 @@ impl NoteCommitmentTrees {
                     ));
                 });
             }
+            timer.finish(module_path!(), line!(), "update_trees_parallel_list 7");
         });
 
+        let timer = CodeTimer::start();
         if let Some(sprout_result) = sprout_result {
             self.sprout = sprout_result?;
         }
+        timer.finish(module_path!(), line!(), "update_trees_parallel_list 8");
+
+        let timer = CodeTimer::start();
         if let Some(sapling_result) = sapling_result {
             self.sapling = sapling_result?;
         }
+        timer.finish(module_path!(), line!(), "update_trees_parallel_list 9");
+
+        let timer = CodeTimer::start();
         if let Some(orchard_result) = orchard_result {
             self.orchard = orchard_result?;
         }
+        timer.finish(module_path!(), line!(), "update_trees_parallel_list 10");
 
         Ok(())
     }

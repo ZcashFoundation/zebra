@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use crate::fmt::duration_short;
 
 /// The default minimum info-level message time.
-pub const DEFAULT_MIN_INFO_TIME: Duration = Duration::from_secs(5);
+pub const DEFAULT_MIN_INFO_TIME: Duration = Duration::from_secs(1);
 
 /// The default minimum warning message time.
 pub const DEFAULT_MIN_WARN_TIME: Duration = Duration::from_secs(20);

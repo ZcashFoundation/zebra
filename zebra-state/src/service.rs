@@ -34,7 +34,6 @@ use tower::buffer::Buffer;
 
 use zebra_chain::{
     block::{self, CountedHeader},
-    diagnostic::CodeTimer,
     parameters::{Network, NetworkUpgrade},
     transparent,
 };
@@ -167,19 +166,14 @@ impl StateService {
         config: Config,
         network: Network,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
-        let timer = CodeTimer::start();
         let disk = FinalizedState::new(&config, network);
-        timer.finish(module_path!(), line!(), "opening finalized state database");
 
-        let timer = CodeTimer::start();
         let initial_tip = disk
             .db()
             .tip_block()
             .map(FinalizedBlock::from)
             .map(ChainTipBlock::from);
-        timer.finish(module_path!(), line!(), "fetching database tip");
 
-        let timer = CodeTimer::start();
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
 
@@ -200,10 +194,8 @@ impl StateService {
             chain_tip_sender,
             best_chain_sender,
         };
-        timer.finish(module_path!(), line!(), "initializing state service");
 
         tracing::info!("starting legacy chain check");
-        let timer = CodeTimer::start();
 
         if let Some(tip) = state.best_tip() {
             if let Some(nu5_activation_height) = NetworkUpgrade::Nu5.activation_height(network) {
@@ -227,7 +219,6 @@ impl StateService {
             }
         }
         tracing::info!("no legacy chain found");
-        timer.finish(module_path!(), line!(), "legacy chain check");
 
         (state, read_only_service, latest_chain_tip, chain_tip_change)
     }
@@ -617,8 +608,6 @@ impl Service<Request> for StateService {
                     "type" => "commit_block",
                 );
 
-                let timer = CodeTimer::start();
-
                 self.assert_block_can_be_validated(&prepared);
 
                 self.pending_utxos
@@ -638,9 +627,6 @@ impl Service<Request> for StateService {
                 let rsp_rx = tokio::task::block_in_place(move || {
                     span.in_scope(|| self.queue_and_commit_non_finalized(prepared))
                 });
-
-                // The work is all done, the future just waits on a channel for the result
-                timer.finish(module_path!(), line!(), "CommitBlock");
 
                 let span = Span::current();
                 async move {
@@ -666,8 +652,6 @@ impl Service<Request> for StateService {
                     "type" => "commit_finalized_block",
                 );
 
-                let timer = CodeTimer::start();
-
                 self.pending_utxos.check_against(&finalized.new_outputs);
 
                 // # Performance
@@ -680,9 +664,6 @@ impl Service<Request> for StateService {
                 let rsp_rx = tokio::task::block_in_place(move || {
                     span.in_scope(|| self.queue_and_commit_finalized(finalized))
                 });
-
-                // The work is all done, the future just waits on a channel for the result
-                timer.finish(module_path!(), line!(), "CommitFinalizedBlock");
 
                 let span = Span::current();
                 async move {
@@ -710,13 +691,8 @@ impl Service<Request> for StateService {
                     "type" => "depth",
                 );
 
-                let timer = CodeTimer::start();
-
                 // TODO: move this work into the future, like Block and Transaction?
                 let rsp = Ok(Response::Depth(self.best_depth(hash)));
-
-                // The work is all done, the future just returns the result.
-                timer.finish(module_path!(), line!(), "Depth");
 
                 async move { rsp }.boxed()
             }
@@ -730,13 +706,8 @@ impl Service<Request> for StateService {
                     "type" => "tip",
                 );
 
-                let timer = CodeTimer::start();
-
                 // TODO: move this work into the future, like Block and Transaction?
                 let rsp = Ok(Response::Tip(self.best_tip()));
-
-                // The work is all done, the future just returns the result.
-                timer.finish(module_path!(), line!(), "Tip");
 
                 async move { rsp }.boxed()
             }
@@ -748,15 +719,10 @@ impl Service<Request> for StateService {
                     "type" => "block_locator",
                 );
 
-                let timer = CodeTimer::start();
-
                 // TODO: move this work into the future, like Block and Transaction?
                 let rsp = Ok(Response::BlockLocator(
                     self.block_locator().unwrap_or_default(),
                 ));
-
-                // The work is all done, the future just returns the result.
-                timer.finish(module_path!(), line!(), "BlockLocator");
 
                 async move { rsp }.boxed()
             }
@@ -767,8 +733,6 @@ impl Service<Request> for StateService {
                     "service" => "state",
                     "type" => "transaction",
                 );
-
-                let timer = CodeTimer::start();
 
                 // Prepare data for concurrent execution
                 let best_chain = self.mem.best_chain().cloned();
@@ -781,9 +745,6 @@ impl Service<Request> for StateService {
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(|| {
                         let rsp = read::transaction(best_chain, &db, hash);
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "Transaction");
 
                         Ok(Response::Transaction(rsp.map(|(tx, _height)| tx)))
                     })
@@ -799,8 +760,6 @@ impl Service<Request> for StateService {
                     "type" => "block",
                 );
 
-                let timer = CodeTimer::start();
-
                 // Prepare data for concurrent execution
                 let best_chain = self.mem.best_chain().cloned();
                 let db = self.disk.db().clone();
@@ -812,9 +771,6 @@ impl Service<Request> for StateService {
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
                         let rsp = read::block(best_chain, &db, hash_or_height);
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "Block");
 
                         Ok(Response::Block(rsp))
                     })
@@ -830,7 +786,6 @@ impl Service<Request> for StateService {
                     "type" => "await_utxo",
                 );
 
-                let timer = CodeTimer::start();
                 let span = Span::current();
 
                 let fut = self.pending_utxos.queue(outpoint);
@@ -838,9 +793,6 @@ impl Service<Request> for StateService {
                 if let Some(utxo) = self.any_utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
                 }
-
-                // The future waits on a channel for a response.
-                timer.finish(module_path!(), line!(), "AwaitUtxo");
 
                 fut.instrument(span).boxed()
             }
@@ -853,8 +805,6 @@ impl Service<Request> for StateService {
                 );
 
                 const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;
-
-                let timer = CodeTimer::start();
 
                 // Prepare data for concurrent execution
                 let best_chain = self.mem.best_chain().cloned();
@@ -873,9 +823,6 @@ impl Service<Request> for StateService {
                             stop,
                             MAX_FIND_BLOCK_HASHES_RESULTS,
                         );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "FindBlockHashes");
 
                         Ok(Response::BlockHashes(res))
                     })
@@ -902,8 +849,6 @@ impl Service<Request> for StateService {
                 // https://github.com/bitcoin/bitcoin/pull/4468/files#r17026905
                 let max_len = MAX_FIND_BLOCK_HEADERS_RESULTS - 2;
 
-                let timer = CodeTimer::start();
-
                 // Prepare data for concurrent execution
                 let best_chain = self.mem.best_chain().cloned();
                 let db = self.disk.db().clone();
@@ -920,9 +865,6 @@ impl Service<Request> for StateService {
                             .into_iter()
                             .map(|header| CountedHeader { header })
                             .collect();
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "FindBlockHeaders");
 
                         Ok(Response::BlockHeaders(res))
                     })
@@ -956,8 +898,6 @@ impl Service<ReadRequest> for ReadStateService {
                     "type" => "block",
                 );
 
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 // # Performance
@@ -969,9 +909,6 @@ impl Service<ReadRequest> for ReadStateService {
                         let block = state.best_chain_receiver.with_watch_data(|best_chain| {
                             read::block(best_chain, &state.db, hash_or_height)
                         });
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::Block");
 
                         Ok(ReadResponse::Block(block))
                     })
@@ -989,8 +926,6 @@ impl Service<ReadRequest> for ReadStateService {
                     "type" => "transaction",
                 );
 
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 // # Performance
@@ -1003,9 +938,6 @@ impl Service<ReadRequest> for ReadStateService {
                             state.best_chain_receiver.with_watch_data(|best_chain| {
                                 read::transaction(best_chain, &state.db, hash)
                             });
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::Transaction");
 
                         Ok(ReadResponse::Transaction(transaction_and_height))
                     })
@@ -1022,8 +954,6 @@ impl Service<ReadRequest> for ReadStateService {
                     "type" => "sapling_tree",
                 );
 
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 // # Performance
@@ -1036,9 +966,6 @@ impl Service<ReadRequest> for ReadStateService {
                             state.best_chain_receiver.with_watch_data(|best_chain| {
                                 read::sapling_tree(best_chain, &state.db, hash_or_height)
                             });
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::SaplingTree");
 
                         Ok(ReadResponse::SaplingTree(sapling_tree))
                     })
@@ -1055,8 +982,6 @@ impl Service<ReadRequest> for ReadStateService {
                     "type" => "orchard_tree",
                 );
 
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 // # Performance
@@ -1069,9 +994,6 @@ impl Service<ReadRequest> for ReadStateService {
                             state.best_chain_receiver.with_watch_data(|best_chain| {
                                 read::orchard_tree(best_chain, &state.db, hash_or_height)
                             });
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::OrchardTree");
 
                         Ok(ReadResponse::OrchardTree(orchard_tree))
                     })
@@ -1092,8 +1014,6 @@ impl Service<ReadRequest> for ReadStateService {
                     "type" => "transaction_ids_by_addresses",
                 );
 
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 // # Performance
@@ -1105,13 +1025,6 @@ impl Service<ReadRequest> for ReadStateService {
                         let tx_ids = state.best_chain_receiver.with_watch_data(|best_chain| {
                             read::transparent_tx_ids(best_chain, &state.db, addresses, height_range)
                         });
-
-                        // The work is done in the future.
-                        timer.finish(
-                            module_path!(),
-                            line!(),
-                            "ReadRequest::TransactionIdsByAddresses",
-                        );
 
                         tx_ids.map(ReadResponse::AddressesTransactionIds)
                     })
@@ -1131,8 +1044,6 @@ impl Service<ReadRequest> for ReadStateService {
                     "type" => "address_balance",
                 );
 
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 // # Performance
@@ -1144,9 +1055,6 @@ impl Service<ReadRequest> for ReadStateService {
                         let balance = state.best_chain_receiver.with_watch_data(|best_chain| {
                             read::transparent_balance(best_chain, &state.db, addresses)
                         })?;
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::AddressBalance");
 
                         Ok(ReadResponse::AddressBalance(balance))
                     })
@@ -1164,8 +1072,6 @@ impl Service<ReadRequest> for ReadStateService {
                     "type" => "utxos_by_addresses",
                 );
 
-                let timer = CodeTimer::start();
-
                 let state = self.clone();
 
                 // # Performance
@@ -1177,9 +1083,6 @@ impl Service<ReadRequest> for ReadStateService {
                         let utxos = state.best_chain_receiver.with_watch_data(|best_chain| {
                             read::transparent_utxos(state.network, best_chain, &state.db, addresses)
                         });
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::UtxosByAddresses");
 
                         utxos.map(ReadResponse::Utxos)
                     })
