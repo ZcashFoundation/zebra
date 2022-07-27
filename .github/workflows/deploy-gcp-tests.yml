@@ -567,10 +567,64 @@ jobs:
           '(estimated progress.*network_upgrade.*=.*Canopy)|(estimated progress.*network_upgrade.*=.*Nu5)|(test result:.*finished in)' \
           "
 
+  # follow the logs of the test we just launched, up to NU5 activation (or the test finishing)
+  logs-canopy:
+    name: Log ${{ inputs.test_id }} test (canopy)
+    needs: [ logs-heartwood ]
+    # If the previous job fails, we still want to show the logs.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.8.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Show recent logs, following until NU5 activation (or the test finishes)
+      - name: Show logs for ${{ inputs.test_id }} test (canopy)
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          docker logs \
+          --tail all \
+          --follow \
+          ${{ inputs.test_id }} | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          '(estimated progress.*network_upgrade.*=.*Nu5)|(test result:.*finished in)' \
+          "
+
   # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
   logs-checkpoint:
     name: Log ${{ inputs.test_id }} test (checkpoint)
-    needs: [ logs-heartwood ]
+    needs: [ logs-canopy ]
     # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
