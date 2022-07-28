@@ -1434,15 +1434,22 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
 
     let (mut zebrad, lightwalletd) = if test_type.needs_zebra_cached_state() {
         // Wait for Zebra to sync its cached state to the chain tip.
-        let zebrad_thread = std::thread::spawn(|| -> Result<_> {
+        let zebrad_thread = std::thread::spawn(move || -> Result<_> {
+            tracing::info!(?test_type, "waiting for Zebra to sync to the tip");
+
             zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
             Ok(zebrad)
         });
 
         // Zebra syncs can take a long time, so we need to clear the `lightwalletd` logs in parallel.
-        let zebrad_thread_and_lightwalletd = std::thread::spawn(|| -> Result<_> {
+        let zebrad_thread_and_lightwalletd = std::thread::spawn(move || -> Result<_> {
             if let Some(mut lightwalletd) = lightwalletd {
+                tracing::info!(
+                    ?test_type,
+                    "checking lightwalletd progress, while waiting for Zebra to sync to the tip",
+                );
+
                 while !zebrad_thread.is_finished() {
                     lightwalletd.expect_stdout_line_matches(
                         "([Aa]dding block to cache)|([Ww]aiting for block)",
@@ -1509,12 +1516,18 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
 
         // Check Zebra is still at the tip.
         // This shouldn't take too long, because we already checked Zebra was at the tip.
+        tracing::info!(?test_type, "checking Zebra is still at the tip");
         zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
         (zebrad, lightwalletd)
     } else {
         (zebrad, lightwalletd)
     };
+
+    tracing::info!(
+        ?test_type,
+        "cleaning up child processes and checking for errors",
+    );
 
     // Cleanup both processes
     //
