@@ -114,40 +114,42 @@ impl NoteCommitmentTrees {
         let mut sapling_result = None;
         let mut orchard_result = None;
 
+        let all_trees_timer = CodeTimer::start();
         rayon::in_place_scope_fifo(|scope| {
-            let timer = CodeTimer::start();
             if !sprout_note_commitments.is_empty() {
                 scope.spawn_fifo(|_scope| {
+                    let timer = CodeTimer::start();
                     sprout_result = Some(Self::update_sprout_note_commitment_tree(
                         sprout,
                         sprout_note_commitments,
                     ));
+                    timer.finish(module_path!(), line!(), "updating sprout note commitment tree");
                 });
             }
-            timer.finish(module_path!(), line!(), "update_trees_parallel_list 5");
 
-            let timer = CodeTimer::start();
             if !sapling_note_commitments.is_empty() {
                 scope.spawn_fifo(|_scope| {
+                    let timer = CodeTimer::start();
                     sapling_result = Some(Self::update_sapling_note_commitment_tree(
                         sapling,
                         sapling_note_commitments,
                     ));
+                    timer.finish(module_path!(), line!(), "updating sapling note commitment tree");
                 });
             }
-            timer.finish(module_path!(), line!(), "update_trees_parallel_list 6");
 
-            let timer = CodeTimer::start();
             if !orchard_note_commitments.is_empty() {
                 scope.spawn_fifo(|_scope| {
+                    let timer = CodeTimer::start();
                     orchard_result = Some(Self::update_orchard_note_commitment_tree(
                         orchard,
                         orchard_note_commitments,
                     ));
+                    timer.finish(module_path!(), line!(), "updating orchard note commitment tree");
                 });
             }
-            timer.finish(module_path!(), line!(), "update_trees_parallel_list 7");
         });
+        all_trees_timer.finish(module_path!(), line!(), "updating all note commitment trees in parallel");
 
         let timer = CodeTimer::start();
         if let Some(sprout_result) = sprout_result {
