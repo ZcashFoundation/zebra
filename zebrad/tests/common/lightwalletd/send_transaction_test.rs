@@ -29,10 +29,7 @@ use zebra_chain::{
 use zebra_state::HashOrHeight;
 
 use crate::common::{
-    cached_state::{
-        load_tip_height_from_state_directory,
-        start_state_service_with_cache_dir,
-    },
+    cached_state::{load_tip_height_from_state_directory, start_state_service_with_cache_dir},
     launch::spawn_zebrad_for_rpc_without_initial_peers,
     lightwalletd::{
         wallet_grpc::{self, connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server},
@@ -142,8 +139,8 @@ async fn load_transactions_from_a_future_block(
     network: Network,
     zebrad_state_path: PathBuf,
 ) -> Result<Vec<Arc<Transaction>>> {
-
-    let partial_sync_height = load_tip_height_from_state_directory(network, zebrad_state_path.as_ref()).await?;
+    let partial_sync_height =
+        load_tip_height_from_state_directory(network, zebrad_state_path.as_ref()).await?;
 
     tracing::info!(
         ?partial_sync_height,
