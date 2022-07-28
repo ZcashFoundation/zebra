@@ -103,7 +103,7 @@
 //!
 //! Please refer to the documentation of each test for more information.
 
-use std::{collections::HashSet, env, fs, path::PathBuf, time::Duration};
+use std::{collections::HashSet, env, fs, panic, path::PathBuf, time::Duration};
 
 use color_eyre::{
     eyre::{eyre, Result, WrapErr},
@@ -1350,7 +1350,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     }
 
     // Launch lightwalletd, if needed
-    let mut lightwalletd = if test_type.launches_lightwalletd() {
+    let lightwalletd = if test_type.launches_lightwalletd() {
         // Wait until `zebrad` has opened the RPC endpoint
         zebrad.expect_stdout_line_matches(regex::escape(
             format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
@@ -1432,60 +1432,64 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         None
     };
 
-    if test_type.needs_zebra_cached_state() {
-        // Wait for Zebra to sync its cached state to the chain tip
-        zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
-
-        // Wait for lightwalletd to sync some blocks
-        if let Some(ref mut lightwalletd) = lightwalletd {
-            lightwalletd
-                .expect_stdout_line_matches("([Aa]dding block to cache)|([Ww]aiting for block)")?;
-
+    let (mut zebrad, lightwalletd) = if test_type.needs_zebra_cached_state() {
+        if let Some(mut lightwalletd) = lightwalletd {
             // Wait for lightwalletd to sync to Zebra's tip.
             //
-            // TODO: after the lightwalletd hangs are fixed, fail the test on errors or timeouts
-            if cfg!(lightwalletd_hang_fix) {
-                lightwalletd.expect_stdout_line_matches("[Ww]aiting for block")?;
-            } else {
-                // To work around a hang bug, we run the test until:
-                // - lightwalletd starts waiting for blocks (best case scenario)
-                // - lightwalletd syncs to near the tip (workaround, cached state image is usable)
-                // - the test times out with an error, but we ignore it
-                //   (workaround, cached state might be usable, slow, or might fail other tests)
-                //
-                // TODO: update the regex to `1[8-9][0-9]{5}` when mainnet reaches block 1_800_000
-                let log_result = lightwalletd.expect_stdout_line_matches(
-                    "([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block)",
-                );
-                if log_result.is_err() {
-                    // This error takes up about 100 lines, and looks like a panic message
-                    tracing::warn!(
-                        multi_line_error = ?log_result,
-                        "ignoring a lightwalletd test failure, to work around a lightwalletd hang bug",
-                    );
+            // "Adding block" and "Waiting for block" logs stop when `lightwalletd` reaches the tip.
+            // But if the logs just stop, we can't tell the difference between a hang and fully synced.
+            // So we assume `lightwalletd` will sync and log large groups of blocks,
+            // and check for logs with heights near the mainnet tip height.
+            //
+            // TODO: update the regex to `1[8-9][0-9]{5}` when mainnet reaches block 1_800_000
+            let lightwalletd_thread = std::thread::spawn(move || -> Result<_> {
+                tracing::info!(?test_type, "waiting for lightwalletd to sync to the tip");
+
+                lightwalletd.expect_stdout_line_matches(
+                    "([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block: 1[7-9][0-9]{5})",
+                )?;
+
+                Ok(lightwalletd)
+            });
+
+            // `lightwalletd` syncs can take a long time,
+            // so we need to check that `zebrad` has synced to the tip in parallel.
+            let lightwalletd_thread_and_zebrad = std::thread::spawn(move || -> Result<_> {
+                tracing::info!(?test_type, "waiting for zebrad to sync to the tip");
+
+                while !lightwalletd_thread.is_finished() {
+                    zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
                 }
-            }
-        }
 
-        // Check Zebra is still at the tip (also clears and prints Zebra's logs)
-        zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
+                Ok((lightwalletd_thread, zebrad))
+            });
 
-        // lightwalletd doesn't log anything when we've reached the tip.
-        // But when it gets near the tip, it starts using the mempool.
-        //
-        // adityapk00/lightwalletd logs mempool changes, but zcash/lightwalletd doesn't.
-        //
-        // TODO: re-enable this code when lightwalletd hangs are fixed
-        if cfg!(lightwalletd_hang_fix) {
-            if let Some(ref mut lightwalletd) = lightwalletd {
-                lightwalletd.expect_stdout_line_matches(regex::escape(
-                    "Block hash changed, clearing mempool clients",
-                ))?;
-                lightwalletd
-                    .expect_stdout_line_matches(regex::escape("Adding new mempool txid"))?;
-            }
+            // Retrieve the child process handles from the threads
+            let (lightwalletd_thread, zebrad) = lightwalletd_thread_and_zebrad
+                .join()
+                .unwrap_or_else(|panic_object| panic::resume_unwind(panic_object))?;
+
+            let lightwalletd = lightwalletd_thread
+                .join()
+                .unwrap_or_else(|panic_object| panic::resume_unwind(panic_object))?;
+
+            (zebrad, Some(lightwalletd))
+        } else {
+            // We're just syncing Zebra, so there's no lightwalletd to check
+            tracing::info!(?test_type, "waiting for zebrad to sync to the tip");
+            zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
+
+            (zebrad, None)
         }
-    }
+    } else {
+        // We don't have a cached state, so we don't do any tip checks for Zebra or lightwalletd
+        (zebrad, lightwalletd)
+    };
+
+    tracing::info!(
+        ?test_type,
+        "cleaning up child processes and checking for errors",
+    );
 
     // Cleanup both processes
     //
