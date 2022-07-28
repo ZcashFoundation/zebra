@@ -16,7 +16,11 @@ tonic::include_proto!("cash.z.wallet.sdk.rpc");
 pub type LightwalletdRpcClient =
     compact_tx_streamer_client::CompactTxStreamerClient<tonic::transport::Channel>;
 
-/// Start a lightwalletd instance with its RPC server functionality enabled.
+/// Start a lightwalletd instance connected to `zebrad_rpc_address`,
+/// using the `lightwalletd_state_path`, with its gRPC server functionality enabled.
+///
+/// Expects cached state based on the `test_type`.
+/// Waits for `lightwalletd` to log "waiting for block" if `wait_for_blocks` is true.
 ///
 /// Returns the lightwalletd instance and the port number that it is listening for RPC connections.
 pub fn spawn_lightwalletd_with_rpc_server(
