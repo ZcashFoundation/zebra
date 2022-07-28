@@ -30,17 +30,21 @@ When there are a lot of large user-generated transactions on the network, Zebra 
 ### Rust Compiler Bug Fixes
 
 - The Rust team has recently [fixed compilation bugs](https://blog.rust-lang.org/2022/07/19/Rust-1.62.1.html) in function coercions of `impl Trait` return types, and `async fn` lifetimes.
-  We recommend that you update your Rust compiler to release 1.62.1, and re-compile Zebra.=
+  We recommend that you update your Rust compiler to release 1.62.1, and re-compile Zebra.
 
 ### Added
 
 - Add a `rayon` thread pool for CPU-bound tasks (#4776)
 - Run multiple cryptographic batches concurrently within each verifier (#4776)
+- Run deserialization of transaction in a rayon thread (#4801)
+- Run CPU-intensive state updates in parallel rayon threads (#4802)
+- Run CPU-intensive state reads in parallel rayon threads (#4805)
+- Support Tiers and supported platforms per Tier doc (#4773)
 
 ### Changed
 
 - Update column family names to match Zebra's database design (#4639)
-- Update Zebra's mainnet and testnet checkpoints (#4777)
+- Update Zebra's mainnet and testnet checkpoints (#4777, #4833)
 - Process more blocks and batch items concurrently, so there's a batch ready for each available CPU (#4776)
 - Wrap note commitment trees in an `Arc`, to reduce CPU and memory usage (#4757)
 - Increment `tokio` dependency from 1.19.2 to 1.20.0, to improve diagnostics (#4780)
@@ -56,6 +60,13 @@ When there are a lot of large user-generated transactions on the network, Zebra 
 - Limit the length of the `reject` network message's `message` and `reason` fields (#4687)
 - Change the `bitvec` dependency from 1.0.0 to 1.0.1, to fix a performance regression (#4769)
 - Fix an occasional panic when a `zebra-network` connection closes (#4782)
+- Stop panicking when the connection error slot is not set (#4770)
+- When writing blocks to disk, don't block other async tasks (#4199)
+- When sending headers to peers, only deserialize the header data from disk (#4792)
+- Return errors from `send_periodic_heartbeats_with_shutdown_handle` (#4756)
+- Make FindHeaders and FindHashes run concurrently with state updates (#4826)
+- Stop reading redundant blocks for every FindHashes and FindHeaders request (#4825)
+- Generate sapling point outside the method (#4799)
 
 #### CI
 
@@ -63,6 +74,7 @@ When there are a lot of large user-generated transactions on the network, Zebra 
 - Split out Canopy logs into a separate job (#4730)
 - Make full sync go all the way to the tip (#4709)
 - Split Docker logs into sprout, other checkpoints, and full validation (#4704)
+- Add a Zebra cached state update test, fix lightwalletd tests (#4813)
 
 
 ## [Zebra 1.0.0-beta.12](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.12) - 2022-06-29
