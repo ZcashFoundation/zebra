@@ -12,7 +12,7 @@ It also improves Zebra's sync performance and reliability under heavy load.
 
 ### Disk and Network Usage Changes
 
-Zebra now uses around 50 - 100 GB of disk space, because many large transactions were recently added to the block chain.
+Zebra now uses around 50 - 100 GB of disk space, because many large transactions were recently added to the block chain. (In the longer term, several hundred GB are likely to be needed.)
 
 When there are a lot of large user-generated transactions on the network, Zebra can upload or download 1 GB or more per day.
 

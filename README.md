@@ -147,7 +147,7 @@ If this is a problem for you, please
 [open a ticket.](https://github.com/ZcashFoundation/zebra/issues/new/choose)
 
 `zebrad`'s typical mainnet network usage is:
-- Initial sync: 40 GB download
+- Initial sync: 40 GB download (in the longer term, several hundred GB are likely to be downloaded).
 - Ongoing updates: 10 MB - 1 GB upload and download per day, depending on user-created transaction size, and peer requests
 
 Zebra also performs an initial sync every time its internal database version changes.
