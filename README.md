@@ -182,8 +182,24 @@ So Zebra's state should always be valid, unless your OS or disk hardware is corr
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
-- [No Windows support #3801](https://github.com/ZcashFoundation/zebra/issues/3801)
+- No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801)
   - We used to test with Windows Server 2019, but not anymore; see issue for details
+
+### Performance
+
+We are working on improving Zebra performance, the following are known issues:
+- Send note commitment and history trees from the non-finalized state to the finalized state [#4824](https://github.com/ZcashFoundation/zebra/issues/4824)
+- Speed up opening the database [#4822](https://github.com/ZcashFoundation/zebra/issues/4822)
+- Revert note commitment and history trees when forking non-finalized chains [#4794](https://github.com/ZcashFoundation/zebra/issues/4794)
+- Store only the first tree state in each identical series of tree states [#4784](https://github.com/ZcashFoundation/zebra/issues/4784)
+
+RPCs might also be slower than they used to be, we need to check:
+- Revert deserializing state transactions in rayon threads [#4831](https://github.com/ZcashFoundation/zebra/issues/4831)
+
+Ongoing investigations:
+- Find out which parts of CommitBlock/CommitFinalizedBlock are slow [#4823](https://github.com/ZcashFoundation/zebra/issues/4823)
+- Mini-Epic: Stop tokio tasks running for a long time and blocking other tasks [#4747](https://github.com/ZcashFoundation/zebra/issues/4747)
+- Investigate busiest tasks per tokio-console [#4583](https://github.com/ZcashFoundation/zebra/issues/4583)
 
 ## Future Work
 
