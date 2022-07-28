@@ -1456,7 +1456,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         });
 
         // Retrieve the child process handles from the threads
-        let (zebrad_thread, mut lightwalletd) = zebrad_thread_and_lightwalletd
+        let (zebrad_thread, lightwalletd) = zebrad_thread_and_lightwalletd
             .join()
             .unwrap_or_else(|panic_object| panic::resume_unwind(panic_object))?;
 
@@ -1465,15 +1465,47 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
             .unwrap_or_else(|panic_object| panic::resume_unwind(panic_object))?;
 
         // Wait for lightwalletd to sync some blocks
-        if let Some(ref mut lightwalletd) = lightwalletd {
+        let (mut zebrad, lightwalletd) = if let Some(mut lightwalletd) = lightwalletd {
             // Wait for lightwalletd to sync to Zebra's tip.
-            // This can take a long time, so we need to clear the `zebrad` logs in parallel.
             //
             // TODO: update the regex to `1[8-9][0-9]{5}` when mainnet reaches block 1_800_000
-            lightwalletd.expect_stdout_line_matches(
-                "([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block: 1[7-9][0-9]{5})",
-            )?;
-        }
+            let lightwalletd_thread = std::thread::spawn(move || -> Result<_> {
+                tracing::info!(?test_type, "waiting for lightwalletd to sync to the tip");
+
+                lightwalletd.expect_stdout_line_matches(
+                    "([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block: 1[7-9][0-9]{5})",
+                )?;
+
+                Ok(lightwalletd)
+            });
+
+            // `lightwalletd` syncs can take a long time, so we need to clear the `zebrad` logs in parallel.
+            let lightwalletd_thread_and_zebrad = std::thread::spawn(move || -> Result<_> {
+                tracing::info!(
+                    ?test_type,
+                    "checking Zebra stability, while waiting for Zebra to sync to the tip",
+                );
+
+                while !lightwalletd_thread.is_finished() {
+                    zebrad.expect_stdout_line_matches(regex::escape("sync_progress"))?;
+                }
+
+                Ok((lightwalletd_thread, zebrad))
+            });
+
+            // Retrieve the child process handles from the threads
+            let (lightwalletd_thread, zebrad) = lightwalletd_thread_and_zebrad
+                .join()
+                .unwrap_or_else(|panic_object| panic::resume_unwind(panic_object))?;
+
+            let lightwalletd = lightwalletd_thread
+                .join()
+                .unwrap_or_else(|panic_object| panic::resume_unwind(panic_object))?;
+
+            (zebrad, Some(lightwalletd))
+        } else {
+            (zebrad, None)
+        };
 
         // Check Zebra is still at the tip.
         // This shouldn't take too long, because we already checked Zebra was at the tip.
