@@ -103,7 +103,7 @@
 //!
 //! Please refer to the documentation of each test for more information.
 
-use std::{collections::HashSet, env, fs, path::PathBuf, time::Duration};
+use std::{collections::HashSet, env, fs, panic, path::PathBuf, time::Duration};
 
 use color_eyre::{
     eyre::{eyre, Result, WrapErr},
@@ -1350,7 +1350,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     }
 
     // Launch lightwalletd, if needed
-    let mut lightwalletd = if test_type.launches_lightwalletd() {
+    let lightwalletd = if test_type.launches_lightwalletd() {
         // Wait until `zebrad` has opened the RPC endpoint
         zebrad.expect_stdout_line_matches(regex::escape(
             format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
@@ -1367,7 +1367,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         let lightwalletd = if test_type == LaunchWithEmptyState {
             ldir.spawn_lightwalletd_child(None, args![])?
         } else {
-            ldir.spawn_lightwalletd_child(lightwalletd_state_path.clone(), args![])?
+            ldir.spawn_lightwalletd_child(lightwalletd_state_path, args![])?
         };
 
         let mut lightwalletd = lightwalletd
@@ -1432,97 +1432,57 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         None
     };
 
-    if test_type.needs_zebra_cached_state() {
-        // Syncing can take a while, so clear some `zebrad` and `lightwalletd` logs first
-        zebrad.expect_stdout_line_matches("sync_percent")?;
-        if let Some(ref mut lightwalletd) = lightwalletd {
-            lightwalletd.expect_stdout_line_matches("CurrentPrice")?;
-        }
+    let (mut zebrad, lightwalletd) = if test_type.needs_zebra_cached_state() {
+        // Wait for Zebra to sync its cached state to the chain tip.
+        let zebrad_thread = std::thread::spawn(|| -> Result<_> {
+            zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
-        // Wait for Zebra to sync its cached state to the chain tip
-        zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
+            Ok(zebrad)
+        });
+
+        // Zebra syncs can take a long time, so we need to clear the `lightwalletd` logs in parallel.
+        let zebrad_thread_and_lightwalletd = std::thread::spawn(|| -> Result<_> {
+            if let Some(mut lightwalletd) = lightwalletd {
+                while !zebrad_thread.is_finished() {
+                    lightwalletd.expect_stdout_line_matches(
+                        "([Aa]dding block to cache)|([Ww]aiting for block)",
+                    )?;
+                }
+
+                Ok((zebrad_thread, Some(lightwalletd)))
+            } else {
+                Ok((zebrad_thread, None))
+            }
+        });
+
+        // Retrieve the child process handles from the threads
+        let (zebrad_thread, mut lightwalletd) = zebrad_thread_and_lightwalletd
+            .join()
+            .unwrap_or_else(|panic_object| panic::resume_unwind(panic_object))?;
+
+        let mut zebrad = zebrad_thread
+            .join()
+            .unwrap_or_else(|panic_object| panic::resume_unwind(panic_object))?;
 
         // Wait for lightwalletd to sync some blocks
         if let Some(ref mut lightwalletd) = lightwalletd {
-            lightwalletd
-                .expect_stdout_line_matches("([Aa]dding block to cache)|([Ww]aiting for block)")?;
-
-            // Syncing can take a while, so clear some `zebrad` logs first
-            zebrad.expect_stdout_line_matches("sync_percent")?;
-
             // Wait for lightwalletd to sync to Zebra's tip.
+            // This can take a long time, so we need to clear the `zebrad` logs in parallel.
             //
-            // TODO: after the lightwalletd hangs are fixed, fail the test on errors or timeouts
-            if cfg!(lightwalletd_hang_fix) {
-                lightwalletd.expect_stdout_line_matches("[Ww]aiting for block")?;
-            } else {
-                // To work around a hang bug, we run the test until:
-                // - lightwalletd starts waiting for blocks (best case scenario)
-                // - lightwalletd syncs to near the tip (workaround, cached state image is usable)
-                // - the test times out with an error, but we ignore it
-                //   (workaround, cached state might be usable, slow, or might fail other tests)
-                //
-                // TODO: update the regex to `1[8-9][0-9]{5}` when mainnet reaches block 1_800_000
-                let log_result = lightwalletd.expect_stdout_line_matches(
-                    "([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block)",
-                );
-
-                if log_result.is_err() {
-                    // This error takes up about 100 lines, and looks like a panic message
-                    tracing::warn!(
-                        multi_line_error = ?log_result,
-                        "ignoring a lightwalletd test failure, to work around a lightwalletd hang bug",
-                    );
-
-                    // Try to re-launch `lightwalletd` to create a valid cached state,
-                    // but ignore any sync errors.
-                    //
-                    // TODO: when lightwalletd runs without hanging, remove this restart workaround
-                    tracing::info!("killing and restarting lightwalletd");
-                    let _ = lightwalletd.kill();
-
-                    // Wait for it to shut down
-                    std::thread::sleep(Duration::from_secs(5));
-
-                    let ldir = testdir()?;
-                    let ldir = ldir.with_lightwalletd_config(config.rpc.listen_addr.unwrap())?;
-                    let new_lightwalletd =
-                        ldir.spawn_lightwalletd_child(lightwalletd_state_path, args![])?;
-                    let new_lightwalletd =
-                        new_lightwalletd.with_timeout(test_type.lightwalletd_timeout());
-                    *lightwalletd = new_lightwalletd;
-
-                    // TODO: update the regex to `1[8-9][0-9]{5}` when mainnet reaches block 1_800_000
-                    lightwalletd.expect_stdout_line_matches(
-                        "([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block)",
-                    )?;
-                }
-            }
+            // TODO: update the regex to `1[8-9][0-9]{5}` when mainnet reaches block 1_800_000
+            lightwalletd.expect_stdout_line_matches(
+                "([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block: 1[7-9][0-9]{5})",
+            )?;
         }
 
-        // Check Zebra is still at the tip (also clears and prints Zebra's logs)
+        // Check Zebra is still at the tip.
+        // This shouldn't take too long, because we already checked Zebra was at the tip.
         zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
-        // lightwalletd doesn't log anything when we've reached the tip.
-        // But when it gets near the tip, it starts using the mempool.
-        //
-        // adityapk00/lightwalletd logs mempool changes, but zcash/lightwalletd doesn't.
-        //
-        // TODO: re-enable this code when lightwalletd hangs are fixed
-        if cfg!(lightwalletd_hang_fix) {
-            if let Some(ref mut lightwalletd) = lightwalletd {
-                lightwalletd.expect_stdout_line_matches(regex::escape(
-                    "Block hash changed, clearing mempool clients",
-                ))?;
-
-                // Syncing can take a while, so clear some `zebrad` logs first
-                zebrad.expect_stdout_line_matches("sync_percent")?;
-
-                lightwalletd
-                    .expect_stdout_line_matches(regex::escape("Adding new mempool txid"))?;
-            }
-        }
-    }
+        (zebrad, lightwalletd)
+    } else {
+        (zebrad, lightwalletd)
+    };
 
     // Cleanup both processes
     //
