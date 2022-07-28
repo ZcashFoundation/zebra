@@ -1490,7 +1490,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
             let lightwalletd_thread_and_zebrad = std::thread::spawn(move || -> Result<_> {
                 tracing::info!(
                     ?test_type,
-                    "checking Zebra stability, while waiting for Zebra to sync to the tip",
+                    "checking Zebra stability, while waiting for lightwalletd to sync to the tip",
                 );
 
                 while !lightwalletd_thread.is_finished() {
