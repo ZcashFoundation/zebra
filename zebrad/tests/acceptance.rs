@@ -134,9 +134,9 @@ use common::{
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
-        LARGE_CHECKPOINT_TIMEOUT, MEDIUM_CHECKPOINT_TEST_HEIGHT, STOP_AT_HEIGHT_REGEX,
-        STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX, TINY_CHECKPOINT_TEST_HEIGHT,
-        TINY_CHECKPOINT_TIMEOUT,
+        LARGE_CHECKPOINT_TIMEOUT, LIGHTWALLETD_SYNC_FINISHED_REGEX, MEDIUM_CHECKPOINT_TEST_HEIGHT,
+        STOP_AT_HEIGHT_REGEX, STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX,
+        TINY_CHECKPOINT_TEST_HEIGHT, TINY_CHECKPOINT_TIMEOUT,
     },
 };
 
@@ -1440,14 +1440,10 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
             // But if the logs just stop, we can't tell the difference between a hang and fully synced.
             // So we assume `lightwalletd` will sync and log large groups of blocks,
             // and check for logs with heights near the mainnet tip height.
-            //
-            // TODO: update the regex to `1[8-9][0-9]{5}` when mainnet reaches block 1_800_000
             let lightwalletd_thread = std::thread::spawn(move || -> Result<_> {
                 tracing::info!(?test_type, "waiting for lightwalletd to sync to the tip");
 
-                lightwalletd.expect_stdout_line_matches(
-                    "([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block: 1[7-9][0-9]{5})",
-                )?;
+                lightwalletd.expect_stdout_line_matches(LIGHTWALLETD_SYNC_FINISHED_REGEX)?;
 
                 Ok(lightwalletd)
             });
