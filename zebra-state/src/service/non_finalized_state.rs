@@ -2,7 +2,11 @@
 //!
 //! [RFC0005]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html
 
-use std::{collections::BTreeSet, mem, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashMap},
+    mem,
+    sync::Arc,
+};
 
 use zebra_chain::{
     block::{self, Block},
@@ -205,6 +209,9 @@ impl NonFinalizedState {
         prepared: PreparedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
+        // Reads from disk
+        //
+        // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,
             &new_chain.unspent_utxos(),
@@ -212,18 +219,18 @@ impl NonFinalizedState {
             finalized_state,
         )?;
 
-        check::prepared_block_commitment_is_valid_for_chain_history(
-            &prepared,
-            self.network,
-            &new_chain.history_tree,
-        )?;
-
-        check::anchors::anchors_refer_to_earlier_treestates(
+        // Reads from disk
+        check::anchors::sapling_orchard_anchors_refer_to_final_treestates(
             finalized_state,
             &new_chain,
             &prepared,
         )?;
 
+        // Reads from disk
+        let sprout_final_treestates =
+            check::anchors::fetch_sprout_final_treestates(finalized_state, &new_chain, &prepared);
+
+        // Quick check that doesn't read from disk
         let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
@@ -238,12 +245,65 @@ impl NonFinalizedState {
             }
         })?;
 
-        // We're pretty sure the new block is valid,
-        // so clone the inner chain if needed, then add the new block.
-        Arc::try_unwrap(new_chain)
-            .unwrap_or_else(|shared_chain| (*shared_chain).clone())
-            .push(contextual)
-            .map(Arc::new)
+        Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
+    }
+
+    /// Validate `contextual` and update `new_chain`, doing CPU-intensive work in parallel batches.
+    #[allow(clippy::unwrap_in_result)]
+    #[tracing::instrument(skip(new_chain, sprout_final_treestates))]
+    fn validate_and_update_parallel(
+        new_chain: Arc<Chain>,
+        contextual: ContextuallyValidBlock,
+        sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
+    ) -> Result<Arc<Chain>, ValidateContextError> {
+        let mut block_commitment_result = None;
+        let mut sprout_anchor_result = None;
+        let mut chain_push_result = None;
+
+        // Clone function arguments for different threads
+        let block = contextual.block.clone();
+        let network = new_chain.network();
+        let history_tree = new_chain.history_tree.clone();
+
+        let block2 = contextual.block.clone();
+        let height = contextual.height;
+        let transaction_hashes = contextual.transaction_hashes.clone();
+
+        rayon::in_place_scope_fifo(|scope| {
+            scope.spawn_fifo(|_scope| {
+                block_commitment_result = Some(check::block_commitment_is_valid_for_chain_history(
+                    block,
+                    network,
+                    &history_tree,
+                ));
+            });
+
+            scope.spawn_fifo(|_scope| {
+                sprout_anchor_result = Some(check::anchors::sprout_anchors_refer_to_treestates(
+                    sprout_final_treestates,
+                    block2,
+                    height,
+                    transaction_hashes,
+                ));
+            });
+
+            // We're pretty sure the new block is valid,
+            // so clone the inner chain if needed, then add the new block.
+            //
+            // Pushing a block onto a Chain can launch additional parallel batches.
+            // TODO: should we pass _scope into Chain::push()?
+            scope.spawn_fifo(|_scope| {
+                let new_chain = Arc::try_unwrap(new_chain)
+                    .unwrap_or_else(|shared_chain| (*shared_chain).clone());
+                chain_push_result = Some(new_chain.push(contextual).map(Arc::new));
+            });
+        });
+
+        // Don't return the updated Chain unless all the parallel results were Ok
+        block_commitment_result.expect("scope has finished")?;
+        sprout_anchor_result.expect("scope has finished")?;
+
+        chain_push_result.expect("scope has finished")
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.
@@ -385,10 +445,10 @@ impl NonFinalizedState {
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,
-        sprout_note_commitment_tree: sprout::tree::NoteCommitmentTree,
-        sapling_note_commitment_tree: sapling::tree::NoteCommitmentTree,
-        orchard_note_commitment_tree: orchard::tree::NoteCommitmentTree,
-        history_tree: HistoryTree,
+        sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
+        sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
+        orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
+        history_tree: Arc<HistoryTree>,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         match self.find_chain(|chain| chain.non_finalized_tip_hash() == parent_hash) {
             // Clone the existing Arc<Chain> in the non-finalized state

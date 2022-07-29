@@ -219,8 +219,8 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             .orchard_note_commitment_tree_by_height(&block::Height::MIN)
             .expect("the genesis block in the database has an Orchard tree");
 
-        assert_eq!(sapling_tree, sapling::tree::NoteCommitmentTree::default());
-        assert_eq!(orchard_tree, orchard::tree::NoteCommitmentTree::default());
+        assert_eq!(*sapling_tree, sapling::tree::NoteCommitmentTree::default());
+        assert_eq!(*orchard_tree, orchard::tree::NoteCommitmentTree::default());
 
         // Blocks
         let mut stored_block_hashes = Vec::new();
@@ -297,7 +297,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 assert_eq!(orchard_tree_at_tip, orchard_tree_by_height);
 
                 // Skip these checks for empty history trees.
-                if let Some(history_tree_at_tip) = history_tree_at_tip.as_ref() {
+                if let Some(history_tree_at_tip) = history_tree_at_tip.as_ref().as_ref() {
                     assert_eq!(history_tree_at_tip.current_height(), max_height);
                     assert_eq!(history_tree_at_tip.network(), state.network());
                 }

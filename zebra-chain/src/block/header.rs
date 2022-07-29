@@ -1,12 +1,12 @@
 //! The block header.
 
-use std::usize;
+use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
 use thiserror::Error;
 
 use crate::{
-    serialization::{CompactSizeMessage, TrustedPreallocate, MAX_PROTOCOL_MESSAGE_LEN},
+    serialization::{TrustedPreallocate, MAX_PROTOCOL_MESSAGE_LEN},
     work::{difficulty::CompactDifficulty, equihash::Solution},
 };
 
@@ -125,18 +125,14 @@ impl Header {
 }
 
 /// A header with a count of the number of transactions in its block.
-///
 /// This structure is used in the Bitcoin network protocol.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+///
+/// The transaction count field is always zero, so we don't store it in the struct.
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct CountedHeader {
     /// The header for a block
-    pub header: Header,
-
-    /// The number of transactions that come after the header
-    ///
-    /// TODO: should this always be zero? (#1924)
-    pub transaction_count: CompactSizeMessage,
+    pub header: Arc<Header>,
 }
 
 /// The serialized size of a Zcash block header.

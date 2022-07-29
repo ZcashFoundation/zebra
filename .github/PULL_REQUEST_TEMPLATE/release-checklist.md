@@ -99,6 +99,12 @@ We should update the README to:
 - [ ] Update the "Build and Run Instructions" with any new dependencies.
       Check for changes in the `Dockerfile` since the last tag: `git diff <previous-release-tag> docker/Dockerfile`.
 
+## Checkpoints
+
+With every release and for performance reasons, we want to update the zebra checkpoints. More information on how to do this can be found in [the zebra-checkpoints README](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/README.md).
+
+To do this you will need a synchronized `zcashd` node. You can request help from other zebra team members to submit this PR if you can't make it yourself at the moment of the release.
+
 ## Change Log
 
 **Important**: Any merge into `main` deletes any edits to the draft changelog.
@@ -134,8 +140,9 @@ From "Keep a Changelog":
 
 ### Create the Release PR
 
-After you have the version increments and the updated changelog:
+After you have the version increments, the updated checkpoints and the updated changelog:
 
+- [ ] Make sure the PR with the new checkpoint hashes is already merged.
 - [ ] Push the version increments and the updated changelog into a branch
       (name suggestion, example: `v1.0.0-alpha.0-release`)
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the

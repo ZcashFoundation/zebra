@@ -1,6 +1,6 @@
 //! Blocks and block-related structures (heights, headers, etc.)
 
-use std::{collections::HashMap, fmt, ops::Neg};
+use std::{collections::HashMap, fmt, ops::Neg, sync::Arc};
 
 use crate::{
     amount::NegativeAllowed,
@@ -46,9 +46,9 @@ pub use arbitrary::LedgerState;
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]
 pub struct Block {
     /// The block header, containing block metadata.
-    pub header: Header,
+    pub header: Arc<Header>,
     /// The block transactions.
-    pub transactions: Vec<std::sync::Arc<Transaction>>,
+    pub transactions: Vec<Arc<Transaction>>,
 }
 
 impl fmt::Display for Block {
@@ -219,7 +219,7 @@ impl Block {
 
 impl<'a> From<&'a Block> for Hash {
     fn from(block: &'a Block) -> Hash {
-        block.header.into()
+        block.header.as_ref().into()
     }
 }
 

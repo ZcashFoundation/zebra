@@ -8,11 +8,12 @@ use num_integer::div_ceil;
 use zebra_chain::{
     block::Height,
     chain_tip::ChainTip,
+    fmt::humantime_seconds,
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
 };
 use zebra_consensus::CheckpointList;
 
-use crate::components::{sync::SyncStatus, tracing::humantime_seconds};
+use crate::components::sync::SyncStatus;
 
 /// The amount of time between progress logs.
 const LOG_INTERVAL: Duration = Duration::from_secs(60);

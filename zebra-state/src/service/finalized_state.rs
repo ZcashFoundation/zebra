@@ -279,9 +279,11 @@ impl FinalizedState {
         // the history tree root. While it _is_ checked during contextual validation,
         // that is not called by the checkpoint verifier, and keeping a history tree there
         // would be harder to implement.
+        //
+        // TODO: run this CPU-intensive cryptography in a parallel rayon thread, if it shows up in profiles
         let history_tree = self.db.history_tree();
-        check::finalized_block_commitment_is_valid_for_chain_history(
-            &finalized,
+        check::block_commitment_is_valid_for_chain_history(
+            finalized.block.clone(),
             self.network,
             &history_tree,
         )?;

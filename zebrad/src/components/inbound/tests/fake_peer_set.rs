@@ -49,7 +49,7 @@ use InventoryResponse::*;
 /// Increasing this value causes the tests to take longer to complete, so it can't be too large.
 const MAX_PEER_SET_REQUEST_DELAY: Duration = Duration::from_millis(500);
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mempool_requests_for_transactions() {
     let (
         inbound_service,
@@ -124,7 +124,7 @@ async fn mempool_requests_for_transactions() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     // get a block that has at least one non coinbase transaction
     let block: Arc<Block> =
@@ -132,6 +132,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
 
     // use the first transaction that is not coinbase
     let tx = block.transactions[1].clone();
+    let test_transaction_id = tx.unmined_id();
 
     let (
         inbound_service,
@@ -163,24 +164,29 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
             Amount::zero(),
         )));
     });
-    let (response, _) = futures::join!(request, verification);
-    match response {
-        Ok(Response::Nil) => (),
-        _ => unreachable!("`PushTransaction` requests should always respond `Ok(Nil)`"),
-    };
+
+    let (push_response, _) = futures::join!(request, verification);
+
+    assert_eq!(
+        push_response.expect("unexpected error response from inbound service"),
+        Response::Nil,
+        "`PushTransaction` requests should always respond `Ok(Nil)`",
+    );
+
+    // Wait for the mempool to store the transaction
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
-    let request = inbound_service
+    let mempool_response = inbound_service
         .clone()
         .oneshot(Request::MempoolTransactionIds)
         .await;
 
-    match request {
-        Ok(Response::TransactionIds(response)) => assert_eq!(response, vec![tx.unmined_id()]),
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
-        ),
-    };
+    assert_eq!(
+        mempool_response.expect("unexpected error response from mempool"),
+        Response::TransactionIds(vec![test_transaction_id]),
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+    );
 
     // Make sure there is an additional request broadcasting the
     // inserted transaction to peers.
@@ -208,7 +214,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     // get a block that has at least one non coinbase transaction
     let block: Block = zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
@@ -260,27 +266,29 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
             Amount::zero(),
         )));
     });
-    let (response, _, _) = futures::join!(request, peer_set_responder, verification);
 
-    match response {
-        Ok(Response::Nil) => (),
-        _ => unreachable!("`AdvertiseTransactionIds` requests should always respond `Ok(Nil)`"),
-    };
+    let (advertise_response, _, _) = futures::join!(request, peer_set_responder, verification);
+
+    assert_eq!(
+        advertise_response.expect("unexpected error response from inbound service"),
+        Response::Nil,
+        "`AdvertiseTransactionIds` requests should always respond `Ok(Nil)`",
+    );
+
+    // Wait for the mempool to store the transaction
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
-    let request = inbound_service
+    let mempool_response = inbound_service
         .clone()
         .oneshot(Request::MempoolTransactionIds)
         .await;
 
-    match request {
-        Ok(Response::TransactionIds(response)) => {
-            assert_eq!(response, vec![test_transaction_id])
-        }
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
-        ),
-    };
+    assert_eq!(
+        mempool_response.expect("unexpected error response from mempool"),
+        Response::TransactionIds(vec![test_transaction_id]),
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+    );
 
     // Make sure there is an additional request broadcasting the
     // inserted transaction to peers.
@@ -308,7 +316,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     // Get a block that has at least one non coinbase transaction
     let block: Block = zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
@@ -357,26 +365,29 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             Amount::zero(),
         )));
     });
-    let (response, _) = futures::join!(request, verification);
-    match response {
-        Ok(Response::Nil) => (),
-        _ => unreachable!("`PushTransaction` requests should always respond `Ok(Nil)`"),
-    };
+
+    let (push_response, _) = futures::join!(request, verification);
+
+    assert_eq!(
+        push_response.expect("unexpected error response from inbound service"),
+        Response::Nil,
+        "`PushTransaction` requests should always respond `Ok(Nil)`",
+    );
+
+    // Wait for the mempool to store the transaction
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
-    let request = inbound_service
+    let mempool_response = inbound_service
         .clone()
         .oneshot(Request::MempoolTransactionIds)
         .await;
 
-    match request {
-        Ok(Response::TransactionIds(response)) => {
-            assert_eq!(response, vec![tx1_id])
-        }
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
-        ),
-    };
+    assert_eq!(
+        mempool_response.expect("unexpected error response from mempool"),
+        Response::TransactionIds(vec![tx1_id]),
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+    );
 
     // Add a new block to the state (make the chain tip advance)
     let block_two: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
@@ -393,14 +404,41 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     // Test transaction 1 is gossiped
     let mut hs = HashSet::new();
     hs.insert(tx1_id);
+
+    // Transaction and Block IDs are gossipped, in any order
+    let possible_requests = &mut [
+        Request::AdvertiseTransactionIds(hs),
+        Request::AdvertiseBlock(block_two.hash()),
+    ]
+    .to_vec();
+
     peer_set
-        .expect_request(Request::AdvertiseTransactionIds(hs))
+        .expect_request_that(|request| {
+            let is_possible = possible_requests.contains(request);
+
+            *possible_requests = possible_requests
+                .clone()
+                .into_iter()
+                .filter(|possible| possible != request)
+                .collect();
+
+            is_possible
+        })
         .await
         .respond(Response::Nil);
 
-    // Block is gossiped then
     peer_set
-        .expect_request(Request::AdvertiseBlock(block_two.hash()))
+        .expect_request_that(|request| {
+            let is_possible = possible_requests.contains(request);
+
+            *possible_requests = possible_requests
+                .clone()
+                .into_iter()
+                .filter(|possible| possible != request)
+                .collect();
+
+            is_possible
+        })
         .await
         .respond(Response::Nil);
 
@@ -456,27 +494,31 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             Amount::zero(),
         )));
     });
-    let (response, _) = futures::join!(request, verification);
-    match response {
-        Ok(Response::Nil) => (),
-        _ => unreachable!("`PushTransaction` requests should always respond `Ok(Nil)`"),
-    };
+
+    let (push_response, _) = futures::join!(request, verification);
+
+    assert_eq!(
+        push_response.expect("unexpected error response from inbound service"),
+        Response::Nil,
+        "`PushTransaction` requests should always respond `Ok(Nil)`",
+    );
+
+    // Wait for the mempool to store the transaction
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
-    let request = inbound_service
+    let mempool_response = inbound_service
         .clone()
         .oneshot(Request::MempoolTransactionIds)
         .await;
 
     // Only tx2 will be in the mempool while tx1 was expired
-    match request {
-        Ok(Response::TransactionIds(response)) => {
-            assert_eq!(response, vec![tx2_id])
-        }
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
-        ),
-    };
+    assert_eq!(
+        mempool_response.expect("unexpected error response from mempool"),
+        Response::TransactionIds(vec![tx2_id]),
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+    );
+
     // Check if tx1 was added to the rejected list as well
     let response = mempool
         .clone()
@@ -585,7 +627,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 /// Test that the inbound downloader rejects blocks above the lookahead limit.
 ///
 /// TODO: also test that it rejects blocks behind the tip limit. (Needs ~100 fake blocks.)
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
     // Get services
     let (
