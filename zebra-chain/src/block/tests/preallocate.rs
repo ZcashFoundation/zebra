@@ -1,6 +1,6 @@
 //! Tests for trusted preallocation during deserialization.
 
-use std::convert::TryInto;
+use std::sync::Arc;
 
 use proptest::prelude::*;
 
@@ -9,10 +9,7 @@ use crate::{
         header::MIN_COUNTED_HEADER_LEN, CountedHeader, Hash, Header, BLOCK_HASH_SIZE,
         MAX_PROTOCOL_MESSAGE_LEN,
     },
-    serialization::{
-        arbitrary::max_allocation_is_big_enough, CompactSizeMessage, TrustedPreallocate,
-        ZcashSerialize,
-    },
+    serialization::{arbitrary::max_allocation_is_big_enough, TrustedPreallocate, ZcashSerialize},
 };
 
 proptest! {
@@ -49,10 +46,9 @@ proptest! {
     /// Confirm that each counted header takes at least COUNTED_HEADER_LEN bytes when serialized.
     /// This verifies that our calculated [`TrustedPreallocate::max_allocation`] is indeed an upper bound.
     #[test]
-    fn counted_header_min_length(header in any::<Header>(), transaction_count in any::<CompactSizeMessage>()) {
+    fn counted_header_min_length(header in any::<Arc<Header>>()) {
         let header = CountedHeader {
             header,
-            transaction_count,
         };
         let serialized_header = header.zcash_serialize_to_vec().expect("Serialization to vec must succeed");
         prop_assert!(serialized_header.len() >= MIN_COUNTED_HEADER_LEN)
@@ -66,10 +62,9 @@ proptest! {
     /// 1. The smallest disallowed vector of `CountedHeaders`s is too large to send via the Zcash Wire Protocol
     /// 2. The largest allowed vector is small enough to fit in a legal Zcash Wire Protocol message
     #[test]
-    fn counted_header_max_allocation(header in any::<Header>()) {
+    fn counted_header_max_allocation(header in any::<Arc<Header>>()) {
         let header = CountedHeader {
             header,
-            transaction_count: 0.try_into().expect("zero is less than MAX_PROTOCOL_MESSAGE_LEN"),
         };
 
         let (

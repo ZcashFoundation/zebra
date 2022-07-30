@@ -6,7 +6,9 @@ use tempfile::TempDir;
 
 use zebra_test::{args, net::random_known_port, prelude::*};
 
-use crate::common::{config::testdir, lightwalletd::LightWalletdTestDirExt};
+use crate::common::{
+    config::testdir, lightwalletd::LightWalletdTestDirExt, sync::LIGHTWALLETD_SYNC_FINISHED_REGEX,
+};
 
 use super::LightwalletdTestType;
 
@@ -16,14 +18,18 @@ tonic::include_proto!("cash.z.wallet.sdk.rpc");
 pub type LightwalletdRpcClient =
     compact_tx_streamer_client::CompactTxStreamerClient<tonic::transport::Channel>;
 
-/// Start a lightwalletd instance with its RPC server functionality enabled.
+/// Start a lightwalletd instance connected to `zebrad_rpc_address`,
+/// using the `lightwalletd_state_path`, with its gRPC server functionality enabled.
+///
+/// Expects cached state based on the `test_type`.
+/// Waits for `lightwalletd` to sync to near the tip, if `wait_for_sync` is true.
 ///
 /// Returns the lightwalletd instance and the port number that it is listening for RPC connections.
 pub fn spawn_lightwalletd_with_rpc_server(
     zebrad_rpc_address: SocketAddr,
     lightwalletd_state_path: Option<PathBuf>,
     test_type: LightwalletdTestType,
-    wait_for_blocks: bool,
+    wait_for_sync: bool,
 ) -> Result<(TestChild<TempDir>, u16)> {
     let lightwalletd_dir = testdir()?.with_lightwalletd_config(zebrad_rpc_address)?;
 
@@ -41,9 +47,11 @@ pub fn spawn_lightwalletd_with_rpc_server(
         .with_failure_regex_iter(lightwalletd_failure_messages, lightwalletd_ignore_messages);
 
     lightwalletd.expect_stdout_line_matches("Starting gRPC server")?;
-    if wait_for_blocks {
-        lightwalletd.expect_stdout_line_matches("[Ww]aiting for block")?;
+
+    if wait_for_sync {
+        lightwalletd.expect_stdout_line_matches(LIGHTWALLETD_SYNC_FINISHED_REGEX)?;
     }
+
     Ok((lightwalletd, lightwalletd_rpc_port))
 }
 

@@ -194,10 +194,10 @@ pub struct TestChild<T> {
     /// The standard output stream of the child process.
     ///
     /// TODO: replace with `Option<ChildOutput { stdout, stderr }>.
-    pub stdout: Option<Box<dyn IteratorDebug<Item = std::io::Result<String>>>>,
+    pub stdout: Option<Box<dyn IteratorDebug<Item = std::io::Result<String>> + Send>>,
 
     /// The standard error stream of the child process.
-    pub stderr: Option<Box<dyn IteratorDebug<Item = std::io::Result<String>>>>,
+    pub stderr: Option<Box<dyn IteratorDebug<Item = std::io::Result<String>> + Send>>,
 
     /// Command outputs which indicate test failure.
     ///
@@ -434,9 +434,9 @@ impl<T> TestChild<T> {
     fn map_into_string_lines<R>(
         &self,
         reader: R,
-    ) -> Box<dyn IteratorDebug<Item = std::io::Result<String>>>
+    ) -> Box<dyn IteratorDebug<Item = std::io::Result<String>> + Send>
     where
-        R: Read + Debug + 'static,
+        R: Read + Debug + Send + 'static,
     {
         let failure_regexes = self.failure_regexes.clone();
         let ignore_regexes = self.ignore_regexes.clone();

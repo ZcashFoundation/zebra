@@ -301,15 +301,14 @@ impl ValueCommitment {
     /// <https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit>
     #[allow(non_snake_case)]
     pub fn new(rcv: pallas::Scalar, value: Amount) -> Self {
-        lazy_static! {
-            static ref V: pallas::Point = pallas_group_hash(b"z.cash:Orchard-cv", b"v");
-            static ref R: pallas::Point = pallas_group_hash(b"z.cash:Orchard-cv", b"r");
-        }
-
         let v = pallas::Scalar::from(value);
-
         Self::from(*V * v + *R * rcv)
     }
+}
+
+lazy_static! {
+    static ref V: pallas::Point = pallas_group_hash(b"z.cash:Orchard-cv", b"v");
+    static ref R: pallas::Point = pallas_group_hash(b"z.cash:Orchard-cv", b"r");
 }
 
 #[cfg(test)]

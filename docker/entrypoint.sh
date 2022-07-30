@@ -38,6 +38,12 @@ case "$1" in
             cargo test --locked --release --features "test_sync_to_mandatory_checkpoint_${NETWORK,,},lightwalletd-grpc-tests" --package zebrad --test acceptance -- --nocapture --include-ignored "sync_to_mandatory_checkpoint_${NETWORK,,}"
             # TODO: replace with $ZEBRA_CACHED_STATE_DIR in Rust and workflows
             ls -lh "/zebrad-cache"/*/* || (echo "No /zebrad-cache/*/*"; ls -lhR "/zebrad-cache" | head -50 || echo "No /zebrad-cache directory")
+        elif [[ "$TEST_UPDATE_SYNC" -eq "1" ]]; then
+            # Run a Zebra sync starting at the cached tip, and syncing to the latest tip.
+            #
+            # List directory used by test
+            ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
+            cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored zebrad_update_sync
         elif [[ "$TEST_CHECKPOINT_SYNC" -eq "1" ]]; then
             # Run a Zebra sync starting at the cached mandatory checkpoint, and syncing past it.
             #

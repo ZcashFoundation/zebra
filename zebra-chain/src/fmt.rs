@@ -7,6 +7,10 @@ use proptest::prelude::*;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+pub mod time;
+
+pub use time::{duration_short, humantime_milliseconds, humantime_seconds};
+
 /// Wrapper to override `Debug`, redirecting it to only output the type's name.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]

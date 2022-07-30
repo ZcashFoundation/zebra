@@ -991,7 +991,8 @@ where
                     server_tx.clone(),
                     address_book_updater.clone(),
                 )
-                .instrument(tracing::debug_span!(parent: connection_span, "heartbeat")),
+                .instrument(tracing::debug_span!(parent: connection_span, "heartbeat"))
+                .boxed(),
             );
 
             let client = Client {
@@ -1128,7 +1129,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
     shutdown_rx: oneshot::Receiver<CancelHeartbeatTask>,
     server_tx: futures::channel::mpsc::Sender<ClientRequest>,
     mut heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
-) {
+) -> Result<(), BoxError> {
     use futures::future::Either;
 
     let heartbeat_run_loop = send_periodic_heartbeats_run_loop(
@@ -1150,7 +1151,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
     // slow rate, and shutdown is a oneshot. If both futures
     // are ready, we want the shutdown to take priority over
     // sending a useless heartbeat.
-    let _result = match future::select(shutdown_rx, heartbeat_run_loop).await {
+    match future::select(shutdown_rx, heartbeat_run_loop).await {
         Either::Left((Ok(CancelHeartbeatTask), _unused_run_loop)) => {
             tracing::trace!("shutting down because Client requested shut down");
             handle_heartbeat_shutdown(
@@ -1177,7 +1178,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
 
             result
         }
-    };
+    }
 }
 
 /// Send periodical heartbeats to `server_tx`, and update the peer status through
