@@ -343,6 +343,19 @@ impl Application for ZebradApp {
             }
         }));
 
+        // Apply the configured number of threads to the thread pool.
+        //
+        // TODO:
+        // - set rayon panic handler to a function that takes `Box<dyn Any + Send + 'static>`,
+        //   which forwards to sentry. If possible, use eyre's panic report for formatting.
+        // - do we also need to call this code in `zebra_consensus::init()`,
+        //   when that crate is being used by itself?
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(config.sync.parallel_cpu_threads)
+            .thread_name(|thread_index| format!("rayon {}", thread_index))
+            .build_global()
+            .expect("unable to initialize rayon thread pool");
+
         self.config = Some(config);
 
         let cfg_ref = self
@@ -388,6 +401,11 @@ impl Application for ZebradApp {
         let global_guard = global_span.enter();
         // leak the global span, to make sure it stays active
         std::mem::forget(global_guard);
+
+        tracing::info!(
+            num_threads = rayon::current_num_threads(),
+            "initialized rayon thread pool for CPU-bound tasks",
+        );
 
         // Launch network and async endpoints only for long-running commands.
         if is_server {

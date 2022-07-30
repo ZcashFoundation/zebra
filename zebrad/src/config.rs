@@ -209,6 +209,12 @@ pub struct SyncSection {
     /// This is set to a low value by default, to avoid verification timeouts on large blocks.
     /// Increasing this value may improve performance on machines with many cores.
     pub full_verify_concurrency_limit: usize,
+
+    /// The number of threads used to verify signatures, proofs, and other CPU-intensive code.
+    ///
+    /// Set to `0` by default, which uses one thread per available CPU core.
+    /// For details, see [the rayon documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
+    pub parallel_cpu_threads: usize,
 }
 
 impl Default for SyncSection {
@@ -223,11 +229,20 @@ impl Default for SyncSection {
             // This default is deliberately very low, so Zebra can verify a few large blocks in under 60 seconds,
             // even on machines with only a few cores.
             //
-            // This lets users see the committed block height changing in every progress log.
+            // This lets users see the committed block height changing in every progress log,
+            // and avoids hangs due to out-of-order verifications flooding the CPUs.
             //
-            // TODO: when we implement orchard proof batching, try increasing to 20 or more
-            //       limit full verification concurrency based on block transaction counts?
-            full_verify_concurrency_limit: 5,
+            // TODO:
+            // - limit full verification concurrency based on block transaction counts?
+            // - move more disk work to blocking tokio threads,
+            //   and CPU work to the rayon thread pool inside blocking tokio threads
+            full_verify_concurrency_limit: 20,
+
+            // Use one thread per CPU.
+            //
+            // If this causes tokio executor starvation, move CPU-intensive tasks to rayon threads,
+            // or reserve a few cores for tokio threads, based on `num_cpus()`.
+            parallel_cpu_threads: 0,
         }
     }
 }

@@ -10,8 +10,6 @@
 //!
 //! A root of a note commitment tree is associated with each treestate.
 
-#![allow(dead_code)]
-
 use std::{
     fmt,
     hash::{Hash, Hasher},
@@ -37,6 +35,11 @@ use super::commitment::pedersen_hashes::pedersen_hash;
 use crate::serialization::{
     serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
+
+/// The type that is used to update the note commitment tree.
+///
+/// Unfortunately, this is not the same as `sapling::NoteCommitment`.
+pub type NoteCommitmentUpdate = jubjub::Fq;
 
 pub(super) const MERKLE_DEPTH: usize = 32;
 
@@ -252,8 +255,8 @@ impl<'de> serde::Deserialize<'de> for Node {
     }
 }
 
-#[allow(dead_code, missing_docs)]
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[derive(Error, Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[allow(missing_docs)]
 pub enum NoteCommitmentTreeError {
     #[error("The note commitment tree is full")]
     FullTree,
@@ -307,7 +310,7 @@ impl NoteCommitmentTree {
     ///
     /// Returns an error if the tree is full.
     #[allow(clippy::unwrap_in_result)]
-    pub fn append(&mut self, cm_u: jubjub::Fq) -> Result<(), NoteCommitmentTreeError> {
+    pub fn append(&mut self, cm_u: NoteCommitmentUpdate) -> Result<(), NoteCommitmentTreeError> {
         if self.inner.append(&cm_u.into()) {
             // Invalidate cached root
             let cached_root = self

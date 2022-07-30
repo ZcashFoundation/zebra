@@ -25,6 +25,7 @@ use crate::{
         external::{types::Version, InventoryHash},
         internal::{Request, Response},
     },
+    BoxError,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -58,7 +59,7 @@ pub struct Client {
     pub(crate) connection_task: JoinHandle<()>,
 
     /// A handle to the task responsible for sending periodic heartbeats.
-    pub(crate) heartbeat_task: JoinHandle<()>,
+    pub(crate) heartbeat_task: JoinHandle<Result<(), BoxError>>,
 }
 
 /// A signal sent by the [`Client`] half of a peer connection,
@@ -201,7 +202,6 @@ impl ClientRequestReceiver {
     /// Closing the channel ensures that:
     /// - the request stream terminates, and
     /// - task notifications are not required.
-    #[allow(clippy::unwrap_in_result)]
     pub fn close_and_flush_next(&mut self) -> Option<InProgressClientRequest> {
         self.inner.close();
 
@@ -210,10 +210,10 @@ impl ClientRequestReceiver {
         // The request stream terminates, because the sender is closed,
         // and the channel has a limited capacity.
         // Task notifications are not required, because the sender is closed.
-        self.inner
-            .try_next()
-            .expect("channel is closed")
-            .map(Into::into)
+        //
+        // Despite what its documentation says, we've seen futures::channel::mpsc::Receiver::try_next()
+        // return an error after the channel is closed.
+        self.inner.try_next().ok()?.map(Into::into)
     }
 }
 
@@ -428,7 +428,10 @@ impl Client {
             .is_ready();
 
         if is_canceled {
-            return self.set_task_exited_error("heartbeat", PeerError::HeartbeatTaskExited);
+            return self.set_task_exited_error(
+                "heartbeat",
+                PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
+            );
         }
 
         match self.heartbeat_task.poll_unpin(cx) {
@@ -436,13 +439,41 @@ impl Client {
                 // Heartbeat task is still running.
                 Ok(())
             }
-            Poll::Ready(Ok(())) => {
-                // Heartbeat task stopped unexpectedly, without panicking.
-                self.set_task_exited_error("heartbeat", PeerError::HeartbeatTaskExited)
+            Poll::Ready(Ok(Ok(_))) => {
+                // Heartbeat task stopped unexpectedly, without panic or error.
+                self.set_task_exited_error(
+                    "heartbeat",
+                    PeerError::HeartbeatTaskExited(
+                        "Heartbeat task stopped unexpectedly".to_string(),
+                    ),
+                )
+            }
+            Poll::Ready(Ok(Err(error))) => {
+                // Heartbeat task stopped unexpectedly, with error.
+                self.set_task_exited_error(
+                    "heartbeat",
+                    PeerError::HeartbeatTaskExited(error.to_string()),
+                )
             }
             Poll::Ready(Err(error)) => {
-                // Heartbeat task stopped unexpectedly with a panic.
-                panic!("heartbeat task has panicked: {}", error);
+                // Heartbeat task was cancelled.
+                if error.is_cancelled() {
+                    self.set_task_exited_error(
+                        "heartbeat",
+                        PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
+                    )
+                }
+                // Heartbeat task stopped with panic.
+                else if error.is_panic() {
+                    panic!("heartbeat task has panicked: {}", error);
+                }
+                // Heartbeat task stopped with error.
+                else {
+                    self.set_task_exited_error(
+                        "heartbeat",
+                        PeerError::HeartbeatTaskExited(error.to_string()),
+                    )
+                }
             }
         }
     }

@@ -1,22 +1,23 @@
 //! Tests for checkpoint-based block verification
 
-use super::*;
-
-use super::types::Progress::*;
-use super::types::TargetHeight::*;
+use std::{cmp::min, mem::drop, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::{
     future::TryFutureExt,
     stream::{FuturesUnordered, StreamExt},
 };
-use std::{cmp::min, convert::TryInto, mem::drop, time::Duration};
 use tokio::time::timeout;
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::parameters::Network::*;
 use zebra_chain::serialization::ZcashDeserialize;
+
+use super::{
+    types::{Progress::*, TargetHeight::*},
+    *,
+};
 
 /// The timeout we apply to each verify future during testing.
 ///
@@ -28,7 +29,7 @@ use zebra_chain::serialization::ZcashDeserialize;
 /// high system load.
 const VERIFY_TIMEOUT_SECONDS: u64 = 10;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn single_item_checkpoint_list_test() -> Result<(), Report> {
     single_item_checkpoint_list().await
 }
@@ -99,7 +100,7 @@ async fn single_item_checkpoint_list() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn multi_item_checkpoint_list_test() -> Result<(), Report> {
     multi_item_checkpoint_list().await
 }
@@ -206,14 +207,14 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn continuous_blockchain_no_restart() -> Result<(), Report> {
     continuous_blockchain(None, Mainnet).await?;
     continuous_blockchain(None, Testnet).await?;
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn continuous_blockchain_restart() -> Result<(), Report> {
     for height in 0..zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.len() {
         continuous_blockchain(Some(block::Height(height.try_into().unwrap())), Mainnet).await?;
@@ -423,7 +424,7 @@ async fn continuous_blockchain(
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn block_higher_than_max_checkpoint_fail_test() -> Result<(), Report> {
     block_higher_than_max_checkpoint_fail().await
 }
@@ -493,7 +494,7 @@ async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn wrong_checkpoint_hash_fail_test() -> Result<(), Report> {
     wrong_checkpoint_hash_fail().await
 }
@@ -505,11 +506,11 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
     let good_block0 =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
     let good_block0_hash = good_block0.hash();
+
     // Change the header hash
     let mut bad_block0 = good_block0.clone();
-    let mut bad_block0 = Arc::make_mut(&mut bad_block0);
-    bad_block0.header.version = 0;
-    let bad_block0: Arc<Block> = bad_block0.clone().into();
+    let bad_block0_mut = Arc::make_mut(&mut bad_block0);
+    Arc::make_mut(&mut bad_block0_mut.header).version = 0;
 
     // Make a checkpoint list containing the genesis block checkpoint
     let genesis_checkpoint_list: BTreeMap<block::Height, block::Hash> =
@@ -661,7 +662,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn checkpoint_drop_cancel_test() -> Result<(), Report> {
     checkpoint_drop_cancel().await
 }
@@ -761,7 +762,7 @@ async fn checkpoint_drop_cancel() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn hard_coded_mainnet_test() -> Result<(), Report> {
     hard_coded_mainnet().await
 }

@@ -89,22 +89,23 @@ pub mod error;
 pub mod future;
 mod layer;
 mod message;
-mod semaphore;
 mod service;
 mod worker;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// Signaling mechanism for batchable services that allows explicit flushing.
-pub enum BatchControl<R> {
+///
+/// This request type is a generic wrapper for the inner `Req` type.
+pub enum BatchControl<Req> {
     /// A new batch item.
-    Item(R),
+    Item(Req),
     /// The current batch should be flushed.
     Flush,
 }
 
-impl<R> From<R> for BatchControl<R> {
-    fn from(req: R) -> BatchControl<R> {
+impl<Req> From<Req> for BatchControl<Req> {
+    fn from(req: Req) -> BatchControl<Req> {
         BatchControl::Item(req)
     }
 }
