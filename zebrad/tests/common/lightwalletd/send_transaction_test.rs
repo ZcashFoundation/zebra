@@ -14,6 +14,7 @@
 //! already been seen in a block.
 
 use std::{
+    cmp::min,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -26,7 +27,9 @@ use zebra_chain::{
     block, chain_tip::ChainTip, parameters::Network, serialization::ZcashSerialize,
     transaction::Transaction,
 };
+use zebra_rpc::queue::CHANNEL_AND_QUEUE_CAPACITY;
 use zebra_state::HashOrHeight;
+use zebrad::components::mempool::downloads::MAX_INBOUND_CONCURRENCY;
 
 use crate::common::{
     cached_state::{load_tip_height_from_state_directory, start_state_service_with_cache_dir},
@@ -38,7 +41,6 @@ use crate::common::{
     },
     sync::perform_full_sync_starting_from,
 };
-use zebrad::components::mempool::downloads::MAX_INBOUND_CONCURRENCY;
 
 /// The test entry point.
 pub async fn run() -> Result<()> {
@@ -106,8 +108,8 @@ pub async fn run() -> Result<()> {
 
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
 
-    // To avoid filling the mempool queue, limit the transactions to be sent to `MAX_INBOUND_CONCURRENCY - 1`
-    transactions.truncate(MAX_INBOUND_CONCURRENCY - 1);
+    // To avoid filling the mempool queue, limit the transactions to be sent to the RPC and mempool queue limits
+    transactions.truncate(min(CHANNEL_AND_QUEUE_CAPACITY, MAX_INBOUND_CONCURRENCY) - 1);
 
     tracing::info!(
         transaction_count = ?transactions.len(),
