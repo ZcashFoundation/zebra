@@ -38,6 +38,7 @@ use crate::common::{
     },
     sync::perform_full_sync_starting_from,
 };
+use zebrad::components::mempool::downloads::MAX_INBOUND_CONCURRENCY;
 
 /// The test entry point.
 pub async fn run() -> Result<()> {
@@ -74,7 +75,7 @@ pub async fn run() -> Result<()> {
         "running gRPC send transaction test using lightwalletd & zebrad",
     );
 
-    let transactions =
+    let mut transactions =
         load_transactions_from_a_future_block(network, zebrad_state_path.clone()).await?;
 
     tracing::info!(
@@ -104,6 +105,9 @@ pub async fn run() -> Result<()> {
     );
 
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
+
+    // To avoid filling the mempool queue, limit the transactions to be sent to `MAX_INBOUND_CONCURRENCY - 1`
+    transactions.truncate(MAX_INBOUND_CONCURRENCY - 1);
 
     tracing::info!(
         transaction_count = ?transactions.len(),
