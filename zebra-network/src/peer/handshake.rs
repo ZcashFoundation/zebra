@@ -6,6 +6,7 @@ use std::{
     fmt,
     future::Future,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    panic,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -17,7 +18,7 @@ use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::broadcast,
     task::JoinError,
-    time::{timeout, Instant},
+    time::{error, timeout, Instant},
 };
 use tokio_stream::wrappers::IntervalStream;
 use tokio_util::codec::Framed;
@@ -807,10 +808,6 @@ where
                 "negotiating protocol version with remote peer"
             );
 
-            // CORRECTNESS
-            //
-            // As a defence-in-depth against hangs, every send() or next() on peer_conn
-            // should be wrapped in a timeout.
             let mut peer_conn = Framed::new(
                 data_stream,
                 Codec::builder()
@@ -820,20 +817,17 @@ where
             );
 
             // Wrap the entire initial connection setup in a timeout.
-            let (remote_version, remote_services, remote_canonical_addr) = timeout(
-                constants::HANDSHAKE_TIMEOUT,
-                negotiate_version(
-                    &mut peer_conn,
-                    &connected_addr,
-                    config,
-                    nonces,
-                    user_agent,
-                    our_services,
-                    relay,
-                    minimum_peer_version,
-                ),
+            let (remote_version, remote_services, remote_canonical_addr) = negotiate_version(
+                &mut peer_conn,
+                &connected_addr,
+                config,
+                nonces,
+                user_agent,
+                our_services,
+                relay,
+                minimum_peer_version,
             )
-            .await??;
+            .await?;
 
             // If we've learned potential peer addresses from an inbound
             // connection or handshake, add those addresses to our address book.
@@ -874,8 +868,9 @@ where
 
             debug!("constructing client, spawning server");
 
-            // These channels should not be cloned more than they are
-            // in this block, see constants.rs for more.
+            // These channels communicate between the inbound and outbound halves of the connection,
+            // and between the different connection tasks. We create separate tasks and channels
+            // for each new connection.
             let (server_tx, server_rx) = futures::channel::mpsc::channel(0);
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let error_slot = ErrorSlot::default();
@@ -1014,9 +1009,28 @@ where
             Ok(client)
         };
 
-        // Spawn a new task to drive this handshake.
+        // Correctness: As a defence-in-depth against hangs, wrap the entire handshake in a timeout.
+        let fut = timeout(constants::HANDSHAKE_TIMEOUT, fut);
+
+        // Spawn a new task to drive this handshake, forwarding panics to the calling task.
         tokio::spawn(fut.instrument(negotiator_span))
-            .map(|x: Result<Result<Client, HandshakeError>, JoinError>| Ok(x??))
+            .map(
+                |join_result: Result<
+                    Result<Result<Client, HandshakeError>, error::Elapsed>,
+                    JoinError,
+                >| {
+                    match join_result {
+                        Ok(Ok(Ok(connection_client))) => Ok(connection_client),
+                        Ok(Ok(Err(handshake_error))) => Err(handshake_error.into()),
+                        Ok(Err(timeout_error)) => Err(timeout_error.into()),
+                        Err(join_error) => match join_error.try_into_panic() {
+                            // Forward panics to the calling task
+                            Ok(panic_reason) => panic::resume_unwind(panic_reason),
+                            Err(join_error) => Err(join_error.into()),
+                        },
+                    }
+                },
+            )
             .boxed()
     }
 }
