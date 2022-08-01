@@ -1287,6 +1287,10 @@ async fn lightwalletd_test_suite() -> Result<()> {
 fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> {
     zebra_test::init();
 
+    if zebra_test::net::zebra_skip_network_tests() {
+        return Ok(());
+    }
+
     // Skip the test unless the user specifically asked for it
     //
     // TODO: pass test_type to zebra_skip_lightwalletd_tests() and check for lightwalletd launch in there
