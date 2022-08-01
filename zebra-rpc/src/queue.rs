@@ -39,7 +39,7 @@ mod tests;
 const NUMBER_OF_BLOCKS_TO_EXPIRE: i64 = 5;
 
 /// Size of the queue and channel.
-const CHANNEL_AND_QUEUE_CAPACITY: usize = 20;
+pub const CHANNEL_AND_QUEUE_CAPACITY: usize = 20;
 
 /// The height to use in spacing calculation if we don't have a chain tip.
 const NO_CHAIN_TIP_HEIGHT: Height = Height(1);
