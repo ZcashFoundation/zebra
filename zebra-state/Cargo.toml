@@ -19,7 +19,7 @@ itertools = "0.10.3"
 lazy_static = "1.4.0"
 metrics = "0.18.1"
 mset = "0.1.0"
-regex = "1.5.6"
+regex = "1.6.0"
 rlimit = "0.8.3"
 rocksdb = { version = "0.18.0", default_features = false, features = ["lz4"] }
 serde = { version = "1.0.137", features = ["serde_derive"] }
