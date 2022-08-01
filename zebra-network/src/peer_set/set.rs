@@ -55,8 +55,7 @@
 //! therefore automatically increased when the block height reaches a network upgrade's activation
 //! height. The helper type is then used to:
 //!
-//! - cancel handshakes to outdated peers, in
-//!   [`handshake::negotiate_version`][crate::peer::handshake::negotiate_version]
+//! - cancel handshakes to outdated peers, in `handshake::negotiate_version`
 //! - cancel requests to and disconnect from peers that have become outdated, in
 //!   [`PeerSet::push_unready`]
 //! - disconnect from peers that have just responded and became outdated, in
@@ -67,9 +66,9 @@
 //! ## Network Coalescence
 //!
 //! [ZIP-201] also specifies how Zcashd behaves [leading up to a activation
-//! height][network-coalescence]. Since Zcashd limits the number of connections to at most eight
-//! peers, it will gradually migrate its connections to up-to-date peers as it approaches the
-//! activation height.
+//! height][1]. Since Zcashd limits the number of connections to at most eight
+//! peers, it will gradually migrate its connections to up-to-date peers as it
+//! approaches the activation height.
 //!
 //! The motivation for this behavior is to avoid an abrupt partitioning the network, which can lead
 //! to isolated peers and increases the chance of an eclipse attack on some peers of the network.
@@ -80,14 +79,18 @@
 //! more costly to execute, and the probability of an abrupt network partition that isolates peers
 //! is lower.
 //!
-//! Even if a Zebra node is manually configured to connect to a smaller number of peers, the
-//! [`AddressBook`] is configured to hold a large number of peer addresses
-//! ([`MAX_ADDRS_IN_ADDRESS_BOOK`]). Since the address book prioritizes addresses it trusts (like
-//! those that it has successfully connected to before), the node should be able to recover and
-//! rejoin the network by itself, as long as the address book is populated with enough entries.
+//! Even if a Zebra node is manually configured to connect to a smaller number
+//! of peers, the [`AddressBook`][2] is configured to hold a large number of
+//! peer addresses ([`MAX_ADDRS_IN_ADDRESS_BOOK`][3]). Since the address book
+//! prioritizes addresses it trusts (like those that it has successfully
+//! connected to before), the node should be able to recover and rejoin the
+//! network by itself, as long as the address book is populated with enough
+//! entries.
 //!
+//! [1]: https://zips.z.cash/zip-0201#network-coalescence
+//! [2]: crate::AddressBook
+//! [3]: crate::constants::MAX_ADDRS_IN_ADDRESS_BOOK
 //! [ZIP-201]: https://zips.z.cash/zip-0201
-//! [network-coalescence]: https://zips.z.cash/zip-0201#network-coalescence
 
 use std::{
     collections::{HashMap, HashSet},
@@ -142,9 +145,12 @@ mod tests;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MorePeers;
 
-/// A signal sent by the [`PeerSet`] to cancel a [`Client`]'s current request or response.
+/// A signal sent by the [`PeerSet`] to cancel a [`Client`][1]'s current request
+/// or response.
 ///
-/// When it receives this signal, the [`Client`] stops processing and exits.
+/// When it receives this signal, the [`Client`][1] stops processing and exits.
+///
+/// [1]: crate::peer::Client
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CancelClientWork;
 
@@ -164,14 +170,23 @@ where
     D::Error: Into<BoxError>,
     C: ChainTip,
 {
+    // Peer Tracking: New Peers
+    //
     /// Provides new and deleted peer [`Change`]s to the peer set,
     /// via the [`Discover`] trait implementation.
     discover: D,
 
+    /// A channel that asks the peer crawler task to connect to more peers.
+    demand_signal: mpsc::Sender<MorePeers>,
+
+    // Peer Tracking: Ready Peers
+    //
     /// Connected peers that are ready to receive requests from Zebra,
     /// or send requests to Zebra.
     ready_services: HashMap<D::Key, D::Service>,
 
+    // Request Routing
+    //
     /// A preselected ready service.
     ///
     /// # Correctness
@@ -188,6 +203,8 @@ where
     /// Used to route inventory requests to peers that are likely to have it.
     inventory_registry: InventoryRegistry,
 
+    // Peer Tracking: Busy Peers
+    //
     /// Connected peers that are handling a Zebra request,
     /// or Zebra is handling one of their requests.
     unready_services: FuturesUnordered<UnreadyService<D::Key, D::Service, Request>>,
@@ -195,9 +212,22 @@ where
     /// Channels used to cancel the request that an unready service is doing.
     cancel_handles: HashMap<D::Key, oneshot::Sender<CancelClientWork>>,
 
-    /// A channel that asks the peer crawler task to connect to more peers.
-    demand_signal: mpsc::Sender<MorePeers>,
+    // Peer Validation
+    //
+    /// An endpoint to see the minimum peer protocol version in real time.
+    ///
+    /// The minimum version depends on the block height, and [`MinimumPeerVersion`] listens for
+    /// height changes and determines the correct minimum version.
+    minimum_peer_version: MinimumPeerVersion<C>,
 
+    /// The configured limit for inbound and outbound connections.
+    ///
+    /// The peer set panics if this size is exceeded.
+    /// If that happens, our connection limit code has a bug.
+    peerset_total_connection_limit: usize,
+
+    // Background Tasks
+    //
     /// Channel for passing ownership of tokio JoinHandles from PeerSet's background tasks
     ///
     /// The join handles passed into the PeerSet are used populate the `guards` member
@@ -209,6 +239,8 @@ where
     /// the `PeerSet` propagate errors from background tasks back to the user
     guards: futures::stream::FuturesUnordered<JoinHandle<Result<(), BoxError>>>,
 
+    // Metrics and Logging
+    //
     /// Address book metrics watch channel.
     ///
     /// Used for logging diagnostics.
@@ -216,18 +248,6 @@ where
 
     /// The last time we logged a message about the peer set size
     last_peer_log: Option<Instant>,
-
-    /// The configured limit for inbound and outbound connections.
-    ///
-    /// The peer set panics if this size is exceeded.
-    /// If that happens, our connection limit code has a bug.
-    peerset_total_connection_limit: usize,
-
-    /// An endpoint to see the minimum peer protocol version in real time.
-    ///
-    /// The minimum version depends on the block height, and [`MinimumPeerVersion`] listens for
-    /// height changes and determines the correct minimum version.
-    minimum_peer_version: MinimumPeerVersion<C>,
 }
 
 impl<D, C> Drop for PeerSet<D, C>
@@ -269,16 +289,23 @@ where
         minimum_peer_version: MinimumPeerVersion<C>,
     ) -> Self {
         Self {
-            // Ready peers
+            // New peers
             discover,
+            demand_signal,
+
+            // Ready peers
             ready_services: HashMap::new(),
+            // Request Routing
             preselected_p2c_peer: None,
             inventory_registry: InventoryRegistry::new(inv_stream),
 
-            // Unready peers
+            // Busy peers
             unready_services: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
-            demand_signal,
+
+            // Peer validation
+            minimum_peer_version,
+            peerset_total_connection_limit: config.peerset_total_connection_limit(),
 
             // Background tasks
             handle_rx,
@@ -287,10 +314,6 @@ where
             // Metrics
             last_peer_log: None,
             address_metrics,
-            peerset_total_connection_limit: config.peerset_total_connection_limit(),
-
-            // Real-time parameters
-            minimum_peer_version,
         }
     }
 
@@ -564,6 +587,7 @@ where
     }
 
     /// Performs P2C on `ready_service_list` to randomly select a less-loaded ready service.
+    #[allow(clippy::unwrap_in_result)]
     fn select_p2c_peer_from_list(&self, ready_service_list: &HashSet<D::Key>) -> Option<D::Key> {
         match ready_service_list.len() {
             0 => None,

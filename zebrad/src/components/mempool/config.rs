@@ -20,8 +20,9 @@ pub struct Config {
 
     /// The mempool transaction eviction age limit.
     ///
-    /// This limits the maximum amount of time evicted transaction IDs stay in the mempool rejection list.
-    /// Transactions are randomly evicted from the mempool when the mempool reaches [`tx_cost_limit`].
+    /// This limits the maximum amount of time evicted transaction IDs stay in
+    /// the mempool rejection list. Transactions are randomly evicted from the
+    /// mempool when the mempool reaches [`Self::tx_cost_limit`].
     ///
     /// (Transactions can also be rejected by the mempool for other reasons.
     /// Different rejection reasons can have different age limits.)

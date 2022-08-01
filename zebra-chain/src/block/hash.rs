@@ -1,4 +1,4 @@
-use std::{fmt, io};
+use std::{fmt, io, sync::Arc};
 
 use hex::{FromHex, ToHex};
 
@@ -94,6 +94,30 @@ impl<'a> From<&'a Header> for Hash {
             .zcash_serialize(&mut hash_writer)
             .expect("Sha256dWriter is infallible");
         Self(hash_writer.finish())
+    }
+}
+
+impl From<Header> for Hash {
+    // The borrow is actually needed to use From<&Header>
+    #[allow(clippy::needless_borrow)]
+    fn from(block_header: Header) -> Self {
+        (&block_header).into()
+    }
+}
+
+impl From<&Arc<Header>> for Hash {
+    // The borrow is actually needed to use From<&Header>
+    #[allow(clippy::needless_borrow)]
+    fn from(block_header: &Arc<Header>) -> Self {
+        block_header.as_ref().into()
+    }
+}
+
+impl From<Arc<Header>> for Hash {
+    // The borrow is actually needed to use From<&Header>
+    #[allow(clippy::needless_borrow)]
+    fn from(block_header: Arc<Header>) -> Self {
+        block_header.as_ref().into()
     }
 }
 

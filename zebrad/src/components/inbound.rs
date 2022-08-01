@@ -35,9 +35,10 @@ use zebra_network::{
 };
 use zebra_node_services::mempool;
 
+use crate::BoxError;
+
 // Re-use the syncer timeouts for consistency.
 use super::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
-use crate::BoxError;
 
 use InventoryResponse::*;
 
@@ -85,6 +86,13 @@ pub enum Setup {
     ///
     /// All requests are ignored.
     Pending {
+        // Configuration
+        //
+        /// The configured full verification concurrency limit.
+        full_verify_concurrency_limit: usize,
+
+        // Services
+        //
         /// A oneshot channel used to receive required services,
         /// after they are set up.
         setup: oneshot::Receiver<InboundSetupData>,
@@ -94,6 +102,8 @@ pub enum Setup {
     ///
     /// All requests are answered.
     Initialized {
+        // Services
+        //
         /// A shared list of peer addresses.
         address_book: Arc<std::sync::Mutex<zn::AddressBook>>,
 
@@ -169,9 +179,15 @@ impl Inbound {
     /// Create a new inbound service.
     ///
     /// Dependent services are sent via the `setup` channel after initialization.
-    pub fn new(setup: oneshot::Receiver<InboundSetupData>) -> Inbound {
+    pub fn new(
+        full_verify_concurrency_limit: usize,
+        setup: oneshot::Receiver<InboundSetupData>,
+    ) -> Inbound {
         Inbound {
-            setup: Setup::Pending { setup },
+            setup: Setup::Pending {
+                full_verify_concurrency_limit,
+                setup,
+            },
         }
     }
 
@@ -200,7 +216,10 @@ impl Service<zn::Request> for Inbound {
         let result;
 
         self.setup = match self.take_setup() {
-            Setup::Pending { mut setup } => match setup.try_recv() {
+            Setup::Pending {
+                full_verify_concurrency_limit,
+                mut setup,
+            } => match setup.try_recv() {
                 Ok(setup_data) => {
                     let InboundSetupData {
                         address_book,
@@ -212,6 +231,7 @@ impl Service<zn::Request> for Inbound {
                     } = setup_data;
 
                     let block_downloads = Box::pin(BlockDownloads::new(
+                        full_verify_concurrency_limit,
                         Timeout::new(block_download_peer_set.clone(), BLOCK_DOWNLOAD_TIMEOUT),
                         Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
                         state.clone(),
@@ -229,7 +249,10 @@ impl Service<zn::Request> for Inbound {
                 Err(TryRecvError::Empty) => {
                     // There's no setup data yet, so keep waiting for it
                     result = Ok(());
-                    Setup::Pending { setup }
+                    Setup::Pending {
+                        full_verify_concurrency_limit,
+                        setup,
+                    }
                 }
                 Err(error @ TryRecvError::Closed) => {
                     // Mark the service as failed, because setup failed
@@ -256,6 +279,7 @@ impl Service<zn::Request> for Inbound {
                 while let Poll::Ready(Some(_)) = block_downloads.as_mut().poll_next(cx) {}
 
                 result = Ok(());
+
                 Setup::Initialized {
                     address_book,
                     block_downloads,

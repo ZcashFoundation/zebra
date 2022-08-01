@@ -170,6 +170,7 @@ impl Storage {
     ///
     /// If inserting this transaction evicts other transactions, they will be tracked
     /// as [`SameEffectsChainRejectionError::RandomlyEvicted`].
+    #[allow(clippy::unwrap_in_result)]
     pub fn insert(&mut self, tx: VerifiedUnminedTx) -> Result<UnminedTxId, MempoolError> {
         // # Security
         //
@@ -341,7 +342,8 @@ impl Storage {
     /// Returns the set of [`UnminedTx`]es with matching [`transaction::Hash`]es
     /// in the mempool.
     ///
-    /// This matches transactions with the same effects, regardless of [`AuthDigest`].
+    /// This matches transactions with the same effects, regardless of
+    /// [`transaction::AuthDigest`].
     pub fn transactions_same_effects(
         &self,
         tx_ids: HashSet<Hash>,
@@ -455,9 +457,6 @@ impl Storage {
             TransactionDownloadVerifyError::InState |
             // An unknown error in the state service, better do nothing
             TransactionDownloadVerifyError::StateError(_) |
-            // Sync has just started. Mempool shouldn't even be enabled, so will not
-            // happen in practice.
-            TransactionDownloadVerifyError::NoTip |
             // If download failed, do nothing; the crawler will end up trying to
             // download it again.
             TransactionDownloadVerifyError::DownloadFailed(_) |

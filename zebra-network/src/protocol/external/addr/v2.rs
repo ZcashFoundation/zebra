@@ -47,11 +47,15 @@ pub const MAX_ADDR_V2_ADDR_SIZE: usize = 512;
 /// > 0x01  IPV4  4   IPv4 address (globally routed internet)
 ///
 /// <https://zips.z.cash/zip-0155#specification>
+///
+/// [`Ipv4Addr`]: std::net::Ipv4Addr
 pub const ADDR_V2_IPV4_NETWORK_ID: u8 = 0x01;
 
 /// The size of [`Ipv4Addr`]s in `addrv2` messages.
 ///
 /// <https://zips.z.cash/zip-0155#specification>
+///
+/// [`Ipv4Addr`]: std::net::Ipv4Addr
 pub const ADDR_V2_IPV4_ADDR_SIZE: usize = 4;
 
 /// The network ID of [`Ipv6Addr`]s in `addrv2` messages.
@@ -59,11 +63,15 @@ pub const ADDR_V2_IPV4_ADDR_SIZE: usize = 4;
 /// > 0x02  IPV6  16  IPv6 address (globally routed internet)
 ///
 /// <https://zips.z.cash/zip-0155#specification>
+///
+/// [`Ipv6Addr`]: std::net::Ipv6Addr
 pub const ADDR_V2_IPV6_NETWORK_ID: u8 = 0x02;
 
 /// The size of [`Ipv6Addr`]s in `addrv2` messages.
 ///
 /// <https://zips.z.cash/zip-0155#specification>
+///
+/// [`Ipv6Addr`]: std::net::Ipv6Addr
 pub const ADDR_V2_IPV6_ADDR_SIZE: usize = 16;
 
 /// The second format used for Bitcoin node addresses.
@@ -96,6 +104,8 @@ pub(in super::super) enum AddrV2 {
         /// The peer's IP address.
         ///
         /// Unlike [`AddrV1`], this can be an IPv4 or IPv6 address.
+        ///
+        /// [`AddrV1`]: super::v1::AddrV1
         ip: IpAddr,
 
         /// The peer's TCP port.
@@ -171,6 +181,7 @@ impl AddrV2 {
     ///
     /// The returned IP version is chosen based on `IP_ADDR_SIZE`,
     /// which should be [`ADDR_V2_IPV4_ADDR_SIZE`] or [`ADDR_V2_IPV6_ADDR_SIZE`].
+    #[allow(clippy::unwrap_in_result)]
     fn ip_addr_from_bytes<const IP_ADDR_SIZE: usize>(
         addr_bytes: Vec<u8>,
     ) -> Result<IpAddr, SerializationError>

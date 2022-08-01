@@ -57,8 +57,8 @@ pub enum PeerError {
     ClientCancelledHeartbeatTask,
 
     /// Zebra's internal heartbeat task exited.
-    #[error("Internal heartbeat task exited")]
-    HeartbeatTaskExited,
+    #[error("Internal heartbeat task exited with message: {0:?}")]
+    HeartbeatTaskExited(String),
 
     /// Sending a message to a remote peer took too long.
     #[error("Sending Client request timed out")]
@@ -130,7 +130,7 @@ impl PeerError {
             PeerError::ConnectionDropped => "ConnectionDropped".into(),
             PeerError::ClientDropped => "ClientDropped".into(),
             PeerError::ClientCancelledHeartbeatTask => "ClientCancelledHeartbeatTask".into(),
-            PeerError::HeartbeatTaskExited => "HeartbeatTaskExited".into(),
+            PeerError::HeartbeatTaskExited(_) => "HeartbeatTaskExited".into(),
             PeerError::ConnectionTaskExited => "ConnectionTaskExited".into(),
             PeerError::ConnectionSendTimeout => "ConnectionSendTimeout".into(),
             PeerError::ConnectionReceiveTimeout => "ConnectionReceiveTimeout".into(),
@@ -181,6 +181,7 @@ impl ErrorSlot {
     ///
     /// Briefly locks the error slot's threaded `std::sync::Mutex`, to get a
     /// reference to the error in the slot.
+    #[allow(clippy::unwrap_in_result)]
     pub fn try_get_error(&self) -> Option<SharedPeerError> {
         self.0
             .lock()
@@ -197,6 +198,7 @@ impl ErrorSlot {
     ///
     /// Briefly locks the error slot's threaded `std::sync::Mutex`, to check for
     /// a previous error, then update the error in the slot.
+    #[allow(clippy::unwrap_in_result)]
     pub fn try_update_error(&self, e: SharedPeerError) -> Result<(), AlreadyErrored> {
         let mut guard = self.0.lock().expect("error mutex should be unpoisoned");
 

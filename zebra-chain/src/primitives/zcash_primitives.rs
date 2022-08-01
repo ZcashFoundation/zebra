@@ -198,6 +198,15 @@ impl From<&Script> for zcash_primitives::legacy::Script {
     }
 }
 
+/// Convert a Zebra Script into a librustzcash one.
+impl From<Script> for zcash_primitives::legacy::Script {
+    // The borrow is actually needed to use From<&Script>
+    #[allow(clippy::needless_borrow)]
+    fn from(script: Script) -> Self {
+        (&script).into()
+    }
+}
+
 /// Compute a signature hash using librustzcash.
 ///
 /// # Inputs
@@ -223,7 +232,7 @@ pub(crate) fn sighash(
     let signable_input = match input_index {
         Some(input_index) => {
             let output = all_previous_outputs[input_index].clone();
-            script = (&output.lock_script).into();
+            script = output.lock_script.into();
             zp_tx::sighash::SignableInput::Transparent {
                 hash_type: hash_type.bits() as _,
                 index: input_index,

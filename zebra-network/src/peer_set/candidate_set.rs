@@ -4,6 +4,7 @@ use chrono::Utc;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::{sleep_until, timeout, Instant};
 use tower::{Service, ServiceExt};
+use tracing::Span;
 
 use zebra_chain::serialization::DateTime32;
 
@@ -15,11 +16,11 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// The [`CandidateSet`] manages outbound peer connection attempts.
-/// Successful connections become peers in the [`PeerSet`].
+/// The [`CandidateSet`] manages outbound peer connection attempts. Successful
+/// connections become peers in the [`PeerSet`](super::set::PeerSet).
 ///
 /// The candidate set divides the set of all possible outbound peers into
-/// disjoint subsets, using the [`PeerAddrState`]:
+/// disjoint subsets, using the [`PeerAddrState`](crate::PeerAddrState):
 ///
 /// 1. [`Responded`] peers, which we have had an outbound connection to.
 /// 2. [`NeverAttemptedGossiped`] peers, which we learned about from other peers
@@ -107,6 +108,13 @@ mod tests;
 ///  │  * update last_response to now()      │
 ///  └───────────────────────────────────────┘
 /// ```
+///
+/// [`Responded`]: crate::PeerAddrState::Responded
+/// [`Version`]: crate::protocol::external::types::Version
+/// [`NeverAttemptedGossiped`]: crate::PeerAddrState::NeverAttemptedGossiped
+/// [`NeverAttemptedAlternate`]: crate::PeerAddrState::NeverAttemptedAlternate
+/// [`Failed`]: crate::PeerAddrState::Failed
+/// [`AttemptPending`]: crate::PeerAddrState::AttemptPending
 // TODO:
 //   * show all possible transitions between Attempt/Responded/Failed,
 //     except Failed -> Responded is invalid, must go through Attempt
@@ -326,9 +334,12 @@ where
         //
         // Extend handles duplicate addresses internally.
         let address_book = self.address_book.clone();
-        tokio::task::spawn_blocking(move || address_book.lock().unwrap().extend(addrs))
-            .await
-            .expect("panic in new peers address book update task");
+        let span = Span::current();
+        tokio::task::spawn_blocking(move || {
+            span.in_scope(|| address_book.lock().unwrap().extend(addrs))
+        })
+        .await
+        .expect("panic in new peers address book update task");
     }
 
     /// Returns the next candidate for a connection attempt, if any are available.
@@ -340,10 +351,10 @@ where
     ///
     /// ## Correctness
     ///
-    /// `AttemptPending` peers will become `Responded` if they respond, or
+    /// `AttemptPending` peers will become [`Responded`] if they respond, or
     /// become `Failed` if they time out or provide a bad response.
     ///
-    /// Live `Responded` peers will stay live if they keep responding, or
+    /// Live [`Responded`] peers will stay live if they keep responding, or
     /// become a reconnection candidate if they stop responding.
     ///
     /// ## Security
@@ -351,6 +362,8 @@ where
     /// Zebra resists distributed denial of service attacks by making sure that
     /// new peer connections are initiated at least
     /// [`MIN_PEER_CONNECTION_INTERVAL`][constants::MIN_PEER_CONNECTION_INTERVAL] apart.
+    ///
+    /// [`Responded`]: crate::PeerAddrState::Responded
     pub async fn next(&mut self) -> Option<MetaAddr> {
         // Correctness: To avoid hangs, computation in the critical section should be kept to a minimum.
         let address_book = self.address_book.clone();
@@ -377,7 +390,8 @@ where
         };
 
         // Correctness: Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
-        let next_peer = tokio::task::spawn_blocking(next_peer)
+        let span = Span::current();
+        let next_peer = tokio::task::spawn_blocking(move || span.in_scope(next_peer))
             .await
             .expect("panic in next peer address book task")?;
 
@@ -397,9 +411,12 @@ where
         // Spawn address book accesses on a blocking thread,
         // to avoid deadlocks (see #1976).
         let address_book = self.address_book.clone();
-        tokio::task::spawn_blocking(move || address_book.lock().unwrap().update(addr))
-            .await
-            .expect("panic in peer failure address book update task");
+        let span = Span::current();
+        tokio::task::spawn_blocking(move || {
+            span.in_scope(|| address_book.lock().unwrap().update(addr))
+        })
+        .await
+        .expect("panic in peer failure address book update task");
     }
 }
 

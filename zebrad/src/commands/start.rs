@@ -37,6 +37,8 @@
 //!    * contextually verifies blocks
 //!    * handles in-memory storage of multiple non-finalized chains
 //!    * handles permanent storage of the best finalized chain
+//!  * Old State Version Cleanup Task
+//!    * deletes outdated state versions
 //!  * Block Gossip Task
 //!    * runs in the background and continuously queries the state for
 //!      newly committed blocks to be gossiped to peers
@@ -58,24 +60,19 @@
 //!  * JSON-RPC Service
 //!    * answers RPC client requests using the State Service and Mempool Service
 //!    * submits client transactions to the node's mempool
-
-use std::{cmp::max, ops::Add, time::Duration};
+//!
+//! Zebra also has diagnostic support
+//! * [metrics](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/metrics.md)
+//! * [tracing](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/tracing.md)
+//!
+//! Some of the diagnostic features are optional, and need to be enabled at compile-time.
 
 use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
-use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
-use num_integer::div_ceil;
 use tokio::{pin, select, sync::oneshot};
 use tower::{builder::ServiceBuilder, util::BoxService};
 use tracing_futures::Instrument;
-
-use zebra_chain::{
-    block::Height,
-    chain_tip::ChainTip,
-    parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
-};
-use zebra_consensus::CheckpointList;
 
 use zebra_rpc::server::RpcServer;
 
@@ -84,7 +81,7 @@ use crate::{
     components::{
         inbound::{self, InboundSetupData},
         mempool::{self, Mempool},
-        sync::{self, SyncStatus},
+        sync::{self, show_block_chain_progress},
         tokio::{RuntimeRun, TokioComponent},
         ChainSync, Inbound,
     },
@@ -120,13 +117,16 @@ impl StartCmd {
         let inbound = ServiceBuilder::new()
             .load_shed()
             .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
-            .service(Inbound::new(setup_rx));
+            .service(Inbound::new(
+                config.sync.full_verify_concurrency_limit,
+                setup_rx,
+            ));
 
         let (peer_set, address_book) =
             zebra_network::init(config.network.clone(), inbound, latest_chain_tip.clone()).await;
 
         info!("initializing verifiers");
-        let (chain_verifier, tx_verifier, mut groth16_download_handle) =
+        let (chain_verifier, tx_verifier, mut groth16_download_handle, max_checkpoint_height) =
             zebra_consensus::chain::init(
                 config.consensus.clone(),
                 config.network.network,
@@ -138,6 +138,7 @@ impl StartCmd {
         info!("initializing syncer");
         let (syncer, sync_status) = ChainSync::new(
             &config,
+            max_checkpoint_height,
             peer_set.clone(),
             chain_verifier.clone(),
             state.clone(),
@@ -208,9 +209,12 @@ impl StartCmd {
         );
 
         let progress_task_handle = tokio::spawn(
-            Self::update_progress(config.network.network, latest_chain_tip, sync_status)
+            show_block_chain_progress(config.network.network, latest_chain_tip, sync_status)
                 .in_current_span(),
         );
+
+        let mut old_databases_task_handle =
+            zebra_state::check_and_delete_old_databases(config.state.clone());
 
         info!("spawned initial Zebra tasks");
 
@@ -229,6 +233,8 @@ impl StartCmd {
         // startup tasks
         let groth16_download_handle_fused = (&mut groth16_download_handle).fuse();
         pin!(groth16_download_handle_fused);
+        let old_databases_task_handle_fused = (&mut old_databases_task_handle).fuse();
+        pin!(old_databases_task_handle_fused);
 
         // Wait for tasks to finish
         let exit_status = loop {
@@ -291,6 +297,16 @@ impl StartCmd {
                     exit_when_task_finishes = false;
                     Ok(())
                 }
+
+                // The same for the old databases task, we expect it to finish while Zebra is running.
+                old_databases_result = &mut old_databases_task_handle_fused => {
+                    old_databases_result
+                        .unwrap_or_else(|_| panic!(
+                            "unexpected panic deleting old database directories"));
+
+                    exit_when_task_finishes = false;
+                    Ok(())
+                }
             };
 
             // Stop Zebra if a task finished and returned an error,
@@ -318,6 +334,7 @@ impl StartCmd {
 
         // startup tasks
         groth16_download_handle.abort();
+        old_databases_task_handle.abort();
 
         exit_status
     }
@@ -327,246 +344,19 @@ impl StartCmd {
     fn state_buffer_bound() -> usize {
         let config = app_config().clone();
 
+        // Ignore the checkpoint verify limit, because it is very large.
+        //
         // TODO: do we also need to account for concurrent use across services?
         //       we could multiply the maximum by 3/2, or add a fixed constant
-        max(
-            config.sync.max_concurrent_block_requests,
-            max(
-                inbound::downloads::MAX_INBOUND_CONCURRENCY,
-                mempool::downloads::MAX_INBOUND_CONCURRENCY,
-            ),
-        )
-    }
-
-    /// Logs Zebra's estimated progress towards the chain tip.
-    async fn update_progress(
-        network: Network,
-        latest_chain_tip: impl ChainTip,
-        sync_status: SyncStatus,
-    ) {
-        // The amount of time between progress logs.
-        const LOG_INTERVAL: Duration = Duration::from_secs(60);
-
-        // The number of blocks we consider to be close to the tip.
-        //
-        // Most chain forks are 1-7 blocks long.
-        const MAX_CLOSE_TO_TIP_BLOCKS: i32 = 1;
-
-        // Skip slow sync warnings when we are this close to the tip.
-        //
-        // In testing, we've seen warnings around 30 blocks.
-        //
-        // TODO: replace with `MAX_CLOSE_TO_TIP_BLOCKS` after fixing slow syncing near tip (#3375)
-        const MIN_SYNC_WARNING_BLOCKS: i32 = 60;
-
-        // The number of fractional digits in sync percentages.
-        const SYNC_PERCENT_FRAC_DIGITS: usize = 3;
-
-        // The minimum number of extra blocks mined between updating a checkpoint list,
-        // and running an automated test that depends on that list.
-        //
-        // Makes sure that the block finalization code always runs in sync tests,
-        // even if the miner or test node clock is wrong by a few minutes.
-        //
-        // This is an estimate based on the time it takes to:
-        // - get the tip height from `zcashd`,
-        // - run `zebra-checkpoints` to update the checkpoint list,
-        // - submit a pull request, and
-        // - run a CI test that logs progress based on the new checkpoint height.
-        //
-        // We might add tests that sync from a cached tip state,
-        // so we only allow a few extra blocks here.
-        const MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE: i32 = 10;
-
-        // The minimum number of extra blocks after the highest checkpoint, based on:
-        // - the non-finalized state limit, and
-        // - the minimum number of extra blocks mined between a checkpoint update,
-        //   and the automated tests for that update.
-        let min_after_checkpoint_blocks = i32::try_from(zebra_state::MAX_BLOCK_REORG_HEIGHT)
-            .expect("constant fits in i32")
-            + MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE;
-
-        // The minimum height of the valid best chain, based on:
-        // - the hard-coded checkpoint height,
-        // - the minimum number of blocks after the highest checkpoint.
-        let after_checkpoint_height = CheckpointList::new(network)
-            .max_height()
-            .add(min_after_checkpoint_blocks)
-            .expect("hard-coded checkpoint height is far below Height::MAX");
-
-        let target_block_spacing = NetworkUpgrade::target_spacing_for_height(network, Height::MAX);
-        let max_block_spacing =
-            NetworkUpgrade::minimum_difficulty_spacing_for_height(network, Height::MAX);
-
-        // We expect the state height to increase at least once in this interval.
-        //
-        // Most chain forks are 1-7 blocks long.
-        //
-        // TODO: remove the target_block_spacing multiplier,
-        //       after fixing slow syncing near tip (#3375)
-        let min_state_block_interval = max_block_spacing.unwrap_or(target_block_spacing * 4) * 2;
-
-        // Formatted string for logging.
-        let max_block_spacing = max_block_spacing
-            .map(|duration| duration.to_string())
-            .unwrap_or_else(|| "None".to_string());
-
-        // The last time we downloaded and verified at least one block.
-        //
-        // Initialized to the start time to simplify the code.
-        let mut last_state_change_time = Utc::now();
-
-        // The state tip height, when we last downloaded and verified at least one block.
-        //
-        // Initialized to the genesis height to simplify the code.
-        let mut last_state_change_height = Height(0);
-
-        loop {
-            let now = Utc::now();
-            let is_syncer_stopped = sync_status.is_close_to_tip();
-
-            if let Some(estimated_height) =
-                latest_chain_tip.estimate_network_chain_tip_height(network, now)
-            {
-                // The estimate/actual race doesn't matter here,
-                // because we're only using it for metrics and logging.
-                let current_height = latest_chain_tip
-                    .best_tip_height()
-                    .expect("unexpected empty state: estimate requires a block height");
-
-                // Work out the sync progress towards the estimated tip.
-                let sync_progress = f64::from(current_height.0) / f64::from(estimated_height.0);
-                let sync_percent = format!(
-                    "{:.frac$} %",
-                    sync_progress * 100.0,
-                    frac = SYNC_PERCENT_FRAC_DIGITS,
-                );
-
-                let remaining_sync_blocks = estimated_height - current_height;
-
-                // Work out how long it has been since the state height has increased.
-                //
-                // Non-finalized forks can decrease the height, we only want to track increases.
-                if current_height > last_state_change_height {
-                    last_state_change_height = current_height;
-                    last_state_change_time = now;
-                }
-
-                let time_since_last_state_block = last_state_change_time.signed_duration_since(now);
-
-                // TODO:
-                // - log progress, remaining blocks, and remaining time to next network upgrade
-                // - add some of this info to the metrics
-
-                if time_since_last_state_block > min_state_block_interval {
-                    // The state tip height hasn't increased for a long time.
-                    //
-                    // Block verification can fail if the local node's clock is wrong.
-                    warn!(
-                        %sync_percent,
-                        ?current_height,
-                        %time_since_last_state_block,
-                        %target_block_spacing,
-                        %max_block_spacing,
-                        ?is_syncer_stopped,
-                        "chain updates have stalled, \
-                         state height has not increased for {} minutes. \
-                         Hint: check your network connection, \
-                         and your computer clock and time zone",
-                        time_since_last_state_block.num_minutes(),
-                    );
-                } else if is_syncer_stopped && remaining_sync_blocks > MIN_SYNC_WARNING_BLOCKS {
-                    // We've stopped syncing blocks, but we estimate we're a long way from the tip.
-                    //
-                    // TODO: warn after fixing slow syncing near tip (#3375)
-                    info!(
-                        %sync_percent,
-                        ?current_height,
-                        ?remaining_sync_blocks,
-                        ?after_checkpoint_height,
-                        %time_since_last_state_block,
-                        "initial sync is very slow, or estimated tip is wrong. \
-                         Hint: check your network connection, \
-                         and your computer clock and time zone",
-                    );
-                } else if is_syncer_stopped && current_height <= after_checkpoint_height {
-                    // We've stopped syncing blocks,
-                    // but we're below the minimum height estimated from our checkpoints.
-                    let min_minutes_after_checkpoint_update: i64 = div_ceil(
-                        i64::from(MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE)
-                            * POST_BLOSSOM_POW_TARGET_SPACING,
-                        60,
-                    );
-
-                    warn!(
-                        %sync_percent,
-                        ?current_height,
-                        ?remaining_sync_blocks,
-                        ?after_checkpoint_height,
-                        %time_since_last_state_block,
-                        "initial sync is very slow, and state is below the highest checkpoint. \
-                         Hint: check your network connection, \
-                         and your computer clock and time zone. \
-                         Dev Hint: were the checkpoints updated in the last {} minutes?",
-                        min_minutes_after_checkpoint_update,
-                    );
-                } else if is_syncer_stopped {
-                    // We've stayed near the tip for a while, and we've stopped syncing lots of blocks.
-                    // So we're mostly using gossiped blocks now.
-                    info!(
-                        %sync_percent,
-                        ?current_height,
-                        ?remaining_sync_blocks,
-                        %time_since_last_state_block,
-                        "finished initial sync to chain tip, using gossiped blocks",
-                    );
-                } else if remaining_sync_blocks <= MAX_CLOSE_TO_TIP_BLOCKS {
-                    // We estimate we're near the tip, but we have been syncing lots of blocks recently.
-                    // We might also be using some gossiped blocks.
-                    info!(
-                        %sync_percent,
-                        ?current_height,
-                        ?remaining_sync_blocks,
-                        %time_since_last_state_block,
-                        "close to finishing initial sync, \
-                         confirming using syncer and gossiped blocks",
-                    );
-                } else {
-                    // We estimate we're far from the tip, and we've been syncing lots of blocks.
-                    info!(
-                        %sync_percent,
-                        ?current_height,
-                        ?remaining_sync_blocks,
-                        %time_since_last_state_block,
-                        "estimated progress to chain tip",
-                    );
-                }
-            } else {
-                let sync_percent = format!("{:.frac$} %", 0.0f64, frac = SYNC_PERCENT_FRAC_DIGITS,);
-
-                if is_syncer_stopped {
-                    // We've stopped syncing blocks,
-                    // but we haven't downloaded and verified the genesis block.
-                    warn!(
-                        %sync_percent,
-                        current_height = %"None",
-                        "initial sync can't download and verify the genesis block. \
-                         Hint: check your network connection, \
-                         and your computer clock and time zone",
-                    );
-                } else {
-                    // We're waiting for the genesis block to be committed to the state,
-                    // before we can estimate the best chain tip.
-                    info!(
-                        %sync_percent,
-                        current_height = %"None",
-                        "initial sync is waiting to download the genesis block",
-                    );
-                }
-            }
-
-            tokio::time::sleep(LOG_INTERVAL).await;
-        }
+        [
+            config.sync.download_concurrency_limit,
+            config.sync.full_verify_concurrency_limit,
+            inbound::downloads::MAX_INBOUND_CONCURRENCY,
+            mempool::downloads::MAX_INBOUND_CONCURRENCY,
+        ]
+        .into_iter()
+        .max()
+        .unwrap()
     }
 }
 

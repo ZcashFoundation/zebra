@@ -12,15 +12,19 @@
 //!
 //! # Correctness
 //!
-//! The mempool downloader doesn't send verified transactions to the [`Mempool`] service.
-//! So Zebra must spawn a task that regularly polls the downloader for ready transactions.
-//! (To ensure that transactions propagate across the entire network in each 75s block interval,
-//! the polling interval should be around 5-10 seconds.)
+//! The mempool downloader doesn't send verified transactions to the [`Mempool`]
+//! service. So Zebra must spawn a task that regularly polls the downloader for
+//! ready transactions. (To ensure that transactions propagate across the entire
+//! network in each 75s block interval, the polling interval should be around
+//! 5-10 seconds.)
 //!
 //! Polling the downloader from [`Mempool::poll_ready`] is not sufficient.
 //! [`Service::poll_ready`] is only called when there is a service request.
 //! But we want to download and gossip transactions,
 //! even when there are no other service requests.
+//!
+//! [`Mempool`]: super::Mempool
+//! [`Mempool::poll_ready`]: super::Mempool::poll_ready
 use std::{
     collections::{HashMap, HashSet},
     pin::Pin,
@@ -39,7 +43,10 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::transaction::{self, UnminedTxId, VerifiedUnminedTx};
+use zebra_chain::{
+    block::Height,
+    transaction::{self, UnminedTxId, VerifiedUnminedTx},
+};
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
 use zebra_node_services::mempool::Gossip;
@@ -98,9 +105,6 @@ pub enum TransactionDownloadVerifyError {
 
     #[error("error in state service")]
     StateError(#[source] BoxError),
-
-    #[error("transaction not validated because the tip is empty")]
-    NoTip,
 
     #[error("error downloading transaction")]
     DownloadFailed(#[source] BoxError),
@@ -269,13 +273,16 @@ where
             // Don't download/verify if the transaction is already in the state.
             Self::transaction_in_state(&mut state, txid).await?;
 
-            let height = match state.oneshot(zs::Request::Tip).await {
-                Ok(zs::Response::Tip(None)) => Err(TransactionDownloadVerifyError::NoTip),
-                Ok(zs::Response::Tip(Some((height, _hash)))) => Ok(height),
+            let next_height = match state.oneshot(zs::Request::Tip).await {
+                Ok(zs::Response::Tip(None)) => Ok(Height(0)),
+                Ok(zs::Response::Tip(Some((height, _hash)))) => {
+                    let next_height =
+                        (height + 1).expect("valid heights are far below the maximum");
+                    Ok(next_height)
+                }
                 Ok(_) => unreachable!("wrong response"),
                 Err(e) => Err(TransactionDownloadVerifyError::StateError(e)),
             }?;
-            let height = (height + 1).expect("must have next height");
 
             let tx = match gossiped_tx {
                 Gossip::Id(txid) => {
@@ -318,7 +325,7 @@ where
             let result = verifier
                 .oneshot(tx::Request::Mempool {
                     transaction: tx.clone(),
-                    height,
+                    height: next_height,
                 })
                 .map_ok(|rsp| {
                     rsp.into_mempool_transaction()

@@ -91,6 +91,8 @@ impl Ord for PeerAddrState {
     /// order, ignoring liveness.
     ///
     /// See [`CandidateSet`] and [`MetaAddr::cmp`] for more details.
+    ///
+    /// [`CandidateSet`]: super::peer_set::CandidateSet
     fn cmp(&self, other: &Self) -> Ordering {
         use Ordering::*;
         match (self, other) {
@@ -292,6 +294,7 @@ impl MetaAddr {
     /// [`MetaAddr`].
     ///
     /// Returns [`None`] if the gossiped peer is missing the untrusted services field.
+    #[allow(clippy::unwrap_in_result)]
     pub fn new_gossiped_change(self) -> Option<MetaAddrChange> {
         let untrusted_services = self.services?;
 
@@ -591,6 +594,7 @@ impl MetaAddr {
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
     ///
     /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
+    #[allow(clippy::unwrap_in_result)]
     pub fn sanitize(&self, network: Network) -> Option<MetaAddr> {
         if !self.last_known_info_is_valid_for_outbound(network) {
             return None;
@@ -861,11 +865,12 @@ impl Ord for MetaAddr {
     /// with `Responded` peers sorted first as a group.
     ///
     /// But this order should not be used for reconnection attempts: use
-    /// [`reconnection_peers`][rp] instead.
+    /// [`reconnection_peers`] instead.
     ///
     /// See [`CandidateSet`] for more details.
     ///
-    /// [rp]: crate::AddressBook::reconnection_peers
+    /// [`CandidateSet`]: super::peer_set::CandidateSet
+    /// [`reconnection_peers`]: crate::AddressBook::reconnection_peers
     fn cmp(&self, other: &Self) -> Ordering {
         use std::net::IpAddr::{V4, V6};
         use Ordering::*;

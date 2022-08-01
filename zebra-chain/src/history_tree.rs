@@ -128,6 +128,7 @@ impl NonEmptyHistoryTree {
     /// `sapling_root` is the root of the Sapling note commitment tree of the block.
     /// `orchard_root` is the root of the Orchard note commitment tree of the block;
     ///  (ignored for pre-Orchard blocks).
+    #[allow(clippy::unwrap_in_result)]
     pub fn from_block(
         network: Network,
         block: Arc<Block>,
@@ -186,6 +187,7 @@ impl NonEmptyHistoryTree {
     /// # Panics
     ///
     /// If the block height is not one more than the previously pushed block.
+    #[allow(clippy::unwrap_in_result)]
     pub fn push(
         &mut self,
         block: Arc<Block>,
@@ -419,6 +421,7 @@ impl HistoryTree {
     /// Create a HistoryTree from a block.
     ///
     /// If the block is pre-Heartwood, it returns an empty history tree.
+    #[allow(clippy::unwrap_in_result)]
     pub fn from_block(
         network: Network,
         block: Arc<Block>,
@@ -444,6 +447,7 @@ impl HistoryTree {
     ///
     /// The tree is updated in-place. It is created when pushing the Heartwood
     /// activation block.
+    #[allow(clippy::unwrap_in_result)]
     pub fn push(
         &mut self,
         network: Network,

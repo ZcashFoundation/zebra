@@ -18,6 +18,7 @@ use crate::{
     peer::{error::SharedPeerError, CancelHeartbeatTask, Client, ClientRequest, ErrorSlot},
     peer_set::InventoryChange,
     protocol::external::types::Version,
+    BoxError,
 };
 
 #[cfg(test)]
@@ -136,6 +137,7 @@ impl ClientTestHarness {
     ///
     /// TODO: make ReceiveRequestAttempt generic, and use it here.
     #[allow(dead_code)]
+    #[allow(clippy::unwrap_in_result)]
     pub(crate) fn try_to_receive_inventory_change(&mut self) -> Option<InventoryChange> {
         let receive_result = self
             .inv_receiver
@@ -281,7 +283,7 @@ where
         let (connection_task, connection_aborter) =
             Self::spawn_background_task_or_fallback(self.connection_task);
         let (heartbeat_task, heartbeat_aborter) =
-            Self::spawn_background_task_or_fallback(self.heartbeat_task);
+            Self::spawn_background_task_or_fallback_with_result(self.heartbeat_task);
 
         let client = Client {
             shutdown_tx: Some(shutdown_sender),
@@ -328,6 +330,39 @@ where
     {
         let (task, abort_handle) = future::abortable(task_future);
         let task_handle = tokio::spawn(task.map(|_result| ()));
+
+        (task_handle, abort_handle)
+    }
+
+    // TODO: In the context of #4734:
+    // - Delete `spawn_background_task_or_fallback` and `spawn_background_task`
+    // - Rename `spawn_background_task_or_fallback_with_result` and `spawn_background_task_with_result` to
+    //   `spawn_background_task_or_fallback` and `spawn_background_task`
+
+    // Similar to `spawn_background_task_or_fallback` but returns a `Result`.
+    fn spawn_background_task_or_fallback_with_result<T>(
+        task_future: Option<T>,
+    ) -> (JoinHandle<Result<(), BoxError>>, AbortHandle)
+    where
+        T: Future<Output = ()> + Send + 'static,
+    {
+        match task_future {
+            Some(future) => Self::spawn_background_task_with_result(future),
+            None => Self::spawn_background_task_with_result(tokio::time::sleep(
+                MAX_PEER_CONNECTION_TIME,
+            )),
+        }
+    }
+
+    // Similar to `spawn_background_task` but returns a `Result`.
+    fn spawn_background_task_with_result<T>(
+        task_future: T,
+    ) -> (JoinHandle<Result<(), BoxError>>, AbortHandle)
+    where
+        T: Future<Output = ()> + Send + 'static,
+    {
+        let (task, abort_handle) = future::abortable(task_future);
+        let task_handle = tokio::spawn(task.map(|_result| Ok(())));
 
         (task_handle, abort_handle)
     }

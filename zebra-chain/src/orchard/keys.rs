@@ -1,7 +1,7 @@
 //! Orchard key types.
 //!
 //! <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
-
+#![allow(clippy::fallible_impl_from)]
 #![allow(dead_code)]
 
 #[cfg(test)]
@@ -161,13 +161,15 @@ impl ConstantTimeEq for SpendingKey {
 }
 
 impl fmt::Display for SpendingKey {
+    #[allow(clippy::unwrap_in_result)]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let hrp = match self.network {
             Network::Mainnet => sk_hrp::MAINNET,
             Network::Testnet => sk_hrp::TESTNET,
         };
 
-        bech32::encode_to_fmt(f, hrp, &self.bytes.to_base32(), Variant::Bech32).unwrap()
+        bech32::encode_to_fmt(f, hrp, &self.bytes.to_base32(), Variant::Bech32)
+            .expect("hrp is valid")
     }
 }
 
@@ -308,7 +310,9 @@ impl From<SpendValidatingKey> for [u8; 32] {
 
 impl From<SpendAuthorizingKey> for SpendValidatingKey {
     fn from(ask: SpendAuthorizingKey) -> Self {
-        let sk = redpallas::SigningKey::<SpendAuth>::try_from(<[u8; 32]>::from(ask)).unwrap();
+        let sk = redpallas::SigningKey::<SpendAuth>::try_from(<[u8; 32]>::from(ask)).expect(
+            "a scalar converted to byte array and then converted back to a scalar should not fail",
+        );
 
         Self(redpallas::VerificationKey::from(&sk))
     }

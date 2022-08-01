@@ -1,3 +1,5 @@
+//! Randomised property tests for the peer set.
+
 use std::net::SocketAddr;
 
 use futures::FutureExt;

@@ -1,3 +1,5 @@
+//! Randomised property tests for the Zebra chain tip.
+
 use std::{collections::HashSet, env, sync::Arc};
 
 use futures::FutureExt;
@@ -50,7 +52,9 @@ proptest! {
             // prepare the update
             if connection.is_grow() {
                 if let (Some(mut block), Some(last_block_hash)) = (update.block(), last_block_hash) {
-                    Arc::make_mut(&mut block).header.previous_block_hash = last_block_hash;
+                    let block_mut = Arc::make_mut(&mut block);
+                    Arc::make_mut(&mut block_mut.header).previous_block_hash = last_block_hash;
+
                     *update.block_mut() = Some(block);
                 }
             }

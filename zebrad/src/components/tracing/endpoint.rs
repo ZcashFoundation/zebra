@@ -3,20 +3,27 @@
 use std::net::SocketAddr;
 
 use abscissa_core::{Component, FrameworkError};
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server};
 
-use crate::{components::tokio::TokioComponent, config::ZebradConfig, prelude::*};
+use crate::config::ZebradConfig;
 
-use super::Tracing;
+#[cfg(feature = "filter-reload")]
+use hyper::{Body, Request, Response};
+
+#[cfg(feature = "filter-reload")]
+use crate::{components::tokio::TokioComponent, prelude::*};
 
 /// Abscissa component which runs a tracing filter endpoint.
 #[derive(Debug, Component)]
-#[component(inject = "init_tokio(zebrad::components::tokio::TokioComponent)")]
+#[cfg_attr(
+    feature = "filter-reload",
+    component(inject = "init_tokio(zebrad::components::tokio::TokioComponent)")
+)]
 pub struct TracingEndpoint {
+    #[allow(dead_code)]
     addr: Option<SocketAddr>,
 }
 
+#[cfg(feature = "filter-reload")]
 async fn read_filter(req: Request<Body>) -> Result<String, String> {
     std::str::from_utf8(
         &hyper::body::to_bytes(req.into_body())
@@ -30,12 +37,26 @@ async fn read_filter(req: Request<Body>) -> Result<String, String> {
 impl TracingEndpoint {
     /// Create the component.
     pub fn new(config: &ZebradConfig) -> Result<Self, FrameworkError> {
+        if !cfg!(feature = "filter-reload") {
+            warn!(addr = ?config.tracing.endpoint_addr,
+                  "unable to activate configured tracing filter endpoint: \
+                   enable the 'filter-reload' feature when compiling zebrad",
+            );
+        }
+
         Ok(Self {
             addr: config.tracing.endpoint_addr,
         })
     }
 
+    #[cfg(feature = "filter-reload")]
+    #[allow(clippy::unwrap_in_result)]
     pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
+        use hyper::{
+            service::{make_service_fn, service_fn},
+            Server,
+        };
+
         let addr = if let Some(addr) = self.addr {
             addr
         } else {
@@ -75,9 +96,12 @@ impl TracingEndpoint {
     }
 }
 
+#[cfg(feature = "filter-reload")]
 #[instrument]
 async fn request_handler(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     use hyper::{Method, StatusCode};
+
+    use super::Tracing;
 
     let rsp = match (req.method(), req.uri().path()) {
         (&Method::GET, "/") => Response::new(Body::from(

@@ -326,6 +326,7 @@ impl Decoder for Codec {
     type Item = Message;
     type Error = Error;
 
+    #[allow(clippy::unwrap_in_result)]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         use Error::Parse;
         match self.state {
@@ -569,8 +570,9 @@ impl Codec {
         Ok(Message::GetAddr)
     }
 
-    fn read_block<R: Read>(&self, reader: R) -> Result<Message, Error> {
-        Ok(Message::Block(Block::zcash_deserialize(reader)?.into()))
+    fn read_block<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
+        let result = Self::deserialize_block_spawning(reader);
+        Ok(Message::Block(result?.into()))
     }
 
     fn read_getblocks<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
@@ -624,8 +626,9 @@ impl Codec {
         Ok(Message::NotFound(Vec::zcash_deserialize(reader)?))
     }
 
-    fn read_tx<R: Read>(&self, reader: R) -> Result<Message, Error> {
-        Ok(Message::Tx(Transaction::zcash_deserialize(reader)?.into()))
+    fn read_tx<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
+        let result = Self::deserialize_transaction_spawning(reader);
+        Ok(Message::Tx(result?.into()))
     }
 
     fn read_mempool<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
@@ -672,6 +675,52 @@ impl Codec {
 
     fn read_filterclear<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
         Ok(Message::FilterClear)
+    }
+
+    /// Given the reader, deserialize the transaction in the rayon thread pool.
+    #[allow(clippy::unwrap_in_result)]
+    fn deserialize_transaction_spawning<R: Read + std::marker::Send>(
+        reader: R,
+    ) -> Result<Transaction, Error> {
+        let mut result = None;
+
+        // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+        //
+        // Since we use `block_in_place()`, other futures running on the connection task will be blocked:
+        // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
+        //
+        // We can't use `spawn_blocking()` because:
+        // - The `reader` has a lifetime (but we could replace it with a `Vec` of message data)
+        // - There is no way to check the blocking task's future for panics
+        tokio::task::block_in_place(|| {
+            rayon::in_place_scope_fifo(|s| {
+                s.spawn_fifo(|_s| result = Some(Transaction::zcash_deserialize(reader)))
+            })
+        });
+
+        result.expect("scope has already finished")
+    }
+
+    /// Given the reader, deserialize the block in the rayon thread pool.
+    #[allow(clippy::unwrap_in_result)]
+    fn deserialize_block_spawning<R: Read + std::marker::Send>(reader: R) -> Result<Block, Error> {
+        let mut result = None;
+
+        // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+        //
+        // Since we use `block_in_place()`, other futures running on the connection task will be blocked:
+        // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
+        //
+        // We can't use `spawn_blocking()` because:
+        // - The `reader` has a lifetime (but we could replace it with a `Vec` of message data)
+        // - There is no way to check the blocking task's future for panics
+        tokio::task::block_in_place(|| {
+            rayon::in_place_scope_fifo(|s| {
+                s.spawn_fifo(|_s| result = Some(Block::zcash_deserialize(reader)))
+            })
+        });
+
+        result.expect("scope has already finished")
     }
 }
 
@@ -942,7 +991,8 @@ mod tests {
     fn max_msg_size_round_trip() {
         use zebra_chain::serialization::ZcashDeserializeInto;
 
-        let rt = zebra_test::init_async();
+        //let rt = zebra_test::init_async();
+        zebra_test::init();
 
         // make tests with a Tx message
         let tx: Transaction = zebra_test::vectors::DUMMY_TX1
@@ -956,7 +1006,7 @@ mod tests {
         let size = 85;
 
         // reducing the max size to body size - 1
-        rt.block_on(async {
+        zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
             let mut bytes = Vec::new();
             {
                 let mut fw = FramedWrite::new(
@@ -970,7 +1020,7 @@ mod tests {
         });
 
         // send again with the msg body size as max size
-        let msg_bytes = rt.block_on(async {
+        let msg_bytes = zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
             let mut bytes = Vec::new();
             {
                 let mut fw = FramedWrite::new(
@@ -985,7 +1035,7 @@ mod tests {
         });
 
         // receive with a reduced max size
-        rt.block_on(async {
+        zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
             let mut fr = FramedRead::new(
                 Cursor::new(&msg_bytes),
                 Codec::builder().with_max_body_len(size - 1).finish(),
@@ -997,7 +1047,7 @@ mod tests {
         });
 
         // receive again with the tx size as max size
-        rt.block_on(async {
+        zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
             let mut fr = FramedRead::new(
                 Cursor::new(&msg_bytes),
                 Codec::builder().with_max_body_len(size).finish(),

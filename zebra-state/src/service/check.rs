@@ -12,7 +12,7 @@ use zebra_chain::{
     work::difficulty::CompactDifficulty,
 };
 
-use crate::{constants, BoxError, FinalizedBlock, PreparedBlock, ValidateContextError};
+use crate::{constants, BoxError, PreparedBlock, ValidateContextError};
 
 // use self as check
 use super::check;
@@ -102,29 +102,10 @@ where
     Ok(())
 }
 
-/// Check that the `prepared` block is contextually valid for `network`, using
+/// Check that `block` is contextually valid for `network`, using
 /// the `history_tree` up to and including the previous block.
-#[tracing::instrument(skip(prepared, history_tree))]
-pub(crate) fn prepared_block_commitment_is_valid_for_chain_history(
-    prepared: &PreparedBlock,
-    network: Network,
-    history_tree: &HistoryTree,
-) -> Result<(), ValidateContextError> {
-    block_commitment_is_valid_for_chain_history(prepared.block.clone(), network, history_tree)
-}
-
-/// Check that the `finalized` block is contextually valid for `network`, using
-/// the `history_tree` up to and including the previous block.
-#[tracing::instrument(skip(finalized, history_tree))]
-pub(crate) fn finalized_block_commitment_is_valid_for_chain_history(
-    finalized: &FinalizedBlock,
-    network: Network,
-    history_tree: &HistoryTree,
-) -> Result<(), ValidateContextError> {
-    block_commitment_is_valid_for_chain_history(finalized.block.clone(), network, history_tree)
-}
-
-fn block_commitment_is_valid_for_chain_history(
+#[tracing::instrument(skip(block, history_tree))]
+pub(crate) fn block_commitment_is_valid_for_chain_history(
     block: Arc<Block>,
     network: Network,
     history_tree: &HistoryTree,

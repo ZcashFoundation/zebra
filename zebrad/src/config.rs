@@ -95,10 +95,14 @@ pub struct TracingSection {
 
     /// The address used for an ad-hoc RPC endpoint allowing dynamic control of the tracing filter.
     ///
+    /// Install Zebra using `cargo install --features=filter-reload` to enable this config.
+    ///
     /// If this is set to None, the endpoint is disabled.
     pub endpoint_addr: Option<SocketAddr>,
 
     /// Controls whether to write a flamegraph of tracing spans.
+    ///
+    /// Install Zebra using `cargo install --features=flamegraph` to enable this config.
     ///
     /// If this is set to None, flamegraphs are disabled. Otherwise, it specifies
     /// an output file path, as described below.
@@ -125,6 +129,8 @@ pub struct TracingSection {
 
     /// The use_journald flag sends tracing events to systemd-journald, on Linux
     /// distributions that use systemd.
+    ///
+    /// Install Zebra using `cargo install --features=journald` to enable this config.
     pub use_journald: bool,
 }
 
@@ -147,6 +153,8 @@ impl Default for TracingSection {
 pub struct MetricsSection {
     /// The address used for the Prometheus metrics endpoint.
     ///
+    /// Install Zebra using `cargo install --features=prometheus` to enable this config.
+    ///
     /// The endpoint is disabled if this is set to `None`.
     pub endpoint_addr: Option<SocketAddr>,
 }
@@ -166,35 +174,75 @@ impl Default for MetricsSection {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct SyncSection {
-    /// The maximum number of concurrent block requests during sync.
+    /// The number of parallel block download requests.
     ///
     /// This is set to a low value by default, to avoid task and
     /// network contention. Increasing this value may improve
-    /// performance on machines with many cores and a fast network
-    /// connection.
-    pub max_concurrent_block_requests: usize,
+    /// performance on machines with a fast network connection.
+    #[serde(alias = "max_concurrent_block_requests")]
+    pub download_concurrency_limit: usize,
 
-    /// Controls how far ahead of the chain tip the syncer tries to
-    /// download before waiting for queued verifications to complete.
+    /// The number of blocks submitted in parallel to the checkpoint verifier.
     ///
     /// Increasing this limit increases the buffer size, so it reduces
-    /// the impact of an individual block request failing.  The block
-    /// size limit is 2MB, so in theory, this could represent multiple
+    /// the impact of an individual block request failing. However, it
+    /// also increases memory and CPU usage if block validation stalls,
+    /// or there are some large blocks in the pipeline.
+    ///
+    /// The block size limit is 2MB, so in theory, this could represent multiple
     /// gigabytes of data, if we downloaded arbitrary blocks. However,
     /// because we randomly load balance outbound requests, and separate
     /// block download from obtaining block hashes, an adversary would
     /// have to control a significant fraction of our peers to lead us
     /// astray.
     ///
-    /// This value is clamped to an implementation-defined lower bound.
-    pub lookahead_limit: usize,
+    /// For reliable checkpoint syncing, Zebra enforces a
+    /// [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`](sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT).
+    ///
+    /// This is set to a high value by default, to avoid verification pipeline stalls.
+    /// Decreasing this value reduces RAM usage.
+    #[serde(alias = "lookahead_limit")]
+    pub checkpoint_verify_concurrency_limit: usize,
+
+    /// The number of blocks submitted in parallel to the full verifier.
+    ///
+    /// This is set to a low value by default, to avoid verification timeouts on large blocks.
+    /// Increasing this value may improve performance on machines with many cores.
+    pub full_verify_concurrency_limit: usize,
+
+    /// The number of threads used to verify signatures, proofs, and other CPU-intensive code.
+    ///
+    /// Set to `0` by default, which uses one thread per available CPU core.
+    /// For details, see [the rayon documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
+    pub parallel_cpu_threads: usize,
 }
 
 impl Default for SyncSection {
     fn default() -> Self {
         Self {
-            max_concurrent_block_requests: 50,
-            lookahead_limit: sync::DEFAULT_LOOKAHEAD_LIMIT,
+            // 2/3 of the default outbound peer limit.
+            download_concurrency_limit: 50,
+
+            // A few max-length checkpoints.
+            checkpoint_verify_concurrency_limit: sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT,
+
+            // This default is deliberately very low, so Zebra can verify a few large blocks in under 60 seconds,
+            // even on machines with only a few cores.
+            //
+            // This lets users see the committed block height changing in every progress log,
+            // and avoids hangs due to out-of-order verifications flooding the CPUs.
+            //
+            // TODO:
+            // - limit full verification concurrency based on block transaction counts?
+            // - move more disk work to blocking tokio threads,
+            //   and CPU work to the rayon thread pool inside blocking tokio threads
+            full_verify_concurrency_limit: 20,
+
+            // Use one thread per CPU.
+            //
+            // If this causes tokio executor starvation, move CPU-intensive tasks to rayon threads,
+            // or reserve a few cores for tokio threads, based on `num_cpus()`.
+            parallel_cpu_threads: 0,
         }
     }
 }

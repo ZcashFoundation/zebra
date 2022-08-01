@@ -2,7 +2,7 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-beta.11"
+version = "1.0.0-beta.13"
 edition = "2021"
 # Zebra is only supported on the latest stable Rust version. Some earlier versions might work.
 # Zebra uses features introduced in Rust 1.58.
@@ -17,7 +17,13 @@ default-run = "zebrad"
 default = ["release_max_level_info"]
 
 # Production features that activate extra dependencies
-enable-sentry = ["sentry", "sentry-tracing"]
+
+sentry = ["dep:sentry", "sentry-tracing"]
+flamegraph = ["tracing-flame", "inferno"]
+journald = ["tracing-journald"]
+filter-reload = ["hyper"]
+
+prometheus = ["metrics-exporter-prometheus"]
 
 # Production features that modify dependency behaviour
 
@@ -42,6 +48,19 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "ze
 # The gRPC tests also need an installed lightwalletd binary
 lightwalletd-grpc-tests = ["tonic-build"]
 
+# tokio-console support
+#
+# To activate this feature, run:
+# ```sh
+# RUSTFLAGS="--cfg tokio_unstable" cargo build --no-default-features --features="tokio-console" --bin zebrad
+# ```
+#
+# The console-subscriber is incompatible with the tracing/max_level_* features.
+#
+# For more details, see:
+# https://github.com/tokio-rs/console/blob/main/console-subscriber/README.md#enabling-tokio-instrumentation
+tokio-console = ["console-subscriber"]
+
 # TODO: replace with environmental variables that skip the tests when not set (part of #2995)
 test_sync_to_mandatory_checkpoint_mainnet = []
 test_sync_to_mandatory_checkpoint_testnet = []
@@ -59,41 +78,51 @@ zebra-state = { path = "../zebra-state" }
 abscissa_core = "0.5"
 gumdrop = "0.7"
 chrono = "0.4.19"
+humantime = "2.1.0"
 humantime-serde = "1.1.1"
-indexmap = "1.8.2"
+indexmap = "1.9.1"
 lazy_static = "1.4.0"
 serde = { version = "1.0.137", features = ["serde_derive"] }
 toml = "0.5.9"
 
-hyper = { version = "0.14.19", features = ["full"] }
 futures = "0.3.21"
-tokio = { version = "1.19.2", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
-tower = { version = "0.4.12", features = ["hedge", "limit"] }
+rayon = "1.5.3"
+tokio = { version = "1.20.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.0.10"
 
 color-eyre = { version = "0.6.1", default_features = false, features = ["issue-url"] }
 thiserror = "1.0.31"
 
-tracing-flame = "0.2.0"
-tracing-journald = "0.3.0"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 tracing-error = "0.2.0"
 tracing-futures = "0.2.5"
 tracing = "0.1.31"
 
 metrics = "0.18.1"
-metrics-exporter-prometheus = { version = "0.9.0", default-features = false, features = ["http-listener"] }
 
 dirs = "4.0.0"
-inferno = { version = "0.11.4", default-features = false }
 atty = "0.2.14"
 
 num-integer = "0.1.45"
 rand = { version = "0.8.5", package = "rand" }
 
-# prod feature enable-sentry
-sentry-tracing = { version = "0.26.0", optional = true }
-sentry = { version = "0.26.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"], optional = true }
+# prod feature sentry
+sentry-tracing = { version = "0.27.0", optional = true }
+sentry = { version = "0.27.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"], optional = true }
+
+# prod feature flamegraph
+tracing-flame = { version = "0.2.0", optional = true }
+inferno = { version = "0.11.6", default-features = false, optional = true }
+
+# prod feature journald
+tracing-journald = { version = "0.3.0", optional = true }
+
+# prod feature filter-reload
+hyper = { version = "0.14.19", features = ["http1", "http2", "server"], optional = true }
+
+# prod feature prometheus
+metrics-exporter-prometheus = { version = "0.9.0", default-features = false, features = ["http-listener"], optional = true }
 
 # prod feature release_max_level_info
 #
@@ -104,6 +133,9 @@ log = "0.4.17"
 # test feature proptest-impl
 proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
+
+# test feature tokio-console
+console-subscriber = { version = "0.1.6", optional = true }
 
 [build-dependencies]
 vergen = { version = "7.2.1", default-features = false, features = ["cargo", "git"] }
@@ -116,12 +148,16 @@ abscissa_core = { version = "0.5", features = ["testing"] }
 hex = "0.4.3"
 once_cell = "1.12.0"
 regex = "1.5.6"
-reqwest = "0.11.10"
-semver = "1.0.10"
+semver = "1.0.11"
+
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { version = "1.0.81", features = ["preserve_order"] }
 tempfile = "3.3.0"
-tokio = { version = "1.19.2", features = ["full", "test-util"] }
+
+hyper = { version = "0.14.18", features = ["http1", "http2", "server"]}
+reqwest = "0.11.11"
+
+tokio = { version = "1.20.0", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.9"
 
 # test feature lightwalletd-grpc-tests

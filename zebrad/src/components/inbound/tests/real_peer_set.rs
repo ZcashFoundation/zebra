@@ -1,8 +1,9 @@
 //! Inbound service tests with a real peer set.
 
-use std::{collections::HashSet, iter, net::SocketAddr, sync::Arc};
+use std::{iter, net::SocketAddr, sync::Arc};
 
 use futures::FutureExt;
+use indexmap::IndexSet;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{
     buffer::Buffer,
@@ -28,7 +29,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
     components::{
-        inbound::{Inbound, InboundSetupData},
+        inbound::{downloads::MAX_INBOUND_CONCURRENCY, Inbound, InboundSetupData},
         mempool::{gossip_mempool_transaction_id, Config as MempoolConfig, Mempool},
         sync::{self, BlockGossipError, SyncStatus},
     },
@@ -119,7 +120,7 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
 /// Check that a network stack with an empty state responds to block requests with `notfound`.
 ///
 /// Uses a real Zebra network stack, with an isolated Zebra inbound TCP connection.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
     let (
         // real services
@@ -335,7 +336,7 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
 ///
 /// Uses a Zebra network stack's peer set to query an isolated Zebra TCP connection,
 /// with an unrelated transaction test responder.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError> {
     // We respond with an unrelated transaction, so the peer gives up on the request.
     let unrelated_response: Transaction =
@@ -485,7 +486,7 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
 /// - returns a `NotFoundRegistry` error for repeated requests to a non-responsive peer.
 ///
 /// The requests are coming from the full stack to the isolated peer.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> {
     // We repeatedly respond with the same transaction, so the peer gives up on the second response.
     let repeated_tx: Transaction = zebra_test::vectors::DUMMY_TX1.zcash_deserialize_into()?;
@@ -636,7 +637,7 @@ async fn setup(
 
     // Inbound
     let (setup_tx, setup_rx) = oneshot::channel();
-    let inbound_service = Inbound::new(setup_rx);
+    let inbound_service = Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx);
     let inbound_service = ServiceBuilder::new()
         .boxed_clone()
         .load_shed()
@@ -655,8 +656,8 @@ async fn setup(
         listen_addr: config_listen_addr,
 
         // Stop Zebra making outbound connections
-        initial_mainnet_peers: HashSet::new(),
-        initial_testnet_peers: HashSet::new(),
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
 
         ..NetworkConfig::default()
     };

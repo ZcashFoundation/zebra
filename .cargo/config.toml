@@ -1,4 +1,6 @@
+# Zebra cargo configuration
 
+# Flags that apply to all Zebra crates and configurations
 [target.'cfg(all())']
 rustflags = [
     # Zebra standard lints for Rust 1.58+
@@ -46,6 +48,13 @@ rustflags = [
 
     # Code styles we want to accept
     "-Aclippy::try_err",
+
+    # Links in public docs can point to private items.
+    "-Arustdoc::private_intra_doc_links",
+
+    # Panics
+    "-Wclippy::fallible_impl_from",
+    "-Wclippy::unwrap_in_result",
 
     # TODOs:
     # `cargo fix` might help do these fixes,
