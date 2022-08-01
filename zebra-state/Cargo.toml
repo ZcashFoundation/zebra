@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-beta.12"
+version = "1.0.0-beta.13"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -19,8 +19,6 @@ itertools = "0.10.3"
 lazy_static = "1.4.0"
 metrics = "0.18.1"
 mset = "0.1.0"
-proptest = { version = "0.10.1", optional = true }
-proptest-derive = { version = "0.3.0", optional = true }
 regex = "1.5.6"
 rlimit = "0.8.3"
 rocksdb = { version = "0.18.0", default_features = false, features = ["lz4"] }
@@ -28,12 +26,16 @@ serde = { version = "1.0.137", features = ["serde_derive"] }
 tempfile = "3.3.0"
 thiserror = "1.0.31"
 
+rayon = "1.5.3"
 tokio = { version = "1.20.0", features = ["sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
 tracing = "0.1.31"
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-test = { path = "../zebra-test/", optional = true }
+
+proptest = { version = "0.10.1", optional = true }
+proptest-derive = { version = "0.3.0", optional = true }
 
 [dev-dependencies]
 color-eyre = "0.6.1"

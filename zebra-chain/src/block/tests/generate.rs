@@ -148,7 +148,7 @@ fn multi_transaction_block(oversized: bool) -> Block {
 
     // Add the transactions into a block
     let block = Block {
-        header: block_header,
+        header: block_header.into(),
         transactions,
     };
 
@@ -228,7 +228,7 @@ fn single_transaction_block_many_inputs(oversized: bool) -> Block {
     let transactions = vec![Arc::new(big_transaction)];
 
     let block = Block {
-        header: block_header,
+        header: block_header.into(),
         transactions,
     };
 
@@ -306,7 +306,7 @@ fn single_transaction_block_many_outputs(oversized: bool) -> Block {
     let transactions = vec![Arc::new(big_transaction)];
 
     let block = Block {
-        header: block_header,
+        header: block_header.into(),
         transactions,
     };
 

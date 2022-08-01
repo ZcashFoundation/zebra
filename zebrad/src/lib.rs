@@ -72,14 +72,15 @@
 //! Changing the traces that are collected:
 //! * `filter-reload`: dynamically reload tracing filters at runtime.
 //! * `error-debug`: enable extra debugging in release builds.
-//! * `tokio-console`: enable tokio's `console-subscriber`.
+//! * `tokio-console`: enable tokio's `console-subscriber` (needs [specific compiler flags])
 //! * A set of features that [skip verbose tracing].
 //!   The default features ignore `debug` and `trace` logs in release builds.
 //!
 //! Read the [tracing](https://zebra.zfnd.org/user/tracing.html) section of the book
 //! for more details.
 //!
-//! [ignore verbose tracing]: https://docs.rs/tracing/0.1.35/tracing/level_filters/index.html#compile-time-filters
+//! [skip verbose tracing]: https://docs.rs/tracing/0.1.35/tracing/level_filters/index.html#compile-time-filters
+//! [specific compiler flags]: https://zebra.zfnd.org/dev/tokio-console.html#setup
 //!
 //! ### Testing
 //!

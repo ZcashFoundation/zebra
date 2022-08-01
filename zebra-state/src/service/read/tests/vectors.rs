@@ -29,7 +29,7 @@ async fn empty_read_state_still_responds_to_requests() -> Result<()> {
 }
 
 /// Test that ReadStateService responds correctly when the state contains blocks.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn populated_read_state_responds_correctly() -> Result<()> {
     zebra_test::init();
 

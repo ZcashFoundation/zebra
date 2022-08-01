@@ -52,15 +52,6 @@ pub enum FundingStreamReceiver {
     MajorGrants,
 }
 
-impl FundingStreamReceiver {
-    /// Get a list of receiver types
-    pub const fn receivers() -> [Self; 3] {
-        [Self::Ecc, Self::ZcashFoundation, Self::MajorGrants]
-    }
-}
-/// The number of funding stream receiver categories.
-pub const FUNDING_STREAM_RECEIVERS_NUMBER: usize = FundingStreamReceiver::receivers().len();
-
 /// Denominator as described in [protocol specification §7.10.1][7.10.1].
 ///
 /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams

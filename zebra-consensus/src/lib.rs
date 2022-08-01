@@ -37,7 +37,6 @@
 mod block;
 mod checkpoint;
 mod config;
-#[allow(dead_code)]
 mod parameters;
 mod primitives;
 mod script;
