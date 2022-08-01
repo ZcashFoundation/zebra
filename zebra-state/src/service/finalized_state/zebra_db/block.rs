@@ -21,6 +21,7 @@ use zebra_chain::{
     block::{self, Block, Height},
     history_tree::HistoryTree,
     orchard,
+    parallel::tree::NoteCommitmentTrees,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     sapling,
     serialization::TrustedPreallocate,
@@ -36,7 +37,7 @@ use crate::{
             block::TransactionLocation,
             transparent::{AddressBalanceLocation, OutputLocation},
         },
-        zebra_db::{metrics::block_precommit_metrics, shielded::NoteCommitmentTrees, ZebraDb},
+        zebra_db::{metrics::block_precommit_metrics, ZebraDb},
         FinalizedBlock,
     },
     BoxError, HashOrHeight,
@@ -72,11 +73,34 @@ impl ZebraDb {
         self.db.zs_get(&hash_by_height, &height)
     }
 
+    /// Returns `true` if `hash` is present in the finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn contains_hash(&self, hash: block::Hash) -> bool {
+        let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
+
+        self.db.zs_contains(&height_by_hash, &hash)
+    }
+
     /// Returns the height of the given block if it exists.
     #[allow(clippy::unwrap_in_result)]
     pub fn height(&self, hash: block::Hash) -> Option<block::Height> {
         let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
         self.db.zs_get(&height_by_hash, &hash)
+    }
+
+    /// Returns the [`block::Header`](zebra_chain::block::Header) with [`block::Hash`](zebra_chain::block::Hash)
+    /// or [`Height`](zebra_chain::block::Height), if it exists in the finalized chain.
+    //
+    // TODO: move this method to the start of the section
+    #[allow(clippy::unwrap_in_result)]
+    pub fn block_header(&self, hash_or_height: HashOrHeight) -> Option<Arc<block::Header>> {
+        // Block Header
+        let block_header_by_height = self.db.cf_handle("block_header_by_height").unwrap();
+
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let header = self.db.zs_get(&block_header_by_height, &height)?;
+
+        Some(header)
     }
 
     /// Returns the [`Block`] with [`block::Hash`](zebra_chain::block::Hash) or
@@ -85,13 +109,9 @@ impl ZebraDb {
     // TODO: move this method to the start of the section
     #[allow(clippy::unwrap_in_result)]
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
-        // Blocks
-        let block_header_by_height = self.db.cf_handle("block_header_by_height").unwrap();
-        let height_by_hash = self.db.cf_handle("height_by_hash").unwrap();
-
-        let height =
-            hash_or_height.height_or_else(|hash| self.db.zs_get(&height_by_hash, &hash))?;
-        let header = self.db.zs_get(&block_header_by_height, &height)?;
+        // Block
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let header = self.block_header(height.into())?;
 
         // Transactions
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
@@ -99,8 +119,11 @@ impl ZebraDb {
         // Manually fetch the entire block's transactions
         let mut transactions = Vec::new();
 
-        // TODO: is this loop more efficient if we store the number of transactions?
-        //       is the difference large enough to matter?
+        // TODO:
+        // - split disk reads from deserialization, and run deserialization in parallel,
+        //   this improves performance for blocks with multiple large shielded transactions
+        // - is this loop more efficient if we store the number of transactions?
+        // - is the difference large enough to matter?
         for tx_index in 0..=Transaction::max_allocation() {
             let tx_loc = TransactionLocation::from_u64(height, tx_index);
 
@@ -218,7 +241,7 @@ impl ZebraDb {
     pub(in super::super) fn write_block(
         &mut self,
         finalized: FinalizedBlock,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
         network: Network,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
@@ -360,7 +383,7 @@ impl DiskWriteBatch {
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         mut note_commitment_trees: NoteCommitmentTrees,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
         let FinalizedBlock {
@@ -440,7 +463,7 @@ impl DiskWriteBatch {
         } = finalized;
 
         // Commit block header data
-        self.zs_insert(&block_header_by_height, height, block.header);
+        self.zs_insert(&block_header_by_height, height, &block.header);
 
         // Index the block hash and height
         self.zs_insert(&hash_by_height, height, hash);

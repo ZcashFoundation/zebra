@@ -12,8 +12,11 @@
 //! The [`crate::constants::DATABASE_FORMAT_VERSION`] constant must
 //! be incremented each time the database format (column, serialization, etc) changes.
 
+use std::sync::Arc;
+
 use zebra_chain::{
-    block::Height, history_tree::HistoryTree, orchard, sapling, sprout, transaction::Transaction,
+    block::Height, history_tree::HistoryTree, orchard, parallel::tree::NoteCommitmentTrees,
+    sapling, sprout, transaction::Transaction,
 };
 
 use crate::{
@@ -24,14 +27,6 @@ use crate::{
     },
     BoxError,
 };
-
-/// An argument wrapper struct for note commitment trees.
-#[derive(Clone, Debug)]
-pub struct NoteCommitmentTrees {
-    sprout: sprout::tree::NoteCommitmentTree,
-    sapling: sapling::tree::NoteCommitmentTree,
-    orchard: orchard::tree::NoteCommitmentTree,
-}
 
 impl ZebraDb {
     // Read shielded methods
@@ -75,16 +70,17 @@ impl ZebraDb {
 
     /// Returns the Sprout note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
-    pub fn sprout_note_commitment_tree(&self) -> sprout::tree::NoteCommitmentTree {
+    pub fn sprout_note_commitment_tree(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
             None => return Default::default(),
         };
 
-        let sprout_note_commitment_tree = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
+        let sprout_nct_handle = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
 
         self.db
-            .zs_get(&sprout_note_commitment_tree, &height)
+            .zs_get(&sprout_nct_handle, &height)
+            .map(Arc::new)
             .expect("Sprout note commitment tree must exist if there is a finalized tip")
     }
 
@@ -95,25 +91,27 @@ impl ZebraDb {
     pub fn sprout_note_commitment_tree_by_anchor(
         &self,
         sprout_anchor: &sprout::tree::Root,
-    ) -> Option<sprout::tree::NoteCommitmentTree> {
-        let sprout_anchors = self.db.cf_handle("sprout_anchors").unwrap();
+    ) -> Option<Arc<sprout::tree::NoteCommitmentTree>> {
+        let sprout_anchors_handle = self.db.cf_handle("sprout_anchors").unwrap();
 
-        self.db.zs_get(&sprout_anchors, sprout_anchor)
+        self.db
+            .zs_get(&sprout_anchors_handle, sprout_anchor)
+            .map(Arc::new)
     }
 
     /// Returns the Sapling note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
-    pub fn sapling_note_commitment_tree(&self) -> sapling::tree::NoteCommitmentTree {
+    pub fn sapling_note_commitment_tree(&self) -> Arc<sapling::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
             None => return Default::default(),
         };
 
-        let sapling_note_commitment_tree =
-            self.db.cf_handle("sapling_note_commitment_tree").unwrap();
+        let sapling_nct_handle = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
         self.db
-            .zs_get(&sapling_note_commitment_tree, &height)
+            .zs_get(&sapling_nct_handle, &height)
+            .map(Arc::new)
             .expect("Sapling note commitment tree must exist if there is a finalized tip")
     }
 
@@ -123,25 +121,25 @@ impl ZebraDb {
     pub fn sapling_note_commitment_tree_by_height(
         &self,
         height: &Height,
-    ) -> Option<sapling::tree::NoteCommitmentTree> {
+    ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
         let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
-        self.db.zs_get(&sapling_trees, height)
+        self.db.zs_get(&sapling_trees, height).map(Arc::new)
     }
 
     /// Returns the Orchard note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
-    pub fn orchard_note_commitment_tree(&self) -> orchard::tree::NoteCommitmentTree {
+    pub fn orchard_note_commitment_tree(&self) -> Arc<orchard::tree::NoteCommitmentTree> {
         let height = match self.finalized_tip_height() {
             Some(h) => h,
             None => return Default::default(),
         };
 
-        let orchard_note_commitment_tree =
-            self.db.cf_handle("orchard_note_commitment_tree").unwrap();
+        let orchard_nct_handle = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
 
         self.db
-            .zs_get(&orchard_note_commitment_tree, &height)
+            .zs_get(&orchard_nct_handle, &height)
+            .map(Arc::new)
             .expect("Orchard note commitment tree must exist if there is a finalized tip")
     }
 
@@ -151,10 +149,10 @@ impl ZebraDb {
     pub fn orchard_note_commitment_tree_by_height(
         &self,
         height: &Height,
-    ) -> Option<orchard::tree::NoteCommitmentTree> {
+    ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
         let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
 
-        self.db.zs_get(&orchard_trees, height)
+        self.db.zs_get(&orchard_trees, height).map(Arc::new)
     }
 
     /// Returns the shielded note commitment trees of the finalized tip
@@ -189,9 +187,9 @@ impl DiskWriteBatch {
         // Index each transaction's shielded data
         for transaction in &block.transactions {
             self.prepare_nullifier_batch(db, transaction)?;
-
-            DiskWriteBatch::update_note_commitment_trees(transaction, note_commitment_trees)?;
         }
+
+        note_commitment_trees.update_trees_parallel(block)?;
 
         Ok(())
     }
@@ -226,38 +224,6 @@ impl DiskWriteBatch {
         Ok(())
     }
 
-    /// Updates the supplied note commitment trees.
-    ///
-    /// If this method returns an error, it will be propagated,
-    /// and the batch should not be written to the database.
-    ///
-    /// # Errors
-    ///
-    /// - Propagates any errors from updating note commitment trees
-    pub fn update_note_commitment_trees(
-        transaction: &Transaction,
-        note_commitment_trees: &mut NoteCommitmentTrees,
-    ) -> Result<(), BoxError> {
-        // Update the note commitment trees
-        for sprout_note_commitment in transaction.sprout_note_commitments() {
-            note_commitment_trees
-                .sprout
-                .append(*sprout_note_commitment)?;
-        }
-        for sapling_note_commitment in transaction.sapling_note_commitments() {
-            note_commitment_trees
-                .sapling
-                .append(*sapling_note_commitment)?;
-        }
-        for orchard_note_commitment in transaction.orchard_note_commitments() {
-            note_commitment_trees
-                .orchard
-                .append(*orchard_note_commitment)?;
-        }
-
-        Ok(())
-    }
-
     /// Prepare a database batch containing the note commitment and history tree updates
     /// from `finalized.block`, and return it (without actually writing anything).
     ///
@@ -273,7 +239,7 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: &FinalizedBlock,
         note_commitment_trees: NoteCommitmentTrees,
-        history_tree: HistoryTree,
+        history_tree: Arc<HistoryTree>,
     ) -> Result<(), BoxError> {
         let sprout_anchors = db.cf_handle("sprout_anchors").unwrap();
         let sapling_anchors = db.cf_handle("sapling_anchors").unwrap();
@@ -285,11 +251,12 @@ impl DiskWriteBatch {
 
         let FinalizedBlock { height, .. } = finalized;
 
+        // Use the cached values that were previously calculated in parallel.
         let sprout_root = note_commitment_trees.sprout.root();
         let sapling_root = note_commitment_trees.sapling.root();
         let orchard_root = note_commitment_trees.orchard.root();
 
-        // Compute the new anchors and index them
+        // Index the new anchors.
         // Note: if the root hasn't changed, we write the same value again.
         self.zs_insert(&sprout_anchors, sprout_root, &note_commitment_trees.sprout);
         self.zs_insert(&sapling_anchors, sapling_root, ());

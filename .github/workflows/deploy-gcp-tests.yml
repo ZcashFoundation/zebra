@@ -256,7 +256,7 @@ jobs:
       # - To ${{ inputs.zebra_state_dir || inputs.disk_prefix }} if not
       #
       # If there are multiple disks:
-      # - prefer images generated from the `main` branch, then any other branch
+      # - prefer images generated from this branch, then the `main` branch, then any other branch
       # - prefer newer images to older images
       #
       # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable
@@ -273,20 +273,28 @@ jobs:
               DISK_PREFIX=${{ inputs.zebra_state_dir || inputs.disk_prefix }}
           fi
 
-          # Try to find an image generated from the main branch
+          # Try to find an image generated from this branch and commit
           # Fields are listed in the "Create image from state disk" step
-          CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "main Disk: $CACHED_DISK_NAME"
+          BRANCH_DISK_NAME="${DISK_PREFIX}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
+          CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${BRANCH_DISK_NAME}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT} Disk: $CACHED_DISK_NAME"
+
+          if [[ -z "$CACHED_DISK_NAME" ]]; then
+              # Try to find an image generated from the main branch
+              CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+              echo "main Disk: $CACHED_DISK_NAME"
+          fi
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               # Try to find an image generated from any other branch
               CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-              echo "Disk: $CACHED_DISK_NAME"
+              echo "any branch Disk: $CACHED_DISK_NAME"
           fi
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               echo "No cached state disk available"
-              echo "Expected ${DISK_PREFIX}-(branch)-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
+              echo "Expected ${BRANCH_DISK_NAME}"
+              echo "Also searched for any commit on main, and any commit on any branch"
               echo "Cached state test jobs must depend on the cached state rebuild job"
               exit 1
           fi
@@ -510,13 +518,12 @@ jobs:
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          '(estimated progress.*network_upgrade.*=.*Sapling)|(test result:.*finished in)' \
+          '(estimated progress.*network_upgrade.*=.*Sapling)|(estimated progress.*network_upgrade.*=.*Blossom)|(estimated progress.*network_upgrade.*=.*Heartwood)|(estimated progress.*network_upgrade.*=.*Canopy)|(estimated progress.*network_upgrade.*=.*Nu5)|(test result:.*finished in)' \
           "
 
-  # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
-  # TODO: split out sapling logs when the mandatory checkpoint is above NU5 activation
-  logs-checkpoint:
-    name: Log ${{ inputs.test_id }} test (checkpoint)
+  # follow the logs of the test we just launched, up to Canopy activation (or the test finishing)
+  logs-heartwood:
+    name: Log ${{ inputs.test_id }} test (heartwood)
     needs: [ logs-sprout ]
     # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() }}
@@ -549,7 +556,174 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
+      # Show recent logs, following until Canopy activation (or the test finishes)
+      - name: Show logs for ${{ inputs.test_id }} test (heartwood)
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          docker logs \
+          --tail all \
+          --follow \
+          ${{ inputs.test_id }} | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          '(estimated progress.*network_upgrade.*=.*Canopy)|(estimated progress.*network_upgrade.*=.*Nu5)|(test result:.*finished in)' \
+          "
+
+  # follow the logs of the test we just launched, up to NU5 activation (or the test finishing)
+  logs-canopy:
+    name: Log ${{ inputs.test_id }} test (canopy)
+    needs: [ logs-heartwood ]
+    # If the previous job fails, we still want to show the logs.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.8.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Show recent logs, following until NU5 activation (or the test finishes)
+      - name: Show logs for ${{ inputs.test_id }} test (canopy)
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          docker logs \
+          --tail all \
+          --follow \
+          ${{ inputs.test_id }} | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          '(estimated progress.*network_upgrade.*=.*Nu5)|(test result:.*finished in)' \
+          "
+
+  # follow the logs of the test we just launched, up to block 1,740,000 (or the test finishing)
+  #
+  # We chose this height because it was about 5 hours into the NU5 sync, at the end of July 2022.
+  # This is a temporary workaround until we improve sync speeds.
+  logs-1740k:
+    name: Log ${{ inputs.test_id }} test (1740k)
+    needs: [ logs-canopy ]
+    # If the previous job fails, we still want to show the logs.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.8.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Show recent logs, following until block 1,740,000 (or the test finishes)
+      - name: Show logs for ${{ inputs.test_id }} test (1740k)
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          docker logs \
+          --tail all \
+          --follow \
+          ${{ inputs.test_id }} | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          '(estimated progress.*current_height.*=.*174[0-9][0-9][0-9][0-9].*remaining_sync_blocks)|(test result:.*finished in)' \
+          "
+
+  # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
+  logs-checkpoint:
+    name: Log ${{ inputs.test_id }} test (checkpoint)
+    needs: [ logs-1740k ]
+    # If the previous job fails, we still want to show the logs.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.8.0
+        with:
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
       # Show recent logs, following until the last checkpoint (or the test finishes)
+      #
+      # TODO: when doing obtain/extend tips, log the verifier in use, and check for full verification here
       - name: Show logs for ${{ inputs.test_id }} test (checkpoint)
         run: |
           gcloud compute ssh \
@@ -568,7 +742,7 @@ jobs:
           '(verified final checkpoint)|(test result:.*finished in)' \
           "
 
-  # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
+  # follow the logs of the test we just launched, until it finishes
   logs-end:
     name: Log ${{ inputs.test_id }} test (end)
     needs: [ logs-checkpoint ]

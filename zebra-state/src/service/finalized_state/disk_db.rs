@@ -460,7 +460,6 @@ impl DiskDb {
 
     /// Writes `batch` to the database.
     pub fn write(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
-        // TODO: move writing to the database to a blocking thread (#2188)
         self.db.write(batch.batch)
     }
 

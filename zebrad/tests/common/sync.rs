@@ -32,7 +32,7 @@ pub const LARGE_CHECKPOINT_TEST_HEIGHT: Height =
 
 pub const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 
-/// The text that should be logged when the initial sync finishes at the estimated chain tip.
+/// The text that should be logged when Zebra's initial sync finishes at the estimated chain tip.
 ///
 /// This message is only logged if:
 /// - we have reached the estimated chain tip,
@@ -44,6 +44,14 @@ pub const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 /// and the other integers on that line are ignored.
 pub const SYNC_FINISHED_REGEX: &str =
     r"finished initial sync to chain tip, using gossiped blocks .*sync_percent.*=.*100\.";
+
+/// The text that should be logged when `lightwalletd`'s initial sync is near the chain tip.
+///
+/// We can't guarantee a "Waiting for block" log, so we just check for a block near the tip height.
+///
+/// TODO: update the regex to `1[8-9][0-9]{5}` when mainnet reaches block 1_800_000
+pub const LIGHTWALLETD_SYNC_FINISHED_REGEX: &str =
+    r"([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block: 1[7-9][0-9]{5})";
 
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///
@@ -75,7 +83,7 @@ pub const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 /// But if we're going to be downloading lots of blocks, we use the default lookahead limit,
 /// so that the sync is faster. This can increase the RAM needed for tests.
 pub const MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD: Height =
-    Height(3 * sync::DEFAULT_LOOKAHEAD_LIMIT as u32);
+    Height(3 * sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT as u32);
 
 /// What the expected behavior of the mempool is for a test that uses [`sync_until`].
 pub enum MempoolBehavior {
@@ -204,7 +212,8 @@ pub fn sync_until(
     // Use the default lookahead limit if we're syncing lots of blocks.
     // (Most tests use a smaller limit to minimise redundant block downloads.)
     if height > MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD {
-        config.sync.lookahead_limit = sync::DEFAULT_LOOKAHEAD_LIMIT;
+        config.sync.checkpoint_verify_concurrency_limit =
+            sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
     }
 
     let tempdir = if let Some(reuse_tempdir) = reuse_tempdir {
@@ -317,7 +326,7 @@ pub fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
     // If we're syncing past the checkpoint with cached state, we don't need the extra lookahead.
     // But the extra downloaded blocks shouldn't slow down the test that much,
     // and testing with the defaults gives us better test coverage.
-    config.sync.lookahead_limit = sync::DEFAULT_LOOKAHEAD_LIMIT;
+    config.sync.checkpoint_verify_concurrency_limit = sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
 
     Ok(config)
 }

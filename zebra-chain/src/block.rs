@@ -1,31 +1,6 @@
 //! Blocks and block-related structures (heights, headers, etc.)
 
-mod commitment;
-mod error;
-mod hash;
-mod header;
-mod height;
-mod serialize;
-
-pub mod merkle;
-
-#[cfg(any(test, feature = "proptest-impl"))]
-pub mod arbitrary;
-#[cfg(any(test, feature = "bench", feature = "proptest-impl"))]
-pub mod tests;
-
-use std::{collections::HashMap, fmt, ops::Neg};
-
-pub use commitment::{
-    ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Commitment, CommitmentError,
-};
-pub use hash::Hash;
-pub use header::{BlockTimeError, CountedHeader, Header};
-pub use height::Height;
-pub use serialize::{SerializedBlock, MAX_BLOCK_BYTES};
-
-#[cfg(any(test, feature = "proptest-impl"))]
-pub use arbitrary::LedgerState;
+use std::{collections::HashMap, fmt, ops::Neg, sync::Arc};
 
 use crate::{
     amount::NegativeAllowed,
@@ -41,14 +16,39 @@ use crate::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
+mod commitment;
+mod error;
+mod hash;
+mod header;
+mod height;
+mod serialize;
+
+pub mod merkle;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod arbitrary;
+#[cfg(any(test, feature = "bench", feature = "proptest-impl"))]
+pub mod tests;
+
+pub use commitment::{
+    ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Commitment, CommitmentError,
+};
+pub use hash::Hash;
+pub use header::{BlockTimeError, CountedHeader, Header};
+pub use height::Height;
+pub use serialize::{SerializedBlock, MAX_BLOCK_BYTES};
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use arbitrary::LedgerState;
+
 /// A Zcash block, containing a header and a list of transactions.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]
 pub struct Block {
     /// The block header, containing block metadata.
-    pub header: Header,
+    pub header: Arc<Header>,
     /// The block transactions.
-    pub transactions: Vec<std::sync::Arc<Transaction>>,
+    pub transactions: Vec<Arc<Transaction>>,
 }
 
 impl fmt::Display for Block {
@@ -219,7 +219,7 @@ impl Block {
 
 impl<'a> From<&'a Block> for Hash {
     fn from(block: &'a Block) -> Hash {
-        (&block.header).into()
+        block.header.as_ref().into()
     }
 }
 

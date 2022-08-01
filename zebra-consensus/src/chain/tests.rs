@@ -9,7 +9,7 @@ use tower::{layer::Layer, timeout::TimeoutLayer, Service};
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
-    serialization::ZcashDeserialize,
+    serialization::{ZcashDeserialize, ZcashDeserializeInto},
 };
 use zebra_state as zs;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
@@ -36,7 +36,9 @@ const VERIFY_TIMEOUT_SECONDS: u64 = 10;
 /// The generated block should fail validation.
 pub fn block_no_transactions() -> Block {
     Block {
-        header: block::Header::zcash_deserialize(&zebra_test::vectors::DUMMY_HEADER[..]).unwrap(),
+        header: zebra_test::vectors::DUMMY_HEADER[..]
+            .zcash_deserialize_into()
+            .unwrap(),
         transactions: Vec::new(),
     }
 }
@@ -64,7 +66,7 @@ async fn verifiers_from_network(
         + 'static,
 ) {
     let state_service = zs::init_test(network);
-    let (chain_verifier, _transaction_verifier, _groth16_download_handle) =
+    let (chain_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
         crate::chain::init(Config::default(), network, state_service.clone(), true).await;
 
     // We can drop the download task handle here, because:
@@ -132,7 +134,7 @@ static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<
     )]
 });
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn verify_checkpoint_test() -> Result<(), Report> {
     verify_checkpoint(Config {
         checkpoint_sync: true,
@@ -161,7 +163,7 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
     // init_from_verifiers.
     //
     // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
-    let (chain_verifier, _transaction_verifier, _groth16_download_handle) =
+    let (chain_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
         super::init(config.clone(), network, zs::init_test(network), true).await;
 
     // Add a timeout layer
@@ -174,7 +176,7 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn verify_fail_no_coinbase_test() -> Result<(), Report> {
     verify_fail_no_coinbase().await
 }
@@ -202,7 +204,7 @@ async fn verify_fail_no_coinbase() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn round_trip_checkpoint_test() -> Result<(), Report> {
     round_trip_checkpoint().await
 }
@@ -227,7 +229,7 @@ async fn round_trip_checkpoint() -> Result<(), Report> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn verify_fail_add_block_checkpoint_test() -> Result<(), Report> {
     verify_fail_add_block_checkpoint().await
 }

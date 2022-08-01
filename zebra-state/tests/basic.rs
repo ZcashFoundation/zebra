@@ -52,12 +52,12 @@ static COMMIT_FINALIZED_BLOCK_TESTNET: Lazy<
     ]
 });
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn check_transcripts_mainnet() -> Result<(), Report> {
     check_transcripts(Network::Mainnet).await
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn check_transcripts_testnet() -> Result<(), Report> {
     check_transcripts(Network::Testnet).await
 }

@@ -1,6 +1,8 @@
+//! Randomised property tests for Proof of Work.
+
 use proptest::{arbitrary::any, prelude::*, test_runner::Config};
 
-use std::env;
+use std::{env, sync::Arc};
 
 use crate::block::{self, Block};
 use crate::serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize};
@@ -31,10 +33,12 @@ prop_compose! {
             .prop_filter("solution must not be the actual solution", move |s| {
                 s != &real_header.solution
             })
-        ) -> block::Header {
+        ) -> Arc<block::Header> {
+
         let mut fake_header = real_header;
         fake_header.solution = fake_solution;
-        fake_header
+
+        Arc::new(fake_header)
     }
 }
 
@@ -53,7 +57,7 @@ fn equihash_prop_test_solution() -> color_eyre::eyre::Result<()> {
                                       .ok()
                                       .and_then(|v| v.parse().ok())
                                       .unwrap_or(DEFAULT_TEST_INPUT_PROPTEST_CASES)),
-                |(fake_header in randomized_solutions(block.header))| {
+                |(fake_header in randomized_solutions(*block.header.as_ref()))| {
             fake_header.solution
                 .check(&fake_header)
                 .expect_err("block header should not validate on randomized solution");
@@ -69,10 +73,12 @@ prop_compose! {
             .prop_filter("nonce must not be the actual nonce", move |fake_nonce| {
                 fake_nonce != &real_header.nonce
             })
-        ) -> block::Header {
-            let mut fake_header = real_header;
-            fake_header.nonce = fake_nonce;
-            fake_header
+        ) -> Arc<block::Header> {
+
+        let mut fake_header = real_header;
+        fake_header.nonce = fake_nonce;
+
+        Arc::new(fake_header)
     }
 }
 
@@ -85,7 +91,7 @@ fn equihash_prop_test_nonce() -> color_eyre::eyre::Result<()> {
             .expect("block test vector should deserialize");
         block.header.solution.check(&block.header)?;
 
-        proptest!(|(fake_header in randomized_nonce(block.header))| {
+        proptest!(|(fake_header in randomized_nonce(*block.header.as_ref()))| {
                 fake_header.solution
                     .check(&fake_header)
                     .expect_err("block header should not validate on randomized nonce");
@@ -101,13 +107,14 @@ prop_compose! {
             .prop_map(move |mut fake_header| {
                 fake_header.nonce = real_header.nonce;
                 fake_header.solution = real_header.solution;
-                fake_header
+                Arc::new(fake_header)
             })
             .prop_filter("input must not be the actual input", move |fake_header| {
-                fake_header != &real_header
+                fake_header.as_ref() != &real_header
             })
-        ) -> block::Header {
-            fake_header
+        ) -> Arc<block::Header> {
+
+        fake_header
     }
 }
 
@@ -124,7 +131,7 @@ fn equihash_prop_test_input() -> color_eyre::eyre::Result<()> {
                                   .ok()
                                   .and_then(|v| v.parse().ok())
                                  .unwrap_or(DEFAULT_TEST_INPUT_PROPTEST_CASES)),
-              |(fake_header in randomized_input(block.header))| {
+              |(fake_header in randomized_input(*block.header.as_ref()))| {
             fake_header.solution
                 .check(&fake_header)
                 .expect_err("equihash solution should not validate on randomized input");

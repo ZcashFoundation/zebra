@@ -5,9 +5,76 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
 
-## Next Release (Draft)
+## [Zebra 1.0.0-beta.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.13) - 2022-07-29
 
-(Draft notes for the next release can be added here.)
+This release fixes multiple bugs in proof and signature verification, which were causing big performance issues near the blockchain tip.
+It also improves Zebra's sync performance and reliability under heavy load.
+
+### Disk and Network Usage Changes
+
+Zebra now uses around 50 - 100 GB of disk space, because many large transactions were recently added to the block chain. (In the longer term, several hundred GB are likely to be needed.)
+
+When there are a lot of large user-generated transactions on the network, Zebra can upload or download 1 GB or more per day.
+
+### Configuration Changes
+
+- Split the checkpoint and full verification [`sync` concurrency options](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html) (#4726, #4758):
+  - Add a new `full_verify_concurrency_limit`
+  - Rename `max_concurrent_block_requests` to `download_concurrency_limit`
+  - Rename `lookahead_limit` to `checkpoint_verify_concurrency_limit`
+  For backwards compatibility, the old names are still accepted as aliases.
+- Add a new `parallel_cpu_threads` [`sync` concurrency option](https://doc.zebra.zfnd.org/zebrad/config/struct.SyncSection.html) (#4776).
+  This option sets the number of threads to use for CPU-bound tasks, such as proof and signature verification.
+  By default, Zebra uses all available CPU cores.
+
+### Rust Compiler Bug Fixes
+
+- The Rust team has recently [fixed compilation bugs](https://blog.rust-lang.org/2022/07/19/Rust-1.62.1.html) in function coercions of `impl Trait` return types, and `async fn` lifetimes.
+  We recommend that you update your Rust compiler to release 1.62.1, and re-compile Zebra.
+
+### Added
+
+- Add a `rayon` thread pool for CPU-bound tasks (#4776)
+- Run multiple cryptographic batches concurrently within each verifier (#4776)
+- Run deserialization of transaction in a rayon thread (#4801)
+- Run CPU-intensive state updates in parallel rayon threads (#4802)
+- Run CPU-intensive state reads in parallel rayon threads (#4805)
+- Support Tiers and supported platforms per Tier doc (#4773)
+
+### Changed
+
+- Update column family names to match Zebra's database design (#4639)
+- Update Zebra's mainnet and testnet checkpoints (#4777, #4833)
+- Process more blocks and batch items concurrently, so there's a batch ready for each available CPU (#4776)
+- Wrap note commitment trees in an `Arc`, to reduce CPU and memory usage (#4757)
+- Increment `tokio` dependency from 1.19.2 to 1.20.0, to improve diagnostics (#4780)
+
+### Fixed
+
+- Only verify halo2 proofs once per transaction (#4752)
+- Use a separate channel for each cryptographic batch, to avoid dropped batch results (#4750)
+- Improve batch fairness and latency under heavy load (#4750, #4776)
+- Run all verifier cryptography on blocking CPU-bound threads, using `tokio` and `rayon`  (#4750, #4776)
+- Use `tokio`'s `PollSemaphore`, instead of an outdated `Semaphore` impl (#4750)
+- Check batch worker tasks for panics and task termination (#4750, #4777)
+- Limit the length of the `reject` network message's `message` and `reason` fields (#4687)
+- Change the `bitvec` dependency from 1.0.0 to 1.0.1, to fix a performance regression (#4769)
+- Fix an occasional panic when a `zebra-network` connection closes (#4782)
+- Stop panicking when the connection error slot is not set (#4770)
+- When writing blocks to disk, don't block other async tasks (#4199)
+- When sending headers to peers, only deserialize the header data from disk (#4792)
+- Return errors from `send_periodic_heartbeats_with_shutdown_handle` (#4756)
+- Make FindHeaders and FindHashes run concurrently with state updates (#4826)
+- Stop reading redundant blocks for every FindHashes and FindHeaders request (#4825)
+- Generate sapling point outside the method (#4799)
+
+#### CI
+
+- Workaround lightwalletd hangs by waiting until we're near the tip (#4763)
+- Split out Canopy logs into a separate job (#4730)
+- Make full sync go all the way to the tip (#4709)
+- Split Docker logs into sprout, other checkpoints, and full validation (#4704)
+- Add a Zebra cached state update test, fix lightwalletd tests (#4813)
 
 
 ## [Zebra 1.0.0-beta.12](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.12) - 2022-06-29

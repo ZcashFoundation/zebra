@@ -229,10 +229,23 @@ impl IntoDisk for Transaction {
 
 impl FromDisk for Transaction {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        bytes
-            .as_ref()
-            .zcash_deserialize_into()
-            .expect("deserialization format should match the serialization format used by IntoDisk")
+        let bytes = bytes.as_ref();
+
+        let mut tx = None;
+
+        // # Performance
+        //
+        // Move CPU-intensive deserialization cryptography into the rayon thread pool.
+        // This avoids blocking the tokio executor.
+        rayon::in_place_scope_fifo(|scope| {
+            scope.spawn_fifo(|_scope| {
+                tx = Some(bytes.as_ref().zcash_deserialize_into().expect(
+                    "deserialization format should match the serialization format used by IntoDisk",
+                ));
+            });
+        });
+
+        tx.expect("scope has already run")
     }
 }
 
