@@ -46,6 +46,10 @@ use crate::common::{
 pub async fn run() -> Result<()> {
     zebra_test::init();
 
+    if zebra_test::net::zebra_skip_network_tests() {
+        return Ok(());
+    }
+
     // Skip the test unless the user specifically asked for it
     if zebra_skip_lightwalletd_tests() {
         return Ok(());
