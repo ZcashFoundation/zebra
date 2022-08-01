@@ -115,7 +115,7 @@ jobs:
       # Build and push image to Google Artifact Registry
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v3.0.0
+        uses: docker/build-push-action@v3.1.0
         with:
           target: build
           context: .
