@@ -168,7 +168,7 @@ pub use crate::{
     config::Config,
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::PeerAddrState,
-    peer::{HandshakeError, PeerError, SharedPeerError},
+    peer::{Client, HandshakeError, PeerError, SharedPeerError},
     peer_set::init,
     policies::RetryLimit,
     protocol::internal::{InventoryResponse, Request, Response},
