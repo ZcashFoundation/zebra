@@ -118,7 +118,7 @@ where
 }
 
 /// The metadata for a peer connection.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConnectionInfo {
     /// The connected peer address, if known. This address might not be valid for connections.
     ///
@@ -134,6 +134,12 @@ pub struct ConnectionInfo {
     /// Derived from `remote_version` and the
     /// [protocol version implemented by `zebra_network`](constants::CURRENT_NETWORK_PROTOCOL_VERSION).
     pub negotiated_version: Version,
+
+    /// The service bits reported by the remote peer.
+    pub peer_services: PeerServices,
+
+    /// The user agent reported by the remote peer.
+    pub user_agent: String,
 }
 
 /// The peer address that we are handshaking with.
@@ -562,7 +568,7 @@ pub async fn negotiate_version<PeerTransport>(
     our_services: PeerServices,
     relay: bool,
     mut minimum_peer_version: MinimumPeerVersion<impl ChainTip>,
-) -> Result<(Version, PeerServices, SocketAddr), HandshakeError>
+) -> Result<(Version, PeerServices, SocketAddr, String), HandshakeError>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -649,7 +655,7 @@ where
     }
 
     // If we got a Version message, destructure its fields into the local scope.
-    let (remote_nonce, remote_services, remote_version, remote_canonical_addr, user_agent) =
+    let (remote_nonce, remote_services, remote_version, remote_canonical_addr, remote_user_agent) =
         if let Message::Version {
             version,
             services,
@@ -665,7 +671,8 @@ where
                 info!(
                     ?services,
                     ?address_services,
-                    "peer with inconsistent version services and version address services"
+                    ?user_agent,
+                    "peer with inconsistent version services and version address services",
                 );
             }
 
@@ -700,7 +707,8 @@ where
             remote_ip = ?their_addr,
             ?remote_version,
             ?min_version,
-            "disconnecting from peer with obsolete network protocol version"
+            ?remote_user_agent,
+            "disconnecting from peer with obsolete network protocol version",
         );
 
         // the value is the number of rejected handshakes, by peer IP and protocol version
@@ -710,7 +718,7 @@ where
             "remote_ip" => their_addr.to_string(),
             "remote_version" => remote_version.to_string(),
             "min_version" => min_version.to_string(),
-            "user_agent" => user_agent,
+            "user_agent" => remote_user_agent.clone(),
         );
 
         // the value is the remote version of the most recent rejected handshake from each peer
@@ -730,7 +738,8 @@ where
             ?remote_version,
             ?negotiated_version,
             ?min_version,
-            "negotiated network protocol version with peer"
+            ?remote_user_agent,
+            "negotiated network protocol version with peer",
         );
 
         // the value is the number of connected handshakes, by peer IP and protocol version
@@ -741,7 +750,7 @@ where
             "remote_version" => remote_version.to_string(),
             "negotiated_version" => negotiated_version.to_string(),
             "min_version" => min_version.to_string(),
-            "user_agent" => user_agent,
+            "user_agent" => remote_user_agent.clone(),
         );
 
         // the value is the remote version of the most recent connected handshake from each peer
@@ -776,7 +785,12 @@ where
         }
     }
 
-    Ok((remote_version, remote_services, remote_canonical_addr))
+    Ok((
+        remote_version,
+        remote_services,
+        remote_canonical_addr,
+        remote_user_agent,
+    ))
 }
 
 /// A handshake request.
@@ -854,17 +868,18 @@ where
             );
 
             // Wrap the entire initial connection setup in a timeout.
-            let (remote_version, remote_services, remote_canonical_addr) = negotiate_version(
-                &mut peer_conn,
-                &connected_addr,
-                config,
-                nonces,
-                user_agent,
-                our_services,
-                relay,
-                minimum_peer_version,
-            )
-            .await?;
+            let (remote_version, remote_services, remote_canonical_addr, remote_user_agent) =
+                negotiate_version(
+                    &mut peer_conn,
+                    &connected_addr,
+                    config,
+                    nonces,
+                    user_agent,
+                    our_services,
+                    relay,
+                    minimum_peer_version,
+                )
+                .await?;
 
             // If we've learned potential peer addresses from an inbound
             // connection or handshake, add those addresses to our address book.
@@ -895,10 +910,13 @@ where
             let negotiated_version =
                 std::cmp::min(remote_version, constants::CURRENT_NETWORK_PROTOCOL_VERSION);
 
+            // TODO: consider wrapping this struct in an Arc in Connection, Client, and LoadTrackedClient
             let connection_info = ConnectionInfo {
                 connected_addr,
                 remote_version,
                 negotiated_version,
+                peer_services: remote_services,
+                user_agent: remote_user_agent,
             };
 
             // Reconfigure the codec to use the negotiated version.
@@ -1016,7 +1034,7 @@ where
                 error_slot.clone(),
                 peer_tx,
                 connection_tracker,
-                connection_info,
+                connection_info.clone(),
             );
 
             let connection_task = tokio::spawn(

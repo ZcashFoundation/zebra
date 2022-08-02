@@ -21,7 +21,7 @@ use crate::{
         ErrorSlot,
     },
     peer_set::InventoryChange,
-    protocol::external::types::Version,
+    protocol::{external::types::Version, types::PeerServices},
     BoxError,
 };
 
@@ -296,6 +296,8 @@ where
             remote_version,
             negotiated_version,
             connected_addr: crate::peer::ConnectedAddr::Isolated,
+            peer_services: PeerServices::default(),
+            user_agent: "client tests".to_string(),
         };
 
         let client = Client {

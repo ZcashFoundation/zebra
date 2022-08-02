@@ -28,7 +28,7 @@ pub struct LoadTrackedClient {
 /// Create a new [`LoadTrackedClient`] wrapping the provided `client` service.
 impl From<Client> for LoadTrackedClient {
     fn from(client: Client) -> Self {
-        let connection_info = client.connection_info;
+        let connection_info = client.connection_info.clone();
 
         let service = PeakEwma::new(
             client,

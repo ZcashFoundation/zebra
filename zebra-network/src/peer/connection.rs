@@ -536,6 +536,8 @@ impl<S, Tx> Connection<S, Tx> {
         connection_tracker: ConnectionTracker,
         connection_info: ConnectionInfo,
     ) -> Self {
+        let metrics_label = connection_info.connected_addr.get_transient_addr_label();
+
         Connection {
             connection_info,
             state: State::AwaitingRequest,
@@ -546,7 +548,7 @@ impl<S, Tx> Connection<S, Tx> {
             error_slot,
             peer_tx: peer_tx.into(),
             connection_tracker,
-            metrics_label: connection_info.connected_addr.get_transient_addr_label(),
+            metrics_label,
             last_metrics_state: None,
         }
     }

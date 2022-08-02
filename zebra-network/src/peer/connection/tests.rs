@@ -11,7 +11,7 @@ use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     peer::{ClientRequest, ConnectedAddr, Connection, ConnectionInfo, ErrorSlot},
     peer_set::ActiveConnectionCounter,
-    protocol::external::Message,
+    protocol::{external::Message, types::PeerServices},
     Request, Response,
 };
 
@@ -50,6 +50,8 @@ fn new_test_connection<A>() -> (
         remote_version: CURRENT_NETWORK_PROTOCOL_VERSION,
         negotiated_version: CURRENT_NETWORK_PROTOCOL_VERSION,
         connected_addr: ConnectedAddr::Isolated,
+        peer_services: PeerServices::default(),
+        user_agent: "connection tests".to_string(),
     };
 
     let connection = Connection::new(
