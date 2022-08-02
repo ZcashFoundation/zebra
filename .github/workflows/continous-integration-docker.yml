@@ -309,6 +309,33 @@ jobs:
       disk_suffix: tip
       height_grep_text: 'current_height.*=.*Height'
 
+  # Test that Zebra can sync to the chain tip, using a cached Zebra tip state,
+  # without launching `lightwalletd`.
+  #
+  # Runs:
+  # - after every PR is merged to `main`
+  # - on every PR update
+  #
+  # If the state version has changed, waits for the new cached state to be created.
+  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
+  test-update-sync:
+    name: Zebra tip update
+    needs: test-full-sync
+    uses: ./.github/workflows/deploy-gcp-tests.yml
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    with:
+      app_name: zebrad
+      test_id: update-to-tip
+      test_description: Test syncing to tip with a Zebra tip state
+      test_variables: '-e TEST_UPDATE_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      needs_zebra_state: true
+      # TODO: do we want to update the disk on every PR, to increase CI speed?
+      saves_to_disk: false
+      disk_suffix: tip
+      root_state_path: '/var/cache'
+      # TODO: do we also want to test the `zebrad` part of the `lwd-cache`? (But not update it.)
+      zebra_state_dir: 'zebrad-cache'
+
   # Test that Zebra can answer a synthetic RPC call, using a cached Zebra tip state
   #
   # Runs:
@@ -410,6 +437,7 @@ jobs:
       test_variables: '-e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
       needs_zebra_state: true
       needs_lwd_state: true
+      # TODO: do we want to update the disk on every PR, to increase CI speed?
       saves_to_disk: false
       disk_prefix: lwd-cache
       disk_suffix: tip

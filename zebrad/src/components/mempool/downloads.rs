@@ -94,7 +94,7 @@ pub(crate) const TRANSACTION_VERIFY_TIMEOUT: Duration = BLOCK_VERIFY_TIMEOUT;
 /// Since Zebra keeps an `inv` index, inbound downloads for malicious transactions
 /// will be directed to the malicious node that originally gossiped the hash.
 /// Therefore, this attack can be carried out by a single malicious node.
-pub(crate) const MAX_INBOUND_CONCURRENCY: usize = 10;
+pub const MAX_INBOUND_CONCURRENCY: usize = 10;
 
 /// Errors that can occur while downloading and verifying a transaction.
 #[derive(Error, Debug)]

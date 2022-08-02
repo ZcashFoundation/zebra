@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "1.0.0-beta.12"
+version = "1.0.0-beta.13"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -22,7 +22,7 @@ chrono = "0.4.19"
 dirs = "4.0.0"
 displaydoc = "0.2.3"
 lazy_static = "1.4.0"
-once_cell = "1.12.0"
+once_cell = "1.13.0"
 serde = { version = "1.0.137", features = ["serde_derive"] }
 
 futures = "0.3.21"

@@ -85,7 +85,7 @@ for your platform:
 2. Install Zebra's build dependencies:
      - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
      - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.12 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.13 zebrad`
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 For more detailed instructions, refer to the [documentation](https://zebra.zfnd.org/user/install.html).
@@ -104,7 +104,7 @@ cargo install --features=<name> ...
 The recommended requirements for compiling and running `zebrad` are:
 - 4+ CPU cores
 - 16+ GB RAM
-- 50GB+ available disk space for building binaries and storing finalized state
+- 100 GB+ available disk space for building binaries and storing cached chain state
 - 100+ Mbps network connections
 
 We continuously test that our builds and tests pass on:
@@ -156,8 +156,8 @@ If this is a problem for you, please
 [open a ticket.](https://github.com/ZcashFoundation/zebra/issues/new/choose)
 
 `zebrad`'s typical mainnet network usage is:
-- Initial sync: 31 GB download
-- Ongoing updates: 10-100 MB upload and download per day, depending on peer requests
+- Initial sync: 40 GB download (in the longer term, several hundred GB are likely to be downloaded).
+- Ongoing updates: 10 MB - 1 GB upload and download per day, depending on user-created transaction size, and peer requests
 
 Zebra also performs an initial sync every time its internal database version changes.
 
@@ -191,8 +191,24 @@ So Zebra's state should always be valid, unless your OS or disk hardware is corr
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
-- [No Windows support #3801](https://github.com/ZcashFoundation/zebra/issues/3801)
+- No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801)
   - We used to test with Windows Server 2019, but not anymore; see issue for details
+
+### Performance
+
+We are working on improving Zebra performance, the following are known issues:
+- Send note commitment and history trees from the non-finalized state to the finalized state [#4824](https://github.com/ZcashFoundation/zebra/issues/4824)
+- Speed up opening the database [#4822](https://github.com/ZcashFoundation/zebra/issues/4822)
+- Revert note commitment and history trees when forking non-finalized chains [#4794](https://github.com/ZcashFoundation/zebra/issues/4794)
+- Store only the first tree state in each identical series of tree states [#4784](https://github.com/ZcashFoundation/zebra/issues/4784)
+
+RPCs might also be slower than they used to be, we need to check:
+- Revert deserializing state transactions in rayon threads [#4831](https://github.com/ZcashFoundation/zebra/issues/4831)
+
+Ongoing investigations:
+- Find out which parts of CommitBlock/CommitFinalizedBlock are slow [#4823](https://github.com/ZcashFoundation/zebra/issues/4823)
+- Mini-Epic: Stop tokio tasks running for a long time and blocking other tasks [#4747](https://github.com/ZcashFoundation/zebra/issues/4747)
+- Investigate busiest tasks per tokio-console [#4583](https://github.com/ZcashFoundation/zebra/issues/4583)
 
 ## Future Work
 
