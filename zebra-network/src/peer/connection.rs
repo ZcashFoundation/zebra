@@ -514,7 +514,7 @@ pub struct Connection<S, Tx> {
 impl<S, Tx> fmt::Debug for Connection<S, Tx> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // skip the channels, they don't tell us anything useful
-        f.debug_struct("Connection")
+        f.debug_struct(std::any::type_name::<Connection<S, Tx>>())
             .field("connection_info", &self.connection_info)
             .field("state", &self.state)
             .field("request_timer", &self.request_timer)

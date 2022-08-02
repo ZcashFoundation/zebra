@@ -76,6 +76,25 @@ where
     parent_span: Span,
 }
 
+impl<S, C> fmt::Debug for Handshake<S, C>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send,
+    C: ChainTip + Clone + Send + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // skip the channels, they don't tell us anything useful
+        f.debug_struct(std::any::type_name::<Handshake<S, C>>())
+            .field("config", &self.config)
+            .field("user_agent", &self.user_agent)
+            .field("our_services", &self.our_services)
+            .field("relay", &self.relay)
+            .field("minimum_peer_version", &self.minimum_peer_version)
+            .field("parent_span", &self.parent_span)
+            .finish()
+    }
+}
+
 impl<S, C> Clone for Handshake<S, C>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
