@@ -1811,6 +1811,15 @@ async fn delete_old_databases() -> Result<()> {
 
     zebra_test::init();
 
+    // Skip this test because it can be very slow without a network.
+    //
+    // The delete databases task is launched last during startup, after network setup.
+    // If there is no network, network setup can take a long time to timeout,
+    // so the task takes a long time to launch, slowing down this test.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return Ok(());
+    }
+
     let mut config = default_test_config()?;
     let run_dir = testdir()?;
     let cache_dir = run_dir.path().join("state");

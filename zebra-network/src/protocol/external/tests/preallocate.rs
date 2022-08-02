@@ -1,6 +1,6 @@
 //! Tests for trusted preallocation during deserialization.
 
-use std::convert::TryInto;
+use std::env;
 
 use proptest::prelude::*;
 
@@ -20,7 +20,16 @@ use crate::{
     },
 };
 
+/// The number of test cases to use for expensive proptests.
+const DEFAULT_PROPTEST_CASES: u32 = 8;
+
 proptest! {
+    // Set the PROPTEST_CASES env var to override this default.
+    #![proptest_config(proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+                                                                 .ok()
+                                                                 .and_then(|v| v.parse().ok())
+                                                                 .unwrap_or(DEFAULT_PROPTEST_CASES)))]
+
     /// Confirm that each InventoryHash takes the expected size in bytes when serialized.
     #[test]
     fn inv_hash_size_is_correct(inv in any::<InventoryHash>()) {
@@ -71,6 +80,12 @@ proptest! {
 }
 
 proptest! {
+    // Set the PROPTEST_CASES env var to override this default.
+    #![proptest_config(proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+                                                                 .ok()
+                                                                 .and_then(|v| v.parse().ok())
+                                                                 .unwrap_or(DEFAULT_PROPTEST_CASES)))]
+
     /// Confirm that each AddrV1 takes exactly ADDR_V1_SIZE bytes when serialized.
     /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
     #[test]
@@ -122,6 +137,12 @@ proptest! {
 }
 
 proptest! {
+    // Set the PROPTEST_CASES env var to override this default.
+    #![proptest_config(proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+                                                                 .ok()
+                                                                 .and_then(|v| v.parse().ok())
+                                                                 .unwrap_or(DEFAULT_PROPTEST_CASES)))]
+
     /// Confirm that each AddrV2 takes at least ADDR_V2_MIN_SIZE bytes when serialized.
     /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
     #[test]
