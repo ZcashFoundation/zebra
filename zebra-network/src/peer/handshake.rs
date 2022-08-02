@@ -102,7 +102,13 @@ where
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct ConnectionInfo {
     /// The network protocol version reported by the remote peer.
-    pub version: Version,
+    pub remote_version: Version,
+
+    /// The network protocol version negotiated with the remote peer.
+    ///
+    /// Derived from `remote_version` and the
+    /// [protocol version implemented by `zebra_network`](constants::CURRENT_NETWORK_PROTOCOL_VERSION).
+    pub negotiated_version: Version,
 }
 
 /// The peer address that we are handshaking with.
@@ -862,6 +868,11 @@ where
             let negotiated_version =
                 std::cmp::min(remote_version, constants::CURRENT_NETWORK_PROTOCOL_VERSION);
 
+            let connection_info = ConnectionInfo {
+                remote_version,
+                negotiated_version,
+            };
+
             // Reconfigure the codec to use the negotiated version.
             //
             // XXX The tokio documentation says not to do this while any frames are still being processed.
@@ -971,9 +982,6 @@ where
                 })
                 .boxed();
 
-            let connection_info = ConnectionInfo {
-                version: remote_version,
-            };
             let server = Connection::new(
                 inbound_service,
                 server_rx,

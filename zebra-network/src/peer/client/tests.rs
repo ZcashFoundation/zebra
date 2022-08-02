@@ -15,6 +15,7 @@ use tokio::{
 };
 
 use crate::{
+    constants,
     peer::{
         error::SharedPeerError, CancelHeartbeatTask, Client, ClientRequest, ConnectionInfo,
         ErrorSlot,
@@ -37,7 +38,7 @@ pub struct ClientTestHarness {
     #[allow(dead_code)]
     inv_receiver: Option<broadcast::Receiver<InventoryChange>>,
     error_slot: ErrorSlot,
-    version: Version,
+    remote_version: Version,
     connection_aborter: AbortHandle,
     heartbeat_aborter: AbortHandle,
 }
@@ -53,9 +54,9 @@ impl ClientTestHarness {
         }
     }
 
-    /// Gets the peer protocol version associated to the [`Client`].
-    pub fn version(&self) -> Version {
-        self.version
+    /// Gets the remote peer protocol version reported by the [`Client`].
+    pub fn remote_version(&self) -> Version {
+        self.remote_version
     }
 
     /// Returns true if the [`Client`] instance still wants connection heartbeats to be sent.
@@ -281,14 +282,20 @@ where
         let (inv_sender, inv_receiver) = broadcast::channel(5);
 
         let error_slot = ErrorSlot::default();
-        let version = self.version.unwrap_or(Version(0));
+        let remote_version = self.version.unwrap_or(Version(0));
 
         let (connection_task, connection_aborter) =
             Self::spawn_background_task_or_fallback(self.connection_task);
         let (heartbeat_task, heartbeat_aborter) =
             Self::spawn_background_task_or_fallback_with_result(self.heartbeat_task);
 
-        let connection_info = ConnectionInfo { version };
+        let negotiated_version =
+            std::cmp::min(remote_version, constants::CURRENT_NETWORK_PROTOCOL_VERSION);
+
+        let connection_info = ConnectionInfo {
+            remote_version,
+            negotiated_version,
+        };
 
         let client = Client {
             connection_info,
@@ -306,7 +313,7 @@ where
             shutdown_receiver: Some(shutdown_receiver),
             inv_receiver: Some(inv_receiver),
             error_slot,
-            version,
+            remote_version,
             connection_aborter,
             heartbeat_aborter,
         };

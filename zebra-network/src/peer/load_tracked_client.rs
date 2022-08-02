@@ -46,8 +46,8 @@ impl From<Client> for LoadTrackedClient {
 
 impl LoadTrackedClient {
     /// Retrieve the peer's reported protocol version.
-    pub fn version(&self) -> Version {
-        self.connection_info.version
+    pub fn remote_version(&self) -> Version {
+        self.connection_info.remote_version
     }
 }
 
