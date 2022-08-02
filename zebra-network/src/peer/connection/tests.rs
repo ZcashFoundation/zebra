@@ -8,7 +8,8 @@ use zebra_chain::serialization::SerializationError;
 use zebra_test::mock_service::MockService;
 
 use crate::{
-    peer::{ClientRequest, ConnectedAddr, Connection, ErrorSlot},
+    constants::CURRENT_NETWORK_PROTOCOL_VERSION,
+    peer::{ClientRequest, ConnectedAddr, Connection, ConnectionInfo, ErrorSlot},
     peer_set::ActiveConnectionCounter,
     protocol::external::Message,
     Request, Response,
@@ -45,13 +46,19 @@ fn new_test_connection<A>() -> (
     };
     let peer_tx = peer_tx.sink_map_err(error_converter);
 
+    let connection_info = ConnectionInfo {
+        remote_version: CURRENT_NETWORK_PROTOCOL_VERSION,
+        negotiated_version: CURRENT_NETWORK_PROTOCOL_VERSION,
+        connected_addr: ConnectedAddr::Isolated,
+    };
+
     let connection = Connection::new(
         mock_inbound_service.clone(),
         client_rx,
         shared_error_slot.clone(),
         peer_tx,
         ActiveConnectionCounter::new_counter().track_connection(),
-        ConnectedAddr::Isolated,
+        connection_info,
     );
 
     (

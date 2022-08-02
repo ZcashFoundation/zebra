@@ -29,7 +29,7 @@ use crate::{
     meta_addr::MetaAddr,
     peer::{
         connection::peer_tx::PeerTx, error::AlreadyErrored, ClientRequest, ClientRequestReceiver,
-        ConnectedAddr, ErrorSlot, InProgressClientRequest, MustUseClientResponseSender, PeerError,
+        ConnectionInfo, ErrorSlot, InProgressClientRequest, MustUseClientResponseSender, PeerError,
         SharedPeerError,
     },
     peer_set::ConnectionTracker,
@@ -448,6 +448,12 @@ impl From<Request> for InboundMessage {
 
 /// The channels, services, and associated state for a peer connection.
 pub struct Connection<S, Tx> {
+    /// The metadata for the connected peer `service`.
+    ///
+    /// This field is used for debugging.
+    #[allow(dead_code)]
+    pub connection_info: ConnectionInfo,
+
     /// The state of this connection's current request or response.
     pub(super) state: State,
 
@@ -505,6 +511,21 @@ pub struct Connection<S, Tx> {
     pub(super) last_metrics_state: Option<Cow<'static, str>>,
 }
 
+impl<S, Tx> fmt::Debug for Connection<S, Tx> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // skip the channels, they don't tell us anything useful
+        f.debug_struct("Connection")
+            .field("connection_info", &self.connection_info)
+            .field("state", &self.state)
+            .field("request_timer", &self.request_timer)
+            .field("cached_addrs", &self.cached_addrs.len())
+            .field("error_slot", &self.error_slot)
+            .field("metrics_label", &self.metrics_label)
+            .field("last_metrics_state", &self.last_metrics_state)
+            .finish()
+    }
+}
+
 impl<S, Tx> Connection<S, Tx> {
     /// Return a new connection from its channels, services, and shared state.
     pub(crate) fn new(
@@ -513,9 +534,10 @@ impl<S, Tx> Connection<S, Tx> {
         error_slot: ErrorSlot,
         peer_tx: Tx,
         connection_tracker: ConnectionTracker,
-        connected_addr: ConnectedAddr,
+        connection_info: ConnectionInfo,
     ) -> Self {
         Connection {
+            connection_info,
             state: State::AwaitingRequest,
             request_timer: None,
             cached_addrs: Vec::new(),
@@ -524,7 +546,7 @@ impl<S, Tx> Connection<S, Tx> {
             error_slot,
             peer_tx: peer_tx.into(),
             connection_tracker,
-            metrics_label: connected_addr.get_transient_addr_label(),
+            metrics_label: connection_info.connected_addr.get_transient_addr_label(),
             last_metrics_state: None,
         }
     }

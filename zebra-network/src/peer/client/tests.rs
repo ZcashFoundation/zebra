@@ -295,6 +295,7 @@ where
         let connection_info = ConnectionInfo {
             remote_version,
             negotiated_version,
+            connected_addr: crate::peer::ConnectedAddr::Isolated,
         };
 
         let client = Client {
@@ -302,7 +303,6 @@ where
             shutdown_tx: Some(shutdown_sender),
             server_tx: client_request_sender,
             inv_collector: inv_sender,
-            transient_addr: None,
             error_slot: error_slot.clone(),
             connection_task,
             heartbeat_task,

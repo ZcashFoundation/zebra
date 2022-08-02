@@ -101,6 +101,12 @@ where
 /// The metadata for a peer connection.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct ConnectionInfo {
+    /// The connected peer address, if known. This address might not be valid for connections.
+    ///
+    /// Peers can be connected via a transient inbound or proxy address,
+    /// so this address can't be trusted.
+    pub connected_addr: ConnectedAddr,
+
     /// The network protocol version reported by the remote peer.
     pub remote_version: Version,
 
@@ -221,6 +227,8 @@ impl ConnectedAddr {
     /// This address must not depend on the canonical address from the `Version`
     /// message. Otherwise, malicious peers could interfere with other peers
     /// `AddressBook` state.
+    ///
+    /// TODO: remove the `get_` from these methods (Rust style avoids `get` prefixes)
     pub fn get_address_book_addr(&self) -> Option<SocketAddr> {
         match self {
             OutboundDirect { addr } => Some(*addr),
@@ -869,6 +877,7 @@ where
                 std::cmp::min(remote_version, constants::CURRENT_NETWORK_PROTOCOL_VERSION);
 
             let connection_info = ConnectionInfo {
+                connected_addr,
                 remote_version,
                 negotiated_version,
             };
@@ -988,7 +997,7 @@ where
                 error_slot.clone(),
                 peer_tx,
                 connection_tracker,
-                connected_addr,
+                connection_info,
             );
 
             let connection_task = tokio::spawn(
@@ -1015,7 +1024,6 @@ where
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 inv_collector,
-                transient_addr: connected_addr.get_transient_addr(),
                 error_slot,
                 connection_task,
                 heartbeat_task,

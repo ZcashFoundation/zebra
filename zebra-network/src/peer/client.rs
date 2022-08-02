@@ -50,9 +50,6 @@ pub struct Client {
     /// so that the peer set can route retries to other clients.
     pub(crate) inv_collector: broadcast::Sender<InventoryChange>,
 
-    /// The peer address for registering missing inventory.
-    pub(crate) transient_addr: Option<SocketAddr>,
-
     /// A slot for an error shared between the Connection and the Client that uses it.
     ///
     /// `None` unless the connection or client have errored.
@@ -87,6 +84,8 @@ pub(crate) struct ClientRequest {
     pub inv_collector: Option<broadcast::Sender<InventoryChange>>,
 
     /// The peer address for registering missing inventory.
+    ///
+    /// TODO: replace this with [`ConnectedAddr`]?
     pub transient_addr: Option<SocketAddr>,
 
     /// The tracing context for the request, so that work the connection task does
@@ -600,7 +599,7 @@ impl Service<Request> for Client {
             request,
             tx,
             inv_collector: Some(self.inv_collector.clone()),
-            transient_addr: self.transient_addr,
+            transient_addr: self.connection_info.connected_addr.get_transient_addr(),
             span,
         }) {
             Err(e) => {
