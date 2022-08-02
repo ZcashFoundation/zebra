@@ -19,10 +19,13 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use tower::Service;
 
 use crate::{
-    peer::error::{AlreadyErrored, ErrorSlot, PeerError, SharedPeerError},
+    peer::{
+        error::{AlreadyErrored, ErrorSlot, PeerError, SharedPeerError},
+        ConnectionInfo,
+    },
     peer_set::InventoryChange,
     protocol::{
-        external::{types::Version, InventoryHash},
+        external::InventoryHash,
         internal::{Request, Response},
     },
     BoxError,
@@ -33,6 +36,9 @@ pub mod tests;
 
 /// The "client" duplex half of a peer connection.
 pub struct Client {
+    /// The metadata for the connected peer `service`.
+    pub connection_info: ConnectionInfo,
+
     /// Used to shut down the corresponding heartbeat.
     /// This is always Some except when we take it on drop.
     pub(crate) shutdown_tx: Option<oneshot::Sender<CancelHeartbeatTask>>,
@@ -51,9 +57,6 @@ pub struct Client {
     ///
     /// `None` unless the connection or client have errored.
     pub(crate) error_slot: ErrorSlot,
-
-    /// The peer connection's protocol version.
-    pub(crate) version: Version,
 
     /// A handle to the task responsible for connecting to the peer.
     pub(crate) connection_task: JoinHandle<()>,
@@ -170,7 +173,10 @@ impl std::fmt::Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // skip the channels, they don't tell us anything useful
         f.debug_struct("Client")
+            .field("connection_info", &self.connection_info)
             .field("error_slot", &self.error_slot)
+            .field("connection_task", &self.connection_task)
+            .field("heartbeat_task", &self.heartbeat_task)
             .finish()
     }
 }

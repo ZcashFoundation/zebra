@@ -15,7 +15,10 @@ use tokio::{
 };
 
 use crate::{
-    peer::{error::SharedPeerError, CancelHeartbeatTask, Client, ClientRequest, ErrorSlot},
+    peer::{
+        error::SharedPeerError, CancelHeartbeatTask, Client, ClientRequest, ConnectionInfo,
+        ErrorSlot,
+    },
     peer_set::InventoryChange,
     protocol::external::types::Version,
     BoxError,
@@ -285,13 +288,15 @@ where
         let (heartbeat_task, heartbeat_aborter) =
             Self::spawn_background_task_or_fallback_with_result(self.heartbeat_task);
 
+        let connection_info = ConnectionInfo { version };
+
         let client = Client {
+            connection_info,
             shutdown_tx: Some(shutdown_sender),
             server_tx: client_request_sender,
             inv_collector: inv_sender,
             transient_addr: None,
             error_slot: error_slot.clone(),
-            version,
             connection_task,
             heartbeat_task,
         };
