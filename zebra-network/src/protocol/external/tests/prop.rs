@@ -107,7 +107,7 @@ proptest! {
     /// Test round-trip AddrV1 serialization for all MetaAddr variants after sanitization
     #[test]
     fn addr_v1_sanitized_roundtrip(addr in any::<MetaAddr>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization,
         // but we also need the original address for this test
@@ -180,7 +180,7 @@ proptest! {
     /// Test round-trip AddrV2 serialization for all MetaAddr variants after sanitization
     #[test]
     fn addr_v2_sanitized_roundtrip(addr in any::<MetaAddr>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization,
         // but we also need the original address for this test

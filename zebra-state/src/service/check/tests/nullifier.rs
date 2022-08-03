@@ -56,7 +56,7 @@ proptest! {
         joinsplit_data in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
         use_finalized_state in any::<bool>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -127,7 +127,7 @@ proptest! {
         mut joinsplit in TypeNameToDebug::<JoinSplit<Groth16Proof>>::arbitrary(),
         joinsplit_data in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -177,7 +177,7 @@ proptest! {
         mut joinsplit2 in TypeNameToDebug::<JoinSplit<Groth16Proof>>::arbitrary(),
         joinsplit_data in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -232,7 +232,7 @@ proptest! {
         joinsplit_data1 in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
         joinsplit_data2 in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -290,7 +290,7 @@ proptest! {
         joinsplit_data2 in TypeNameToDebug::<JoinSplitData<Groth16Proof>>::arbitrary(),
         duplicate_in_finalized_state in any::<bool>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -390,7 +390,7 @@ proptest! {
         sapling_shielded_data in TypeNameToDebug::<sapling::ShieldedData<PerSpendAnchor>>::arbitrary(),
         use_finalized_state in any::<bool>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -443,7 +443,7 @@ proptest! {
         mut spend2 in TypeNameToDebug::<sapling::Spend<PerSpendAnchor>>::arbitrary(),
         sapling_shielded_data in TypeNameToDebug::<sapling::ShieldedData<PerSpendAnchor>>::arbitrary(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -493,7 +493,7 @@ proptest! {
         sapling_shielded_data1 in TypeNameToDebug::<sapling::ShieldedData<PerSpendAnchor>>::arbitrary(),
         sapling_shielded_data2 in TypeNameToDebug::<sapling::ShieldedData<PerSpendAnchor>>::arbitrary(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -546,7 +546,7 @@ proptest! {
         sapling_shielded_data2 in TypeNameToDebug::<sapling::ShieldedData<PerSpendAnchor>>::arbitrary(),
         duplicate_in_finalized_state in any::<bool>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -632,7 +632,7 @@ proptest! {
         orchard_shielded_data in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
         use_finalized_state in any::<bool>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -687,7 +687,7 @@ proptest! {
         mut authorized_action2 in TypeNameToDebug::<orchard::AuthorizedAction>::arbitrary(),
         orchard_shielded_data in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -737,7 +737,7 @@ proptest! {
         orchard_shielded_data1 in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
         orchard_shielded_data2 in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -794,7 +794,7 @@ proptest! {
         orchard_shielded_data2 in TypeNameToDebug::<orchard::ShieldedData>::arbitrary(),
         duplicate_in_finalized_state in any::<bool>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()

@@ -878,7 +878,7 @@ mod test {
 
     #[test]
     fn block_test_vectors_unique() {
-        init();
+        let _init_guard = init();
 
         let block_count = BLOCKS.len();
         let block_set: HashSet<_> = BLOCKS.iter().collect();
@@ -898,7 +898,7 @@ mod test {
     /// We're using lazy_static! and combinators, so it would be easy to make this mistake.
     #[test]
     fn block_test_vectors_count() {
-        init();
+        let _init_guard = init();
 
         assert!(
             MAINNET_BLOCKS.len() > 30,

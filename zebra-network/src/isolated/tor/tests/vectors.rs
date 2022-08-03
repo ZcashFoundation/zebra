@@ -18,7 +18,7 @@ const MAX_TEST_DURATION: Duration = Duration::from_secs(20);
 /// (We can't connect to ourselves over Tor, so there's not much more we can do here.)
 #[tokio::test]
 async fn connect_isolated_run_tor_once() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -43,7 +43,7 @@ async fn connect_isolated_run_tor_once() {
 /// Use the multi-threaded runtime to test concurrent Tor instances.
 #[tokio::test(flavor = "multi_thread")]
 async fn connect_isolated_run_tor_multi() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;

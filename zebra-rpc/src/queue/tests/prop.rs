@@ -101,7 +101,7 @@ proptest! {
     /// Test transactions are removed from the queue after time elapses.
     #[test]
     fn remove_expired_transactions_from_queue(transaction in any::<UnminedTx>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
 
         runtime.block_on(async move {
             // pause the clock
@@ -159,7 +159,7 @@ proptest! {
     /// Test transactions are removed from queue after they get in the mempool
     #[test]
     fn queue_runner_mempool(transaction in any::<Transaction>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
@@ -239,7 +239,7 @@ proptest! {
     /// Test transactions are removed from queue after they get in the state
     #[test]
     fn queue_runner_state(transaction in any::<Transaction>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
 
         runtime.block_on(async move {
             let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
@@ -314,7 +314,7 @@ proptest! {
     // Test any given transaction can be mempool retried.
     #[test]
     fn queue_mempool_retry(transaction in any::<Transaction>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();

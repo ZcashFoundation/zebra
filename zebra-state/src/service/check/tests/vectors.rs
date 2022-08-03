@@ -8,7 +8,7 @@ use super::super::*;
 
 #[test]
 fn test_orphan_consensus_check() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let height = zebra_test::vectors::BLOCK_MAINNET_347499_BYTES
         .zcash_deserialize_into::<Arc<Block>>()
@@ -27,7 +27,7 @@ fn test_orphan_consensus_check() {
 
 #[test]
 fn test_sequential_height_check() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let height = zebra_test::vectors::BLOCK_MAINNET_347499_BYTES
         .zcash_deserialize_into::<Arc<Block>>()

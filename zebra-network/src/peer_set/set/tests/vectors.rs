@@ -27,7 +27,7 @@ fn peer_set_ready_single_connection() {
     };
 
     // Start the runtime
-    let runtime = zebra_test::init_async();
+    let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
 
     // Get peers and client handles of them
@@ -120,7 +120,7 @@ fn peer_set_ready_multiple_connections() {
     };
 
     // Start the runtime
-    let runtime = zebra_test::init_async();
+    let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
 
     // Pause the runtime's timer so that it advances automatically.
@@ -184,7 +184,7 @@ fn peer_set_route_inv_empty_registry() {
     };
 
     // Start the runtime
-    let runtime = zebra_test::init_async();
+    let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
 
     // Pause the runtime's timer so that it advances automatically.
@@ -266,7 +266,7 @@ fn peer_set_route_inv_advertised_registry_order(advertised_first: bool) {
     };
 
     // Start the runtime
-    let runtime = zebra_test::init_async();
+    let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
 
     // Pause the runtime's timer so that it advances automatically.
@@ -375,7 +375,7 @@ fn peer_set_route_inv_missing_registry_order(missing_first: bool) {
     };
 
     // Start the runtime
-    let runtime = zebra_test::init_async();
+    let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
 
     // Pause the runtime's timer so that it advances automatically.
@@ -478,7 +478,7 @@ fn peer_set_route_inv_all_missing_fail() {
     };
 
     // Start the runtime
-    let runtime = zebra_test::init_async();
+    let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
 
     // Pause the runtime's timer so that it advances automatically.

@@ -44,7 +44,7 @@ use crate::common::{
 
 /// The test entry point.
 pub async fn run() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return Ok(());

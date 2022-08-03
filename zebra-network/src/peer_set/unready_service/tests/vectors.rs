@@ -21,7 +21,7 @@ struct MockKey;
 
 #[tokio::test]
 async fn unready_service_result_ok() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (_cancel_sender, cancel) = oneshot::channel();
 
@@ -40,7 +40,7 @@ async fn unready_service_result_ok() {
 
 #[tokio::test]
 async fn unready_service_result_canceled() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (cancel_sender, cancel) = oneshot::channel();
 
@@ -63,7 +63,7 @@ async fn unready_service_result_canceled() {
 
 #[tokio::test]
 async fn unready_service_result_cancel_handle_dropped() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (cancel_sender, cancel) = oneshot::channel();
 

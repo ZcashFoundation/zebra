@@ -94,7 +94,7 @@ use proptest::prelude::*;
 
 #[test]
 fn round_trip_work_expanded() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(work_before in any::<Work>())| {
         let work: U256 = work_before.as_u128().into();
@@ -107,7 +107,7 @@ fn round_trip_work_expanded() {
 /// Check that the block locator heights are sensible.
 #[test]
 fn test_block_locator_heights() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     for (height, min_height) in BLOCK_LOCATOR_CASES.iter().cloned() {
         let locator = util::block_locator_heights(block::Height(height));

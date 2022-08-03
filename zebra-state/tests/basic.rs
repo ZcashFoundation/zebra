@@ -64,7 +64,7 @@ async fn check_transcripts_testnet() -> Result<(), Report> {
 
 #[spandoc::spandoc]
 async fn check_transcripts(network: Network) -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mainnet_transcript = &[&COMMIT_FINALIZED_BLOCK_MAINNET];
     let testnet_transcript = &[&COMMIT_FINALIZED_BLOCK_TESTNET];

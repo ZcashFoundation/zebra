@@ -24,7 +24,7 @@ proptest! {
         local_listener in any::<SocketAddr>(),
         addresses in vec(any::<MetaAddr>(), 0..MAX_META_ADDR),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
         let chrono_now = Utc::now();
 
         let address_book = AddressBook::new_with_addrs(
@@ -52,7 +52,7 @@ proptest! {
         local_listener in any::<SocketAddr>(),
         addresses in vec(any::<MetaAddr>(), 0..MAX_META_ADDR),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
         let instant_now = Instant::now();
         let chrono_now = Utc::now();
 
@@ -80,7 +80,7 @@ proptest! {
         addr_limit in 0..=MAX_ADDR_CHANGE,
         pre_fill in any::<bool>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let initial_addrs = if pre_fill {
             addr_changes_lists

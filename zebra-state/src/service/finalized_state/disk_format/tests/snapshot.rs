@@ -45,7 +45,7 @@ use crate::{
 /// These snapshots contain the `default` column family, but it is not used by Zebra.
 #[test]
 fn test_raw_rocksdb_column_families() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     test_raw_rocksdb_column_families_with_network(Mainnet);
     test_raw_rocksdb_column_families_with_network(Testnet);

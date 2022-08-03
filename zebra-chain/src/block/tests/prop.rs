@@ -23,7 +23,7 @@ const DEFAULT_BLOCK_ROUNDTRIP_PROPTEST_CASES: u32 = 16;
 proptest! {
     #[test]
     fn block_hash_roundtrip(hash in any::<Hash>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let bytes = hash.zcash_serialize_to_vec()?;
         let other_hash: Hash = bytes.zcash_deserialize_into()?;
@@ -38,7 +38,7 @@ proptest! {
 
     #[test]
     fn block_hash_display_fromstr_roundtrip(hash in any::<Hash>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let display = format!("{}", hash);
         let parsed = display.parse::<Hash>().expect("hash should parse");
@@ -47,7 +47,7 @@ proptest! {
 
     #[test]
     fn block_hash_hex_roundtrip(hash in any::<Hash>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let hex_hash: String = hash.encode_hex();
         let new_hash = Hash::from_hex(hex_hash).expect("hex hash should parse");
@@ -56,7 +56,7 @@ proptest! {
 
     #[test]
     fn blockheader_roundtrip(header in any::<Header>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let bytes = header.zcash_serialize_to_vec()?;
         let other_header = bytes.zcash_deserialize_into()?;
@@ -75,7 +75,7 @@ proptest! {
         network in any::<Network>(),
         block_height in any::<Height>()
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // just skip the test if the bytes don't parse, because there's nothing
         // to compare with
@@ -97,7 +97,7 @@ proptest! {
 
     #[test]
     fn block_roundtrip(block in any::<Block>(), network in any::<Network>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let bytes = block.zcash_serialize_to_vec()?;
 
@@ -141,7 +141,7 @@ proptest! {
 /// coinbase transactions.
 #[test]
 fn blocks_have_coinbase() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let strategy =
         LedgerState::coinbase_strategy(None, None, false).prop_flat_map(Block::arbitrary_with);
@@ -158,7 +158,7 @@ fn blocks_have_coinbase() -> Result<()> {
 /// height and previous block hash.
 #[test]
 fn block_genesis_strategy() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let strategy =
         LedgerState::genesis_strategy(None, None, false).prop_flat_map(Block::arbitrary_with);
@@ -177,7 +177,7 @@ fn block_genesis_strategy() -> Result<()> {
 /// - no transparent spends in the genesis block, because genesis transparent outputs are ignored
 #[test]
 fn genesis_partial_chain_strategy() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let strategy = LedgerState::genesis_strategy(None, None, false).prop_flat_map(|init| {
         Block::partial_chain_strategy(
@@ -225,7 +225,7 @@ fn genesis_partial_chain_strategy() -> Result<()> {
 /// - correct previous block hashes
 #[test]
 fn arbitrary_height_partial_chain_strategy() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let strategy = any::<Height>()
         .prop_flat_map(|height| LedgerState::height_strategy(height, None, None, false))

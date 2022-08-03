@@ -57,7 +57,7 @@ use crate::common::{
 
 /// The test entry point.
 pub async fn run() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Skip the test unless the user specifically asked for it
     if zebra_skip_lightwalletd_tests() {

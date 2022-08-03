@@ -15,7 +15,7 @@ use crate::{
 proptest! {
     #[test]
     fn compact_size_message_write_then_read_round_trip(size in any::<CompactSizeMessage>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let buf = size.zcash_serialize_to_vec().unwrap();
         // Maximum encoding size of a CompactSize is 9 bytes.
@@ -31,7 +31,7 @@ proptest! {
 
     #[test]
     fn compact_size_message_read_then_write_round_trip(bytes in prop::array::uniform9(0u8..)) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // Only do the test if the bytes were valid.
         if let Ok(size) = CompactSizeMessage::zcash_deserialize(Cursor::new(&bytes[..])) {
@@ -54,7 +54,7 @@ proptest! {
 
     #[test]
     fn compact_size_message_range(size in any::<usize>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         if let Ok(compact_size) = CompactSizeMessage::try_from(size) {
             prop_assert!(size <= MAX_PROTOCOL_MESSAGE_LEN);
@@ -68,7 +68,7 @@ proptest! {
 
     #[test]
     fn compact_size_64_write_then_read_round_trip(size in any::<CompactSize64>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let buf = size.zcash_serialize_to_vec().unwrap();
         // Maximum encoding size of a CompactSize is 9 bytes.
@@ -80,7 +80,7 @@ proptest! {
 
     #[test]
     fn compact_size_64_read_then_write_round_trip(bytes in prop::array::uniform9(0u8..)) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // Only do the test if the bytes were valid.
         if let Ok(s) = CompactSize64::zcash_deserialize(Cursor::new(&bytes[..])) {
@@ -99,7 +99,7 @@ proptest! {
 
     #[test]
     fn compact_size_64_conversion(size in any::<u64>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let compact_size = CompactSize64::from(size);
         let compact_size: u64 = compact_size.into();
@@ -108,7 +108,7 @@ proptest! {
 
     #[test]
     fn transaction_serialized_size(transaction in any::<UnminedTx>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         prop_assert_eq!(transaction.transaction.zcash_serialized_size().unwrap(), transaction.size);
     }

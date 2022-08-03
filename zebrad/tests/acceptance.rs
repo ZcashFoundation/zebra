@@ -142,7 +142,7 @@ use common::{
 
 #[test]
 fn generate_no_args() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let child = testdir()?
         .with_config(&mut default_test_config()?)?
@@ -159,7 +159,7 @@ fn generate_no_args() -> Result<()> {
 
 #[test]
 fn generate_args() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let testdir = testdir()?;
     let testdir = &testdir;
@@ -205,7 +205,7 @@ fn generate_args() -> Result<()> {
 
 #[test]
 fn help_no_args() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
@@ -229,7 +229,7 @@ fn help_no_args() -> Result<()> {
 
 #[test]
 fn help_args() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let testdir = testdir()?;
     let testdir = &testdir;
@@ -249,7 +249,7 @@ fn help_args() -> Result<()> {
 
 #[test]
 fn start_no_args() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // start caches state, so run one of the start tests with persistent state
     let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
@@ -277,7 +277,7 @@ fn start_no_args() -> Result<()> {
 
 #[test]
 fn start_args() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
     let testdir = &testdir;
@@ -303,7 +303,7 @@ fn start_args() -> Result<()> {
 
 #[test]
 fn persistent_mode() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
     let testdir = &testdir;
@@ -357,7 +357,7 @@ fn misconfigured_ephemeral_missing_directory() -> Result<()> {
 fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck) -> Result<()> {
     use std::io::ErrorKind;
 
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut config = default_test_config()?;
     let run_dir = testdir()?;
@@ -447,7 +447,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 
 #[test]
 fn app_no_args() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
@@ -462,7 +462,7 @@ fn app_no_args() -> Result<()> {
 
 #[test]
 fn version_no_args() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
 
@@ -483,7 +483,7 @@ fn version_no_args() -> Result<()> {
 
 #[test]
 fn version_args() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let testdir = testdir()?.with_config(&mut default_test_config()?)?;
     let testdir = &testdir;
@@ -521,7 +521,7 @@ fn config_test() -> Result<()> {
 
 /// Test that `zebrad start` can parse the output from `zebrad generate`.
 fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let testdir = testdir()?;
     let testdir = &testdir;
@@ -572,7 +572,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
 /// Checks that Zebra prints an informative message when it cannot parse the
 /// config file.
 fn invalid_generated_config() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let testdir = &testdir()?;
 
@@ -708,7 +708,7 @@ fn sync_one_checkpoint_testnet() -> Result<()> {
 /// Test if `zebrad` can sync the first checkpoint, restart, and stop on load.
 #[test]
 fn restart_stop_at_height() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     restart_stop_at_height_for_network(Network::Mainnet, TINY_CHECKPOINT_TEST_HEIGHT)?;
     // TODO: disabled because testnet is not currently reliable
@@ -906,7 +906,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
 #[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_to_mandatory_checkpoint_mainnet", test)]
 fn sync_to_mandatory_checkpoint_mainnet() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     let network = Mainnet;
     create_cached_database(network)
 }
@@ -915,7 +915,7 @@ fn sync_to_mandatory_checkpoint_mainnet() -> Result<()> {
 #[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_to_mandatory_checkpoint_testnet", test)]
 fn sync_to_mandatory_checkpoint_testnet() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     let network = Testnet;
     create_cached_database(network)
 }
@@ -928,7 +928,7 @@ fn sync_to_mandatory_checkpoint_testnet() -> Result<()> {
 #[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_past_mandatory_checkpoint_mainnet", test)]
 fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     let network = Mainnet;
     sync_past_mandatory_checkpoint(network)
 }
@@ -941,7 +941,7 @@ fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
 #[allow(dead_code)]
 #[cfg_attr(feature = "test_sync_past_mandatory_checkpoint_testnet", test)]
 fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     let network = Testnet;
     sync_past_mandatory_checkpoint(network)
 }
@@ -975,7 +975,7 @@ fn full_sync_testnet() -> Result<()> {
 async fn metrics_endpoint() -> Result<()> {
     use hyper::Client;
 
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
     let port = random_known_port();
@@ -1031,7 +1031,7 @@ async fn metrics_endpoint() -> Result<()> {
 async fn tracing_endpoint() -> Result<()> {
     use hyper::{Body, Client, Request};
 
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
     let port = random_known_port();
@@ -1126,7 +1126,7 @@ async fn rpc_endpoint() -> Result<()> {
     use hyper::{body::to_bytes, Body, Client, Method, Request};
     use serde_json::Value;
 
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     if zebra_test::net::zebra_skip_network_tests() {
         return Ok(());
     }
@@ -1285,7 +1285,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
 ///
 /// The random ports in this test can cause [rare port conflicts.](#Note on port conflict)
 fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return Ok(());
@@ -1523,7 +1523,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
 /// The second node will panic with the Zcash listener conflict hint added in #1535.
 #[test]
 fn zebra_zcash_listener_conflict() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
     let port = random_known_port();
@@ -1555,7 +1555,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
 #[test]
 #[cfg(feature = "prometheus")]
 fn zebra_metrics_conflict() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
     let port = random_known_port();
@@ -1584,7 +1584,7 @@ fn zebra_metrics_conflict() -> Result<()> {
 #[test]
 #[cfg(feature = "filter-reload")]
 fn zebra_tracing_conflict() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // [Note on port conflict](#Note on port conflict)
     let port = random_known_port();
@@ -1615,7 +1615,7 @@ fn zebra_tracing_conflict() -> Result<()> {
 #[test]
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn zebra_rpc_conflict() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return Ok(());
@@ -1646,7 +1646,7 @@ fn zebra_rpc_conflict() -> Result<()> {
 /// The second node will panic with the Zcash state conflict hint added in #1535.
 #[test]
 fn zebra_state_conflict() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // A persistent config has a fixed temp state directory, but asks the OS to
     // automatically choose an unused port
@@ -1756,7 +1756,7 @@ where
 #[tokio::test]
 #[ignore]
 async fn fully_synced_rpc_test() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // We're only using cached Zebra state here, so this test type is the most similar
     let test_type = LightwalletdTestType::FullSyncFromGenesis {
@@ -1809,7 +1809,7 @@ async fn fully_synced_rpc_test() -> Result<()> {
 async fn delete_old_databases() -> Result<()> {
     use std::fs::{canonicalize, create_dir};
 
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut config = default_test_config()?;
     let run_dir = testdir()?;

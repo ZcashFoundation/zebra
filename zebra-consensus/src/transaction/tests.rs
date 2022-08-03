@@ -37,7 +37,7 @@ mod prop;
 
 #[test]
 fn v5_fake_transactions() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let networks = vec![
         (Network::Mainnet, zebra_test::vectors::MAINNET_BLOCKS.iter()),
@@ -289,7 +289,7 @@ fn v5_transaction_is_accepted_after_nu5_activation_testnet() {
 }
 
 fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network) {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let nu5 = NetworkUpgrade::Nu5;
         let nu5_activation_height = nu5
@@ -769,7 +769,7 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
 /// Test if V4 transaction with a joinsplit that has duplicate nullifiers is rejected.
 #[test]
 fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
         let network_upgrade = NetworkUpgrade::Canopy;
@@ -834,7 +834,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
 /// Test if V4 transaction with duplicate nullifiers across joinsplits is rejected.
 #[test]
 fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejected() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
         let network_upgrade = NetworkUpgrade::Canopy;
@@ -1364,7 +1364,7 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
 /// This test verifies if the transaction verifier correctly accepts a signed transaction.
 #[test]
 fn v4_with_signed_sprout_transfer_is_accepted() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
@@ -1407,7 +1407,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
 /// invalid JoinSplit.
 #[test]
 fn v4_with_modified_joinsplit_is_rejected() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         v4_with_joinsplit_is_rejected_for_modification(
             JoinSplitModification::CorruptSignature,
@@ -1473,7 +1473,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
 /// Test if a V4 transaction with Sapling spends is accepted by the verifier.
 #[test]
 fn v4_with_sapling_spends() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
@@ -1513,7 +1513,7 @@ fn v4_with_sapling_spends() {
 /// Test if a V4 transaction with a duplicate Sapling spend is rejected by the verifier.
 #[test]
 fn v4_with_duplicate_sapling_spends() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
@@ -1558,7 +1558,7 @@ fn v4_with_duplicate_sapling_spends() {
 /// Test if a V4 transaction with Sapling outputs but no spends is accepted by the verifier.
 #[test]
 fn v4_with_sapling_outputs_and_no_spends() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
@@ -1603,7 +1603,7 @@ fn v4_with_sapling_outputs_and_no_spends() {
 // TODO: add NU5 mainnet test vectors with Sapling spends, then remove should_panic
 #[should_panic]
 fn v5_with_sapling_spends() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
         let nu5_activation = NetworkUpgrade::Nu5.activation_height(network);
@@ -1650,7 +1650,7 @@ fn v5_with_sapling_spends() {
 /// Test if a V5 transaction with a duplicate Sapling spend is rejected by the verifier.
 #[test]
 fn v5_with_duplicate_sapling_spends() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
@@ -1696,7 +1696,7 @@ fn v5_with_duplicate_sapling_spends() {
 /// Test if a V5 transaction with a duplicate Orchard action is rejected by the verifier.
 #[test]
 fn v5_with_duplicate_orchard_action() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
@@ -2018,7 +2018,7 @@ fn duplicate_sapling_spend_in_shielded_data<A: sapling::AnchorVariant + Clone>(
 
 #[test]
 fn add_to_sprout_pool_after_nu() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // get a block that we know it haves a transaction with `vpub_old` field greater than 0.
     let block: Arc<_> = zebra_chain::block::Block::zcash_deserialize(
@@ -2076,7 +2076,7 @@ fn add_to_sprout_pool_after_nu() {
 
 #[test]
 fn coinbase_outputs_are_decryptable_for_historical_blocks() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     coinbase_outputs_are_decryptable_for_historical_blocks_for_network(Network::Mainnet)?;
     coinbase_outputs_are_decryptable_for_historical_blocks_for_network(Network::Testnet)?;

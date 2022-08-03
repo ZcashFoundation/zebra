@@ -36,7 +36,7 @@ async fn single_item_checkpoint_list_test() -> Result<(), Report> {
 
 #[spandoc::spandoc]
 async fn single_item_checkpoint_list() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let block0 =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
@@ -107,7 +107,7 @@ async fn multi_item_checkpoint_list_test() -> Result<(), Report> {
 
 #[spandoc::spandoc]
 async fn multi_item_checkpoint_list() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Parse all the blocks
     let mut checkpoint_data = Vec::new();
@@ -231,7 +231,7 @@ async fn continuous_blockchain(
     restart_height: Option<block::Height>,
     network: Network,
 ) -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // A continuous blockchain
     let blockchain = match network {
@@ -431,7 +431,7 @@ async fn block_higher_than_max_checkpoint_fail_test() -> Result<(), Report> {
 
 #[spandoc::spandoc]
 async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let block0 =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
@@ -501,7 +501,7 @@ async fn wrong_checkpoint_hash_fail_test() -> Result<(), Report> {
 
 #[spandoc::spandoc]
 async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let good_block0 =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
@@ -669,7 +669,7 @@ async fn checkpoint_drop_cancel_test() -> Result<(), Report> {
 
 #[spandoc::spandoc]
 async fn checkpoint_drop_cancel() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Parse all the blocks
     let mut checkpoint_data = Vec::new();
@@ -769,7 +769,7 @@ async fn hard_coded_mainnet_test() -> Result<(), Report> {
 
 #[spandoc::spandoc]
 async fn hard_coded_mainnet() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let block0 =
         Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;

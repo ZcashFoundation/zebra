@@ -136,7 +136,7 @@ fn candidate_set_updates_are_rate_limited() {
     // How many times should `update` be called in each rate limit interval
     const POLL_FREQUENCY_FACTOR: u32 = 3;
 
-    let runtime = zebra_test::init_async();
+    let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(
@@ -181,7 +181,7 @@ fn candidate_set_updates_are_rate_limited() {
 /// rate limited.
 #[test]
 fn candidate_set_update_after_update_initial_is_rate_limited() {
-    let runtime = zebra_test::init_async();
+    let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
 
     let address_book = AddressBook::new(

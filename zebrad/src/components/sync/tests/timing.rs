@@ -31,7 +31,7 @@ use crate::{
 /// Make sure the timeout values are consistent with each other.
 #[test]
 fn ensure_timeouts_consistent() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This constraint clears the download pipeline during a restart
     assert!(
@@ -114,7 +114,7 @@ fn ensure_timeouts_consistent() {
 /// Test that calls to [`ChainSync::request_genesis`] are rate limited.
 #[test]
 fn request_genesis_is_rate_limited() {
-    let runtime = zebra_test::init_async();
+    let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();
 
     // The number of calls to `request_genesis()` we are going to be testing for
