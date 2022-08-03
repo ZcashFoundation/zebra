@@ -29,7 +29,7 @@ futures = "0.3.21"
 futures-util = "0.3.21"
 metrics = "0.18.1"
 thiserror = "1.0.31"
-tokio = { version = "1.20.0", features = ["time", "sync", "tracing", "rt-multi-thread"] }
+tokio = { version = "1.20.1", features = ["time", "sync", "tracing", "rt-multi-thread"] }
 tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.31"
 tracing-futures = "0.2.5"
@@ -58,7 +58,7 @@ proptest-derive = "0.3.0"
 rand07 = { package = "rand", version = "0.7" }
 spandoc = "0.2.2"
 
-tokio = { version = "1.20.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.20.1", features = ["full", "tracing", "test-util"] }
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.11"
 
