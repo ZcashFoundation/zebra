@@ -92,6 +92,10 @@ tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.0.10"
 
 color-eyre = { version = "0.6.1", default_features = false, features = ["issue-url"] }
+# This is a transitive dependency via color-eyre.
+# Enable a feature that makes tinyvec compile much faster.
+tinyvec = { version = "1.5.1", features = ["rustc_1_55"] }
+
 thiserror = "1.0.31"
 
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
