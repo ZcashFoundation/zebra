@@ -1287,6 +1287,10 @@ async fn lightwalletd_test_suite() -> Result<()> {
 fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> {
     zebra_test::init();
 
+    if zebra_test::net::zebra_skip_network_tests() {
+        return Ok(());
+    }
+
     // Skip the test unless the user specifically asked for it
     //
     // TODO: pass test_type to zebra_skip_lightwalletd_tests() and check for lightwalletd launch in there
@@ -1806,6 +1810,15 @@ async fn delete_old_databases() -> Result<()> {
     use std::fs::{canonicalize, create_dir};
 
     zebra_test::init();
+
+    // Skip this test because it can be very slow without a network.
+    //
+    // The delete databases task is launched last during startup, after network setup.
+    // If there is no network, network setup can take a long time to timeout,
+    // so the task takes a long time to launch, slowing down this test.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return Ok(());
+    }
 
     let mut config = default_test_config()?;
     let run_dir = testdir()?;

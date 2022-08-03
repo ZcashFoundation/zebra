@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use color_eyre::{eyre::eyre, Report};
 use ed25519_zebra::*;
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::stream::{FuturesOrdered, StreamExt};
 use rand::thread_rng;
 use tower::{Service, ServiceExt};
 use tower_batch::Batch;
@@ -24,7 +24,7 @@ async fn sign_and_verify<V>(
 where
     V: Service<Ed25519Item, Response = ()>,
 {
-    let results = FuturesUnordered::new();
+    let mut results = FuturesOrdered::new();
     for i in 0..n {
         let span = tracing::trace_span!("sig", i);
         let sk = SigningKey::new(thread_rng());

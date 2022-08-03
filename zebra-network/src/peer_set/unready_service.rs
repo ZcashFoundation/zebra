@@ -1,5 +1,6 @@
-// Adapted from tower-balance
-
+/// Services that are busy or newly created.
+///
+/// Adapted from tower-balance.
 use std::{
     future::Future,
     marker::PhantomData,
@@ -21,11 +22,18 @@ mod tests;
 #[pin_project]
 #[derive(Debug)]
 pub(super) struct UnreadyService<K, S, Req> {
+    /// The key used to lookup `service`.
     pub(super) key: Option<K>,
+
+    /// A oneshot used to cancel the request the `service` is currently working on, if any.
     #[pin]
     pub(super) cancel: oneshot::Receiver<CancelClientWork>,
+
+    /// The `service` that is busy (or newly created).
     pub(super) service: Option<S>,
 
+    /// Dropping `service` might drop a request.
+    /// This [`PhantomData`] tells the Rust compiler to do a drop check for `Req`.
     pub(super) _req: PhantomData<Req>,
 }
 

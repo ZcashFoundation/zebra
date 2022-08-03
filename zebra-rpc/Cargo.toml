@@ -21,23 +21,23 @@ chrono = "0.4.19"
 futures = "0.3.21"
 
 # lightwalletd sends JSON-RPC requests over HTTP 1.1
-hyper = { version = "0.14.19", features = ["http1", "server"] }
+hyper = { version = "0.14.20", features = ["http1", "server"] }
 
 jsonrpc-core = "18.0.0"
 jsonrpc-derive = "18.0.0"
 jsonrpc-http-server = "18.0.0"
 # zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
-serde_json = { version = "1.0.81", features = ["preserve_order"] }
+serde_json = { version = "1.0.82", features = ["preserve_order"] }
 indexmap = { version = "1.9.1", features = ["serde"] }
 
-tokio = { version = "1.20.0", features = ["time", "rt-multi-thread", "macros", "tracing"] }
+tokio = { version = "1.20.1", features = ["time", "rt-multi-thread", "macros", "tracing"] }
 tower = "0.4.13"
 
 tracing = "0.1.31"
 tracing-futures = "0.2.5"
 
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.137", features = ["serde_derive"] }
+serde = { version = "1.0.141", features = ["serde_derive"] }
 
 proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
@@ -46,10 +46,10 @@ proptest-derive = { version = "0.3.0", optional = true }
 insta = { version = "1.15.0", features = ["redactions"] }
 proptest = "0.10.1"
 proptest-derive = "0.3.0"
-serde_json = "1.0.81"
+serde_json = "1.0.82"
 thiserror = "1.0.31"
 
-tokio = { version = "1.20.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.20.1", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }

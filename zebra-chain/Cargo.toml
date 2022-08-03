@@ -60,8 +60,8 @@ tracing = "0.1.31"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.137", features = ["serde_derive", "rc"] }
-serde_with = "1.14.0"
+serde = { version = "1.0.141", features = ["serde_derive", "rc"] }
+serde_with = "2.0.0"
 serde-big-array = "0.4.1"
 
 # Processing
@@ -80,7 +80,7 @@ proptest-derive = { version = "0.3.0", optional = true }
 rand = { version = "0.8.5", optional = true, package = "rand" }
 rand_chacha = { version = "0.3.1", optional = true }
 
-tokio = { version = "1.20.0", features = ["tracing"], optional = true }
+tokio = { version = "1.20.1", features = ["tracing"], optional = true }
 
 zebra-test = { path = "../zebra-test/", optional = true }
 
@@ -103,7 +103,7 @@ proptest-derive = "0.3.0"
 rand = { version = "0.8.5", package = "rand" }
 rand_chacha = "0.3.1"
 
-tokio = { version = "1.20.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.20.1", features = ["full", "tracing", "test-util"] }
 
 zebra-test = { path = "../zebra-test/" }
 

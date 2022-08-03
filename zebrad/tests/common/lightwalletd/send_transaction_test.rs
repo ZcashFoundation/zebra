@@ -14,6 +14,7 @@
 //! already been seen in a block.
 
 use std::{
+    cmp::min,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -26,7 +27,9 @@ use zebra_chain::{
     block, chain_tip::ChainTip, parameters::Network, serialization::ZcashSerialize,
     transaction::Transaction,
 };
+use zebra_rpc::queue::CHANNEL_AND_QUEUE_CAPACITY;
 use zebra_state::HashOrHeight;
+use zebrad::components::mempool::downloads::MAX_INBOUND_CONCURRENCY;
 
 use crate::common::{
     cached_state::{load_tip_height_from_state_directory, start_state_service_with_cache_dir},
@@ -42,6 +45,10 @@ use crate::common::{
 /// The test entry point.
 pub async fn run() -> Result<()> {
     zebra_test::init();
+
+    if zebra_test::net::zebra_skip_network_tests() {
+        return Ok(());
+    }
 
     // Skip the test unless the user specifically asked for it
     if zebra_skip_lightwalletd_tests() {
@@ -74,7 +81,7 @@ pub async fn run() -> Result<()> {
         "running gRPC send transaction test using lightwalletd & zebrad",
     );
 
-    let transactions =
+    let mut transactions =
         load_transactions_from_a_future_block(network, zebrad_state_path.clone()).await?;
 
     tracing::info!(
@@ -104,6 +111,9 @@ pub async fn run() -> Result<()> {
     );
 
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
+
+    // To avoid filling the mempool queue, limit the transactions to be sent to the RPC and mempool queue limits
+    transactions.truncate(min(CHANNEL_AND_QUEUE_CAPACITY, MAX_INBOUND_CONCURRENCY) - 1);
 
     tracing::info!(
         transaction_count = ?transactions.len(),
