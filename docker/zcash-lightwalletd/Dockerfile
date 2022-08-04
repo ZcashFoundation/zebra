@@ -36,7 +36,7 @@ RUN set -ex; \
     echo "rpcport=8232"; \
   } > "${ZCASHD_CONF_PATH}"
 
-ENTRYPOINT ["/lightwalletd"]
+ENTRYPOINT ["/opt/lightwalletd"]
 CMD ["--no-tls-very-insecure", "--grpc-bind-addr=0.0.0.0:9067",  "--http-bind-addr=0.0.0.0:9068", "--log-file=/dev/stdout", "--log-level=7"]
 
 ##
