@@ -16,7 +16,7 @@ proptest! {
     fn spend_v4_roundtrip(
         spend in any::<sapling::Spend<PerSpendAnchor>>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let data = spend.zcash_serialize_to_vec().expect("spend should serialize");
         let spend_parsed = data.zcash_deserialize_into().expect("randomized spend should deserialize");
@@ -33,7 +33,7 @@ proptest! {
     fn spend_v5_roundtrip(
         spend in any::<sapling::Spend<SharedAnchor>>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let (prefix, zkproof, spend_auth_sig) = spend.into_v5_parts();
 
@@ -70,7 +70,7 @@ proptest! {
     fn output_roundtrip(
         output in any::<sapling::Output>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // v4 format
         let data = output.clone().into_v4().zcash_serialize_to_vec().expect("output should serialize");
@@ -113,7 +113,7 @@ proptest! {
     fn sapling_shielded_data_v4_roundtrip(
         shielded_v4 in any::<sapling::ShieldedData<PerSpendAnchor>>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // shielded data doesn't serialize by itself, so we have to stick it in
         // a transaction
@@ -142,7 +142,7 @@ proptest! {
     fn sapling_shielded_data_v5_roundtrip(
         shielded_v5 in any::<sapling::ShieldedData<SharedAnchor>>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let data = shielded_v5.zcash_serialize_to_vec().expect("shielded_v5 should serialize");
         let shielded_v5_parsed = data.zcash_deserialize_into().expect("randomized shielded_v5 should deserialize");
@@ -165,7 +165,7 @@ proptest! {
     fn sapling_shielded_data_v4_outputs_only(
         shielded_v4 in any::<sapling::ShieldedData<PerSpendAnchor>>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // we need at least one output to delete all the spends
         prop_assume!(shielded_v4.outputs().count() > 0);
@@ -204,7 +204,7 @@ proptest! {
     fn sapling_shielded_data_v5_outputs_only(
         shielded_v5 in any::<sapling::ShieldedData<SharedAnchor>>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // we need at least one output to delete all the spends
         prop_assume!(shielded_v5.outputs().count() > 0);

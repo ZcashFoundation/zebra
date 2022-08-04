@@ -9,7 +9,7 @@ use crate::{
 
 #[test]
 fn parse_config_listen_addr() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let fixtures = vec![
         ("listen_addr = '0.0.0.0'", "0.0.0.0:8233"),
@@ -33,7 +33,7 @@ fn parse_config_listen_addr() {
 /// Make sure the peer connection limits are consistent with each other.
 #[test]
 fn ensure_peer_connection_limits_consistent() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Zebra should allow more inbound connections, to avoid connection exhaustion
     const_assert!(INBOUND_PEER_LIMIT_MULTIPLIER > OUTBOUND_PEER_LIMIT_MULTIPLIER);

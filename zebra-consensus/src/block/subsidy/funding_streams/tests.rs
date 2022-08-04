@@ -5,7 +5,7 @@ use std::convert::TryFrom;
 #[test]
 // Check funding streams are correct in the entire period.
 fn test_funding_stream_values() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     let network = Network::Mainnet;
 
     // funding streams not active

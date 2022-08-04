@@ -18,7 +18,7 @@ use crate::{
 /// Test that a newly initialized client functions correctly before it is polled.
 #[tokio::test]
 async fn client_service_ok_without_readiness_check() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (_client, mut harness) = ClientTestHarness::build().finish();
 
@@ -30,7 +30,7 @@ async fn client_service_ok_without_readiness_check() {
 /// Test that a newly initialized client functions correctly after it is polled.
 #[tokio::test]
 async fn client_service_ready_ok() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut client, mut harness) = ClientTestHarness::build().finish();
 
@@ -43,7 +43,7 @@ async fn client_service_ready_ok() {
 /// Test that a client functions correctly if its readiness future is dropped.
 #[tokio::test]
 async fn client_service_ready_drop_ok() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut client, mut harness) = ClientTestHarness::build().finish();
 
@@ -61,7 +61,7 @@ async fn client_service_ready_drop_ok() {
 /// Test that a client functions correctly if it is polled for readiness multiple times.
 #[tokio::test]
 async fn client_service_ready_multiple_ok() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut client, mut harness) = ClientTestHarness::build().finish();
 
@@ -76,7 +76,7 @@ async fn client_service_ready_multiple_ok() {
 /// Test that clients propagate errors from their heartbeat tasks.
 #[tokio::test]
 async fn client_service_ready_heartbeat_exit() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut client, mut harness) = ClientTestHarness::build().finish();
 
@@ -91,7 +91,7 @@ async fn client_service_ready_heartbeat_exit() {
 /// Test that clients propagate errors from their connection tasks.
 #[tokio::test]
 async fn client_service_ready_request_drop() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut client, mut harness) = ClientTestHarness::build().finish();
 
@@ -106,7 +106,7 @@ async fn client_service_ready_request_drop() {
 /// Test that clients error when their connection task closes the request channel.
 #[tokio::test]
 async fn client_service_ready_request_close() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut client, mut harness) = ClientTestHarness::build().finish();
 
@@ -121,7 +121,7 @@ async fn client_service_ready_request_close() {
 
 #[tokio::test]
 async fn client_service_ready_error_in_slot() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut client, mut harness) = ClientTestHarness::build().finish();
 
@@ -136,7 +136,7 @@ async fn client_service_ready_error_in_slot() {
 /// Test that clients error when multiple error conditions occur at the same time.
 #[tokio::test]
 async fn client_service_ready_multiple_errors() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut client, mut harness) = ClientTestHarness::build().finish();
 
@@ -152,7 +152,7 @@ async fn client_service_ready_multiple_errors() {
 /// Test that clients register an error and cleanup channels correctly when the client is dropped.
 #[tokio::test]
 async fn client_service_drop_cleanup() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (client, mut harness) = ClientTestHarness::build().finish();
 
@@ -166,7 +166,7 @@ async fn client_service_drop_cleanup() {
 /// Force the connection background task to stop, and check if the `Client` properly handles it.
 #[tokio::test]
 async fn client_service_handles_exited_connection_task() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut client, mut harness) = ClientTestHarness::build().finish();
 
@@ -182,7 +182,7 @@ async fn client_service_handles_exited_connection_task() {
 #[tokio::test]
 #[should_panic]
 async fn client_service_propagates_panic_from_connection_task() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut client, _harness) = ClientTestHarness::build()
         .with_connection_task(async move {
@@ -199,7 +199,7 @@ async fn client_service_propagates_panic_from_connection_task() {
 /// Force the heartbeat background task to stop, and check if the `Client` properly handles it.
 #[tokio::test]
 async fn client_service_handles_exited_heartbeat_task() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut client, mut harness) = ClientTestHarness::build().finish();
 
@@ -215,7 +215,7 @@ async fn client_service_handles_exited_heartbeat_task() {
 #[tokio::test]
 #[should_panic]
 async fn client_service_propagates_panic_from_heartbeat_task() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut client, _harness) = ClientTestHarness::build()
         .with_heartbeat_task(async move {
@@ -238,7 +238,7 @@ async fn client_service_propagates_panic_from_heartbeat_task() {
 /// and we would never ask the peer if it has received the inventory.
 #[test]
 fn missing_inv_collector_ignores_local_registry_errors() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let block_hash = block::Hash([0; 32]);
     let request = Request::BlocksByHash(iter::once(block_hash).collect());

@@ -28,7 +28,7 @@ proptest! {
         prop_assert!(MAX_HASH_COUNT <= MAX_PENDING_CHANGES, "channel must not block in tests");
 
         // Start the runtime
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
 
         runtime.block_on(async move {
             // Check all combinations of:

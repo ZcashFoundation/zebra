@@ -41,7 +41,7 @@ proptest! {
     /// and client services.
     #[test]
     fn sanitize_avoids_leaks(addr in MetaAddr::arbitrary()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         if let Some(sanitized) = addr.sanitize(Mainnet) {
             // check that all sanitized addresses are valid for outbound
@@ -65,7 +65,7 @@ proptest! {
     fn preserve_initial_untrusted_values(
         (mut addr, changes) in MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         for change in changes {
             if let Some(changed_addr) = change.apply_to_meta_addr(addr) {
@@ -106,7 +106,7 @@ proptest! {
     fn individual_peer_retry_limit_meta_addr(
         (mut addr, changes) in MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE)
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let instant_now = std::time::Instant::now();
         let chrono_now = Utc::now();
@@ -145,7 +145,7 @@ proptest! {
         local_listener in any::<SocketAddr>(),
         address_book_addrs in vec(any::<MetaAddr>(), 0..MAX_META_ADDR),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let chrono_now = Utc::now();
 
@@ -185,7 +185,7 @@ proptest! {
     fn new_meta_addr_from_meta_addr_change(
         (addr, changes) in MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE)
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let local_listener = "0.0.0.0:0".parse().expect("unexpected invalid SocketAddr");
 
@@ -293,7 +293,7 @@ proptest! {
     fn individual_peer_retry_limit_candidate_set(
         (addr, changes) in MetaAddrChange::addr_changes_strategy(MAX_ADDR_CHANGE)
     ) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         // Run the test for this many simulated live peer durations
@@ -392,7 +392,7 @@ proptest! {
             2..MAX_ADDR_CHANGE
         ),
     ) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         let instant_now = std::time::Instant::now();

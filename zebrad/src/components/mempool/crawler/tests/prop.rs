@@ -55,7 +55,7 @@ proptest! {
     /// enabled, i.e., if the block synchronizer is likely close to the chain tip.
     #[test]
     fn crawler_requests_for_transaction_ids(mut sync_lengths in any::<Vec<usize>>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
 
         // Add a dummy last element, so that all of the original values are used.
         sync_lengths.push(0);
@@ -102,7 +102,7 @@ proptest! {
     fn crawled_transactions_are_forwarded_to_downloader(
         transaction_ids in hash_set(any::<UnminedTxId>(), 1..MAX_CRAWLED_TX),
     ) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
 
         let transaction_id_count = transaction_ids.len();
 
@@ -141,7 +141,7 @@ proptest! {
             vec(any::<(UnminedTxId, Result<(), MempoolError>)>(), 1..MAX_CRAWLED_TX),
         transaction_ids_for_return_to_normal in hash_set(any::<UnminedTxId>(), 1..MAX_CRAWLED_TX),
     ) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
 
         // Make transaction_ids_and_responses unique
         let unique_transaction_ids_and_responses: HashSet<UnminedTxId> = transaction_ids_and_responses.iter().map(|(id, _result)| id).copied().collect();

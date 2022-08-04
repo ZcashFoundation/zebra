@@ -15,7 +15,7 @@ use crate::{
 /// Test if deserializing [`InventoryHash::Wtx`] does not produce an error.
 #[test]
 fn parses_msg_wtx_inventory_type() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut input = Vec::new();
 
@@ -39,7 +39,7 @@ fn parses_msg_wtx_inventory_type() {
 /// Also checks some of the deserialized address values.
 #[test]
 fn parses_msg_addr_v1_ip() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let codec = Codec::builder().finish();
 
@@ -104,7 +104,7 @@ fn parses_msg_addr_v1_ip() {
 /// and produces no addresses.
 #[test]
 fn parses_msg_addr_v1_empty() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let codec = Codec::builder().finish();
 
@@ -138,7 +138,7 @@ fn parses_msg_addr_v1_empty() {
 /// Also checks some of the deserialized address values.
 #[test]
 fn parses_msg_addr_v2_ip() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let codec = Codec::builder().finish();
 
@@ -228,7 +228,7 @@ fn parses_msg_addr_v2_ip() {
 /// and produces no addresses.
 #[test]
 fn parses_msg_addr_v2_empty() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let codec = Codec::builder().finish();
 
@@ -259,7 +259,7 @@ fn parses_msg_addr_v2_empty() {
 /// Test that deserializing invalid [`AddrV2`] fails.
 #[test]
 fn parses_msg_addr_v2_invalid() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let codec = Codec::builder().finish();
 

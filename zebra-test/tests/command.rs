@@ -46,7 +46,7 @@ fn is_command_available(cmd: &str, args: &[&str]) -> bool {
 /// Test if a process that keeps on producing lines of output is killed after the timeout.
 #[test]
 fn kill_on_timeout_output_continuous_lines() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Ideally, we'd want to use the 'yes' command here, but BSD yes treats
     // every string as an argument to repeat - so we can't test if it is
@@ -78,7 +78,7 @@ fn kill_on_timeout_output_continuous_lines() -> Result<()> {
 // TODO: create a similar test that pauses after output (#1140)
 #[test]
 fn finish_before_timeout_output_single_line() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
@@ -107,7 +107,7 @@ fn finish_before_timeout_output_single_line() -> Result<()> {
 //#[ignore]
 #[allow(dead_code)]
 fn kill_on_timeout_continuous_output_no_newlines() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "head";
     // Skip the test if the test system does not have the command
@@ -134,7 +134,7 @@ fn kill_on_timeout_continuous_output_no_newlines() -> Result<()> {
 // TODO: create a similar test that pauses after output (#1140)
 #[test]
 fn finish_before_timeout_short_output_no_newlines() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "printf";
     // Skip the test if the test system does not have the command
@@ -163,7 +163,7 @@ fn finish_before_timeout_short_output_no_newlines() -> Result<()> {
 // #[ignore]
 #[allow(dead_code)]
 fn kill_on_timeout_no_output() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "sleep";
     // Skip the test if the test system does not have the command
@@ -189,7 +189,7 @@ fn kill_on_timeout_no_output() -> Result<()> {
 #[test]
 #[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
@@ -219,7 +219,7 @@ fn failure_regex_matches_stdout_failure_message() {
 #[test]
 #[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stderr_failure_message() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // The read command prints its prompt to stderr.
     //
@@ -255,7 +255,7 @@ fn failure_regex_matches_stderr_failure_message() {
 #[test]
 #[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message_drop() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
@@ -284,7 +284,7 @@ fn failure_regex_matches_stdout_failure_message_drop() {
 #[test]
 #[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message_kill() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
@@ -315,7 +315,7 @@ fn failure_regex_matches_stdout_failure_message_kill() {
 #[test]
 #[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message_kill_on_error() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
@@ -347,7 +347,7 @@ fn failure_regex_matches_stdout_failure_message_kill_on_error() {
 #[test]
 #[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message_no_kill_on_error() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
@@ -381,7 +381,7 @@ fn failure_regex_matches_stdout_failure_message_no_kill_on_error() {
 #[test]
 #[should_panic(expected = "Logged a failure message")]
 fn failure_regex_timeout_continuous_output() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Ideally, we'd want to use the 'yes' command here, but BSD yes treats
     // every string as an argument to repeat - so we can't test if it is
@@ -418,7 +418,7 @@ fn failure_regex_timeout_continuous_output() {
 #[test]
 #[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message_wait_for_output() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
@@ -449,7 +449,7 @@ fn failure_regex_matches_stdout_failure_message_wait_for_output() {
 #[test]
 #[should_panic(expected = "Logged a failure message")]
 fn failure_regex_iter_matches_stdout_failure_message() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
@@ -480,7 +480,7 @@ fn failure_regex_iter_matches_stdout_failure_message() {
 /// Make sure ignore regexes override failure regexes.
 #[test]
 fn ignore_regex_ignores_stdout_failure_message() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
@@ -502,7 +502,7 @@ fn ignore_regex_ignores_stdout_failure_message() {
 /// Make sure ignore regex iters override failure regex iters.
 #[test]
 fn ignore_regex_iter_ignores_stdout_failure_message() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command

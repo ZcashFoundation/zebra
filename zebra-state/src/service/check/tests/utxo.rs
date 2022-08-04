@@ -32,7 +32,7 @@ use crate::{
 /// (And that the test infrastructure generally works.)
 #[test]
 fn accept_shielded_mature_coinbase_utxo_spend() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let created_height = Height(1);
     let outpoint = transparent::OutPoint {
@@ -58,7 +58,7 @@ fn accept_shielded_mature_coinbase_utxo_spend() {
 /// Check that non-shielded spends of coinbase transparent outputs fail.
 #[test]
 fn reject_unshielded_coinbase_utxo_spend() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let created_height = Height(1);
     let outpoint = transparent::OutPoint {
@@ -80,7 +80,7 @@ fn reject_unshielded_coinbase_utxo_spend() {
 /// Check that early spends of coinbase transparent outputs fail.
 #[test]
 fn reject_immature_coinbase_utxo_spend() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let created_height = Height(1);
     let outpoint = transparent::OutPoint {
@@ -142,7 +142,7 @@ proptest! {
         mut prevout_input in TypeNameToDebug::<transparent::Input>::arbitrary_with(None),
         use_finalized_state in any::<bool>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -226,7 +226,7 @@ proptest! {
         use_finalized_state_output in any::<bool>(),
         mut use_finalized_state_spend in any::<bool>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // if we use the non-finalized state for the first block,
         // we have to use it for the second as well
@@ -320,7 +320,7 @@ proptest! {
         mut prevout_input1 in TypeNameToDebug::<transparent::Input>::arbitrary_with(None),
         mut prevout_input2 in TypeNameToDebug::<transparent::Input>::arbitrary_with(None),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -382,7 +382,7 @@ proptest! {
         mut prevout_input2 in TypeNameToDebug::<transparent::Input>::arbitrary_with(None),
         use_finalized_state_output in any::<bool>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block2 = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
             .zcash_deserialize_into::<Block>()
@@ -458,7 +458,7 @@ proptest! {
         mut prevout_input2 in TypeNameToDebug::<transparent::Input>::arbitrary_with(None),
         use_finalized_state_output in any::<bool>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block2 = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
             .zcash_deserialize_into::<Block>()
@@ -542,7 +542,7 @@ proptest! {
         use_finalized_state_output in any::<bool>(),
         mut use_finalized_state_spend in any::<bool>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // if we use the non-finalized state for the first block,
         // we have to use it for the second as well
@@ -690,7 +690,7 @@ proptest! {
         unused_output in TypeNameToDebug::<transparent::Output>::arbitrary(),
         prevout_input in TypeNameToDebug::<transparent::Input>::arbitrary_with(None),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()
@@ -743,7 +743,7 @@ proptest! {
         output in TypeNameToDebug::<transparent::Output>::arbitrary(),
         mut prevout_input in TypeNameToDebug::<transparent::Input>::arbitrary_with(None),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .zcash_deserialize_into::<Block>()

@@ -20,7 +20,7 @@ use crate::{
 proptest! {
     #[test]
     fn transaction_roundtrip(tx in any::<Transaction>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
         let tx2 = data.zcash_deserialize_into().expect("randomized tx should deserialize");
@@ -36,7 +36,7 @@ proptest! {
 
     #[test]
     fn transaction_hash_struct_display_roundtrip(hash in any::<Hash>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let display = format!("{}", hash);
         let parsed = display.parse::<Hash>().expect("hash should parse");
@@ -45,7 +45,7 @@ proptest! {
 
     #[test]
     fn transaction_hash_string_parse_roundtrip(hash in any::<String>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         if let Ok(parsed) = hash.parse::<Hash>() {
             let display = format!("{}", parsed);
@@ -55,7 +55,7 @@ proptest! {
 
     #[test]
     fn transaction_hash_hex_roundtrip(hash in any::<Hash>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let hex_hash: String = hash.encode_hex();
         let new_hash = Hash::from_hex(hex_hash).expect("hex hash should parse");
@@ -64,7 +64,7 @@ proptest! {
 
     #[test]
     fn transaction_auth_digest_struct_display_roundtrip(auth_digest in any::<AuthDigest>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let display = format!("{}", auth_digest);
         let parsed = display.parse::<AuthDigest>().expect("auth digest should parse");
@@ -73,7 +73,7 @@ proptest! {
 
     #[test]
     fn transaction_auth_digest_string_parse_roundtrip(auth_digest in any::<String>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         if let Ok(parsed) = auth_digest.parse::<AuthDigest>() {
             let display = format!("{}", parsed);
@@ -83,7 +83,7 @@ proptest! {
 
     #[test]
     fn transaction_wtx_id_struct_display_roundtrip(wtx_id in any::<WtxId>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let display = format!("{}", wtx_id);
         let parsed = display.parse::<WtxId>().expect("wide transaction ID should parse");
@@ -92,7 +92,7 @@ proptest! {
 
     #[test]
     fn transaction_wtx_id_string_parse_roundtrip(wtx_id in any::<String>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         if let Ok(parsed) = wtx_id.parse::<WtxId>() {
             let display = format!("{}", parsed);
@@ -102,7 +102,7 @@ proptest! {
 
     #[test]
     fn locktime_roundtrip(locktime in any::<LockTime>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut bytes = Cursor::new(Vec::new());
         locktime.zcash_serialize(&mut bytes)?;
@@ -118,7 +118,7 @@ proptest! {
 /// transaction versions.
 #[test]
 fn arbitrary_transaction_version_strategy() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Update with new transaction versions as needed
     let strategy = (1..5u32)
@@ -145,7 +145,7 @@ fn arbitrary_transaction_version_strategy() -> Result<()> {
 /// with valid network upgrades.
 #[test]
 fn transaction_valid_network_upgrade_strategy() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Update with new transaction versions as needed
     let strategy = LedgerState::coinbase_strategy(None, 5, true).prop_flat_map(|ledger_state| {

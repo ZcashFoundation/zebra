@@ -152,7 +152,7 @@ impl TransactionData {
 /// Snapshot test for finalized block and transaction data.
 #[test]
 fn test_block_and_transaction_data() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     test_block_and_transaction_data_with_network(Mainnet);
     test_block_and_transaction_data_with_network(Testnet);

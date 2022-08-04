@@ -732,7 +732,7 @@ async fn setup(
     JoinHandle<Result<(), BlockGossipError>>,
     JoinHandle<Result<(), BoxError>>,
 ) {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let network = Mainnet;
     let consensus_config = ConsensusConfig::default();

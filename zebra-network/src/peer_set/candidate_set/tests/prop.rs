@@ -41,7 +41,7 @@ proptest! {
         gossiped_peers in vec(MetaAddr::gossiped_strategy(), 1..TEST_ADDRESSES),
         last_seen_limit in any::<DateTime32>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let validated_peers = validate_addrs(gossiped_peers, last_seen_limit);
 
@@ -57,7 +57,7 @@ proptest! {
     ///       using a "not ready for attempt" peer generation strategy
     #[test]
     fn skipping_outbound_peer_connection_skips_rate_limit(next_peer_attempts in 0..TEST_ADDRESSES) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         let peer_service = tower::service_fn(|_| async {
@@ -96,7 +96,7 @@ proptest! {
         initial_candidates in 0..MAX_TEST_CANDIDATES,
         extra_candidates in 0..MAX_TEST_CANDIDATES,
     ) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         let peer_service = tower::service_fn(|_| async {

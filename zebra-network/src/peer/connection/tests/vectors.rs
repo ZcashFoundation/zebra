@@ -29,7 +29,7 @@ use crate::{
 /// Test that the connection run loop works as a future
 #[tokio::test]
 async fn connection_run_loop_ok() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
@@ -66,7 +66,7 @@ async fn connection_run_loop_ok() {
 /// Test that the connection run loop works as a spawned task
 #[tokio::test]
 async fn connection_run_loop_spawn_ok() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
@@ -108,7 +108,7 @@ async fn connection_run_loop_spawn_ok() {
 /// Test that the connection run loop works as a spawned task with messages in and out
 #[tokio::test]
 async fn connection_run_loop_message_ok() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     tokio::time::pause();
 
@@ -188,7 +188,7 @@ async fn connection_run_loop_message_ok() {
 /// Test that the connection run loop fails correctly when dropped
 #[tokio::test]
 async fn connection_run_loop_future_drop() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
@@ -221,7 +221,7 @@ async fn connection_run_loop_future_drop() {
 /// Test that the connection run loop fails correctly when the internal client closes the connection channel
 #[tokio::test]
 async fn connection_run_loop_client_close() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
@@ -266,7 +266,7 @@ async fn connection_run_loop_client_close() {
 /// Test that the connection run loop fails correctly when the internal client drops the connection channel
 #[tokio::test]
 async fn connection_run_loop_client_drop() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
@@ -306,7 +306,7 @@ async fn connection_run_loop_client_drop() {
 /// (We're not sure if tokio closes or drops the TcpStream when the TCP connection closes.)
 #[tokio::test]
 async fn connection_run_loop_inbound_close() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
@@ -347,7 +347,7 @@ async fn connection_run_loop_inbound_close() {
 /// (We're not sure if tokio closes or drops the TcpStream when the TCP connection closes.)
 #[tokio::test]
 async fn connection_run_loop_inbound_drop() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
@@ -386,7 +386,7 @@ async fn connection_run_loop_inbound_drop() {
 /// Test that the connection run loop fails correctly on internal connection errors.
 #[tokio::test]
 async fn connection_run_loop_failed() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // The real stream and sink are from a split TCP connection,
     // but that doesn't change how the state machine behaves.
@@ -437,7 +437,7 @@ async fn connection_run_loop_failed() {
 /// but we are not expecting a response message from the peer.
 #[tokio::test]
 async fn connection_run_loop_send_timeout_nil_response() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     tokio::time::pause();
 
@@ -512,7 +512,7 @@ async fn connection_run_loop_send_timeout_nil_response() {
 /// and we are expecting a response message from the peer.
 #[tokio::test]
 async fn connection_run_loop_send_timeout_expect_response() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     tokio::time::pause();
 
@@ -587,7 +587,7 @@ async fn connection_run_loop_send_timeout_expect_response() {
 /// when a peer accepts a message, but does not send an expected response.
 #[tokio::test]
 async fn connection_run_loop_receive_timeout() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     tokio::time::pause();
 

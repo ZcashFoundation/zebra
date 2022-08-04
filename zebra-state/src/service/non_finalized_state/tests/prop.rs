@@ -37,7 +37,7 @@ const DEFAULT_SHORT_CHAIN_PROPTEST_CASES: u32 = 16;
 /// Logs extra debugging information when the chain value balances fail.
 #[test]
 fn push_genesis_chain() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(
         ProptestConfig::with_cases(env::var("PROPTEST_CASES")
@@ -81,7 +81,7 @@ fn push_genesis_chain() -> Result<()> {
 /// Check that chain block pushes work with history tree blocks
 #[test]
 fn push_history_tree_chain() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(
     ProptestConfig::with_cases(env::var("PROPTEST_CASES")
@@ -129,7 +129,7 @@ fn push_history_tree_chain() -> Result<()> {
 /// - Chain value balances are non-negative.
 #[test]
 fn forked_equals_pushed_genesis() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(
     ProptestConfig::with_cases(env::var("PROPTEST_CASES")
@@ -234,7 +234,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
 /// Check that a forked history tree chain is the same as a chain that had the same blocks appended.
 #[test]
 fn forked_equals_pushed_history_tree() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(
     ProptestConfig::with_cases(env::var("PROPTEST_CASES")
@@ -305,7 +305,7 @@ fn forked_equals_pushed_history_tree() -> Result<()> {
 /// a chain that never had those blocks added.
 #[test]
 fn finalized_equals_pushed_genesis() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
                                          .ok()
@@ -368,7 +368,7 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
 /// a chain that never had those blocks added.
 #[test]
 fn finalized_equals_pushed_history_tree() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
                                          .ok()
@@ -439,7 +439,7 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
 /// in a non-finalized state.
 #[test]
 fn rejection_restores_internal_state_genesis() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
                                .ok()
@@ -532,7 +532,7 @@ fn rejection_restores_internal_state_genesis() -> Result<()> {
 /// and that all the state fields are covered by `eq_internal_state`.
 #[test]
 fn different_blocks_different_chains() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
                                .ok()

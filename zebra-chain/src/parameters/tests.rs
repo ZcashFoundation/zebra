@@ -12,7 +12,7 @@ use NetworkUpgrade::*;
 /// Check that the activation heights and network upgrades are unique.
 #[test]
 fn activation_bijective() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mainnet_activations = NetworkUpgrade::activation_list(Mainnet);
     let mainnet_heights: HashSet<&block::Height> = mainnet_activations.keys().collect();
@@ -31,13 +31,13 @@ fn activation_bijective() {
 
 #[test]
 fn activation_extremes_mainnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     activation_extremes(Mainnet)
 }
 
 #[test]
 fn activation_extremes_testnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     activation_extremes(Testnet)
 }
 
@@ -108,13 +108,13 @@ fn activation_extremes(network: Network) {
 
 #[test]
 fn activation_consistent_mainnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     activation_consistent(Mainnet)
 }
 
 #[test]
 fn activation_consistent_testnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     activation_consistent(Testnet)
 }
 
@@ -156,7 +156,7 @@ fn activation_consistent(network: Network) {
 /// Check that the network upgrades and branch ids are unique.
 #[test]
 fn branch_id_bijective() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let branch_id_list = NetworkUpgrade::branch_id_list();
     let nus: HashSet<&NetworkUpgrade> = branch_id_list.keys().collect();
@@ -168,13 +168,13 @@ fn branch_id_bijective() {
 
 #[test]
 fn branch_id_extremes_mainnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     branch_id_extremes(Mainnet)
 }
 
 #[test]
 fn branch_id_extremes_testnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     branch_id_extremes(Testnet)
 }
 
@@ -206,13 +206,13 @@ fn branch_id_extremes(network: Network) {
 
 #[test]
 fn branch_id_consistent_mainnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     branch_id_consistent(Mainnet)
 }
 
 #[test]
 fn branch_id_consistent_testnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     branch_id_consistent(Testnet)
 }
 
@@ -241,7 +241,7 @@ use proptest::prelude::*;
 proptest! {
     #[test]
     fn branch_id_hex_roundtrip(nu in any::<NetworkUpgrade>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         if let Some(branch) = nu.branch_id() {
             let hex_branch: String = branch.encode_hex();

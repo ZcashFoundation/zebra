@@ -7,7 +7,7 @@ use proptest::prelude::*;
 
 #[test]
 fn generate_keys_from_test_vectors() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     for test_vector in KEY_COMPONENTS.iter() {
         let spending_key = SpendingKey::from_bytes(test_vector.sk, Network::Mainnet);
@@ -53,7 +53,7 @@ proptest! {
     #[test]
     #[allow(clippy::clone_on_copy, clippy::cmp_owned)]
     fn generate_keys(spending_key in any::<SpendingKey>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // Test ConstantTimeEq, Eq, PartialEq
         assert_eq!(spending_key, SpendingKey::from_bytes(spending_key.bytes, spending_key.network));
