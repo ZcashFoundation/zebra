@@ -24,7 +24,7 @@ futures = "0.3.21"
 color-eyre = "0.6.1"
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
-tinyvec = { version = "1.5.1", features = ["rustc_1_55"] }
+tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
 owo-colors = "3.4.0"
 spandoc = "0.2.2"
