@@ -11,7 +11,7 @@ publish = false
 color-eyre = "0.6.1"
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
-tinyvec = { version = "1.5.1", features = ["rustc_1_55"] }
+tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
 structopt = "0.3.26"
 hex = "0.4.3"

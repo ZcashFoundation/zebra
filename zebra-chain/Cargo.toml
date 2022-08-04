@@ -92,7 +92,7 @@ criterion = { version = "0.3.5", features = ["html_reports"] }
 color-eyre = "0.6.1"
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
-tinyvec = { version = "1.5.1", features = ["rustc_1_55"] }
+tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 spandoc = "0.2.2"
 tracing = "0.1.31"
 
