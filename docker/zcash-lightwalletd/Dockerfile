@@ -24,7 +24,7 @@ RUN go mod download
 COPY . ./
 
 # Build and install the binary.
-RUN go build -v -o /lightwalletd
+RUN go build -v -o /opt/lightwalletd
 
 ARG ZCASHD_CONF_PATH
 
@@ -51,7 +51,7 @@ ARG LWD_HTTP_PORT
 
 WORKDIR /
 
-COPY --from=build /lightwalletd /usr/local/bin
+COPY --from=build /opt/lightwalletd /usr/local/bin
 COPY --from=build $ZCASHD_CONF_PATH ./
 
 EXPOSE 9067

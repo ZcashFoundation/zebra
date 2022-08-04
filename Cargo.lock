@@ -641,9 +641,9 @@ checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
 
 [[package]]
 name = "bytes"
-version = "1.1.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4872d67bab6358e59559027aa3b9157c53d9358c51423c17554809a8858e0f8"
+checksum = "ec8a7b6a70fde80372154c65702f00a0f56f3e1c36abbc6c440484be248856db"
 
 [[package]]
 name = "bzip2-sys"
@@ -2127,9 +2127,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.19"
+version = "0.14.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42dc3c131584288d375f2d07f822b0cb012d8c6fb899a5b9fdb3cb7eb9b6004f"
+checksum = "02c929dc5c39e335a03c405292728118860721b10190d98c2a0f0efd5baafbac"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -4078,7 +4078,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
 dependencies = [
- "semver 1.0.12",
+ "semver 1.0.13",
 ]
 
 [[package]]
@@ -4235,9 +4235,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.12"
+version = "1.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2333e6df6d6598f2b1974829f853c2b4c5f4a6e503c10af918081aa6f8564e1"
+checksum = "93f6841e709003d68bb2deee8c343572bf446003ec20a583e76f7b15cebf3711"
 
 [[package]]
 name = "semver-parser"
@@ -4327,9 +4327,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.137"
+version = "1.0.142"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61ea8d54c77f8315140a05f4c7237403bf38b72704d031543aa1d16abbf517d1"
+checksum = "e590c437916fb6b221e1d00df6e3294f3fccd70ca7e92541c475d6ed6ef5fee2"
 dependencies = [
  "serde_derive",
 ]
@@ -4355,9 +4355,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.137"
+version = "1.0.142"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f26faba0c3959972377d3b2d306ee9f71faee9714294e41bb777f83f88578be"
+checksum = "34b5b8d809babe02f538c2cfec6f2c1ed10804c0e5a6a041a049a4f5588ccc2e"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
@@ -4366,9 +4366,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.82"
+version = "1.0.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82c2c1fdcd807d1098552c5b9a36e425e42e9fbd7c6a37a8425f390f781f7fa7"
+checksum = "38dd04e3c8279e75b31ef29dbdceebfe5ad89f4d0937213c53f7d49d01b3d5a7"
 dependencies = [
  "indexmap",
  "itoa 1.0.1",
@@ -4866,9 +4866,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.20.0"
+version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57aec3cfa4c296db7255446efb4928a6be304b431a806216105542a67b6ca82e"
+checksum = "7a8325f63a7d4774dd041e363b2409ed1c5cbbd0f867795e661df066b2b0a581"
 dependencies = [
  "autocfg 1.1.0",
  "bytes",
@@ -5455,6 +5455,7 @@ dependencies = [
  "pin-project 1.0.11",
  "rand 0.8.5",
  "rayon",
+ "tinyvec",
  "tokio",
  "tokio-test",
  "tokio-util 0.7.3",
@@ -6345,6 +6346,7 @@ dependencies = [
  "static_assertions",
  "subtle",
  "thiserror",
+ "tinyvec",
  "tokio",
  "tracing",
  "uint",
@@ -6388,6 +6390,7 @@ dependencies = [
  "serde",
  "spandoc",
  "thiserror",
+ "tinyvec",
  "tokio",
  "tower",
  "tower-batch",
@@ -6519,6 +6522,7 @@ dependencies = [
  "spandoc",
  "tempfile",
  "thiserror",
+ "tinyvec",
  "tokio",
  "tower",
  "tracing",
@@ -6544,6 +6548,7 @@ dependencies = [
  "spandoc",
  "tempfile",
  "thiserror",
+ "tinyvec",
  "tokio",
  "tower",
  "tracing",
@@ -6559,6 +6564,7 @@ dependencies = [
  "hex",
  "serde_json",
  "structopt",
+ "tinyvec",
  "tracing-error",
  "tracing-subscriber 0.3.11",
  "zebra-chain",
@@ -6598,13 +6604,14 @@ dependencies = [
  "rayon",
  "regex",
  "reqwest",
- "semver 1.0.12",
+ "semver 1.0.13",
  "sentry",
  "sentry-tracing",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
+ "tinyvec",
  "tokio",
  "tokio-stream",
  "toml",
