@@ -12,7 +12,7 @@ proptest! {
     /// See [`ZIP_212_GRACE_PERIOD_DURATION`] for more information.
     #[test]
     fn mandatory_checkpoint_is_after_zip212_grace_period(network in any::<Network>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let canopy_activation = NetworkUpgrade::Canopy
             .activation_height(network)

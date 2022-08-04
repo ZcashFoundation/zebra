@@ -10,7 +10,7 @@ use color_eyre::eyre::Result;
 
 #[test]
 fn test_add_bare() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let one: Amount = 1.try_into()?;
     let neg_one: Amount = (-1).try_into()?;
@@ -25,7 +25,7 @@ fn test_add_bare() -> Result<()> {
 
 #[test]
 fn test_add_opt_lhs() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let one: Amount = 1.try_into()?;
     let one = Ok(one);
@@ -41,7 +41,7 @@ fn test_add_opt_lhs() -> Result<()> {
 
 #[test]
 fn test_add_opt_rhs() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let one: Amount = 1.try_into()?;
     let neg_one: Amount = (-1).try_into()?;
@@ -57,7 +57,7 @@ fn test_add_opt_rhs() -> Result<()> {
 
 #[test]
 fn test_add_opt_both() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let one: Amount = 1.try_into()?;
     let one = Ok(one);
@@ -74,7 +74,7 @@ fn test_add_opt_both() -> Result<()> {
 
 #[test]
 fn test_add_assign() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let one: Amount = 1.try_into()?;
     let neg_one: Amount = (-1).try_into()?;
@@ -91,7 +91,7 @@ fn test_add_assign() -> Result<()> {
 
 #[test]
 fn test_sub_bare() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let one: Amount = 1.try_into()?;
     let zero: Amount = Amount::zero();
@@ -106,7 +106,7 @@ fn test_sub_bare() -> Result<()> {
 
 #[test]
 fn test_sub_opt_lhs() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let one: Amount = 1.try_into()?;
     let one = Ok(one);
@@ -122,7 +122,7 @@ fn test_sub_opt_lhs() -> Result<()> {
 
 #[test]
 fn test_sub_opt_rhs() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let one: Amount = 1.try_into()?;
     let zero: Amount = Amount::zero();
@@ -138,7 +138,7 @@ fn test_sub_opt_rhs() -> Result<()> {
 
 #[test]
 fn test_sub_assign() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let one: Amount = 1.try_into()?;
     let zero: Amount = Amount::zero();
@@ -155,7 +155,7 @@ fn test_sub_assign() -> Result<()> {
 
 #[test]
 fn add_with_diff_constraints() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let one = Amount::<NonNegative>::try_from(1)?;
     let zero: Amount<NegativeAllowed> = Amount::zero();
@@ -170,7 +170,7 @@ fn add_with_diff_constraints() -> Result<()> {
 // The borrows are actually needed to call the correct trait impl
 #[allow(clippy::needless_borrow)]
 fn deserialize_checks_bounds() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let big = (MAX_MONEY * 2)
         .try_into()
@@ -205,7 +205,7 @@ fn deserialize_checks_bounds() -> Result<()> {
 
 #[test]
 fn hash() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let one = Amount::<NonNegative>::try_from(1)?;
     let another_one = Amount::<NonNegative>::try_from(1)?;
@@ -233,7 +233,7 @@ fn hash() -> Result<()> {
 
 #[test]
 fn ordering_constraints() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     ordering::<NonNegative, NonNegative>()?;
     ordering::<NonNegative, NegativeAllowed>()?;
@@ -281,7 +281,7 @@ where
 
 #[test]
 fn test_sum() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let one: Amount = 1.try_into()?;
     let neg_one: Amount = (-1).try_into()?;

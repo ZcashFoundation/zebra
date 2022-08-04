@@ -13,7 +13,7 @@ use zebra_chain::{
 /// Make a checkpoint list containing only the genesis block
 #[test]
 fn checkpoint_list_genesis() -> Result<(), BoxError> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Parse the genesis block
     let mut checkpoint_data = Vec::new();
@@ -36,7 +36,7 @@ fn checkpoint_list_genesis() -> Result<(), BoxError> {
 /// Make a checkpoint list containing multiple blocks
 #[test]
 fn checkpoint_list_multiple() -> Result<(), BoxError> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Parse all the blocks
     let mut checkpoint_data = Vec::new();
@@ -65,7 +65,7 @@ fn checkpoint_list_multiple() -> Result<(), BoxError> {
 /// Make sure that an empty checkpoint list fails
 #[test]
 fn checkpoint_list_empty_fail() -> Result<(), BoxError> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let _ = CheckpointList::from_list(Vec::new()).expect_err("empty checkpoint lists should fail");
 
@@ -75,7 +75,7 @@ fn checkpoint_list_empty_fail() -> Result<(), BoxError> {
 /// Make sure a checkpoint list that doesn't contain the genesis block fails
 #[test]
 fn checkpoint_list_no_genesis_fail() -> Result<(), BoxError> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Parse a non-genesis block
     let mut checkpoint_data = Vec::new();
@@ -98,7 +98,7 @@ fn checkpoint_list_no_genesis_fail() -> Result<(), BoxError> {
 /// Make sure a checkpoint list that contains a null hash fails
 #[test]
 fn checkpoint_list_null_hash_fail() -> Result<(), BoxError> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let checkpoint_data = vec![(block::Height(0), block::Hash([0; 32]))];
 
@@ -114,7 +114,7 @@ fn checkpoint_list_null_hash_fail() -> Result<(), BoxError> {
 /// Make sure a checkpoint list that contains an invalid block height fails
 #[test]
 fn checkpoint_list_bad_height_fail() -> Result<(), BoxError> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let checkpoint_data = vec![(
         block::Height(block::Height::MAX.0 + 1),
@@ -142,7 +142,7 @@ fn checkpoint_list_bad_height_fail() -> Result<(), BoxError> {
 /// Make sure that a checkpoint list containing duplicate blocks fails
 #[test]
 fn checkpoint_list_duplicate_blocks_fail() -> Result<(), BoxError> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Parse some blocks twice
     let mut checkpoint_data = Vec::new();
@@ -170,7 +170,7 @@ fn checkpoint_list_duplicate_blocks_fail() -> Result<(), BoxError> {
 /// (with different hashes) fails
 #[test]
 fn checkpoint_list_duplicate_heights_fail() -> Result<(), BoxError> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Parse the genesis block
     let mut checkpoint_data = Vec::new();
@@ -197,7 +197,7 @@ fn checkpoint_list_duplicate_heights_fail() -> Result<(), BoxError> {
 /// (at different heights) fails
 #[test]
 fn checkpoint_list_duplicate_hashes_fail() -> Result<(), BoxError> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Parse the genesis block
     let mut checkpoint_data = Vec::new();
@@ -223,7 +223,7 @@ fn checkpoint_list_duplicate_hashes_fail() -> Result<(), BoxError> {
 /// Parse and check the hard-coded Mainnet and Testnet lists
 #[test]
 fn checkpoint_list_load_hard_coded() -> Result<(), BoxError> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let _: CheckpointList = MAINNET_CHECKPOINTS
         .parse()
@@ -250,7 +250,7 @@ fn checkpoint_list_hard_coded_mandatory_testnet() -> Result<(), BoxError> {
 
 /// Check that the hard-coded lists cover the mandatory checkpoint
 fn checkpoint_list_hard_coded_mandatory(network: Network) -> Result<(), BoxError> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mandatory_checkpoint = network.mandatory_checkpoint_height();
 
@@ -280,7 +280,7 @@ fn checkpoint_list_hard_coded_max_gap_testnet() -> Result<(), BoxError> {
 /// blockchain in the tests. But that's ok, because the byte limit only impacts
 /// performance.
 fn checkpoint_list_hard_coded_max_gap(network: Network) -> Result<(), BoxError> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let list = CheckpointList::new(network);
     let mut heights = list.0.keys();

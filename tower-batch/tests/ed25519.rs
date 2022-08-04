@@ -55,7 +55,7 @@ where
 #[tokio::test(flavor = "multi_thread")]
 async fn batch_flushes_on_max_items() -> Result<(), Report> {
     use tokio::time::timeout;
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Use a very long max_latency and a short timeout to check that
     // flushing is happening based on hitting max_items.
@@ -73,7 +73,7 @@ async fn batch_flushes_on_max_items() -> Result<(), Report> {
 #[tokio::test(flavor = "multi_thread")]
 async fn batch_flushes_on_max_latency() -> Result<(), Report> {
     use tokio::time::timeout;
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Use a very high max_items and a short timeout to check that
     // flushing is happening based on hitting max_latency.
@@ -95,7 +95,7 @@ async fn batch_flushes_on_max_latency() -> Result<(), Report> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn fallback_verification() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Create our own verifier, so we don't shut down a shared verifier used by other tests.
     let verifier = Fallback::new(

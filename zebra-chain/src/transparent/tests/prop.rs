@@ -13,7 +13,7 @@ use proptest::collection::vec;
 
 #[test]
 fn coinbase_has_height() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let strategy =
         any::<block::Height>().prop_flat_map(|height| Input::arbitrary_with(Some(height)));
@@ -28,7 +28,7 @@ fn coinbase_has_height() -> Result<()> {
 
 #[test]
 fn input_coinbase_vecs_only_have_coinbase_input() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let strategy = LedgerState::coinbase_strategy(None, None, false)
         .prop_flat_map(|ledger_state| Input::vec_strategy(ledger_state, MAX_ARBITRARY_ITEMS));
@@ -51,7 +51,7 @@ fn input_coinbase_vecs_only_have_coinbase_input() -> Result<()> {
 
 #[test]
 fn coinbase_height_round_trip_from_random_input() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let strategy =
         any::<block::Height>().prop_flat_map(|height| Input::arbitrary_with(Some(height)));

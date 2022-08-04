@@ -629,7 +629,7 @@ async fn setup(
     // real open socket addresses
     SocketAddr,
 ) {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let network = Network::Mainnet;
     // Open a listener on an unused IPv4 localhost port

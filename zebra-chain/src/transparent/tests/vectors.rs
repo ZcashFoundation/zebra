@@ -11,7 +11,7 @@ use zebra_test::prelude::*;
 
 #[test]
 fn parse_coinbase_height_mins() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // examples with height 1:
 
@@ -49,7 +49,7 @@ fn parse_coinbase_height_mins() {
 
 #[test]
 fn get_transparent_output_address() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let script_tx: Vec<u8> = <Vec<u8>>::from_hex("0400008085202f8901fcaf44919d4a17f6181a02a7ebe0420be6f7dad1ef86755b81d5a9567456653c010000006a473044022035224ed7276e61affd53315eca059c92876bc2df61d84277cafd7af61d4dbf4002203ed72ea497a9f6b38eb29df08e830d99e32377edb8a574b8a289024f0241d7c40121031f54b095eae066d96b2557c1f99e40e967978a5fd117465dbec0986ca74201a6feffffff020050d6dc0100000017a9141b8a9bda4b62cd0d0582b55455d0778c86f8628f870d03c812030000001976a914e4ff5512ffafe9287992a1cd177ca6e408e0300388ac62070d0095070d000000000000000000000000")
     .expect("Block bytes are in valid hex representation");
@@ -83,7 +83,7 @@ fn get_transparent_output_address() -> Result<()> {
 
 #[test]
 fn get_transparent_output_address_with_blocks() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     get_transparent_output_address_with_blocks_for_network(Network::Mainnet);
     get_transparent_output_address_with_blocks_for_network(Network::Testnet);

@@ -11,7 +11,7 @@ const TRANSCRIPT_DATA: [(&str, Result<&str, ExpectedTranscriptError>); 4] = [
 
 #[tokio::test]
 async fn transcript_returns_responses_and_ends() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut svc = Transcript::from(TRANSCRIPT_DATA.iter().cloned());
 
@@ -26,7 +26,7 @@ async fn transcript_returns_responses_and_ends() {
 
 #[tokio::test]
 async fn transcript_errors_wrong_request() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut svc = Transcript::from(TRANSCRIPT_DATA.iter().cloned());
 
@@ -39,7 +39,7 @@ async fn transcript_errors_wrong_request() {
 
 #[tokio::test]
 async fn self_check() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let t1 = Transcript::from(TRANSCRIPT_DATA.iter().cloned());
     let t2 = Transcript::from(TRANSCRIPT_DATA.iter().cloned());
@@ -59,7 +59,7 @@ const TRANSCRIPT_DATA2: [(&str, Result<&str, ExpectedTranscriptError>); 4] = [
 
 #[tokio::test]
 async fn self_check_err() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let t1 = Transcript::from(TRANSCRIPT_DATA2.iter().cloned());
     let t2 = Transcript::from(TRANSCRIPT_DATA2.iter().cloned());

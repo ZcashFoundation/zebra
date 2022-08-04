@@ -28,7 +28,7 @@ use crate::service::finalized_state::{
 // TODO: turn this into a unit test, it has a fixed value
 #[test]
 fn roundtrip_unit_type() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val in any::<()>())| assert_value_properties(val));
 }
@@ -38,7 +38,7 @@ fn roundtrip_unit_type() {
 
 #[test]
 fn roundtrip_block_height() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(
         |(mut val in any::<Height>())| {
@@ -53,14 +53,14 @@ fn roundtrip_block_height() {
 
 #[test]
 fn roundtrip_block_hash() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val in any::<block::Hash>())| assert_value_properties(val));
 }
 
 #[test]
 fn roundtrip_block_header() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val in any::<block::Header>())| assert_value_properties(val));
 }
@@ -69,7 +69,7 @@ fn roundtrip_block_header() {
 
 #[test]
 fn roundtrip_transaction_location() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(
         |(mut val in any::<TransactionLocation>())| {
@@ -81,14 +81,14 @@ fn roundtrip_transaction_location() {
 
 #[test]
 fn roundtrip_transaction_hash() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val in any::<transaction::Hash>())| assert_value_properties(val));
 }
 
 #[test]
 fn roundtrip_transaction() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val in any::<Transaction>())| assert_value_properties(val));
 }
@@ -98,7 +98,7 @@ fn roundtrip_transaction() {
 // TODO: turn this into a generic function like assert_value_properties()
 #[test]
 fn serialized_transparent_address_equal() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val1 in any::<transparent::Address>(), val2 in any::<transparent::Address>())| {
         if val1 == val2 {
@@ -130,14 +130,14 @@ fn serialized_transparent_address_equal() {
 
 #[test]
 fn roundtrip_transparent_address() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val in any::<transparent::Address>())| assert_value_properties(val));
 }
 
 #[test]
 fn roundtrip_output_location() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(
         |(mut val in any::<OutputLocation>())| {
@@ -149,7 +149,7 @@ fn roundtrip_output_location() {
 
 #[test]
 fn roundtrip_address_location() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(
         |(mut val in any::<AddressLocation>())| {
@@ -161,7 +161,7 @@ fn roundtrip_address_location() {
 
 #[test]
 fn roundtrip_address_balance_location() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(
         |(mut val in any::<AddressBalanceLocation>())| {
@@ -173,14 +173,14 @@ fn roundtrip_address_balance_location() {
 
 #[test]
 fn roundtrip_transparent_output() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val in any::<transparent::Output>())| assert_value_properties(val));
 }
 
 #[test]
 fn roundtrip_address_unspent_output() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(
         |(mut val in any::<AddressUnspentOutput>())| {
@@ -194,7 +194,7 @@ fn roundtrip_address_unspent_output() {
 
 #[test]
 fn roundtrip_address_transaction() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(
         |(mut val in any::<AddressTransaction>())| {
@@ -208,7 +208,7 @@ fn roundtrip_address_transaction() {
 
 #[test]
 fn roundtrip_amount() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val in any::<Amount::<NonNegative>>())| assert_value_properties(val));
 }
@@ -217,7 +217,7 @@ fn roundtrip_amount() {
 
 #[test]
 fn serialized_sprout_nullifier_equal() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val1 in any::<sprout::Nullifier>(), val2 in any::<sprout::Nullifier>())| {
         if val1 == val2 {
@@ -249,7 +249,7 @@ fn serialized_sprout_nullifier_equal() {
 
 #[test]
 fn serialized_sprout_tree_root_equal() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val1 in any::<sprout::tree::Root>(), val2 in any::<sprout::tree::Root>())| {
         if val1 == val2 {
@@ -285,7 +285,7 @@ fn serialized_sprout_tree_root_equal() {
 
 #[test]
 fn serialized_sapling_nullifier_equal() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val1 in any::<sapling::Nullifier>(), val2 in any::<sapling::Nullifier>())| {
         if val1 == val2 {
@@ -317,7 +317,7 @@ fn serialized_sapling_nullifier_equal() {
 
 #[test]
 fn serialized_sapling_tree_root_equal() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val1 in any::<sapling::tree::Root>(), val2 in any::<sapling::tree::Root>())| {
         if val1 == val2 {
@@ -353,7 +353,7 @@ fn serialized_sapling_tree_root_equal() {
 
 #[test]
 fn serialized_orchard_nullifier_equal() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val1 in any::<orchard::Nullifier>(), val2 in any::<orchard::Nullifier>())| {
         if val1 == val2 {
@@ -385,7 +385,7 @@ fn serialized_orchard_nullifier_equal() {
 
 #[test]
 fn serialized_orchard_tree_root_equal() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val1 in any::<orchard::tree::Root>(), val2 in any::<orchard::tree::Root>())| {
         if val1 == val2 {
@@ -423,7 +423,7 @@ fn serialized_orchard_tree_root_equal() {
 
 #[test]
 fn roundtrip_value_balance() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(val in any::<ValueBalance::<NonNegative>>())| assert_value_properties(val));
 }

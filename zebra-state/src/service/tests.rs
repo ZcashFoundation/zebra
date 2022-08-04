@@ -210,7 +210,7 @@ fn out_of_order_committing_strategy() -> BoxedStrategy<Vec<Arc<Block>>> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn empty_state_still_responds_to_requests() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let block =
         zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into::<Arc<Block>>()?;
@@ -262,7 +262,7 @@ async fn empty_state_still_responds_to_requests() -> Result<()> {
 
 #[test]
 fn state_behaves_when_blocks_are_committed_in_order() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let blocks = zebra_test::vectors::MAINNET_BLOCKS
         .range(0..=LAST_BLOCK_HEIGHT)
@@ -293,7 +293,7 @@ proptest! {
     /// Test out of order commits of continuous block test vectors from genesis onward.
     #[test]
     fn state_behaves_when_blocks_are_committed_out_of_order(blocks in out_of_order_committing_strategy()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         populate_and_check(blocks).unwrap();
     }
@@ -386,7 +386,7 @@ proptest! {
         (network, finalized_blocks, non_finalized_blocks)
             in continuous_empty_blocks_from_test_vectors(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let (mut state_service, _read_only_state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network);
 
@@ -439,7 +439,7 @@ proptest! {
         (network, finalized_blocks, non_finalized_blocks)
             in continuous_empty_blocks_from_test_vectors(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let (mut state_service, _, _, _) = StateService::new(Config::ephemeral(), network);
 

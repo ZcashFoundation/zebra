@@ -23,7 +23,7 @@ use crate::{
 /// Sprout Spend's referenced anchor is validated.
 #[test]
 fn check_sprout_anchors() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut state, _genesis) = new_state_with_mainnet_genesis();
 
@@ -133,7 +133,7 @@ fn prepare_sprout_block(mut block_to_prepare: Block, reference_block: Block) -> 
 /// validated.
 #[test]
 fn check_sapling_anchors() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (mut state, _genesis) = new_state_with_mainnet_genesis();
 

@@ -36,7 +36,7 @@ mod tests {
 
     #[test]
     fn derive_keys_and_addresses() {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let network = Network::Mainnet;
 

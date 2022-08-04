@@ -64,7 +64,7 @@ const LISTENER_TEST_DURATION: Duration = Duration::from_secs(10);
 /// Note: This test doesn't cover local interface or public IP address discovery.
 #[tokio::test]
 async fn local_listener_unspecified_port_unspecified_addr_v4() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -82,7 +82,7 @@ async fn local_listener_unspecified_port_unspecified_addr_v4() {
 /// Note: This test doesn't cover local interface or public IP address discovery.
 #[tokio::test]
 async fn local_listener_unspecified_port_unspecified_addr_v6() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -101,7 +101,7 @@ async fn local_listener_unspecified_port_unspecified_addr_v6() {
 /// and sends them to the `AddressBook`.
 #[tokio::test]
 async fn local_listener_unspecified_port_localhost_addr_v4() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -116,7 +116,7 @@ async fn local_listener_unspecified_port_localhost_addr_v4() {
 /// and sends them to the `AddressBook`.
 #[tokio::test]
 async fn local_listener_unspecified_port_localhost_addr_v6() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -134,7 +134,7 @@ async fn local_listener_unspecified_port_localhost_addr_v6() {
 /// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
 #[tokio::test]
 async fn local_listener_fixed_port_localhost_addr_v4() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let localhost_v4 = "127.0.0.1".parse().unwrap();
 
@@ -149,7 +149,7 @@ async fn local_listener_fixed_port_localhost_addr_v4() {
 /// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
 #[tokio::test]
 async fn local_listener_fixed_port_localhost_addr_v6() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let localhost_v6 = "::1".parse().unwrap();
 
@@ -170,7 +170,7 @@ async fn local_listener_fixed_port_localhost_addr_v6() {
 #[tokio::test]
 #[should_panic]
 async fn peer_limit_zero_mainnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test should not require network access, because the connection limit is zero.
 
@@ -191,7 +191,7 @@ async fn peer_limit_zero_mainnet() {
 #[tokio::test]
 #[should_panic]
 async fn peer_limit_zero_testnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test should not require network access, because the connection limit is zero.
 
@@ -210,7 +210,7 @@ async fn peer_limit_zero_testnet() {
 /// Test zebra-network with a peer limit of one inbound and one outbound peer on mainnet.
 #[tokio::test]
 async fn peer_limit_one_mainnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -229,7 +229,7 @@ async fn peer_limit_one_mainnet() {
 /// Test zebra-network with a peer limit of one inbound and one outbound peer on testnet.
 #[tokio::test]
 async fn peer_limit_one_testnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -248,7 +248,7 @@ async fn peer_limit_one_testnet() {
 /// Test zebra-network with a peer limit of two inbound and three outbound peers on mainnet.
 #[tokio::test]
 async fn peer_limit_two_mainnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -267,7 +267,7 @@ async fn peer_limit_two_mainnet() {
 /// Test zebra-network with a peer limit of two inbound and three outbound peers on testnet.
 #[tokio::test]
 async fn peer_limit_two_testnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -286,7 +286,7 @@ async fn peer_limit_two_testnet() {
 /// Test the crawler with an outbound peer limit of zero peers, and a connector that panics.
 #[tokio::test]
 async fn crawler_peer_limit_zero_connect_panic() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test does not require network access, because the outbound connector
     // and peer set are fake.
@@ -311,7 +311,7 @@ async fn crawler_peer_limit_zero_connect_panic() {
 /// Test the crawler with an outbound peer limit of one peer, and a connector that always errors.
 #[tokio::test]
 async fn crawler_peer_limit_one_connect_error() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test does not require network access, because the outbound connector
     // and peer set are fake.
@@ -336,7 +336,7 @@ async fn crawler_peer_limit_one_connect_error() {
 /// and a connector that returns success then disconnects the peer.
 #[tokio::test]
 async fn crawler_peer_limit_one_connect_ok_then_drop() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test does not require network access, because the outbound connector
     // and peer set are fake.
@@ -397,7 +397,7 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
 /// and a connector that returns success then holds the peer open.
 #[tokio::test]
 async fn crawler_peer_limit_one_connect_ok_stay_open() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test does not require network access, because the outbound connector
     // and peer set are fake.
@@ -486,7 +486,7 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
 /// Test the crawler with the default outbound peer limit, and a connector that always errors.
 #[tokio::test]
 async fn crawler_peer_limit_default_connect_error() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test does not require network access, because the outbound connector
     // and peer set are fake.
@@ -511,7 +511,7 @@ async fn crawler_peer_limit_default_connect_error() {
 /// and a connector that returns success then disconnects the peer.
 #[tokio::test]
 async fn crawler_peer_limit_default_connect_ok_then_drop() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test does not require network access, because the outbound connector
     // and peer set are fake.
@@ -574,7 +574,7 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
 /// and a connector that returns success then holds the peer open.
 #[tokio::test]
 async fn crawler_peer_limit_default_connect_ok_stay_open() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test does not require network access, because the outbound connector
     // and peer set are fake.
@@ -664,7 +664,7 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
 /// Test the listener with an inbound peer limit of zero peers, and a handshaker that panics.
 #[tokio::test]
 async fn listener_peer_limit_zero_handshake_panic() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
     if zebra_test::net::zebra_skip_network_tests() {
@@ -691,7 +691,7 @@ async fn listener_peer_limit_zero_handshake_panic() {
 /// Test the listener with an inbound peer limit of one peer, and a handshaker that always errors.
 #[tokio::test]
 async fn listener_peer_limit_one_handshake_error() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
     if zebra_test::net::zebra_skip_network_tests() {
@@ -718,7 +718,7 @@ async fn listener_peer_limit_one_handshake_error() {
 /// and a handshaker that returns success then disconnects the peer.
 #[tokio::test]
 async fn listener_peer_limit_one_handshake_ok_then_drop() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
     if zebra_test::net::zebra_skip_network_tests() {
@@ -783,7 +783,7 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
 /// and a handshaker that returns success then holds the peer open.
 #[tokio::test]
 async fn listener_peer_limit_one_handshake_ok_stay_open() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
     if zebra_test::net::zebra_skip_network_tests() {
@@ -877,7 +877,7 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
 /// Test the listener with the default inbound peer limit, and a handshaker that always errors.
 #[tokio::test]
 async fn listener_peer_limit_default_handshake_error() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
     if zebra_test::net::zebra_skip_network_tests() {
@@ -908,7 +908,7 @@ async fn listener_peer_limit_default_handshake_error() {
 #[cfg(not(target_os = "macos"))]
 #[tokio::test]
 async fn listener_peer_limit_default_handshake_ok_then_drop() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
     if zebra_test::net::zebra_skip_network_tests() {
@@ -973,7 +973,7 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
 /// and a handshaker that returns success then holds the peer open.
 #[tokio::test]
 async fn listener_peer_limit_default_handshake_ok_stay_open() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
     if zebra_test::net::zebra_skip_network_tests() {
@@ -1067,7 +1067,7 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
 /// Test if the initial seed peer connections is rate-limited.
 #[tokio::test]
 async fn add_initial_peers_is_rate_limited() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test should not require network access.
 
@@ -1127,7 +1127,7 @@ async fn add_initial_peers_deadlock() {
     const PEERSET_INITIAL_TARGET_SIZE: usize = 2;
     const TIME_LIMIT: Duration = Duration::from_secs(10);
 
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // This test requires an IPv4 network stack. Localhost should be enough.
     if zebra_test::net::zebra_skip_network_tests() {

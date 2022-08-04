@@ -48,7 +48,7 @@ impl fmt::Debug for Memo {
 
 #[test]
 fn memo_fmt() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Rust changed the escaping of ' between 1.52 and 1.53 (nightly-2021-04-14?),
     // so the memo string can't contain '
@@ -78,7 +78,7 @@ fn memo_fmt() {
 
 #[test]
 fn memo_from_string() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let memo = Memo::try_from("foo bar baz".as_ref()).unwrap();
 

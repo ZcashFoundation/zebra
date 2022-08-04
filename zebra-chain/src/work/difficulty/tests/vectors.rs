@@ -15,7 +15,7 @@ const OFFSET: i32 = CompactDifficulty::OFFSET;
 /// Test debug formatting.
 #[test]
 fn debug_format() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     assert_eq!(
         format!("{:?}", CompactDifficulty(0)),
@@ -76,7 +76,7 @@ fn debug_format() {
 /// Test zero values for CompactDifficulty.
 #[test]
 fn compact_zero() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let natural_zero = CompactDifficulty(0);
     assert_eq!(natural_zero.to_expanded(), None);
@@ -108,7 +108,7 @@ fn compact_zero() {
 /// Test extreme values for CompactDifficulty.
 #[test]
 fn compact_extremes() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Values equal to one
     let expanded_one = Some(ExpandedDifficulty(U256::one()));
@@ -233,7 +233,7 @@ static COMPACT_DIFFICULTY_CASES: &[(u32, Option<u128>, Option<u128>)] = &[
 #[test]
 #[spandoc::spandoc]
 fn compact_bitcoin_test_vectors() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // We use two spans, so we can diagnose conversion panics, and mismatching results
     for (compact, expected_expanded, expected_work) in COMPACT_DIFFICULTY_CASES.iter().cloned() {
@@ -271,7 +271,7 @@ fn block_difficulty() -> Result<(), Report> {
 
 #[spandoc::spandoc]
 fn block_difficulty_for_network(network: Network) -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let block_iter = match network {
         Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.iter(),
@@ -360,7 +360,7 @@ fn genesis_block_difficulty() -> Result<(), Report> {
 
 #[spandoc::spandoc]
 fn genesis_block_difficulty_for_network(network: Network) -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let block = match network {
         Network::Mainnet => zebra_test::vectors::MAINNET_BLOCKS.get(&0),
@@ -499,7 +499,7 @@ fn check_testnet_minimum_difficulty_block(height: block::Height) -> Result<(), R
 #[spandoc::spandoc]
 #[allow(clippy::eq_op)]
 fn expanded_order() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let zero = ExpandedDifficulty(U256::zero());
     let one = ExpandedDifficulty(U256::one());
@@ -521,7 +521,7 @@ fn expanded_order() -> Result<(), Report> {
 #[test]
 #[spandoc::spandoc]
 fn expanded_hash_order() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let ex_zero = ExpandedDifficulty(U256::zero());
     let ex_one = ExpandedDifficulty(U256::one());

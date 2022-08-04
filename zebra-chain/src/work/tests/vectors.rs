@@ -16,7 +16,7 @@ const BLOCK_HEADER_LENGTH: usize = EQUIHASH_SOLUTION_BLOCK_OFFSET + 3 + equihash
 
 #[test]
 fn equihash_solution_test_vectors() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     for block in zebra_test::vectors::BLOCKS.iter() {
         let solution_bytes = &block[EQUIHASH_SOLUTION_BLOCK_OFFSET..BLOCK_HEADER_LENGTH];
@@ -37,7 +37,7 @@ fn equihash_solution_test_vectors() {
 
 #[test]
 fn equihash_solution_test_vectors_are_valid() -> color_eyre::eyre::Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     for block in zebra_test::vectors::BLOCKS.iter() {
         let block =
@@ -61,7 +61,7 @@ static EQUIHASH_SIZE_TESTS: &[usize] = &[
 
 #[test]
 fn equihash_solution_size_field() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     for size in EQUIHASH_SIZE_TESTS.iter().copied() {
         let mut data = Vec::new();

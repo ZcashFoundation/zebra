@@ -8,7 +8,7 @@ use zebra_chain::{orchard, sapling};
 
 #[test]
 fn sapling_note_commitment_tree_serialization() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut incremental_tree = sapling::tree::NoteCommitmentTree::default();
 
@@ -47,7 +47,7 @@ fn sapling_note_commitment_tree_serialization() {
 
 #[test]
 fn orchard_note_commitment_tree_serialization() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut incremental_tree = orchard::tree::NoteCommitmentTree::default();
 

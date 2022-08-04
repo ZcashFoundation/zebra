@@ -24,7 +24,7 @@ use crate::{
 
 #[test]
 fn construct_empty() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     let _chain = Chain::new(
         Network::Mainnet,
         Default::default(),
@@ -37,7 +37,7 @@ fn construct_empty() {
 
 #[test]
 fn construct_single() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     let block: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
 
@@ -59,7 +59,7 @@ fn construct_single() -> Result<()> {
 
 #[test]
 fn construct_many() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut block: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
@@ -91,7 +91,7 @@ fn construct_many() -> Result<()> {
 
 #[test]
 fn ord_matches_work() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     let less_block = zebra_test::vectors::BLOCK_MAINNET_434873_BYTES
         .zcash_deserialize_into::<Arc<Block>>()?
         .set_work(1);
@@ -124,7 +124,7 @@ fn ord_matches_work() -> Result<()> {
 
 #[test]
 fn best_chain_wins() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     best_chain_wins_for_network(Network::Mainnet)?;
     best_chain_wins_for_network(Network::Testnet)?;
@@ -164,7 +164,7 @@ fn best_chain_wins_for_network(network: Network) -> Result<()> {
 
 #[test]
 fn finalize_pops_from_best_chain() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     finalize_pops_from_best_chain_for_network(Network::Mainnet)?;
     finalize_pops_from_best_chain_for_network(Network::Testnet)?;
@@ -212,7 +212,7 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
 #[test]
 // This test gives full coverage for `take_chain_if`
 fn commit_block_extending_best_chain_doesnt_drop_worst_chains() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(Network::Mainnet)?;
     commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(Network::Testnet)?;
@@ -260,7 +260,7 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
 
 #[test]
 fn shorter_chain_can_be_best_chain() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     shorter_chain_can_be_best_chain_for_network(Network::Mainnet)?;
     shorter_chain_can_be_best_chain_for_network(Network::Testnet)?;
@@ -305,7 +305,7 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
 
 #[test]
 fn longer_chain_with_more_work_wins() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     longer_chain_with_more_work_wins_for_network(Network::Mainnet)?;
     longer_chain_with_more_work_wins_for_network(Network::Testnet)?;
@@ -354,7 +354,7 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
 
 #[test]
 fn equal_length_goes_to_more_work() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     equal_length_goes_to_more_work_for_network(Network::Mainnet)?;
     equal_length_goes_to_more_work_for_network(Network::Testnet)?;
