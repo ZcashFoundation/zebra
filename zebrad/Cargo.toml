@@ -96,7 +96,7 @@ color-eyre = { version = "0.6.1", default_features = false, features = ["issue-u
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.5.1", features = ["rustc_1_55"] }
 
-thiserror = "1.0.31"
+thiserror = "1.0.32"
 
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 tracing-error = "0.2.0"
