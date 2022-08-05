@@ -36,6 +36,9 @@ skip = [
     { name = "halo2_gadgets", version = "=0.1.0" },
     { name = "halo2_proofs", version = "=0.1.0" },
     { name = "orchard", version = "=0.1.0" },
+
+    # wait for proc-macro2 and syn to upgrade
+    { name = "unicode-xid", version = "=0.1.0"}
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
