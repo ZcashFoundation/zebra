@@ -28,7 +28,7 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
 owo-colors = "3.4.0"
 spandoc = "0.2.2"
-thiserror = "1.0.31"
+thiserror = "1.0.32"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 tracing-error = "0.2.0"
 tracing = "0.1.31"
