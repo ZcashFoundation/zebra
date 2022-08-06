@@ -132,7 +132,7 @@ pub struct ConnectionInfo {
     /// The network protocol version negotiated with the remote peer.
     ///
     /// Derived from `remote_version` and the
-    /// [protocol version implemented by `zebra_network`](constants::CURRENT_NETWORK_PROTOCOL_VERSION).
+    /// [current `zebra_network` protocol version](constants::CURRENT_NETWORK_PROTOCOL_VERSION).
     pub negotiated_version: Version,
 
     /// The service bits reported by the remote peer.
@@ -152,7 +152,10 @@ pub enum ConnectedAddr {
     ///
     /// In an honest network, a Zcash peer is listening on this exact address
     /// and port.
-    OutboundDirect { addr: SocketAddr },
+    OutboundDirect {
+        /// The connected outbound remote address and port.
+        addr: SocketAddr,
+    },
 
     /// The address we received from the OS, when a remote peer directly
     /// connected to our Zcash listener port.
@@ -161,7 +164,10 @@ pub enum ConnectedAddr {
     /// if its outbound address is the same as its listener address. But the port
     /// is an ephemeral outbound TCP port, not a listener port.
     InboundDirect {
+        /// The connected inbound remote address.
         maybe_ip: IpAddr,
+
+        /// The connected inbound transient remote port.
         transient_port: u16,
     },
 
@@ -171,7 +177,10 @@ pub enum ConnectedAddr {
     /// outbound address and port can be used as an identifier for the duration
     /// of this connection.
     OutboundProxy {
+        /// The remote address and port of the proxy.
         proxy_addr: SocketAddr,
+
+        /// The local address and transient port we used to connect to the proxy.
         transient_local_addr: SocketAddr,
     },
 
@@ -180,7 +189,10 @@ pub enum ConnectedAddr {
     ///
     /// The proxy's ephemeral outbound address can be used as an identifier for
     /// the duration of this connection.
-    InboundProxy { transient_addr: SocketAddr },
+    InboundProxy {
+        /// The local address and transient port we used to connect to the proxy.
+        transient_addr: SocketAddr,
+    },
 
     /// An isolated connection, where we deliberately don't have any connection metadata.
     Isolated,

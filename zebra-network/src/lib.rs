@@ -168,10 +168,14 @@ pub use crate::{
     config::Config,
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::PeerAddrState,
-    peer::{Client, HandshakeError, PeerError, SharedPeerError},
+    peer::{Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, SharedPeerError},
     peer_set::init,
     policies::RetryLimit,
-    protocol::internal::{InventoryResponse, Request, Response},
+    protocol::{
+        external::Version,
+        internal::{InventoryResponse, Request, Response},
+        types::PeerServices,
+    },
 };
 
 /// Types used in the definition of [`Request`] and [`Response`] messages.

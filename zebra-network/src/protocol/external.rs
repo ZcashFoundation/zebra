@@ -20,4 +20,6 @@ pub use addr::{canonical_socket_addr, AddrInVersion};
 pub use codec::Codec;
 pub use inv::InventoryHash;
 pub use message::Message;
+pub use types::Version;
+
 pub use zebra_chain::serialization::MAX_PROTOCOL_MESSAGE_LEN;
