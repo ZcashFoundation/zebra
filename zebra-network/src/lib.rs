@@ -172,7 +172,7 @@ pub use crate::{
     peer_set::init,
     policies::RetryLimit,
     protocol::{
-        external::Version,
+        external::{Version, VersionMessage},
         internal::{InventoryResponse, Request, Response},
         types::PeerServices,
     },

@@ -85,7 +85,7 @@ pub(crate) struct ClientRequest {
 
     /// The peer address for registering missing inventory.
     ///
-    /// TODO: replace this with [`ConnectedAddr`]?
+    /// TODO: replace this with `ConnectedAddr`?
     pub transient_addr: Option<SocketAddr>,
 
     /// The tracing context for the request, so that work the connection task does

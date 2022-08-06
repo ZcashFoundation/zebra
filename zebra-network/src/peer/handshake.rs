@@ -45,7 +45,7 @@ use crate::{
         internal::{Request, Response},
     },
     types::MetaAddr,
-    BoxError, Config,
+    BoxError, Config, VersionMessage,
 };
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
@@ -628,7 +628,7 @@ where
         }
     };
 
-    let our_version = Message::Version {
+    let our_version = VersionMessage {
         version: constants::CURRENT_NETWORK_PROTOCOL_VERSION,
         services: our_services,
         timestamp,
@@ -639,7 +639,8 @@ where
         user_agent: user_agent.clone(),
         start_height: minimum_peer_version.chain_tip_height(),
         relay,
-    };
+    }
+    .into();
 
     debug!(?our_version, "sending initial version message");
     peer_conn.send(our_version).await?;
@@ -668,14 +669,14 @@ where
 
     // If we got a Version message, destructure its fields into the local scope.
     let (remote_nonce, remote_services, remote_version, remote_canonical_addr, remote_user_agent) =
-        if let Message::Version {
+        if let Message::Version(VersionMessage {
             version,
             services,
             address_from,
             nonce,
             user_agent,
             ..
-        } = remote_msg
+        }) = remote_msg
         {
             let canonical_addr = address_from.addr();
             let address_services = address_from.untrusted_services();

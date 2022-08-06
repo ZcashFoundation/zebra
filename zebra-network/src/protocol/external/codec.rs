@@ -26,7 +26,7 @@ use crate::constants;
 
 use super::{
     addr::{AddrInVersion, AddrV1, AddrV2},
-    message::{Message, RejectReason},
+    message::{Message, RejectReason, VersionMessage},
     types::*,
 };
 
@@ -195,7 +195,7 @@ impl Codec {
     /// contain a checksum of the message body.
     fn write_body<W: Write>(&self, msg: &Message, mut writer: W) -> Result<(), Error> {
         match msg {
-            Message::Version {
+            Message::Version(VersionMessage {
                 version,
                 services,
                 timestamp,
@@ -205,7 +205,7 @@ impl Codec {
                 user_agent,
                 start_height,
                 relay,
-            } => {
+            }) => {
                 writer.write_u32::<LittleEndian>(version.0)?;
                 writer.write_u64::<LittleEndian>(services.bits())?;
                 // # Security
@@ -465,7 +465,7 @@ impl Decoder for Codec {
 
 impl Codec {
     fn read_version<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        Ok(Message::Version {
+        Ok(VersionMessage {
             version: Version(reader.read_u32::<LittleEndian>()?),
             // Use from_bits_truncate to discard unknown service bits.
             services: PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
@@ -485,7 +485,8 @@ impl Codec {
                 1 => true,
                 _ => return Err(Error::Parse("non-bool value supplied in relay field")),
             },
-        })
+        }
+        .into())
     }
 
     fn read_verack<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
@@ -723,9 +724,7 @@ impl Codec {
     }
 }
 
-// TODO:
-// - move these unit tests to a separate file
-// - add exterior integration tests + proptest
+// TODO: move these tests to their own module
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -740,7 +739,8 @@ mod tests {
         static ref VERSION_TEST_VECTOR: Message = {
             let services = PeerServices::NODE_NETWORK;
             let timestamp = Utc.timestamp(1_568_000_000, 0);
-            Message::Version {
+
+            VersionMessage {
                 version: crate::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
                 services,
                 timestamp,
@@ -757,6 +757,7 @@ mod tests {
                 start_height: block::Height(540_000),
                 relay: true,
             }
+            .into()
         };
     }
 
