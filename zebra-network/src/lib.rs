@@ -174,13 +174,18 @@ pub use crate::{
     protocol::{
         external::{Version, VersionMessage},
         internal::{InventoryResponse, Request, Response},
-        types::PeerServices,
     },
 };
 
-/// Types used in the definition of [`Request`] and [`Response`] messages.
+/// Types used in the definition of [`Request`], [`Response`], and [`Message::Version`] messages.
 pub mod types {
-    pub use crate::{meta_addr::MetaAddr, protocol::types::PeerServices};
+    pub use crate::{
+        meta_addr::MetaAddr,
+        protocol::{
+            external::{AddrInVersion, Nonce},
+            types::PeerServices,
+        },
+    };
 
     #[cfg(any(test, feature = "proptest-impl"))]
     pub use crate::protocol::external::InventoryHash;
