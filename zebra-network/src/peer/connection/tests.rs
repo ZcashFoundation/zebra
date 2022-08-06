@@ -1,18 +1,25 @@
 //! Tests for peer connections
 
-use std::io;
+use std::{
+    io,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+};
 
+use chrono::Utc;
 use futures::{channel::mpsc, sink::SinkMapErr, SinkExt};
 
-use zebra_chain::serialization::SerializationError;
+use zebra_chain::{block::Height, serialization::SerializationError};
 use zebra_test::mock_service::MockService;
 
 use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     peer::{ClientRequest, ConnectedAddr, Connection, ConnectionInfo, ErrorSlot},
     peer_set::ActiveConnectionCounter,
-    protocol::{external::Message, types::PeerServices},
-    Request, Response,
+    protocol::{
+        external::{AddrInVersion, Message},
+        types::{Nonce, PeerServices},
+    },
+    Request, Response, VersionMessage,
 };
 
 mod prop;
@@ -46,12 +53,26 @@ fn new_test_connection<A>() -> (
     };
     let peer_tx = peer_tx.sink_map_err(error_converter);
 
+    let fake_addr: SocketAddr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 4).into();
+    let fake_version = CURRENT_NETWORK_PROTOCOL_VERSION;
+    let fake_services = PeerServices::default();
+
+    let remote = VersionMessage {
+        version: fake_version,
+        services: fake_services,
+        timestamp: Utc::now(),
+        address_recv: AddrInVersion::new(fake_addr, fake_services),
+        address_from: AddrInVersion::new(fake_addr, fake_services),
+        nonce: Nonce::default(),
+        user_agent: "connection test".to_string(),
+        start_height: Height(0),
+        relay: true,
+    };
+
     let connection_info = ConnectionInfo {
-        remote_version: CURRENT_NETWORK_PROTOCOL_VERSION,
-        negotiated_version: CURRENT_NETWORK_PROTOCOL_VERSION,
         connected_addr: ConnectedAddr::Isolated,
-        peer_services: PeerServices::default(),
-        user_agent: "connection tests".to_string(),
+        remote,
+        negotiated_version: fake_version,
     };
 
     let connection = Connection::new(

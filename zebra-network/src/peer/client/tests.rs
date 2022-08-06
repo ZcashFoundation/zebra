@@ -3,8 +3,12 @@
 
 #![cfg_attr(feature = "proptest-impl", allow(dead_code))]
 
-use std::time::Duration;
+use std::{
+    net::{Ipv4Addr, SocketAddrV4},
+    time::Duration,
+};
 
+use chrono::Utc;
 use futures::{
     channel::{mpsc, oneshot},
     future::{self, AbortHandle, Future, FutureExt},
@@ -14,6 +18,8 @@ use tokio::{
     task::JoinHandle,
 };
 
+use zebra_chain::block::Height;
+
 use crate::{
     constants,
     peer::{
@@ -21,8 +27,11 @@ use crate::{
         ErrorSlot,
     },
     peer_set::InventoryChange,
-    protocol::{external::types::Version, types::PeerServices},
-    BoxError,
+    protocol::{
+        external::{types::Version, AddrInVersion},
+        types::{Nonce, PeerServices},
+    },
+    BoxError, VersionMessage,
 };
 
 #[cfg(test)]
@@ -292,12 +301,28 @@ where
         let negotiated_version =
             std::cmp::min(remote_version, constants::CURRENT_NETWORK_PROTOCOL_VERSION);
 
+        let remote = VersionMessage {
+            version: remote_version,
+            services: PeerServices::default(),
+            timestamp: Utc::now(),
+            address_recv: AddrInVersion::new(
+                SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1),
+                PeerServices::default(),
+            ),
+            address_from: AddrInVersion::new(
+                SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2),
+                PeerServices::default(),
+            ),
+            nonce: Nonce::default(),
+            user_agent: "client test harness".to_string(),
+            start_height: Height(0),
+            relay: true,
+        };
+
         let connection_info = ConnectionInfo {
-            remote_version,
-            negotiated_version,
             connected_addr: crate::peer::ConnectedAddr::Isolated,
-            peer_services: PeerServices::default(),
-            user_agent: "client tests".to_string(),
+            remote,
+            negotiated_version,
         };
 
         let client = Client {
