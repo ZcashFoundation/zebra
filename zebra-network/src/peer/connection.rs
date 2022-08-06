@@ -452,7 +452,7 @@ pub struct Connection<S, Tx> {
     ///
     /// This field is used for debugging.
     #[allow(dead_code)]
-    pub connection_info: ConnectionInfo,
+    pub connection_info: Arc<ConnectionInfo>,
 
     /// The state of this connection's current request or response.
     pub(super) state: State,
@@ -534,7 +534,7 @@ impl<S, Tx> Connection<S, Tx> {
         error_slot: ErrorSlot,
         peer_tx: Tx,
         connection_tracker: ConnectionTracker,
-        connection_info: ConnectionInfo,
+        connection_info: Arc<ConnectionInfo>,
     ) -> Self {
         let metrics_label = connection_info.connected_addr.get_transient_addr_label();
 

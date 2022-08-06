@@ -899,12 +899,12 @@ where
             let negotiated_version =
                 std::cmp::min(remote.version, constants::CURRENT_NETWORK_PROTOCOL_VERSION);
 
-            // TODO: consider wrapping this struct in an Arc in Connection, Client, and LoadTrackedClient
-            let connection_info = ConnectionInfo {
+            // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
+            let connection_info = Arc::new(ConnectionInfo {
                 connected_addr,
                 remote,
                 negotiated_version,
-            };
+            });
 
             // Reconfigure the codec to use the negotiated version.
             //

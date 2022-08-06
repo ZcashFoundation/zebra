@@ -1,7 +1,10 @@
 //! A peer connection service wrapper type to handle load tracking and provide access to the
 //! reported protocol version.
 
-use std::task::{Context, Poll};
+use std::{
+    sync::Arc,
+    task::{Context, Poll},
+};
 
 use tower::{
     load::{Load, PeakEwma},
@@ -22,7 +25,7 @@ pub struct LoadTrackedClient {
     service: PeakEwma<Client>,
 
     /// The metadata for the connected peer `service`.
-    connection_info: ConnectionInfo,
+    connection_info: Arc<ConnectionInfo>,
 }
 
 /// Create a new [`LoadTrackedClient`] wrapping the provided `client` service.

@@ -6,6 +6,7 @@ use std::{
     iter,
     net::SocketAddr,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -37,7 +38,7 @@ pub mod tests;
 /// The "client" duplex half of a peer connection.
 pub struct Client {
     /// The metadata for the connected peer `service`.
-    pub connection_info: ConnectionInfo,
+    pub connection_info: Arc<ConnectionInfo>,
 
     /// Used to shut down the corresponding heartbeat.
     /// This is always Some except when we take it on drop.

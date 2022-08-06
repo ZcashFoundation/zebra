@@ -1,6 +1,9 @@
 //! Acceptance tests for zebra-network APIs.
 
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::{
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    sync::Arc,
+};
 
 use chrono::Utc;
 
@@ -34,9 +37,9 @@ fn connection_info_types_are_public() {
         relay: true,
     };
 
-    let _connection_info = ConnectionInfo {
+    let _connection_info = Arc::new(ConnectionInfo {
         connected_addr,
         remote,
         negotiated_version,
-    };
+    });
 }

@@ -3,6 +3,7 @@
 use std::{
     io,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    sync::Arc,
 };
 
 use chrono::Utc;
@@ -81,7 +82,7 @@ fn new_test_connection<A>() -> (
         shared_error_slot.clone(),
         peer_tx,
         ActiveConnectionCounter::new_counter().track_connection(),
-        connection_info,
+        Arc::new(connection_info),
     );
 
     (

@@ -5,6 +5,7 @@
 
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
+    sync::Arc,
     time::Duration,
 };
 
@@ -319,11 +320,11 @@ where
             relay: true,
         };
 
-        let connection_info = ConnectionInfo {
+        let connection_info = Arc::new(ConnectionInfo {
             connected_addr: crate::peer::ConnectedAddr::Isolated,
             remote,
             negotiated_version,
-        };
+        });
 
         let client = Client {
             connection_info,
