@@ -131,7 +131,7 @@ fn rpc_server_spawn_port_conflict() {
 
         info!("spawning RPC server 1...");
 
-        let (rpc_server_1_task_handle, rpc_tx_queue_1_task_handle) = RpcServer::spawn(
+        let (_rpc_server_1_task_handle, _rpc_tx_queue_1_task_handle) = RpcServer::spawn(
             config.clone(),
             "RPC server 1 test",
             Buffer::new(mempool.clone(), 1),
@@ -139,6 +139,8 @@ fn rpc_server_spawn_port_conflict() {
             NoChainTip,
             Mainnet,
         );
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
 
         info!("spawning conflicted RPC server 2...");
 
@@ -156,21 +158,21 @@ fn rpc_server_spawn_port_conflict() {
         mempool.expect_no_requests().await;
         state.expect_no_requests().await;
 
-        // The first server and queue tasks should continue without errors or panics
-        let rpc_server_1_task_result = rpc_server_1_task_handle.now_or_never();
-        assert!(matches!(rpc_server_1_task_result, None));
-
-        let rpc_tx_queue_1_task_result = rpc_tx_queue_1_task_handle.now_or_never();
-        assert!(matches!(rpc_tx_queue_1_task_result, None));
+        // Because there is a panic inside a multi-threaded executor,
+        // we can't depend on the exact behaviour of the other tasks,
+        // particularly across different machines and OSes.
 
         // The second server should panic, so its task handle should return the panic
         let rpc_server_2_task_result = rpc_server_2_task_handle.await;
         match rpc_server_2_task_result {
-            Ok(()) => panic!("conflicted RPC port should exit with an error"),
+            Ok(()) => panic!(
+                "RPC server with conflicting port should exit with an error: \
+                 unexpected Ok result"
+            ),
             Err(join_error) => match join_error.try_into_panic() {
                 Ok(panic_object) => panic::resume_unwind(panic_object),
                 Err(cancelled_error) => panic!(
-                    "conflicted RPC port should exit with an error: \
+                    "RPC server with conflicting port should exit with an error: \
                      unexpected JoinError: {cancelled_error:?}"
                 ),
             },
@@ -183,16 +185,16 @@ fn rpc_server_spawn_port_conflict() {
     std::thread::sleep(Duration::from_secs(10));
 
     info!("waiting for RPC server to shut down...");
-    rt.shutdown_timeout(Duration::from_secs(1));
+    rt.shutdown_timeout(Duration::from_secs(3));
 
     match test_task_handle.now_or_never() {
         Some(Ok(_never)) => unreachable!("test task always panics"),
-        None => panic!("unexpected task hang"),
+        None => panic!("unexpected test task hang"),
         Some(Err(join_error)) => match join_error.try_into_panic() {
             Ok(panic_object) => panic::resume_unwind(panic_object),
             Err(cancelled_error) => panic!(
-                "test task should exit with a panic: \
-                 unexpected JoinError: {cancelled_error:?}"
+                "test task should exit with a RPC server panic: \
+                 unexpected non-panic JoinError: {cancelled_error:?}"
             ),
         },
     }
