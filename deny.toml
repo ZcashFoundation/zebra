@@ -45,8 +45,8 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # wait for criterion to de-duplicate itertools transitive dependencies
-    { name = "criterion", version = "=0.3.5" },
+    # wait for criterion to upgrade cast, itoa, strsim transitive dependencies
+    { name = "criterion", version = "=0.3.6" },
 
     # ticket #3000: upgrade tower-fallback dependencies
     { name = "pin-project", version = "=0.4.29" },
@@ -70,15 +70,16 @@ skip-tree = [
     # wait for curve25519-dalek to upgrade
     { name = "digest", version = "=0.9.0" },
 
-    # wait for inferno -> num-format to upgrade
+    # wait for inferno -> num-format to upgrade (optional dependency)
     { name = "arrayvec", version = "=0.4.12" },
 
     # wait for tokio-test -> tokio-stream to upgrade
     { name = "tokio-util", version = "=0.6.9" },
 
-    # upgrade abscissa and arti
+    # upgrade abscissa and arti (optional dependency)
     { name = "darling", version = "=0.10.2" },
     { name = "darling", version = "=0.12.4" },
+    { name = "semver", version = "=0.9.0" },
     { name = "tracing-subscriber", version = "=0.1.6" },
 
     # wait for primitive-types to upgrade
