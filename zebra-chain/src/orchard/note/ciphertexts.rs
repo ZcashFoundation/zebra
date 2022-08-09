@@ -134,7 +134,7 @@ proptest! {
 
     #[test]
     fn encrypted_ciphertext_roundtrip(ec in any::<EncryptedNote>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut data = Vec::new();
 
@@ -147,7 +147,7 @@ proptest! {
 
     #[test]
     fn out_ciphertext_roundtrip(oc in any::<WrappedNoteKey>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut data = Vec::new();
 

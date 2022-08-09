@@ -22,7 +22,7 @@ const TEST_TIME_ERROR_MARGIN: Duration32 = Duration32::from_seconds(1);
 /// Make sure that the sanitize function handles minimum and maximum times.
 #[test]
 fn sanitize_extremes() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let min_time_entry = MetaAddr {
         addr: "127.0.0.1:8233".parse().unwrap(),
@@ -57,7 +57,7 @@ fn sanitize_extremes() {
 /// The local listener [`MetaAddr`] is always considered gossipable.
 #[test]
 fn new_local_listener_is_gossipable() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let chrono_now = Utc::now();
 
@@ -75,7 +75,7 @@ fn new_local_listener_is_gossipable() {
 /// confirmed that the address is reachable.
 #[test]
 fn new_alternate_peer_address_is_not_gossipable() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let chrono_now = Utc::now();
 
@@ -90,7 +90,7 @@ fn new_alternate_peer_address_is_not_gossipable() {
 /// Test if recently received gossiped peer is gossipable.
 #[test]
 fn gossiped_peer_reportedly_to_be_seen_recently_is_gossipable() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let chrono_now = Utc::now();
 
@@ -112,7 +112,7 @@ fn gossiped_peer_reportedly_to_be_seen_recently_is_gossipable() {
 /// Test if received gossiped peer that was reportedly last seen in the future is gossipable.
 #[test]
 fn gossiped_peer_reportedly_seen_in_the_future_is_gossipable() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let chrono_now = Utc::now();
 
@@ -131,7 +131,7 @@ fn gossiped_peer_reportedly_seen_in_the_future_is_gossipable() {
 /// Test if gossiped peer that was reported last seen a long time ago is not gossipable.
 #[test]
 fn gossiped_peer_reportedly_seen_long_ago_is_not_gossipable() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let chrono_now = Utc::now();
 
@@ -153,7 +153,7 @@ fn gossiped_peer_reportedly_seen_long_ago_is_not_gossipable() {
 /// Test that peer that has just responded is gossipable.
 #[test]
 fn recently_responded_peer_is_gossipable() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let chrono_now = Utc::now();
 
@@ -173,7 +173,7 @@ fn recently_responded_peer_is_gossipable() {
 /// Test that peer that last responded in the reachable interval is gossipable.
 #[test]
 fn not_so_recently_responded_peer_is_still_gossipable() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let chrono_now = Utc::now();
 
@@ -203,7 +203,7 @@ fn not_so_recently_responded_peer_is_still_gossipable() {
 /// Test that peer that responded long ago is not gossipable.
 #[test]
 fn responded_long_ago_peer_is_not_gossipable() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let chrono_now = Utc::now();
 

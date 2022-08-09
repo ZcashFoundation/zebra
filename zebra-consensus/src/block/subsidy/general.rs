@@ -85,7 +85,7 @@ mod test {
 
     #[test]
     fn halving_test() -> Result<(), Report> {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         halving_for_network(Network::Mainnet)?;
         halving_for_network(Network::Testnet)?;
@@ -172,7 +172,7 @@ mod test {
 
     #[test]
     fn block_subsidy_test() -> Result<(), Report> {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         block_subsidy_for_network(Network::Mainnet)?;
         block_subsidy_for_network(Network::Testnet)?;

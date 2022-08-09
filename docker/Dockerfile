@@ -9,7 +9,7 @@
 # This stage implements cargo-chef for docker layer caching
 FROM rust:bullseye as chef
 RUN cargo install cargo-chef --locked
-WORKDIR /app
+WORKDIR /opt/zebrad
 
 # Analyze the current project to determine the minimum subset of files
 # (Cargo.lock and Cargo.toml manifests) required to build it and cache dependencies
@@ -25,7 +25,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 # We set defaults for the arguments, in case the build does not include this information.
 FROM chef AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
-COPY --from=planner /app/recipe.json recipe.json
+COPY --from=planner /opt/zebrad/recipe.json recipe.json
 
 # Install zebra build deps
 RUN apt-get -qq update && \
@@ -82,7 +82,7 @@ ENV CHECKPOINT_SYNC ${CHECKPOINT_SYNC:-true}
 ARG NETWORK
 ENV NETWORK ${NETWORK:-Mainnet}
 
-ENV CARGO_HOME /app/.cargo/
+ENV CARGO_HOME /opt/zebrad/.cargo/
 
 # In this stage we build tests (without running then)
 #
@@ -92,7 +92,7 @@ FROM deps AS tests
 # TODO: do not hardcode the user /root/ even though is a safe assumption
 # Pre-download Zcash Sprout, Sapling parameters and Lightwalletd binary
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
-COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /lightwalletd /usr/local/bin
+COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd /usr/local/bin
 
 # Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
 # and build it to cache all possible sentry and test dependencies.
@@ -129,7 +129,7 @@ RUN cargo build --locked --release --features sentry --package zebrad --bin zebr
 # To save space, this step starts from scratch using debian, and only adds the resulting
 # binary from the `release` stage, and the Zcash Sprout & Sapling parameters from ZCash
 FROM debian:bullseye-slim AS runtime
-COPY --from=release /app/target/release/zebrad /usr/local/bin
+COPY --from=release /opt/zebrad/target/release/zebrad /usr/local/bin
 COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/zcash-params /root/.zcash-params /root/.zcash-params
 
 RUN apt-get update && \

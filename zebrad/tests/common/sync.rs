@@ -189,7 +189,7 @@ pub fn sync_until(
     checkpoint_sync: bool,
     check_legacy_chain: bool,
 ) -> Result<TempDir> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return testdir();

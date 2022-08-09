@@ -90,7 +90,7 @@ proptest! {
     /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
     #[test]
     fn addr_v1_size_is_correct(addr in MetaAddr::arbitrary()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization
         let addr = addr.sanitize(Mainnet);
@@ -109,7 +109,7 @@ proptest! {
     /// 2. The largest allowed vector is small enough to fit in a legal Zcash message
     #[test]
     fn addr_v1_max_allocation_is_correct(addr in MetaAddr::arbitrary()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization
         let addr = addr.sanitize(Mainnet);
@@ -147,7 +147,7 @@ proptest! {
     /// This verifies that our calculated `TrustedPreallocate::max_allocation()` is indeed an upper bound.
     #[test]
     fn addr_v2_size_is_correct(addr in MetaAddr::arbitrary()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization
         let addr = addr.sanitize(Mainnet);
@@ -166,7 +166,7 @@ proptest! {
     /// 2. The largest allowed vector is small enough to fit in a legal Zcash message
     #[test]
     fn addr_v2_max_allocation_is_correct(addr in MetaAddr::arbitrary()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // We require sanitization before serialization
         let addr = addr.sanitize(Mainnet);

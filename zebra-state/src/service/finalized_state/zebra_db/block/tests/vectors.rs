@@ -75,7 +75,7 @@ fn test_block_db_round_trip_with(
     network: Network,
     block_test_cases: impl IntoIterator<Item = Block>,
 ) {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let state = FinalizedState::new(&Config::ephemeral(), network);
 

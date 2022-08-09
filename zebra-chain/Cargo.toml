@@ -55,12 +55,12 @@ humantime = "2.1.0"
 # Error Handling & Formatting
 displaydoc = "0.2.3"
 static_assertions = "1.1.0"
-thiserror = "1.0.31"
+thiserror = "1.0.32"
 tracing = "0.1.31"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.141", features = ["serde_derive", "rc"] }
+serde = { version = "1.0.142", features = ["serde_derive", "rc"] }
 serde_with = "2.0.0"
 serde-big-array = "0.4.1"
 
@@ -85,12 +85,14 @@ tokio = { version = "1.20.1", features = ["tracing"], optional = true }
 zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
-
 # Benchmarks
-criterion = { version = "0.3.5", features = ["html_reports"] }
+criterion = { version = "0.3.6", features = ["html_reports"] }
 
 # Error Handling & Formatting
 color-eyre = "0.6.1"
+# This is a transitive dependency via color-eyre.
+# Enable a feature that makes tinyvec compile much faster.
+tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 spandoc = "0.2.2"
 tracing = "0.1.31"
 

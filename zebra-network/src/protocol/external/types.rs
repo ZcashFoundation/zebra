@@ -171,7 +171,7 @@ mod proptest {
 
     #[test]
     fn magic_debug() {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         assert_eq!(format!("{:?}", magics::MAINNET), "Magic(\"24e92764\")");
         assert_eq!(format!("{:?}", magics::TESTNET), "Magic(\"fa1af9bf\")");
@@ -181,7 +181,7 @@ mod proptest {
 
         #[test]
         fn proptest_magic_from_array(data in any::<[u8; 4]>()) {
-            zebra_test::init();
+            let _init_guard = zebra_test::init();
 
             assert_eq!(format!("{:?}", Magic(data)), format!("Magic({:x?})", hex::encode(data)));
         }
@@ -205,7 +205,7 @@ mod test {
     /// Test the min_specified_for_upgrade and min_specified_for_height functions for `network` with
     /// extreme values.
     fn version_extremes(network: Network) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         assert_eq!(
             Version::min_specified_for_height(network, block::Height(0)),
@@ -233,7 +233,7 @@ mod test {
     /// Check that the min_specified_for_upgrade and min_specified_for_height functions
     /// are consistent for `network`.
     fn version_consistent(network: Network) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let highest_network_upgrade = NetworkUpgrade::current(network, block::Height::MAX);
         assert!(highest_network_upgrade == Nu5 || highest_network_upgrade == Canopy,

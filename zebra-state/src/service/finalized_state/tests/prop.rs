@@ -18,7 +18,7 @@ const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 1;
 
 #[test]
 fn blocks_with_v5_transactions() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
     proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -50,7 +50,7 @@ fn blocks_with_v5_transactions() -> Result<()> {
 #[test]
 #[allow(clippy::print_stderr)]
 fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_none() {
         eprintln!("Skipping all_upgrades_and_wrong_commitments_with_fake_activation_heights() since $TEST_FAKE_ACTIVATION_HEIGHTS is NOT set");

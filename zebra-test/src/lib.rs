@@ -65,14 +65,18 @@ static INIT: Once = Once::new();
 /// such as tracing configs, panic hooks, and `cargo insta` settings.
 ///
 /// This function should be called at the start of every test.
-pub fn init() {
+///
+/// It returns a drop guard that must be stored in a variable, so that it
+/// gets dropped when the test finishes.
+#[must_use]
+pub fn init() -> impl Drop {
     // Per-test
 
     // Settings for threads that snapshots data using `insta`
 
     let mut settings = insta::Settings::clone_current();
     settings.set_prepend_module_to_snapshot(false);
-    settings.bind_to_thread();
+    let drop_guard = settings.bind_to_scope();
 
     // Globals
 
@@ -139,7 +143,9 @@ pub fn init() {
             .panic_message(SkipTestReturnedErrPanicMessages)
             .install()
             .unwrap();
-    })
+    });
+
+    drop_guard
 }
 
 /// Initialize globals for tests that need a separate Tokio runtime instance.
@@ -150,13 +156,16 @@ pub fn init() {
 /// [`MULTI_THREADED_RUNTIME`] instances instead.
 ///
 /// See also the [`init`] function, which is called by this function.
-pub fn init_async() -> tokio::runtime::Runtime {
-    init();
+pub fn init_async() -> (tokio::runtime::Runtime, impl Drop) {
+    let drop_guard = init();
 
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("Failed to create Tokio runtime")
+    (
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create Tokio runtime"),
+        drop_guard,
+    )
 }
 
 struct SkipTestReturnedErrPanicMessages;

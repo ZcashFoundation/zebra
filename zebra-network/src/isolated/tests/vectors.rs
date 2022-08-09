@@ -19,7 +19,7 @@ use Network::*;
 /// when sent over TCP.
 #[tokio::test]
 async fn connect_isolated_sends_anonymised_version_message_tcp() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -78,7 +78,7 @@ async fn connect_isolated_sends_anonymised_version_message_tcp_net(network: Netw
 /// - runs even if network tests are disabled.
 #[tokio::test]
 async fn connect_isolated_sends_anonymised_version_message_mem() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     connect_isolated_sends_anonymised_version_message_mem_net(Mainnet).await;
     connect_isolated_sends_anonymised_version_message_mem_net(Testnet).await;

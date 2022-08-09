@@ -29,7 +29,7 @@ proptest! {
         relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
         transaction_version in 4_u8..=5,
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let zero_lock_time = LockTime::Height(block::Height(0));
 
@@ -62,7 +62,7 @@ proptest! {
         transaction_version in 4_u8..=5,
         lock_time in any::<LockTime>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let (mut transaction, known_utxos) = mock_transparent_transaction(
             network,
@@ -97,7 +97,7 @@ proptest! {
         transaction_version in 4_u8..=5,
         relative_unlock_height in 0.0..1.0,
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let unlock_height = scale_block_height(block_height, None, relative_unlock_height);
         let lock_time = LockTime::Height(unlock_height);
@@ -127,7 +127,7 @@ proptest! {
         relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
         transaction_version in 4_u8..=5,
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let (unlock_time, block_time) = if first_datetime >= second_datetime {
             (first_datetime, second_datetime)
@@ -160,7 +160,7 @@ proptest! {
         transaction_version in 4_u8..=5,
         relative_unlock_height in 0.0..1.0,
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         // Because `scale_block_height` uses the range `[min, max)`, with `max` being
         // non-inclusive, we have to use `block_height + 1` as the upper bound in order to test
@@ -198,7 +198,7 @@ proptest! {
         relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
         transaction_version in 4_u8..=5,
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let (unlock_time, block_time) = if first_datetime < second_datetime {
             (first_datetime, second_datetime)

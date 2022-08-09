@@ -13,7 +13,7 @@ const DEFAULT_TEST_INPUT_PROPTEST_CASES: u32 = 64;
 
 #[test]
 fn equihash_solution_roundtrip() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     proptest!(|(solution in any::<equihash::Solution>())| {
             let data = solution
@@ -44,7 +44,7 @@ prop_compose! {
 
 #[test]
 fn equihash_prop_test_solution() -> color_eyre::eyre::Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     for block_bytes in zebra_test::vectors::BLOCKS.iter() {
         let block = Block::zcash_deserialize(&block_bytes[..])
@@ -84,7 +84,7 @@ prop_compose! {
 
 #[test]
 fn equihash_prop_test_nonce() -> color_eyre::eyre::Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     for block_bytes in zebra_test::vectors::BLOCKS.iter() {
         let block = Block::zcash_deserialize(&block_bytes[..])
@@ -120,7 +120,7 @@ prop_compose! {
 
 #[test]
 fn equihash_prop_test_input() -> color_eyre::eyre::Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     for block_bytes in zebra_test::vectors::BLOCKS.iter() {
         let block = Block::zcash_deserialize(&block_bytes[..])

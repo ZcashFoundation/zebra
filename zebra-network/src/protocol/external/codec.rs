@@ -761,7 +761,7 @@ mod tests {
     /// Check that the version test vector serializes and deserializes correctly
     #[test]
     fn version_message_round_trip() {
-        let rt = zebra_test::init_async();
+        let (rt, _init_guard) = zebra_test::init_async();
 
         let v = &*VERSION_TEST_VECTOR;
 
@@ -814,7 +814,7 @@ mod tests {
 
     /// Deserialize a `Version` message containing `time`, and return the result.
     fn deserialize_version_with_time(time: i64) -> Result<Message, Error> {
-        let rt = zebra_test::init_async();
+        let (rt, _init_guard) = zebra_test::init_async();
 
         let v = &*VERSION_TEST_VECTOR;
 
@@ -855,7 +855,7 @@ mod tests {
 
     #[test]
     fn filterload_message_round_trip() {
-        let rt = zebra_test::init_async();
+        let (rt, _init_guard) = zebra_test::init_async();
 
         let v = Message::FilterLoad {
             filter: Filter(vec![0; 35999]),
@@ -889,7 +889,7 @@ mod tests {
 
     #[test]
     fn reject_message_no_extra_data_round_trip() {
-        let rt = zebra_test::init_async();
+        let (rt, _init_guard) = zebra_test::init_async();
 
         let v = Message::Reject {
             message: "experimental".to_string(),
@@ -923,7 +923,7 @@ mod tests {
 
     #[test]
     fn reject_message_extra_data_round_trip() {
-        let rt = zebra_test::init_async();
+        let (rt, _init_guard) = zebra_test::init_async();
 
         let v = Message::Reject {
             message: "block".to_string(),
@@ -957,7 +957,7 @@ mod tests {
 
     #[test]
     fn filterload_message_too_large_round_trip() {
-        let rt = zebra_test::init_async();
+        let (rt, _init_guard) = zebra_test::init_async();
 
         let v = Message::FilterLoad {
             filter: Filter(vec![0; 40000]),
@@ -991,8 +991,8 @@ mod tests {
     fn max_msg_size_round_trip() {
         use zebra_chain::serialization::ZcashDeserializeInto;
 
-        //let rt = zebra_test::init_async();
-        zebra_test::init();
+        //let (rt, _init_guard) = zebra_test::init_async();
+        let _init_guard = zebra_test::init();
 
         // make tests with a Tx message
         let tx: Transaction = zebra_test::vectors::DUMMY_TX1

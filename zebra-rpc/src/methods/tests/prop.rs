@@ -34,7 +34,7 @@ proptest! {
     /// Test that when sending a raw transaction, it is received by the mempool service.
     #[test]
     fn mempool_receives_raw_transaction(transaction in any::<Transaction>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
@@ -85,7 +85,7 @@ proptest! {
     /// Mempool service errors should become server errors.
     #[test]
     fn mempool_errors_are_forwarded(transaction in any::<Transaction>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
@@ -142,7 +142,7 @@ proptest! {
     /// Test that when the mempool rejects a transaction the caller receives an error.
     #[test]
     fn rejected_transactions_are_reported(transaction in any::<Transaction>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
@@ -203,7 +203,7 @@ proptest! {
     /// non-hexadecimal character, and check that it fails with an expected error.
     #[test]
     fn non_hexadecimal_string_results_in_an_error(non_hex_string in ".*[^0-9A-Fa-f].*") {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
@@ -255,7 +255,7 @@ proptest! {
     /// transaction, and check that it fails with an expected error.
     #[test]
     fn invalid_transaction_results_in_an_error(random_bytes in any::<Vec<u8>>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
@@ -309,7 +309,7 @@ proptest! {
     /// returns those IDs as hexadecimal strings.
     #[test]
     fn mempool_transactions_are_sent_to_caller(transaction_ids in any::<HashSet<UnminedTxId>>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
@@ -364,7 +364,7 @@ proptest! {
     fn get_raw_transaction_non_hexadecimal_string_results_in_an_error(
         non_hex_string in ".*[^0-9A-Fa-f].*",
     ) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
@@ -418,7 +418,7 @@ proptest! {
     fn get_raw_transaction_invalid_transaction_results_in_an_error(
         random_bytes in any::<Vec<u8>>(),
     ) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
@@ -469,7 +469,7 @@ proptest! {
     /// Test the `get_blockchain_info` response when Zebra's state is empty.
     #[test]
     fn get_blockchain_info_response_without_a_chain_tip(network in any::<Network>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
         let mut mempool = MockService::build().for_prop_tests();
         let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
@@ -506,7 +506,7 @@ proptest! {
         network in any::<Network>(),
         block in any::<Block>(),
     ) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
         let mut mempool = MockService::build().for_prop_tests();
         let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
@@ -586,7 +586,7 @@ proptest! {
         addresses in any::<HashSet<transparent::Address>>(),
         balance in any::<Amount<NonNegative>>(),
     ) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         let mut mempool = MockService::build().for_prop_tests();
@@ -651,7 +651,7 @@ proptest! {
         network in any::<Network>(),
         at_least_one_invalid_address in vec(".*", 1..10),
     ) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         prop_assume!(at_least_one_invalid_address
@@ -706,7 +706,7 @@ proptest! {
     /// Test the queue functionality using `send_raw_transaction`
     #[test]
     fn rpc_queue_main_loop(tx in any::<Transaction>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         let transaction_hash = tx.hash();
@@ -795,7 +795,7 @@ proptest! {
     /// Test we receive all transactions that are sent in a channel
     #[test]
     fn rpc_queue_receives_all_transactions_from_channel(txs in any::<[Transaction; 2]>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         runtime.block_on(async move {

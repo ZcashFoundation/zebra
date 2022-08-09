@@ -18,7 +18,7 @@ use crate::sprout::tree;
 /// Tests if empty roots are generated correctly.
 #[test]
 fn empty_roots() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     for i in 0..tree::EMPTY_ROOTS.len() {
         assert_eq!(
@@ -41,7 +41,7 @@ fn empty_leaf() {
 /// Tests if we can build the tree correctly.
 #[test]
 fn incremental_roots() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut leaves = vec![];
 

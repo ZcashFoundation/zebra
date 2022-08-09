@@ -100,7 +100,7 @@ mod proptests {
     proptest! {
         #[test]
         fn script_roundtrip(script in any::<Script>()) {
-            zebra_test::init();
+            let _init_guard = zebra_test::init();
 
             let mut bytes = Cursor::new(Vec::new());
             script.zcash_serialize(&mut bytes)?;

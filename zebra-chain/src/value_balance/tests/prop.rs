@@ -10,7 +10,7 @@ proptest! {
         value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
         value_balance2 in any::<ValueBalance<NegativeAllowed>>())
     {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let transparent = value_balance1.transparent + value_balance2.transparent;
         let sprout = value_balance1.sprout + value_balance2.sprout;
@@ -43,7 +43,7 @@ proptest! {
         value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
         value_balance2 in any::<ValueBalance<NegativeAllowed>>())
     {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let transparent = value_balance1.transparent - value_balance2.transparent;
         let sprout = value_balance1.sprout - value_balance2.sprout;
@@ -77,7 +77,7 @@ proptest! {
         value_balance1 in any::<ValueBalance<NegativeAllowed>>(),
         value_balance2 in any::<ValueBalance<NegativeAllowed>>(),
     ) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let collection = vec![value_balance1, value_balance2];
 
@@ -107,7 +107,7 @@ proptest! {
 
     #[test]
     fn value_balance_serialization(value_balance in any::<ValueBalance<NonNegative>>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let bytes = value_balance.to_bytes();
         let serialized_value_balance = ValueBalance::from_bytes(bytes)?;
@@ -117,7 +117,7 @@ proptest! {
 
     #[test]
     fn value_balance_deserialization(bytes in any::<[u8; 32]>()) {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         if let Ok(deserialized) = ValueBalance::<NonNegative>::from_bytes(bytes) {
             let bytes2 = deserialized.to_bytes();

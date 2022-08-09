@@ -18,7 +18,7 @@ use super::super::*;
 /// Snapshot test for RPC methods responses.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_rpc_response_data() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     test_rpc_response_data_for_network(Mainnet).await;
     test_rpc_response_data_for_network(Testnet).await;
