@@ -89,7 +89,7 @@ futures = "0.3.21"
 rayon = "1.5.3"
 tokio = { version = "1.20.1", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
-pin-project = "1.0.10"
+pin-project = "1.0.12"
 
 color-eyre = { version = "0.6.1", default_features = false, features = ["issue-url"] }
 # This is a transitive dependency via color-eyre.

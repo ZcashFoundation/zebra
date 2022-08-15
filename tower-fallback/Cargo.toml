@@ -6,7 +6,7 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-pin-project = "0.4.29"
+pin-project = "1.0.12"
 tower = "0.4.13"
 futures-core = "0.3.21"
 tracing = "0.1.31"
