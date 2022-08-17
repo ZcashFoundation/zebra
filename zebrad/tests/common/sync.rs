@@ -363,7 +363,7 @@ pub fn create_cached_database_height(
 ) -> Result<()> {
     eprintln!("creating cached database");
 
-    // 16 hours
+    // 20 hours
     let timeout = Duration::from_secs(60 * 60 * 20);
 
     // Use a persistent state, so we can handle large syncs
