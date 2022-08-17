@@ -15,6 +15,7 @@ mod txid;
 mod unmined;
 
 #[cfg(any(test, feature = "proptest-impl"))]
+#[allow(clippy::unwrap_in_result)]
 pub mod arbitrary;
 #[cfg(test)]
 mod tests;
@@ -946,6 +947,7 @@ impl Transaction {
     /// using the outputs spent by this transaction.
     ///
     /// See `transparent_value_balance` for details.
+    #[allow(clippy::unwrap_in_result)]
     fn transparent_value_balance_from_outputs(
         &self,
         outputs: &HashMap<transparent::OutPoint, transparent::Output>,

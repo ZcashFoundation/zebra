@@ -50,7 +50,11 @@ rustflags = [
     "-Aclippy::try_err",
 
     # Links in public docs can point to private items.
-    "-Arustdoc::private_intra_doc_links"
+    "-Arustdoc::private_intra_doc_links",
+
+    # Panics
+    "-Wclippy::fallible_impl_from",
+    "-Wclippy::unwrap_in_result",
 
     # TODOs:
     # `cargo fix` might help do these fixes,

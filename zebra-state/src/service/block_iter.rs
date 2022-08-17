@@ -39,6 +39,7 @@ impl Iter<'_> {
         }
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn next_finalized_block(&mut self) -> Option<Arc<Block>> {
         let Iter { service, state } = self;
 

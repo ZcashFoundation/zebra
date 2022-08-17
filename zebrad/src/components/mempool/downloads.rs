@@ -43,7 +43,10 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::transaction::{self, UnminedTxId, VerifiedUnminedTx};
+use zebra_chain::{
+    block::Height,
+    transaction::{self, UnminedTxId, VerifiedUnminedTx},
+};
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
 use zebra_node_services::mempool::Gossip;
@@ -91,7 +94,7 @@ pub(crate) const TRANSACTION_VERIFY_TIMEOUT: Duration = BLOCK_VERIFY_TIMEOUT;
 /// Since Zebra keeps an `inv` index, inbound downloads for malicious transactions
 /// will be directed to the malicious node that originally gossiped the hash.
 /// Therefore, this attack can be carried out by a single malicious node.
-pub(crate) const MAX_INBOUND_CONCURRENCY: usize = 10;
+pub const MAX_INBOUND_CONCURRENCY: usize = 10;
 
 /// Errors that can occur while downloading and verifying a transaction.
 #[derive(Error, Debug)]
@@ -102,9 +105,6 @@ pub enum TransactionDownloadVerifyError {
 
     #[error("error in state service")]
     StateError(#[source] BoxError),
-
-    #[error("transaction not validated because the tip is empty")]
-    NoTip,
 
     #[error("error downloading transaction")]
     DownloadFailed(#[source] BoxError),
@@ -273,13 +273,16 @@ where
             // Don't download/verify if the transaction is already in the state.
             Self::transaction_in_state(&mut state, txid).await?;
 
-            let height = match state.oneshot(zs::Request::Tip).await {
-                Ok(zs::Response::Tip(None)) => Err(TransactionDownloadVerifyError::NoTip),
-                Ok(zs::Response::Tip(Some((height, _hash)))) => Ok(height),
+            let next_height = match state.oneshot(zs::Request::Tip).await {
+                Ok(zs::Response::Tip(None)) => Ok(Height(0)),
+                Ok(zs::Response::Tip(Some((height, _hash)))) => {
+                    let next_height =
+                        (height + 1).expect("valid heights are far below the maximum");
+                    Ok(next_height)
+                }
                 Ok(_) => unreachable!("wrong response"),
                 Err(e) => Err(TransactionDownloadVerifyError::StateError(e)),
             }?;
-            let height = (height + 1).expect("must have next height");
 
             let tx = match gossiped_tx {
                 Gossip::Id(txid) => {
@@ -322,7 +325,7 @@ where
             let result = verifier
                 .oneshot(tx::Request::Mempool {
                     transaction: tx.clone(),
-                    height,
+                    height: next_height,
                 })
                 .map_ok(|rsp| {
                     rsp.into_mempool_transaction()

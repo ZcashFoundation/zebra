@@ -1,5 +1,8 @@
 //! Future types for the `Fallback` middleware.
 
+// TODO: remove this lint exception after upgrading to pin-project 1.0.11 or later (#2355)
+#![allow(dead_code)]
+
 use std::{
     fmt::Debug,
     future::Future,

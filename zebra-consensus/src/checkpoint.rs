@@ -464,6 +464,11 @@ where
         if verified_height == self.checkpoint_list.max_height() {
             metrics::gauge!("checkpoint.verified.height", verified_height.0 as f64);
             self.verifier_progress = FinalCheckpoint;
+
+            tracing::info!(
+                final_checkpoint_height = ?verified_height,
+                "verified final checkpoint: starting full validation",
+            );
         } else if self.checkpoint_list.contains(verified_height) {
             metrics::gauge!("checkpoint.verified.height", verified_height.0 as f64);
             self.verifier_progress = PreviousCheckpoint(verified_height);
@@ -516,6 +521,7 @@ where
     ///
     /// If the block does not pass basic validity checks,
     /// returns an error immediately.
+    #[allow(clippy::unwrap_in_result)]
     fn queue_block(&mut self, block: Arc<Block>) -> Result<RequestBlock, VerifyCheckpointError> {
         // Set up a oneshot channel to send results
         let (tx, rx) = oneshot::channel();
@@ -590,6 +596,7 @@ where
     /// During checkpoint range processing, process all the blocks at `height`.
     ///
     /// Returns the first valid block. If there is no valid block, returns None.
+    #[allow(clippy::unwrap_in_result)]
     fn process_height(
         &mut self,
         height: block::Height,

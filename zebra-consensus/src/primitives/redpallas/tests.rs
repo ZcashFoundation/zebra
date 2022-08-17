@@ -45,13 +45,13 @@ where
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn batch_flushes_on_max_items() -> Result<()> {
     use tokio::time::timeout;
 
     // Use a very long max_latency and a short timeout to check that
     // flushing is happening based on hitting max_items.
-    let verifier = Batch::new(Verifier::default(), 10, Duration::from_secs(1000));
+    let verifier = Batch::new(Verifier::default(), 10, 5, Duration::from_secs(1000));
     timeout(Duration::from_secs(5), sign_and_verify(verifier, 100))
         .await?
         .map_err(|e| eyre!(e))?;
@@ -59,13 +59,13 @@ async fn batch_flushes_on_max_items() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn batch_flushes_on_max_latency() -> Result<()> {
     use tokio::time::timeout;
 
     // Use a very high max_items and a short timeout to check that
     // flushing is happening based on hitting max_latency.
-    let verifier = Batch::new(Verifier::default(), 100, Duration::from_millis(500));
+    let verifier = Batch::new(Verifier::default(), 100, 10, Duration::from_millis(500));
     timeout(Duration::from_secs(5), sign_and_verify(verifier, 10))
         .await?
         .map_err(|e| eyre!(e))?;

@@ -43,6 +43,7 @@ impl ZebraDb {
 
     /// Returns the [`AddressBalanceLocation`] for a [`transparent::Address`],
     /// if it is in the finalized state.
+    #[allow(clippy::unwrap_in_result)]
     pub fn address_balance_location(
         &self,
         address: &transparent::Address,
@@ -89,11 +90,12 @@ impl ZebraDb {
 
     /// Returns the transparent output for an [`OutputLocation`],
     /// if it is unspent in the finalized state.
+    #[allow(clippy::unwrap_in_result)]
     pub fn utxo_by_location(
         &self,
         output_location: OutputLocation,
     ) -> Option<transparent::OrderedUtxo> {
-        let utxo_by_out_loc = self.db.cf_handle("utxo_by_outpoint").unwrap();
+        let utxo_by_out_loc = self.db.cf_handle("utxo_by_out_loc").unwrap();
 
         let output = self.db.zs_get(&utxo_by_out_loc, &output_location)?;
 
@@ -176,6 +178,7 @@ impl ZebraDb {
     }
 
     /// Returns the transaction hash for an [`TransactionLocation`].
+    #[allow(clippy::unwrap_in_result)]
     pub fn tx_id_by_location(&self, tx_location: TransactionLocation) -> Option<transaction::Hash> {
         let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
 
@@ -415,13 +418,14 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
+    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_new_transparent_outputs_batch(
         &mut self,
         db: &DiskDb,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &mut HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
-        let utxo_by_out_loc = db.cf_handle("utxo_by_outpoint").unwrap();
+        let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
             db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
         let tx_loc_by_transparent_addr_loc =
@@ -490,13 +494,14 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
+    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_spent_transparent_outputs_batch(
         &mut self,
         db: &DiskDb,
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &mut HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
-        let utxo_by_out_loc = db.cf_handle("utxo_by_outpoint").unwrap();
+        let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
             db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
 
@@ -543,6 +548,7 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
+    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_spending_transparent_tx_ids_batch(
         &mut self,
         db: &DiskDb,
@@ -591,6 +597,7 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
+    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_transparent_balances_batch(
         &mut self,
         db: &DiskDb,

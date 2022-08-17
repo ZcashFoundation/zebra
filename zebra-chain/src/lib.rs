@@ -10,17 +10,22 @@
 #![recursion_limit = "256"]
 
 #[macro_use]
+extern crate bitflags;
+
+#[macro_use]
 extern crate serde;
 
 #[macro_use]
-extern crate bitflags;
+extern crate tracing;
 
 pub mod amount;
 pub mod block;
 pub mod chain_tip;
+pub mod diagnostic;
 pub mod fmt;
 pub mod history_tree;
 pub mod orchard;
+pub mod parallel;
 pub mod parameters;
 pub mod primitives;
 pub mod sapling;

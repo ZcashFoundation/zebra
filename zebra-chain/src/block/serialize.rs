@@ -1,11 +1,14 @@
-use std::{borrow::Borrow, convert::TryInto, io};
+//! Serialization and deserialization for Zcash blocks.
+
+use std::{borrow::Borrow, io};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
 
 use crate::{
     serialization::{
-        ReadZcashExt, SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+        CompactSizeMessage, ReadZcashExt, SerializationError, ZcashDeserialize,
+        ZcashDeserializeInto, ZcashSerialize,
     },
     work::{difficulty::CompactDifficulty, equihash},
 };
@@ -21,6 +24,7 @@ use super::{merkle, Block, CountedHeader, Hash, Header};
 pub const MAX_BLOCK_BYTES: u64 = 2_000_000;
 
 impl ZcashSerialize for Header {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u32::<LittleEndian>(self.version)?;
         self.previous_block_hash.zcash_serialize(&mut writer)?;
@@ -92,19 +96,30 @@ impl ZcashDeserialize for Header {
 }
 
 impl ZcashSerialize for CountedHeader {
+    #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.header.zcash_serialize(&mut writer)?;
-        self.transaction_count.zcash_serialize(&mut writer)?;
+
+        // A header-only message has zero transactions in it.
+        let transaction_count =
+            CompactSizeMessage::try_from(0).expect("0 is below the message size limit");
+        transaction_count.zcash_serialize(&mut writer)?;
+
         Ok(())
     }
 }
 
 impl ZcashDeserialize for CountedHeader {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(CountedHeader {
+        let header = CountedHeader {
             header: (&mut reader).zcash_deserialize_into()?,
-            transaction_count: (&mut reader).zcash_deserialize_into()?,
-        })
+        };
+
+        // We ignore the number of transactions in a header-only message,
+        // it should always be zero.
+        let _transaction_count: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+
+        Ok(header)
     }
 }
 

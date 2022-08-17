@@ -25,7 +25,7 @@ jobs:
 
       - name: Rust files
         id: changed-files-rust
-        uses: tj-actions/changed-files@v23
+        uses: tj-actions/changed-files@v24
         with:
           files: |
             **/*.rs
@@ -37,7 +37,7 @@ jobs:
 
       - name: Workflow files
         id: changed-files-workflows
-        uses: tj-actions/changed-files@v23
+        uses: tj-actions/changed-files@v24
         with:
           files: |
             .github/workflows/*.yml
@@ -138,7 +138,7 @@ jobs:
     if: ${{ needs.changed-files.outputs.workflows == 'true' }}
     steps:
       - uses: actions/checkout@v3.0.2
-      - uses: reviewdog/action-actionlint@v1.25.1
+      - uses: reviewdog/action-actionlint@v1.27.0
         with:
           level: warning
           fail_on_error: false

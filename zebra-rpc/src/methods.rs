@@ -343,6 +343,7 @@ where
         Ok(response)
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn get_blockchain_info(&self) -> Result<GetBlockChainInfo> {
         let network = self.network;
 
@@ -1227,6 +1228,7 @@ pub struct GetAddressTxIdsRequest {
 
 impl GetRawTransaction {
     /// Converts `tx` and `height` into a new `GetRawTransaction` in the `verbose` format.
+    #[allow(clippy::unwrap_in_result)]
     fn from_transaction(
         tx: Arc<Transaction>,
         height: Option<block::Height>,

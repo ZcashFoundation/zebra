@@ -2,7 +2,7 @@
 
 ## Dynamic Tracing
 
-Zebra supports dynamic tracing, configured using the config's 
+Zebra supports dynamic tracing, configured using the config's
 [`TracingSection`][tracing_section] and an HTTP RPC endpoint.
 
 Activate this feature using the `filter-reload` compile-time feature,

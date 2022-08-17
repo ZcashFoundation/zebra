@@ -1,10 +1,19 @@
 //! A component owning the Tokio runtime.
+//!
+//! The tokio runtime is used for:
+//! - non-blocking async tasks, via [`Future`]s and
+//! - blocking network and file tasks, via [`spawn_blocking`](tokio::task::spawn_blocking).
+//!
+//! The rayon thread pool is used for:
+//! - long-running CPU-bound tasks like cryptography, via [`rayon::spawn_fifo`].
 
-use crate::prelude::*;
+use std::{future::Future, time::Duration};
+
 use abscissa_core::{Application, Component, FrameworkError, Shutdown};
 use color_eyre::Report;
-use std::{future::Future, time::Duration};
 use tokio::runtime::Runtime;
+
+use crate::prelude::*;
 
 /// When Zebra is shutting down, wait this long for tokio tasks to finish.
 const TOKIO_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
@@ -22,13 +31,14 @@ pub struct TokioComponent {
 }
 
 impl TokioComponent {
+    #[allow(clippy::unwrap_in_result)]
     pub fn new() -> Result<Self, FrameworkError> {
         Ok(Self {
             rt: Some(
                 tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()
-                    .unwrap(),
+                    .expect("runtime building should not fail"),
             ),
         })
     }

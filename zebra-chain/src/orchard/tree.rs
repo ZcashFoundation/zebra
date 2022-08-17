@@ -11,7 +11,6 @@
 //! A root of a note commitment tree is associated with each treestate.
 
 #![allow(clippy::derive_hash_xor_eq)]
-#![allow(dead_code)]
 
 use std::{
     fmt,
@@ -33,6 +32,11 @@ use super::sinsemilla::*;
 use crate::serialization::{
     serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
+
+/// The type that is used to update the note commitment tree.
+///
+/// Unfortunately, this is not the same as `orchard::NoteCommitment`.
+pub type NoteCommitmentUpdate = pallas::Base;
 
 pub(super) const MERKLE_DEPTH: usize = 32;
 
@@ -248,8 +252,8 @@ impl<'de> serde::Deserialize<'de> for Node {
     }
 }
 
-#[allow(dead_code, missing_docs)]
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[derive(Error, Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[allow(missing_docs)]
 pub enum NoteCommitmentTreeError {
     #[error("The note commitment tree is full")]
     FullTree,
@@ -301,7 +305,8 @@ impl NoteCommitmentTree {
     /// chain and input into the proof.
     ///
     /// Returns an error if the tree is full.
-    pub fn append(&mut self, cm_x: pallas::Base) -> Result<(), NoteCommitmentTreeError> {
+    #[allow(clippy::unwrap_in_result)]
+    pub fn append(&mut self, cm_x: NoteCommitmentUpdate) -> Result<(), NoteCommitmentTreeError> {
         if self.inner.append(&cm_x.into()) {
             // Invalidate cached root
             let cached_root = self

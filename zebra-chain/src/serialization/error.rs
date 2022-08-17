@@ -1,4 +1,4 @@
-//! Errors for transaction serialization.
+//! Errors for Zcash consensus-critical serialization.
 
 use std::{array::TryFromSliceError, io, num::TryFromIntError, str::Utf8Error};
 

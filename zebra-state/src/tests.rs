@@ -1,4 +1,6 @@
-use std::{convert::TryFrom, mem, sync::Arc};
+//! Tests for the Zebra state service.
+
+use std::{mem, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block},
@@ -42,7 +44,7 @@ impl FakeChainHelper for Arc<Block> {
         }
 
         child.transactions.push(tx);
-        child.header.previous_block_hash = parent_hash;
+        Arc::make_mut(&mut child.header).previous_block_hash = parent_hash;
 
         Arc::new(child)
     }
@@ -52,13 +54,13 @@ impl FakeChainHelper for Arc<Block> {
         let expanded = work_to_expanded(work);
 
         let block = Arc::make_mut(&mut self);
-        block.header.difficulty_threshold = expanded.into();
+        Arc::make_mut(&mut block.header).difficulty_threshold = expanded.into();
         self
     }
 
     fn set_block_commitment(mut self, block_commitment: [u8; 32]) -> Arc<Block> {
         let block = Arc::make_mut(&mut self);
-        block.header.commitment_bytes = block_commitment;
+        Arc::make_mut(&mut block.header).commitment_bytes = block_commitment;
         self
     }
 }

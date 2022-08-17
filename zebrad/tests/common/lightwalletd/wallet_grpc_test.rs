@@ -110,7 +110,7 @@ pub async fn run() -> Result<()> {
     )?;
 
     // Give lightwalletd a few seconds to open its grpc port before connecting to it
-    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
     tracing::info!(
         ?lightwalletd_rpc_port,

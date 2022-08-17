@@ -5,6 +5,7 @@ use std::{fmt::Write as _, io::Write as _, process};
 use abscissa_core::{
     application::{self, fatal_error, AppCell},
     config::{self, Configurable},
+    status_err,
     terminal::{component::Terminal, stderr, stdout, ColorChoice},
     Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths, Version,
 };
@@ -193,6 +194,7 @@ impl Application for ZebradApp {
     /// beyond the default ones provided by the framework, this is the place
     /// to do so.
     #[allow(clippy::print_stderr)]
+    #[allow(clippy::unwrap_in_result)]
     fn register_components(&mut self, command: &Self::Cmd) -> Result<(), FrameworkError> {
         use crate::components::{
             metrics::MetricsEndpoint, tokio::TokioComponent, tracing::TracingEndpoint,
@@ -202,11 +204,16 @@ impl Application for ZebradApp {
 
         // Load config *after* framework components so that we can
         // report an error to the terminal if it occurs.
-        let config = command
-            .config_path()
-            .map(|path| self.load_config(&path))
-            .transpose()?
-            .unwrap_or_default();
+        let config = match command.config_path() {
+            Some(path) => match self.load_config(&path) {
+                Ok(config) => config,
+                Err(e) => {
+                    status_err!("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file. You can generate a valid config by running \"zebrad generate\", and diff it against yours to examine any format inconsistencies.");
+                    return Err(e);
+                }
+            },
+            None => ZebradConfig::default(),
+        };
 
         let config = command.process_config(config)?;
 
@@ -310,7 +317,7 @@ impl Application for ZebradApp {
         // This MUST happen after `Terminal::new` to ensure our preferred panic
         // handler is the last one installed
         let (panic_hook, eyre_hook) = builder.into_hooks();
-        eyre_hook.install().unwrap();
+        eyre_hook.install().expect("eyre_hook.install() error");
 
         // The Sentry default config pulls in the DSN from the `SENTRY_DSN`
         // environment variable.
@@ -335,6 +342,19 @@ impl Application for ZebradApp {
                 }
             }
         }));
+
+        // Apply the configured number of threads to the thread pool.
+        //
+        // TODO:
+        // - set rayon panic handler to a function that takes `Box<dyn Any + Send + 'static>`,
+        //   which forwards to sentry. If possible, use eyre's panic report for formatting.
+        // - do we also need to call this code in `zebra_consensus::init()`,
+        //   when that crate is being used by itself?
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(config.sync.parallel_cpu_threads)
+            .thread_name(|thread_index| format!("rayon {}", thread_index))
+            .build_global()
+            .expect("unable to initialize rayon thread pool");
 
         self.config = Some(config);
 
@@ -382,6 +402,11 @@ impl Application for ZebradApp {
         // leak the global span, to make sure it stays active
         std::mem::forget(global_guard);
 
+        tracing::info!(
+            num_threads = rayon::current_num_threads(),
+            "initialized rayon thread pool for CPU-bound tasks",
+        );
+
         // Launch network and async endpoints only for long-running commands.
         if is_server {
             components.push(Box::new(TokioComponent::new()?));
@@ -393,6 +418,7 @@ impl Application for ZebradApp {
     }
 
     /// Load this application's configuration and initialize its components.
+    #[allow(clippy::unwrap_in_result)]
     fn init(&mut self, command: &Self::Cmd) -> Result<(), FrameworkError> {
         // Create and register components with the application.
         // We do this first to calculate a proper dependency ordering before
@@ -400,7 +426,10 @@ impl Application for ZebradApp {
         self.register_components(command)?;
 
         // Fire callback to signal state in the application lifecycle
-        let config = self.config.take().unwrap();
+        let config = self
+            .config
+            .take()
+            .expect("register_components always populates the config");
         self.after_config(config)?;
 
         Ok(())

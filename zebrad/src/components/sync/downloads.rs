@@ -20,7 +20,7 @@ use tower::{hedge, Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, Height},
     chain_tip::ChainTip,
 };
 use zebra_network as zn;
@@ -119,6 +119,15 @@ pub enum BlockDownloadVerifyError {
     CancelledDuringDownload { hash: block::Hash },
 
     #[error(
+        "block download & verification was cancelled while waiting for the verifier service: \
+         to become ready: {height:?} {hash:?}"
+    )]
+    CancelledAwaitingVerifierReadiness {
+        height: block::Height,
+        hash: block::Hash,
+    },
+
+    #[error(
         "block download & verification was cancelled during verification: {height:?} {hash:?}"
     )]
     CancelledDuringVerification {
@@ -160,8 +169,9 @@ where
     // Internal downloads state
     /// A list of pending block download and verify tasks.
     #[pin]
-    pending:
-        FuturesUnordered<JoinHandle<Result<block::Hash, (BlockDownloadVerifyError, block::Hash)>>>,
+    pending: FuturesUnordered<
+        JoinHandle<Result<(Height, block::Hash), (BlockDownloadVerifyError, block::Hash)>>,
+    >,
 
     /// A list of channels that can be used to cancel pending block download and
     /// verify tasks.
@@ -180,7 +190,7 @@ where
     ZV::Future: Send,
     ZSTip: ChainTip + Clone + Send + 'static,
 {
-    type Item = Result<block::Hash, BlockDownloadVerifyError>;
+    type Item = Result<(Height, block::Hash), BlockDownloadVerifyError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -195,9 +205,10 @@ where
         // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
             match join_result.expect("block download and verify tasks must not panic") {
-                Ok(hash) => {
+                Ok((height, hash)) => {
                     this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Ok(hash)))
+
+                    Poll::Ready(Some(Ok((height, hash))))
                 }
                 Err((e, hash)) => {
                     this.cancel_handles.remove(&hash);
@@ -282,6 +293,7 @@ where
 
         let task = tokio::spawn(
             async move {
+                // Download the block.
                 // Prefer the cancel handle if both are ready.
                 let rsp = tokio::select! {
                     biased;
@@ -315,6 +327,7 @@ where
                 // that will timeout before being verified.
                 let tip_height = latest_chain_tip.best_tip_height();
 
+                // TODO: don't use VERIFICATION_PIPELINE_SCALING_MULTIPLIER for full verification?
                 let max_lookahead_height = if let Some(tip_height) = tip_height {
                     // Scale the height limit with the lookahead limit,
                     // so users with low capacity or under DoS can reduce them both.
@@ -363,9 +376,7 @@ where
                         ?tip_height,
                         ?max_lookahead_height,
                         lookahead_limit = ?lookahead_limit,
-                        "synced block height too far ahead of the tip: dropped downloaded block. \
-                         Hint: Try increasing the value of the lookahead_limit field \
-                         in the sync section of the configuration file."
+                        "synced block height too far ahead of the tip: dropped downloaded block",
                     );
                     metrics::counter!("sync.max.height.limit.dropped.block.count", 1);
 
@@ -393,12 +404,24 @@ where
                     Err(BlockDownloadVerifyError::BehindTipHeightLimit { height: block_height, hash })?;
                 }
 
+                // Wait for the verifier service to be ready.
+                let readiness = verifier.ready();
+                // Prefer the cancel handle if both are ready.
+                let verifier = tokio::select! {
+                    biased;
+                    _ = &mut cancel_rx => {
+                        trace!("task cancelled waiting for verifier service readiness");
+                        metrics::counter!("sync.cancelled.verify.ready.count", 1);
+                        return Err(BlockDownloadVerifyError::CancelledAwaitingVerifierReadiness { height: block_height, hash })
+                    }
+                    verifier = readiness => verifier,
+                };
+
+                // Verify the block.
                 let rsp = verifier
-                    .ready()
-                    .await
                     .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?
                     .call(block);
-                // Prefer the cancel handle if both are ready.
+
                 let verification = tokio::select! {
                     biased;
                     _ = &mut cancel_rx => {
@@ -408,22 +431,28 @@ where
                     }
                     verification = rsp => verification,
                 };
+
                 if verification.is_ok() {
                     metrics::counter!("sync.verified.block.count", 1);
                 }
 
-                verification.map_err(|err| {
-                    match err.downcast::<zebra_consensus::chain::VerifyChainError>() {
-                        Ok(error) => BlockDownloadVerifyError::Invalid { error: *error, height: block_height, hash },
-                        Err(error) => BlockDownloadVerifyError::ValidationRequestError { error, height: block_height, hash },
-                    }
-                })
+                verification
+                    .map(|hash| (block_height, hash))
+                    .map_err(|err| {
+                        match err.downcast::<zebra_consensus::chain::VerifyChainError>() {
+                            Ok(error) => BlockDownloadVerifyError::Invalid { error: *error, height: block_height, hash },
+                            Err(error) => BlockDownloadVerifyError::ValidationRequestError { error, height: block_height, hash },
+                        }
+                    })
             }
             .in_current_span()
             // Tack the hash onto the error so we can remove the cancel handle
             // on failure as well as on success.
             .map_err(move |e| (e, hash)),
         );
+
+        // Try to start the spawned task before queueing the next block request
+        tokio::task::yield_now().await;
 
         self.pending.push(task);
         assert!(

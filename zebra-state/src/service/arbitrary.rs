@@ -32,7 +32,7 @@ pub struct PreparedChainTree {
     chain: Arc<SummaryDebug<Vec<PreparedBlock>>>,
     count: BinarySearch,
     network: Network,
-    history_tree: HistoryTree,
+    history_tree: Arc<HistoryTree>,
 }
 
 impl ValueTree for PreparedChainTree {
@@ -40,7 +40,7 @@ impl ValueTree for PreparedChainTree {
         Arc<SummaryDebug<Vec<PreparedBlock>>>,
         <BinarySearch as ValueTree>::Value,
         Network,
-        HistoryTree,
+        Arc<HistoryTree>,
     );
 
     fn current(&self) -> Self::Value {
@@ -64,7 +64,13 @@ impl ValueTree for PreparedChainTree {
 #[derive(Debug, Default)]
 pub struct PreparedChain {
     // the proptests are threaded (not async), so we want to use a threaded mutex here
-    chain: std::sync::Mutex<Option<(Network, Arc<SummaryDebug<Vec<PreparedBlock>>>, HistoryTree)>>,
+    chain: std::sync::Mutex<
+        Option<(
+            Network,
+            Arc<SummaryDebug<Vec<PreparedBlock>>>,
+            Arc<HistoryTree>,
+        )>,
+    >,
     // the strategy for generating LedgerStates. If None, it calls [`LedgerState::genesis_strategy`].
     ledger_strategy: Option<BoxedStrategy<LedgerState>>,
     generate_valid_commitments: bool,
@@ -112,6 +118,7 @@ impl Strategy for PreparedChain {
     type Tree = PreparedChainTree;
     type Value = <PreparedChainTree as ValueTree>::Value;
 
+    #[allow(clippy::unwrap_in_result)]
     fn new_tree(&self, runner: &mut TestRunner) -> NewTree<Self> {
         let mut chain = self.chain.lock().unwrap();
         if chain.is_none() {
@@ -154,7 +161,11 @@ impl Strategy for PreparedChain {
                 &Default::default(),
             )
             .expect("history tree should be created");
-            *chain = Some((network, Arc::new(SummaryDebug(blocks)), history_tree));
+            *chain = Some((
+                network,
+                Arc::new(SummaryDebug(blocks)),
+                Arc::new(history_tree),
+            ));
         }
 
         let chain = chain.clone().expect("should be generated");

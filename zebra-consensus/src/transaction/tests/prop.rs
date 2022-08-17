@@ -1,3 +1,5 @@
+//! Randomised property tests for transaction verification.
+
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
 use chrono::{DateTime, Duration, Utc};
@@ -438,7 +440,7 @@ fn validate(
     known_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     network: Network,
 ) -> Result<transaction::Response, TransactionError> {
-    zebra_test::RUNTIME.block_on(async {
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         // Initialize the verifier
         let state_service =
             tower::service_fn(|_| async { unreachable!("State service should not be called") });
