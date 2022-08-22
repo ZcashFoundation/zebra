@@ -24,21 +24,17 @@ allow = [
 
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    #  wait for zcash_proofs fork be merged back into upstream
-    # https://github.com/ZcashFoundation/zebra/issues/3831
-    { name = "equihash", version = "=0.2.0" },
-    { name = "zcash_encoding", version = "=0.1.0" },
-    { name = "zcash_note_encryption", version = "=0.1.0" },
-    { name = "zcash_primitives", version = "=0.7.0" },
-
-    # wait until zcash updates its halo2, orchard, etc. dependencies
-    # (which is likely to happen in the release after 5.0.0)
-    { name = "halo2_gadgets", version = "=0.1.0" },
-    { name = "halo2_proofs", version = "=0.1.0" },
-    { name = "orchard", version = "=0.1.0" },
+    # wait for zcash_proofs to be published
+    { name = "equihash", version = "=0.2.0"},
+    { name = "zcash_encoding", version = "=0.1.0"},
+    { name = "zcash_note_encryption", version = "=0.1.0"},
+    { name = "zcash_primitives", version = "=0.7.0"},
 
     # wait for proc-macro2 and syn to upgrade
-    { name = "unicode-xid", version = "=0.1.0"}
+    { name = "unicode-xid", version = "=0.1.0"},
+
+    # wait for zcash_address to upgrade
+    { name = "bech32", version = "=0.8.1"},
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
@@ -56,9 +52,6 @@ skip-tree = [
 
     # wait for structopt upgrade (or upgrade to clap 3)
     { name = "heck", version = "=0.3.3" },
-
-    # wait for halo2 to upgrade
-    { name = "blake2b_simd", version = "=0.5.11" },
 
     # wait for zcash_primitives to remove duplicated dependencies
     { name = "block-buffer", version = "=0.7.3" },
