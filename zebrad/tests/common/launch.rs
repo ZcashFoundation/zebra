@@ -48,12 +48,12 @@ pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(2);
 /// and `zebrad` takes about 30 minutes to update to the tip.
 ///
 /// TODO: reduce to 20 minutes when `zebrad` sync performance improves
-pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = Duration::from_secs(60 * 60);
+pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = Duration::from_secs(11 * 60 * 60);
 
 /// The amount of time we wait for lightwalletd to do a full sync to the tip.
 ///
 /// See [`LIGHTWALLETD_UPDATE_TIP_DELAY`] for details.
-pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = Duration::from_secs(150 * 60);
+pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = Duration::from_secs(11 * 60 * 60);
 
 /// The amount of extra time we wait for Zebra to sync to the tip,
 /// after we ignore a lightwalletd failure.
