@@ -192,9 +192,9 @@ impl Chain {
             self.sprout_note_commitment_tree.root() == other.sprout_note_commitment_tree.root() &&
             self.sprout_trees_by_anchor == other.sprout_trees_by_anchor &&
             self.sapling_note_commitment_tree.root() == other.sapling_note_commitment_tree.root() &&
-            self.sapling_trees_by_height== other.sapling_trees_by_height &&
+            self.sapling_trees_by_height == other.sapling_trees_by_height &&
             self.orchard_note_commitment_tree.root() == other.orchard_note_commitment_tree.root() &&
-            self.orchard_trees_by_height== other.orchard_trees_by_height &&
+            self.orchard_trees_by_height == other.orchard_trees_by_height &&
 
             // history trees
             self.history_tree == other.history_tree &&
