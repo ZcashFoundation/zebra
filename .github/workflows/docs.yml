@@ -17,6 +17,12 @@ on:
       # workflow definitions
       - '.github/workflows/docs.yml'
 
+env:
+  RUST_LOG: info
+  RUST_BACKTRACE: full
+  RUST_LIB_BACKTRACE: full
+  COLORBT_SHOW_HIDDEN: '1'
+
 jobs:
   build:
     name: Build and Deploy Docs (+beta)
