@@ -60,6 +60,10 @@ fn main() {
     tonic_build::configure()
         .build_client(true)
         .build_server(false)
+        // The lightwalletd gRPC types don't use floats or complex collections,
+        // so we can derive `Eq` as well as the default generated `PartialEq` derive.
+        // This fixes `clippy::derive_partial_eq_without_eq` warnings.
+        .type_attribute(".", "#[derive(Eq)]")
         .compile(
             &["tests/common/lightwalletd/proto/service.proto"],
             &["tests/common/lightwalletd/proto"],
