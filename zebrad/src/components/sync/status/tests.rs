@@ -33,7 +33,7 @@ proptest! {
     /// length updates and verifies if the other task was awakened by the update.
     #[test]
     fn waits_until_close_to_tip(sync_lengths in any::<Vec<usize>>()) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         runtime.block_on(timeout(MAX_TEST_EXECUTION, root_task(sync_lengths)))??;

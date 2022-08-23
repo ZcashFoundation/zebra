@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn pedersen_hash_to_point_test_vectors() {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         const D: [u8; 8] = *b"Zcash_PH";
 
@@ -390,7 +390,7 @@ mod tests {
 
     #[test]
     fn add() {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let identity = ValueCommitment(jubjub::AffinePoint::identity());
 
@@ -414,7 +414,7 @@ mod tests {
 
     #[test]
     fn add_assign() {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let mut identity = ValueCommitment(jubjub::AffinePoint::identity());
 
@@ -441,7 +441,7 @@ mod tests {
 
     #[test]
     fn sub() {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let g_point = jubjub::AffinePoint::from_raw_unchecked(
             jubjub::Fq::from_raw([
@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn sub_assign() {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let g_point = jubjub::AffinePoint::from_raw_unchecked(
             jubjub::Fq::from_raw([
@@ -496,7 +496,7 @@ mod tests {
 
     #[test]
     fn sum() {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let g_point = jubjub::AffinePoint::from_raw_unchecked(
             jubjub::Fq::from_raw([

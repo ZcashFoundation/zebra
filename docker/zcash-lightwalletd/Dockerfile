@@ -24,7 +24,7 @@ RUN go mod download
 COPY . ./
 
 # Build and install the binary.
-RUN go build -v -o /lightwalletd
+RUN go build -v -o /opt/lightwalletd
 
 ARG ZCASHD_CONF_PATH
 
@@ -36,7 +36,7 @@ RUN set -ex; \
     echo "rpcport=8232"; \
   } > "${ZCASHD_CONF_PATH}"
 
-ENTRYPOINT ["/lightwalletd"]
+ENTRYPOINT ["/opt/lightwalletd"]
 CMD ["--no-tls-very-insecure", "--grpc-bind-addr=0.0.0.0:9067",  "--http-bind-addr=0.0.0.0:9068", "--log-file=/dev/stdout", "--log-level=7"]
 
 ##
@@ -51,7 +51,7 @@ ARG LWD_HTTP_PORT
 
 WORKDIR /
 
-COPY --from=build /lightwalletd /usr/local/bin
+COPY --from=build /opt/lightwalletd /usr/local/bin
 COPY --from=build $ZCASHD_CONF_PATH ./
 
 EXPOSE 9067

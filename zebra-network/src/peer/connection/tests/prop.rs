@@ -45,7 +45,7 @@ proptest! {
         first_block in any::<DisplayToDebug<Arc<Block>>>(),
         second_block in any::<DisplayToDebug<Arc<Block>>>(),
     ) {
-        let runtime = zebra_test::init_async();
+        let (runtime, _init_guard) = zebra_test::init_async();
 
         runtime.block_on(async move {
             // The real stream and sink are from a split TCP connection,

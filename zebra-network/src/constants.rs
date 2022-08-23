@@ -336,7 +336,7 @@ mod tests {
     /// it relies on.
     #[test]
     fn ensure_live_peer_duration_value_matches_others() {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let constructed_live_peer_duration =
             HEARTBEAT_INTERVAL + REQUEST_TIMEOUT + REQUEST_TIMEOUT + REQUEST_TIMEOUT;
@@ -347,7 +347,7 @@ mod tests {
     /// Make sure that the timeout values are consistent with each other.
     #[test]
     fn ensure_timeouts_consistent() {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         assert!(HANDSHAKE_TIMEOUT <= REQUEST_TIMEOUT,
                 "Handshakes are requests, so the handshake timeout can't be longer than the timeout for all requests.");
@@ -382,7 +382,7 @@ mod tests {
     /// Make sure that peer age limits are consistent with each other.
     #[test]
     fn ensure_peer_age_limits_consistent() {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         assert!(
             MAX_PEER_ACTIVE_FOR_GOSSIP <= MAX_RECENT_PEER_AGE,
@@ -397,7 +397,7 @@ mod tests {
         // Zebra 1.0.0-beta.2 address book metrics in December 2021.
         const TYPICAL_MAINNET_ADDRESS_BOOK_SIZE: usize = 4_500;
 
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         assert!(
             MAX_ADDRS_IN_ADDRESS_BOOK >= GET_ADDR_FANOUT * MAX_ADDRS_IN_MESSAGE,
@@ -418,7 +418,7 @@ mod tests {
     /// Make sure inventory registry rotation is consistent with the target block interval.
     #[test]
     fn ensure_inventory_rotation_consistent() {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         assert!(
             INVENTORY_ROTATION_INTERVAL

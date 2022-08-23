@@ -155,7 +155,7 @@ async fn verify_checkpoint_test() -> Result<(), Report> {
 /// Also tests the `chain::init` function.
 #[spandoc::spandoc]
 async fn verify_checkpoint(config: Config) -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let network = Network::Mainnet;
 
@@ -187,7 +187,7 @@ async fn verify_fail_no_coinbase_test() -> Result<(), Report> {
 /// and BlockVerifier. This is the error case, where there is no height.
 #[spandoc::spandoc]
 async fn verify_fail_no_coinbase() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet).await;
 
@@ -212,7 +212,7 @@ async fn round_trip_checkpoint_test() -> Result<(), Report> {
 /// Test that state updates work
 #[spandoc::spandoc]
 async fn round_trip_checkpoint() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet).await;
 
@@ -237,7 +237,7 @@ async fn verify_fail_add_block_checkpoint_test() -> Result<(), Report> {
 /// Test that the state rejects duplicate block adds
 #[spandoc::spandoc]
 async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (chain_verifier, state_service) = verifiers_from_network(Network::Mainnet).await;
 

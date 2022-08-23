@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn dequeue_gives_right_children() -> Result<()> {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let block1: Arc<Block> =
             zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn prune_removes_right_children() -> Result<()> {
-        zebra_test::init();
+        let _init_guard = zebra_test::init();
 
         let block1: Arc<Block> =
             zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;

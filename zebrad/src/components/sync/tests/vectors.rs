@@ -937,7 +937,7 @@ fn setup() -> (
     MockService<zebra_state::Request, zebra_state::Response, PanicAssertion>,
     MockChainTipSender,
 ) {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let consensus_config = ConsensusConfig::default();
     let state_config = StateConfig::ephemeral();

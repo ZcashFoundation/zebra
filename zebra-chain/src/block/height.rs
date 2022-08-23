@@ -146,7 +146,7 @@ impl ZcashDeserialize for Height {
 
 #[test]
 fn operator_tests() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Elementary checks.
     assert_eq!(Some(Height(2)), Height(1) + Height(1));

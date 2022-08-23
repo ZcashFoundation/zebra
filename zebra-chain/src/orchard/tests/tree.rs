@@ -5,7 +5,7 @@ use crate::orchard::tree::*;
 
 #[test]
 fn empty_roots() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     for i in 0..EMPTY_ROOTS.len() {
         assert_eq!(
@@ -18,7 +18,7 @@ fn empty_roots() {
 
 #[test]
 fn incremental_roots() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut leaves = vec![];
 

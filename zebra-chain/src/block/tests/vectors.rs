@@ -21,7 +21,7 @@ use super::generate; // XXX this should be rewritten as strategies
 
 #[test]
 fn blockheaderhash_debug() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let preimage = b"foo bar baz";
     let mut sha_writer = sha256d::Writer::default();
@@ -37,7 +37,7 @@ fn blockheaderhash_debug() {
 
 #[test]
 fn blockheaderhash_from_blockheader() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let (blockheader, _blockheader_bytes) = generate::block_header();
 
@@ -64,7 +64,7 @@ fn blockheaderhash_from_blockheader() {
 
 #[test]
 fn deserialize_blockheader() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Includes the 32-byte nonce and 3-byte equihash length field.
     const BLOCK_HEADER_LENGTH: usize = crate::work::equihash::Solution::INPUT_LENGTH
@@ -83,7 +83,7 @@ fn deserialize_blockheader() {
 
 #[test]
 fn round_trip_blocks() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // this one has a bad version field, but it is still valid
     zebra_test::vectors::BLOCK_MAINNET_434873_BYTES
@@ -106,7 +106,7 @@ fn round_trip_blocks() {
 
 #[test]
 fn coinbase_parsing_rejects_above_0x80() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     zebra_test::vectors::BAD_BLOCK_MAINNET_202_BYTES
         .zcash_deserialize_into::<Block>()
@@ -115,7 +115,7 @@ fn coinbase_parsing_rejects_above_0x80() {
 
 #[test]
 fn block_test_vectors_unique() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let block_count = zebra_test::vectors::BLOCKS.len();
     let block_hashes: HashSet<_> = zebra_test::vectors::BLOCKS
@@ -137,14 +137,14 @@ fn block_test_vectors_unique() {
 
 #[test]
 fn block_test_vectors_height_mainnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     block_test_vectors_height(Mainnet);
 }
 
 #[test]
 fn block_test_vectors_height_testnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     block_test_vectors_height(Testnet);
 }
@@ -191,14 +191,14 @@ fn block_test_vectors_height(network: Network) {
 
 #[test]
 fn block_commitment_mainnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     block_commitment(Mainnet);
 }
 
 #[test]
 fn block_commitment_testnet() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     block_commitment(Testnet);
 }
@@ -248,7 +248,7 @@ fn block_commitment(network: Network) {
 
 #[test]
 fn block_limits_multi_tx() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Test multiple small transactions to fill a block max size
 
@@ -285,7 +285,7 @@ fn block_limits_multi_tx() {
 
 #[test]
 fn block_limits_single_tx() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Test block limit with a big single transaction
 
@@ -334,7 +334,7 @@ fn node_time_check(
 
 #[test]
 fn time_check_now() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // These checks are deteministic, because all the times are offset
     // from the current time.
@@ -396,7 +396,7 @@ static BLOCK_HEADER_INVALID_TIMESTAMPS: &[i64] = &[
 
 #[test]
 fn time_check_fixed() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // These checks are non-deterministic, but the times are all in the
     // distant past or far future. So it's unlikely that the test

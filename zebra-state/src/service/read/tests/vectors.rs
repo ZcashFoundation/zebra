@@ -16,7 +16,7 @@ use crate::{init_test_services, populated_state, ReadRequest, ReadResponse};
 /// Test that ReadStateService responds correctly when empty.
 #[tokio::test]
 async fn empty_read_state_still_responds_to_requests() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let transcript = Transcript::from(empty_state_test_cases());
 
@@ -31,7 +31,7 @@ async fn empty_read_state_still_responds_to_requests() -> Result<()> {
 /// Test that ReadStateService responds correctly when the state contains blocks.
 #[tokio::test(flavor = "multi_thread")]
 async fn populated_read_state_responds_correctly() -> Result<()> {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS

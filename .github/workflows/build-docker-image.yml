@@ -36,8 +36,9 @@ on:
       rust_log:
         required: false
         type: string
+        default: info
     outputs:
-      image_digest  :
+      image_digest:
         description: 'The image digest to be used on a caller workflow'
         value: ${{ jobs.build.outputs.image_digest }}
 
@@ -109,7 +110,7 @@ jobs:
       # Build and push image to Google Artifact Registry
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v3.1.0
+        uses: docker/build-push-action@v3.1.1
         with:
           target: ${{ inputs.dockerfile_target }}
           context: .

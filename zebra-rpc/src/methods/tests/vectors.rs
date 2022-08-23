@@ -22,7 +22,7 @@ use super::super::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getinfo() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -55,7 +55,7 @@ async fn rpc_getinfo() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblock() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
@@ -115,7 +115,7 @@ async fn rpc_getblock() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblock_parse_error() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -145,7 +145,7 @@ async fn rpc_getblock_parse_error() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblock_missing_error() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -197,7 +197,7 @@ async fn rpc_getblock_missing_error() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getbestblockhash() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
@@ -243,7 +243,7 @@ async fn rpc_getbestblockhash() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getrawtransaction() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
@@ -328,7 +328,7 @@ async fn rpc_getrawtransaction() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getaddresstxids_invalid_arguments() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
@@ -432,7 +432,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getaddresstxids_response() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     for network in [Mainnet, Testnet] {
         let blocks: Vec<Arc<Block>> = match network {
@@ -527,7 +527,7 @@ async fn rpc_getaddresstxids_response_with(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getaddressutxos_invalid_arguments() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -562,7 +562,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getaddressutxos_response() {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
         .iter()

@@ -27,7 +27,7 @@ where
                 std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
             >,
 {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut async_checks = FuturesUnordered::new();
 
@@ -138,7 +138,7 @@ where
             std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
         >,
 {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut async_checks = FuturesUnordered::new();
 
@@ -219,7 +219,7 @@ where
                 std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
             >,
 {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut async_checks = FuturesUnordered::new();
 
@@ -291,7 +291,7 @@ where
                 std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
             >,
 {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut async_checks = FuturesUnordered::new();
 
@@ -407,7 +407,7 @@ where
             std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
         >,
 {
-    zebra_test::init();
+    let _init_guard = zebra_test::init();
 
     let mut async_checks = FuturesUnordered::new();
 
