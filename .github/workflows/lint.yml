@@ -10,6 +10,13 @@ on:
     branches:
       - 'main'
 
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_LOG: info
+  RUST_BACKTRACE: full
+  RUST_LIB_BACKTRACE: full
+  COLORBT_SHOW_HIDDEN: '1'
+
 jobs:
   changed-files:
     runs-on: ubuntu-latest
