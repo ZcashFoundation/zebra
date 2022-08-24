@@ -29,9 +29,9 @@ jobs:
   # If a release was made we want to substract the first part of the semver from the
   # tag_name
   #
-  # Output:
-  # - If our semver is v1.3.0 the resulting output from this job would be v1
-  # 
+  # Generate the following output to pass to subsequent jobs
+  # - If our semver is `v1.3.0` the resulting output from this job would be `v1`
+  #
   # Note: We just use the first part of the version to replace old instances, and change
   # it when a major version is released, to keep a segregation between new and old 
   # versions.
@@ -52,6 +52,10 @@ jobs:
         id: set
         run: echo "::set-output name=major_version::${{ steps.get.outputs.result }}"
 
+  # Each time this workflow is executed, a build will be triggered to create a new image
+  # with the corresponding tags using information from Git
+  #
+  # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
   build:
     uses: ./.github/workflows/build-docker-image.yml
     with:
@@ -64,6 +68,17 @@ jobs:
       zebra_skip_ipv6_tests: '1'
       rust_log: info
 
+  # This jobs handles the deployment of a Managed Instance Group (MiG) with 2 nodes in
+  # the us-central1 region. Two different groups of MiGs are deployed one for pushes to
+  # the main branch and another for version releases of Zebra
+  #
+  # Once this workflow is triggered the previous MiG is replaced, on pushes to main its
+  # always replaced, and with releases its only replaced if the same major version is
+  # being deployed, otherwise a new major version is deployed
+  #
+  # Runs:
+  # - on every push/merge to the `main` branch
+  # - on every release, when it's published
   deploy-nodes:
     name: Deploy Mainnet nodes
     needs: [ build, versioning ]
@@ -72,7 +87,7 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
-    if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' }}
 
     steps:
       - name: Inject slug/short variables
@@ -128,6 +143,13 @@ jobs:
           --version template="zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --region "${{ env.REGION }}"
 
+  # This jobs handles the deployment of a single node (1) in the us-central1-a zone
+  # when an instance is required to test a specific commit
+  #
+  # Runs:
+  # - on request, using workflow_dispatch with regenerate-disks
+  #
+  # Note: this instances are not automatically replaced or deleted
   deploy-instance:
     name: Deploy single instance
     needs: build
