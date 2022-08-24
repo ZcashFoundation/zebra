@@ -1254,12 +1254,10 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
                 });
                 let _ = writeln!(&mut stdout_buf, "{}", line);
             }
-            source.stdout = None;
         } else if let Some(child) = &mut source.child {
             if let Some(stdout) = &mut child.stdout {
                 let _ = stdout.read_to_string(&mut stdout_buf);
             }
-            child.stdout = None;
         }
 
         if let Some(stderr) = &mut source.stderr {
@@ -1269,12 +1267,10 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
                 });
                 let _ = writeln!(&mut stderr_buf, "{}", line);
             }
-            source.stderr = None;
         } else if let Some(child) = &mut source.child {
             if let Some(stderr) = &mut child.stderr {
                 let _ = stderr.read_to_string(&mut stderr_buf);
             }
-            child.stderr = None;
         }
 
         self.section(stdout_buf.header("Unread Stdout:"))
