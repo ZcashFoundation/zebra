@@ -608,6 +608,7 @@ fn different_blocks_different_chains() -> Result<()> {
                 // note commitment trees
                 chain1.sprout_note_commitment_tree = chain2.sprout_note_commitment_tree.clone();
                 chain1.sprout_trees_by_anchor = chain2.sprout_trees_by_anchor.clone();
+                chain1.sprout_trees_by_height = chain2.sprout_trees_by_height.clone();
                 chain1.sapling_note_commitment_tree = chain2.sapling_note_commitment_tree.clone();
                 chain1.sapling_trees_by_height = chain2.sapling_trees_by_height.clone();
                 chain1.orchard_note_commitment_tree = chain2.orchard_note_commitment_tree.clone();

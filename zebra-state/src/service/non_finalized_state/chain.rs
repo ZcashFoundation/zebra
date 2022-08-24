@@ -71,6 +71,9 @@ pub struct Chain {
     /// This is required for interstitial states.
     pub(crate) sprout_trees_by_anchor:
         HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
+    /// The Sprout note commitment tree for each height.
+    pub(crate) sprout_trees_by_height:
+        BTreeMap<block::Height, Arc<sprout::tree::NoteCommitmentTree>>,
     /// The Sapling note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
@@ -150,6 +153,7 @@ impl Chain {
             sprout_anchors: MultiSet::new(),
             sprout_anchors_by_height: Default::default(),
             sprout_trees_by_anchor: Default::default(),
+            sprout_trees_by_height: Default::default(),
             sapling_anchors: MultiSet::new(),
             sapling_anchors_by_height: Default::default(),
             sapling_trees_by_height: Default::default(),
@@ -191,6 +195,7 @@ impl Chain {
             // note commitment trees
             self.sprout_note_commitment_tree.root() == other.sprout_note_commitment_tree.root() &&
             self.sprout_trees_by_anchor == other.sprout_trees_by_anchor &&
+            self.sprout_trees_by_height == other.sprout_trees_by_height &&
             self.sapling_note_commitment_tree.root() == other.sapling_note_commitment_tree.root() &&
             self.sapling_trees_by_height == other.sapling_trees_by_height &&
             self.orchard_note_commitment_tree.root() == other.orchard_note_commitment_tree.root() &&
@@ -739,6 +744,7 @@ impl Chain {
             spent_utxos: self.spent_utxos.clone(),
             sprout_note_commitment_tree,
             sprout_trees_by_anchor: self.sprout_trees_by_anchor.clone(),
+            sprout_trees_by_height: self.sprout_trees_by_height.clone(),
             sapling_note_commitment_tree,
             sapling_trees_by_height: self.sapling_trees_by_height.clone(),
             orchard_note_commitment_tree,
@@ -808,6 +814,8 @@ impl Chain {
         // Do the Chain updates with data dependencies on note commitment tree updates
 
         // Update the note commitment trees indexed by height.
+        self.sprout_trees_by_height
+            .insert(height, self.sprout_note_commitment_tree.clone());
         self.sapling_trees_by_height
             .insert(height, self.sapling_note_commitment_tree.clone());
         self.orchard_trees_by_height
@@ -1115,6 +1123,9 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         if !self.sprout_anchors.contains(&anchor) {
             self.sprout_trees_by_anchor.remove(&anchor);
         }
+        self.sprout_trees_by_height
+            .remove(&height)
+            .expect("Sprout note commitment tree must be present if block was added to chain");
 
         let anchor = self
             .sapling_anchors_by_height
