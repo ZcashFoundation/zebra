@@ -130,9 +130,9 @@ jobs:
         id: create-instance
         run: |
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 100GB \
+          --boot-disk-size 200GB \
           --boot-disk-type pd-ssd \
-          --create-disk name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --create-disk name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=200GB,type=pd-ssd \
           --container-image debian:buster \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
@@ -313,9 +313,9 @@ jobs:
         id: create-instance
         run: |
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 100GB \
+          --boot-disk-size 200GB \
           --boot-disk-type pd-ssd \
-          --create-disk image=${{ env.CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --create-disk image=${{ env.CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=200GB,type=pd-ssd \
           --container-image debian:buster \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
