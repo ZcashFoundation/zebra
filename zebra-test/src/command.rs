@@ -567,7 +567,7 @@ impl<T> TestChild<T> {
     {
         self.apply_failure_regexes_to_outputs();
 
-        if let Some(line) = self.stdout.as_mut().and_then(|iter| iter.next()) {
+        if let Some(line_result) = self.stdout.as_mut().and_then(|iter| iter.next()) {
             let bypass_test_capture = self.bypass_test_capture;
 
             if let Some(write_context) = write_context.into() {
@@ -575,7 +575,8 @@ impl<T> TestChild<T> {
             }
 
             Self::write_to_test_logs(
-                line.context_from(self)
+                line_result
+                    .context_from(self)
                     .expect("failure reading test process logs"),
                 bypass_test_capture,
             );
@@ -599,7 +600,7 @@ impl<T> TestChild<T> {
     {
         self.apply_failure_regexes_to_outputs();
 
-        if let Some(line) = self.stderr.as_mut().and_then(|iter| iter.next()) {
+        if let Some(line_result) = self.stderr.as_mut().and_then(|iter| iter.next()) {
             let bypass_test_capture = self.bypass_test_capture;
 
             if let Some(write_context) = write_context.into() {
@@ -607,7 +608,8 @@ impl<T> TestChild<T> {
             }
 
             Self::write_to_test_logs(
-                line.context_from(self)
+                line_result
+                    .context_from(self)
                     .expect("failure reading test process logs"),
                 bypass_test_capture,
             );
