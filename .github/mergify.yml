@@ -7,7 +7,7 @@ queue_rules:
     speculative_checks: 1
     batch_size: 8
     # Wait a short time to embark hotfixes together in a merge train
-    batch_max_wait_time: "1 minute"
+    batch_max_wait_time: "2 minutes"
     conditions:
       # Mergify automatically applies status check, approval, and conversation rules,
       # which are the same as the GitHub main branch protection rules
@@ -18,7 +18,7 @@ queue_rules:
     allow_inplace_checks: True
     allow_checks_interruption: True
     speculative_checks: 1
-    batch_size: 8
+    batch_size: 20
     # Wait for a few minutes to embark high priority tickets together in a merge train
     batch_max_wait_time: "10 minutes"
     conditions:
@@ -28,7 +28,7 @@ queue_rules:
     allow_inplace_checks: True
     allow_checks_interruption: True
     speculative_checks: 1
-    batch_size: 8
+    batch_size: 20
     # Wait a bit longer to embark low priority tickets together in a merge train
     batch_max_wait_time: "20 minutes"
     conditions:
