@@ -185,19 +185,15 @@ fn kill_on_timeout_no_output() -> Result<()> {
 }
 
 /// Make sure failure regexes detect when a child process prints a failure message to stdout,
-/// and panic with a test failure message.
+/// and fail with a test failure message.
 #[test]
-#[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message() {
     let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
     if !is_command_available(TEST_CMD, &[]) {
-        panic!(
-            "skipping test: command not available\n\
-             fake panic message: Logged a failure message"
-        );
+        return;
     }
 
     let mut child = tempdir()
@@ -209,15 +205,21 @@ fn failure_regex_matches_stdout_failure_message() {
 
     // Any method that reads output should work here.
     // We use a non-matching regex, to trigger the failure panic.
-    child
+    let expected_error = child
         .expect_stdout_line_matches("this regex should not match")
         .unwrap_err();
+
+    let expected_error = format!("{:?}", expected_error);
+    assert!(
+        expected_error.contains("Logged a failure message"),
+        "error did not contain expected failure message: {}",
+        expected_error,
+    );
 }
 
 /// Make sure failure regexes detect when a child process prints a failure message to stderr,
 /// and panic with a test failure message.
 #[test]
-#[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stderr_failure_message() {
     let _init_guard = zebra_test::init();
 
@@ -230,10 +232,7 @@ fn failure_regex_matches_stderr_failure_message() {
     const TEST_CMD: &str = "bash";
     // Skip the test if the test system does not have the command
     if !is_command_available(TEST_CMD, &["-c", "read -t 1 -p failure_message"]) {
-        panic!(
-            "skipping test: command not available\n\
-             fake panic message: Logged a failure message"
-        );
+        return;
     }
 
     let mut child = tempdir()
@@ -245,9 +244,16 @@ fn failure_regex_matches_stderr_failure_message() {
 
     // Any method that reads output should work here.
     // We use a non-matching regex, to trigger the failure panic.
-    child
+    let expected_error = child
         .expect_stderr_line_matches("this regex should not match")
         .unwrap_err();
+
+    let expected_error = format!("{:?}", expected_error);
+    assert!(
+        expected_error.contains("Logged a failure message"),
+        "error did not contain expected failure message: {}",
+        expected_error,
+    );
 }
 
 /// Make sure failure regexes detect when a child process prints a failure message to stdout,
@@ -260,10 +266,7 @@ fn failure_regex_matches_stdout_failure_message_drop() {
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
     if !is_command_available(TEST_CMD, &[]) {
-        panic!(
-            "skipping test: command not available\n\
-             fake panic message: Logged a failure message"
-        );
+        return;
     }
 
     let _child = tempdir()
@@ -289,10 +292,7 @@ fn failure_regex_matches_stdout_failure_message_kill() {
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
     if !is_command_available(TEST_CMD, &[]) {
-        panic!(
-            "skipping test: command not available\n\
-             fake panic message: Logged a failure message"
-        );
+        return;
     }
 
     let mut child = tempdir()
@@ -307,7 +307,7 @@ fn failure_regex_matches_stdout_failure_message_kill() {
 
     // Kill should read all unread output to generate the error context,
     // or the output should be read on drop.
-    child.kill().unwrap();
+    child.kill(true).unwrap();
 }
 
 /// Make sure failure regexes detect when a child process prints a failure message to stdout,
@@ -320,10 +320,7 @@ fn failure_regex_matches_stdout_failure_message_kill_on_error() {
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
     if !is_command_available(TEST_CMD, &[]) {
-        panic!(
-            "skipping test: command not available\n\
-             fake panic message: Logged a failure message"
-        );
+        return;
     }
 
     let child = tempdir()
@@ -352,10 +349,7 @@ fn failure_regex_matches_stdout_failure_message_no_kill_on_error() {
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
     if !is_command_available(TEST_CMD, &[]) {
-        panic!(
-            "skipping test: command not available\n\
-             fake panic message: Logged a failure message"
-        );
+        return;
     }
 
     let child = tempdir()
@@ -379,7 +373,6 @@ fn failure_regex_matches_stdout_failure_message_no_kill_on_error() {
 ///
 /// TODO: test the failure regex on timeouts with no output (#1140)
 #[test]
-#[should_panic(expected = "Logged a failure message")]
 fn failure_regex_timeout_continuous_output() {
     let _init_guard = zebra_test::init();
 
@@ -389,10 +382,7 @@ fn failure_regex_timeout_continuous_output() {
     const TEST_CMD: &str = "hexdump";
     // Skip the test if the test system does not have the command
     if !is_command_available(TEST_CMD, &["/dev/null"]) {
-        panic!(
-            "skipping test: command not available\n\
-             fake panic message: Logged a failure message"
-        );
+        return;
     }
 
     // Without '-v', hexdump hides duplicate lines. But we want duplicate lines
@@ -406,9 +396,16 @@ fn failure_regex_timeout_continuous_output() {
 
     // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
     // We use a non-matching regex, to trigger the timeout and the failure panic.
-    child
+    let expected_error = child
         .expect_stdout_line_matches("this regex should not match")
         .unwrap_err();
+
+    let expected_error = format!("{:?}", expected_error);
+    assert!(
+        expected_error.contains("Logged a failure message"),
+        "error did not contain expected failure message: {}",
+        expected_error,
+    );
 }
 
 /// Make sure failure regexes are checked when a child process prints a failure message to stdout,
@@ -423,10 +420,7 @@ fn failure_regex_matches_stdout_failure_message_wait_for_output() {
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
     if !is_command_available(TEST_CMD, &[]) {
-        panic!(
-            "skipping test: command not available\n\
-             fake panic message: Logged a failure message"
-        );
+        return;
     }
 
     let child = tempdir()
@@ -447,17 +441,13 @@ fn failure_regex_matches_stdout_failure_message_wait_for_output() {
 /// Make sure failure regex iters detect when a child process prints a failure message to stdout,
 /// and panic with a test failure message.
 #[test]
-#[should_panic(expected = "Logged a failure message")]
 fn failure_regex_iter_matches_stdout_failure_message() {
     let _init_guard = zebra_test::init();
 
     const TEST_CMD: &str = "echo";
     // Skip the test if the test system does not have the command
     if !is_command_available(TEST_CMD, &[]) {
-        panic!(
-            "skipping test: command not available\n\
-             fake panic message: Logged a failure message"
-        );
+        return;
     }
 
     let mut child = tempdir()
@@ -472,9 +462,16 @@ fn failure_regex_iter_matches_stdout_failure_message() {
 
     // Any method that reads output should work here.
     // We use a non-matching regex, to trigger the failure panic.
-    child
+    let expected_error = child
         .expect_stdout_line_matches("this regex should not match")
         .unwrap_err();
+
+    let expected_error = format!("{:?}", expected_error);
+    assert!(
+        expected_error.contains("Logged a failure message"),
+        "error did not contain expected failure message: {}",
+        expected_error,
+    );
 }
 
 /// Make sure ignore regexes override failure regexes.

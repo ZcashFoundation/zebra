@@ -248,7 +248,7 @@ pub fn sync_until(
 
         // make sure the child process is dead
         // if it has already exited, ignore that error
-        let _ = child.kill();
+        let _ = child.kill(true);
 
         Ok(child.dir.take().expect("dir was not already taken"))
     } else {
@@ -389,7 +389,7 @@ pub fn create_cached_database_height(
 
     child.expect_stdout_line_matches(stop_regex)?;
 
-    child.kill()?;
+    child.kill(true)?;
 
     Ok(())
 }
