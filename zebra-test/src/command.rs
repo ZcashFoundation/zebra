@@ -838,7 +838,7 @@ impl<T> TestChild<T> {
             // If the process exits between is_running and kill, we will see
             // spurious errors here. So we want to ignore "no such process"
             // errors from kill.
-            self.kill(true).context_from(self)?;
+            self.kill(true)?;
         }
 
         let report = eyre!(
