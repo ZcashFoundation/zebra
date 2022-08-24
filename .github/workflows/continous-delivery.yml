@@ -39,7 +39,7 @@ jobs:
     name: Versioning
     runs-on: ubuntu-latest
     outputs:
-      api_version: ${{ steps.set.outputs.api_version }}
+      major_version: ${{ steps.set.outputs.major_version }}
     steps:
       - name: Getting Zebrad Version
         id: get
@@ -50,7 +50,7 @@ jobs:
             return context.payload.release.tag_name.substring(0,2)
       - name: Setting API Version
         id: set
-        run: echo "::set-output name=api_version::${{ steps.get.outputs.result }}"
+        run: echo "::set-output name=major_version::${{ steps.get.outputs.result }}"
 
   build:
     uses: ./.github/workflows/build-docker-image.yml
@@ -91,7 +91,7 @@ jobs:
 
       - name: Create instance template
         run: |
-          gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.api_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --boot-disk-type=pd-ssd \
           --container-image ${{ env.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
           --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-ssd \
@@ -105,7 +105,7 @@ jobs:
         id: does-group-exist
         continue-on-error: true
         run: |
-          gcloud compute instance-groups list | grep "zebrad-${{ needs.versioning.outputs.api_version || env.GITHUB_REF_SLUG_URL }}" | grep "${{ env.REGION }}"
+          gcloud compute instance-groups list | grep "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}" | grep "${{ env.REGION }}"
 
       # Deploy new managed instance group using the new instance template
       - name: Create managed instance group
@@ -113,7 +113,7 @@ jobs:
         run: |
           gcloud compute instance-groups managed create \
           "zebrad-${{ env.GITHUB_REF_SLUG_URL }}" \
-          --template "zebrad-${{ needs.versioning.outputs.api_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --template "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --health-check zebrad-tracing-filter \
           --initial-delay 30 \
           --region "${{ env.REGION }}" \
@@ -125,7 +125,7 @@ jobs:
         run: |
           gcloud compute instance-groups managed rolling-action start-update \
           "zebrad-${{ env.GITHUB_REF_SLUG_URL }}" \
-          --version template="zebrad-${{ needs.versioning.outputs.api_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --version template="zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --region "${{ env.REGION }}"
 
   deploy-instance:
