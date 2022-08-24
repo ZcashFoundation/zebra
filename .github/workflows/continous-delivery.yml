@@ -43,7 +43,7 @@ jobs:
     steps:
       - name: Getting Zebrad Version
         id: get
-        uses: actions/github-script@vv6.1.0
+        uses: actions/github-script@v6.1.0
         with:
           result-encoding: string
           script: |
