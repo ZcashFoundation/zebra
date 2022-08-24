@@ -79,8 +79,7 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            # disabled if major zero
-            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+            type=semver,pattern={{major}}
 
       # Setup Docker Buildx to allow use of docker cache layers from GH
       - name: Set up Docker Buildx
