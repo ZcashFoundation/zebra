@@ -483,7 +483,21 @@ impl<T> TestChild<T> {
     pub fn kill(&mut self, ignore_exited: bool) -> Result<()> {
         let child = match self.child.as_mut() {
             Some(child) => child,
-            None => return Err(eyre!("child was already taken")).context_from(self.as_mut()),
+            None if ignore_exited => {
+                Self::write_to_test_logs(
+                    "test child was already taken\n\
+                     ignoring kill because ignore_exited is true",
+                    self.bypass_test_capture,
+                );
+                return Ok(());
+            }
+            None => {
+                return Err(eyre!(
+                    "test child was already taken\n\
+                     call kill() once for each child process, or set ignore_exited to true"
+                ))
+                .context_from(self.as_mut())
+            }
         };
 
         /// SPANDOC: Killing child process
@@ -622,8 +636,8 @@ impl<T> TestChild<T> {
             // either in `context_from`, or on drop.
             None => {
                 return Err(eyre!(
-                    "child was already taken.\n\
-                 wait_with_output can only be called once for each child process",
+                    "test child was already taken\n\
+                     wait_with_output can only be called once for each child process",
                 ))
                 .context_from(self.as_mut())
             }
