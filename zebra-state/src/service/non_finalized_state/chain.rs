@@ -507,7 +507,7 @@ impl Chain {
 
     /// Returns the Sapling
     /// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a
-    /// hash or height, if it exists in the non-finalized `chain`.
+    /// [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
     pub fn sapling_tree(
         &self,
         hash_or_height: HashOrHeight,
@@ -520,7 +520,7 @@ impl Chain {
 
     /// Returns the Orchard
     /// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
-    /// hash or height, if it exists in the non-finalized `chain`.
+    /// [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
     pub fn orchard_tree(
         &self,
         hash_or_height: HashOrHeight,
