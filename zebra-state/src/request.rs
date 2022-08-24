@@ -221,6 +221,17 @@ pub struct FinalizedWithTrees {
     pub treestate: Option<Treestate>,
 }
 
+impl FinalizedWithTrees {
+    pub fn new(block: ContextuallyValidBlock, treestate: Treestate) -> Self {
+        let finalized = FinalizedBlock::from(block);
+
+        Self {
+            finalized,
+            treestate: Some(treestate),
+        }
+    }
+}
+
 impl From<Arc<Block>> for FinalizedWithTrees {
     fn from(block: Arc<Block>) -> Self {
         Self::from(FinalizedBlock::from(block))
