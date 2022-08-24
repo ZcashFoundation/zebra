@@ -36,6 +36,7 @@ on:
       rust_log:
         required: false
         type: string
+        default: info
 
 jobs:
   build:

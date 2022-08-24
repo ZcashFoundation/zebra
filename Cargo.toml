@@ -20,6 +20,8 @@ panic = "abort"
 
 # Speed up tests by optimizing performance-critical crates
 
+# Cryptographic crates
+
 [profile.dev.package.blake2b_simd]
 opt-level = 3
 
@@ -41,11 +43,25 @@ opt-level = 3
 [profile.dev.package.bls12_381]
 opt-level = 3
 
-[profile.dev.package.minreq]
-opt-level = 1
+# Cryptographic and parameter download crates
 
 [profile.dev.package.zcash_proofs]
-opt-level = 1
+opt-level = 3
+
+[profile.dev.package.minreq]
+opt-level = 3
+
+[profile.dev.package.rustls]
+opt-level = 3
+
+[profile.dev.package.ring]
+opt-level = 3
+
+[profile.dev.package.spin]
+opt-level = 3
+
+[profile.dev.package.untrusted]
+opt-level = 3
 
 
 [profile.release]

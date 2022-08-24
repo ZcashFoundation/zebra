@@ -36,6 +36,7 @@ on:
 
 env:
   CARGO_INCREMENTAL: 0
+  RUST_LOG: info
   RUST_BACKTRACE: full
   RUST_LIB_BACKTRACE: full
   COLORBT_SHOW_HIDDEN: '1'
@@ -54,11 +55,14 @@ jobs:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
         os: [ubuntu-latest, macos-latest]
         rust: [stable, beta]
+        exclude:
+        # TODO: re-enable beta Rust tests on ubuntu (#4929)
+          - os: ubuntu-latest
+            rust: beta
         # We're excluding macOS for the following reasons:
         # - the concurrent macOS runner limit is much lower than the Linux limit
         # - macOS is slower than Linux, and shouldn't have a build or test difference with Linux
         # - macOS is a second-tier Zebra support platform
-        exclude:
           - os: macos-latest
             rust: beta
 
