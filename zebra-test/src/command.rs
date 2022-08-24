@@ -523,7 +523,7 @@ impl<T> TestChild<T> {
 
             if wrote_lines {
                 // Write an empty line, to make output more readable
-                self.write_to_test_logs("");
+                Self::write_to_test_logs("", self.bypass_test_capture);
             }
         }
 
@@ -533,7 +533,7 @@ impl<T> TestChild<T> {
             while self.wait_for_stderr_line(None) {}
 
             if wrote_lines {
-                self.write_to_test_logs("");
+                Self::write_to_test_logs("", self.bypass_test_capture);
             }
         }
 
@@ -554,11 +554,17 @@ impl<T> TestChild<T> {
         self.apply_failure_regexes_to_outputs();
 
         if let Some(line) = self.stdout.as_mut().and_then(|iter| iter.next()) {
+            let bypass_test_capture = self.bypass_test_capture;
+
             if let Some(write_context) = write_context.into() {
-                self.write_to_test_logs(write_context);
+                Self::write_to_test_logs(write_context, bypass_test_capture);
             }
 
-            self.write_to_test_logs(line.expect("failure reading test process logs"));
+            Self::write_to_test_logs(
+                line.context_from(self)
+                    .expect("failure reading test process logs"),
+                bypass_test_capture,
+            );
 
             return true;
         }
@@ -580,11 +586,17 @@ impl<T> TestChild<T> {
         self.apply_failure_regexes_to_outputs();
 
         if let Some(line) = self.stderr.as_mut().and_then(|iter| iter.next()) {
+            let bypass_test_capture = self.bypass_test_capture;
+
             if let Some(write_context) = write_context.into() {
-                self.write_to_test_logs(write_context);
+                Self::write_to_test_logs(write_context, bypass_test_capture);
             }
 
-            self.write_to_test_logs(line.expect("failure reading test process logs"));
+            Self::write_to_test_logs(
+                line.context_from(self)
+                    .expect("failure reading test process logs"),
+                bypass_test_capture,
+            );
 
             return true;
         }
@@ -681,10 +693,17 @@ impl<T> TestChild<T> {
 
         match self.expect_line_matching_regex_set(&mut lines, success_regex, "stdout") {
             Ok(()) => {
+                // Replace the log lines for the next check
                 self.stdout = Some(lines);
                 Ok(self)
             }
-            Err(report) => Err(report),
+            Err(report) => {
+                // Read all the log lines for error context
+                self.stdout = Some(lines);
+                let error = Err(report).context_from(self);
+
+                error
+            }
         }
     }
 
@@ -708,10 +727,17 @@ impl<T> TestChild<T> {
 
         match self.expect_line_matching_regex_set(&mut lines, success_regex, "stderr") {
             Ok(()) => {
+                // Replace the log lines for the next check
                 self.stderr = Some(lines);
                 Ok(self)
             }
-            Err(report) => Err(report),
+            Err(report) => {
+                // Read all the log lines for error context
+                self.stderr = Some(lines);
+                let error = Err(report).context_from(self);
+
+                error
+            }
         }
     }
 
@@ -789,7 +815,7 @@ impl<T> TestChild<T> {
             };
 
             // Since we're about to discard this line write it to stdout.
-            self.write_to_test_logs(&line);
+            Self::write_to_test_logs(&line, self.bypass_test_capture);
 
             if success_regexes.is_match(&line) {
                 return Ok(());
@@ -800,14 +826,13 @@ impl<T> TestChild<T> {
             // If the process exits between is_running and kill, we will see
             // spurious errors here. So we want to ignore "no such process"
             // errors from kill.
-            self.kill(true)?;
+            self.kill(true).context_from(self)?;
         }
 
         let report = eyre!(
             "{} of command did not contain any matches for the given regex",
             stream_name
         )
-        .context_from(self)
         .with_section(|| format!("{:#?}", success_regexes.patterns()).header("Match Regex:"));
 
         Err(report)
@@ -821,11 +846,11 @@ impl<T> TestChild<T> {
     /// May cause weird reordering for stdout / stderr.
     /// Uses stdout even if the original lines were from stderr.
     #[allow(clippy::print_stdout)]
-    fn write_to_test_logs<S>(&self, line: S)
+    fn write_to_test_logs<S>(line: S, bypass_test_capture: bool)
     where
         S: AsRef<str>,
     {
-        write_to_test_logs(line, self.bypass_test_capture);
+        write_to_test_logs(line, bypass_test_capture);
     }
 
     /// Kill `child`, wait for its output, and use that output as the context for
@@ -1224,24 +1249,32 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
 
         if let Some(stdout) = &mut source.stdout {
             for line in stdout {
-                let line = line.expect("failure reading test process logs");
+                let line = line.unwrap_or_else(|error| {
+                    format!("failure reading test process logs: {:?}", error)
+                });
                 let _ = writeln!(&mut stdout_buf, "{}", line);
             }
+            source.stdout = None;
         } else if let Some(child) = &mut source.child {
             if let Some(stdout) = &mut child.stdout {
                 let _ = stdout.read_to_string(&mut stdout_buf);
             }
+            child.stdout = None;
         }
 
         if let Some(stderr) = &mut source.stderr {
             for line in stderr {
-                let line = line.expect("failure reading test process logs");
+                let line = line.unwrap_or_else(|error| {
+                    format!("failure reading test process logs: {:?}", error)
+                });
                 let _ = writeln!(&mut stderr_buf, "{}", line);
             }
+            source.stderr = None;
         } else if let Some(child) = &mut source.child {
             if let Some(stderr) = &mut child.stderr {
                 let _ = stderr.read_to_string(&mut stderr_buf);
             }
+            child.stderr = None;
         }
 
         self.section(stdout_buf.header("Unread Stdout:"))

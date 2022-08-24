@@ -282,6 +282,84 @@ fn failure_regex_matches_stdout_failure_message_drop() {
     // Drop should read all unread output.
 }
 
+/// When checking output, make sure failure regexes detect when a child process
+/// prints a failure message to stdout, then they fail the test,
+/// and read any extra multi-line output from the child process.
+#[test]
+fn failure_regex_reads_multi_line_output_on_expect_line() {
+    let _init_guard = zebra_test::init();
+
+    const TEST_CMD: &str = "echo";
+    // Skip the test if the test system does not have the command
+    if !is_command_available(TEST_CMD, &[]) {
+        return;
+    }
+
+    let mut child = tempdir()
+        .unwrap()
+        .spawn_child_with_command(
+            TEST_CMD,
+            args![
+                "failure_message\n\
+                 multi-line failure message"
+            ],
+        )
+        .unwrap()
+        .with_timeout(Duration::from_secs(5))
+        .with_failure_regex_set("failure_message", RegexSet::empty());
+
+    // Any method that reads output should work here.
+    // We use a non-matching regex, to trigger the failure panic.
+    let expected_error = child
+        .expect_stdout_line_matches("this regex should not match")
+        .unwrap_err();
+
+    let expected_error = format!("{:?}", expected_error);
+    assert!(
+        expected_error.contains(
+            "\
+Unread Stdout:
+   multi-line failure message\
+            "
+        ),
+        "error did not contain expected failure message: {}",
+        expected_error,
+    );
+}
+
+/// On drop, make sure failure regexes detect when a child process prints a failure message.
+/// then they fail the test, and read any extra multi-line output from the child process.
+#[test]
+#[should_panic(expected = "Unread Stdout:
+   multi-line failure message")]
+fn failure_regex_reads_multi_line_output_on_drop() {
+    let _init_guard = zebra_test::init();
+
+    const TEST_CMD: &str = "echo";
+    // Skip the test if the test system does not have the command
+    if !is_command_available(TEST_CMD, &[]) {
+        return;
+    }
+
+    let _child = tempdir()
+        .unwrap()
+        .spawn_child_with_command(
+            TEST_CMD,
+            args![
+                "failure_message\n\
+                 multi-line failure message"
+            ],
+        )
+        .unwrap()
+        .with_timeout(Duration::from_secs(5))
+        .with_failure_regex_set("failure_message", RegexSet::empty());
+
+    // Give the child process enough time to print its output.
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Drop should read all unread output.
+}
+
 /// Make sure failure regexes detect when a child process prints a failure message to stdout,
 /// then the child process is killed.
 #[test]
