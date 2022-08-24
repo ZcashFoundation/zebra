@@ -120,6 +120,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -187,6 +188,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -241,6 +243,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -369,6 +372,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -494,6 +498,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -552,6 +557,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -606,6 +612,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -664,6 +671,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -718,6 +726,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -774,6 +783,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -831,6 +841,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
