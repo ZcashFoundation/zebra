@@ -139,7 +139,7 @@ jobs:
         if: steps.does-group-exist.outcome == 'success'
         run: |
           gcloud compute instance-groups managed rolling-action start-update \
-          "zebrad-${{ env.GITHUB_REF_SLUG_URL }}" \
+          "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}" \
           --version template="zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --region "${{ env.REGION }}"
 
