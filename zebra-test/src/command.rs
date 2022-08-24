@@ -714,9 +714,7 @@ impl<T> TestChild<T> {
             Err(report) => {
                 // Read all the log lines for error context
                 self.stdout = Some(lines);
-                let error = Err(report).context_from(self);
-
-                error
+                Err(report).context_from(self)
             }
         }
     }
@@ -748,9 +746,7 @@ impl<T> TestChild<T> {
             Err(report) => {
                 // Read all the log lines for error context
                 self.stderr = Some(lines);
-                let error = Err(report).context_from(self);
-
-                error
+                Err(report).context_from(self)
             }
         }
     }
