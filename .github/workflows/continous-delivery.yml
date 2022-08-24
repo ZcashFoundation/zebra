@@ -26,7 +26,7 @@ env:
   MACHINE_TYPE: c2-standard-4
 
 jobs:
-  # If a release was made we want to substract the first part of the semver from the
+  # If a release was made we want to extract the first part of the semver from the
   # tag_name
   #
   # Generate the following output to pass to subsequent jobs
