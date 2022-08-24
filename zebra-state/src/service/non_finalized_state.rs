@@ -12,13 +12,12 @@ use zebra_chain::{
     block::{self, Block},
     history_tree::HistoryTree,
     orchard,
-    parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     sapling, sprout, transparent,
 };
 
 use crate::{
-    request::{ContextuallyValidBlock, FinalizedWithTrees, Treestate},
+    request::{ContextuallyValidBlock, FinalizedWithTrees},
     service::{check, finalized_state::ZebraDb},
     FinalizedBlock, PreparedBlock, ValidateContextError,
 };
@@ -92,24 +91,15 @@ impl NonFinalizedState {
         // extract best chain
         let mut best_chain = chains.next_back().expect("there's at least one chain");
 
-        // Obtain the treestate associated with the block being finalized.
-        let treestate = Treestate {
-            note_commitment_trees: NoteCommitmentTrees {
-                sprout: best_chain.sprout_note_commitment_tree.clone(),
-                sapling: best_chain.sapling_note_commitment_tree.clone(),
-                orchard: best_chain.orchard_note_commitment_tree.clone(),
-            },
-            history_tree: best_chain.history_tree.clone(),
-        };
-
         // clone if required
         let write_best_chain = Arc::make_mut(&mut best_chain);
 
         // extract the rest into side_chains so they can be mutated
         let side_chains = chains;
 
-        // remove the lowest height block from the best_chain to be finalized
-        let finalizing = write_best_chain.pop_root();
+        // Pop the lowest height block from the best chain to be finalized, and
+        // also obtain its associated treestate.
+        let (finalizing, treestate) = write_best_chain.pop_root();
 
         // add best_chain back to `self.chain_set`
         if !best_chain.is_empty() {
@@ -132,7 +122,7 @@ impl NonFinalizedState {
             let write_chain = Arc::make_mut(&mut chain);
 
             // remove the first block from `chain`
-            let chain_start = write_chain.pop_root();
+            let (chain_start, _treestate) = write_chain.pop_root();
             assert_eq!(chain_start.hash, finalizing.hash);
 
             // add the chain back to `self.chain_set`

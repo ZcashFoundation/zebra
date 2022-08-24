@@ -30,8 +30,8 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::check, ContextuallyValidBlock, HashOrHeight, OutputLocation, TransactionLocation,
-    ValidateContextError,
+    request::Treestate, service::check, ContextuallyValidBlock, HashOrHeight, OutputLocation,
+    TransactionLocation, ValidateContextError,
 };
 
 use self::index::TransparentTransfers;
@@ -245,22 +245,28 @@ impl Chain {
         Ok(self)
     }
 
-    /// Remove the lowest height block of the non-finalized portion of a chain.
+    /// Pops the lowest height block of the non-finalized portion of a chain,
+    /// and returns it with its associated treestate.
     #[instrument(level = "debug", skip(self))]
-    pub(crate) fn pop_root(&mut self) -> ContextuallyValidBlock {
+    pub(crate) fn pop_root(&mut self) -> (ContextuallyValidBlock, Treestate) {
+        // Obtain the lowest height.
         let block_height = self.non_finalized_root_height();
 
-        // remove the lowest height block from self.blocks
+        // Obtain the treestate associated with the block being finalized.
+        let treestate = self
+            .treestate(block_height.into())
+            .expect("The treestate must be present for the root height.");
+
+        // Remove the lowest height block from `self.blocks`.
         let block = self
             .blocks
             .remove(&block_height)
             .expect("only called while blocks is populated");
 
-        // update cumulative data members
+        // Update cumulative data members.
         self.revert_chain_with(&block, RevertPosition::Root);
 
-        // return the prepared block
-        block
+        (block, treestate)
     }
 
     /// Returns the height of the chain root.
@@ -486,6 +492,19 @@ impl Chain {
         )
     }
 
+    /// Returns the Sprout
+    /// [`NoteCommitmentTree`](sprout::tree::NoteCommitmentTree) specified by a
+    /// [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
+    pub fn sprout_tree(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Option<Arc<sprout::tree::NoteCommitmentTree>> {
+        let height =
+            hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
+
+        self.sprout_trees_by_height.get(&height).cloned()
+    }
+
     /// Returns the Sapling
     /// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a
     /// hash or height, if it exists in the non-finalized `chain`.
@@ -510,6 +529,29 @@ impl Chain {
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
         self.orchard_trees_by_height.get(&height).cloned()
+    }
+
+    /// Returns the [`HistoryTree`] specified by a [`HashOrHeight`], if it
+    /// exists in the non-finalized [`Chain`].
+    pub fn history_tree(&self, hash_or_height: HashOrHeight) -> Option<Arc<HistoryTree>> {
+        let height =
+            hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
+
+        self.history_trees_by_height.get(&height).cloned()
+    }
+
+    fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
+        let sprout_tree = self.sprout_tree(hash_or_height)?;
+        let sapling_tree = self.sapling_tree(hash_or_height)?;
+        let orchard_tree = self.orchard_tree(hash_or_height)?;
+        let history_tree = self.history_tree(hash_or_height)?;
+
+        Some(Treestate::new(
+            sprout_tree,
+            sapling_tree,
+            orchard_tree,
+            history_tree,
+        ))
     }
 
     /// Returns the block hash of the tip block.

@@ -10,9 +10,11 @@ use zebra_chain::{
     amount::NegativeAllowed,
     block::{self, Block},
     history_tree::HistoryTree,
+    orchard,
     parallel::tree::NoteCommitmentTrees,
+    sapling,
     serialization::SerializationError,
-    transaction,
+    sprout, transaction,
     transparent::{self, utxos_from_ordered_utxos},
     value_balance::{ValueBalance, ValueBalanceError},
 };
@@ -185,6 +187,24 @@ pub struct Treestate {
     pub note_commitment_trees: NoteCommitmentTrees,
     /// History tree.
     pub history_tree: Arc<HistoryTree>,
+}
+
+impl Treestate {
+    pub fn new(
+        sprout: Arc<sprout::tree::NoteCommitmentTree>,
+        sapling: Arc<sapling::tree::NoteCommitmentTree>,
+        orchard: Arc<orchard::tree::NoteCommitmentTree>,
+        history_tree: Arc<HistoryTree>,
+    ) -> Self {
+        Self {
+            note_commitment_trees: NoteCommitmentTrees {
+                sprout,
+                sapling,
+                orchard,
+            },
+            history_tree,
+        }
+    }
 }
 
 /// Contains a block ready to be committed together with its associated

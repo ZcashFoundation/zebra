@@ -354,7 +354,7 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
             }
 
         for _ in 0..finalized_count {
-            let _finalized = full_chain.pop_root();
+            full_chain.pop_root();
         }
 
         prop_assert_eq!(full_chain.blocks.len(), partial_chain.blocks.len());
@@ -425,7 +425,7 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
             }
 
         for _ in 0..finalized_count {
-            let _finalized = full_chain.pop_root();
+            full_chain.pop_root();
         }
 
         prop_assert_eq!(full_chain.blocks.len(), partial_chain.blocks.len());
