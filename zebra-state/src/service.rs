@@ -244,7 +244,14 @@ impl StateService {
             .disk
             .queue_and_commit_finalized((finalized, rsp_tx))
             .map(ChainTipBlock::from);
+
+        let timer = CodeTimer::start();
         self.chain_tip_sender.set_finalized_tip(tip_block);
+        timer.finish(
+            module_path!(),
+            line!(),
+            "CommitFinalizedBlock/set_finalized_tip()",
+        );
 
         rsp_rx
     }

@@ -74,15 +74,12 @@ impl NoteCommitmentTrees {
         &mut self,
         block_list: BTreeMap<Height, Arc<Block>>,
     ) -> Result<(), NoteCommitmentTreeError> {
-        let timer = CodeTimer::start();
         // Prepare arguments for parallel threads
         let NoteCommitmentTrees {
             sprout,
             sapling,
             orchard,
         } = self.clone();
-
-        timer.finish(module_path!(), line!(), "update_trees_parallel_list 1");
 
         let timer = CodeTimer::start();
         let sprout_note_commitments: Vec<_> = block_list
@@ -91,7 +88,12 @@ impl NoteCommitmentTrees {
             .flat_map(|tx| tx.sprout_note_commitments())
             .cloned()
             .collect();
-        timer.finish(module_path!(), line!(), "update_trees_parallel_list 2");
+        timer.finish(
+            module_path!(),
+            line!(),
+            "update_trees_parallel/sprout collect",
+        );
+
         let timer = CodeTimer::start();
         let sapling_note_commitments: Vec<_> = block_list
             .values()
@@ -99,7 +101,11 @@ impl NoteCommitmentTrees {
             .flat_map(|tx| tx.sapling_note_commitments())
             .cloned()
             .collect();
-        timer.finish(module_path!(), line!(), "update_trees_parallel_list 3");
+        timer.finish(
+            module_path!(),
+            line!(),
+            "update_trees_parallel/sapling collect",
+        );
 
         let timer = CodeTimer::start();
         let orchard_note_commitments: Vec<_> = block_list
@@ -108,7 +114,11 @@ impl NoteCommitmentTrees {
             .flat_map(|tx| tx.orchard_note_commitments())
             .cloned()
             .collect();
-        timer.finish(module_path!(), line!(), "update_trees_parallel_list 4");
+        timer.finish(
+            module_path!(),
+            line!(),
+            "update_trees_parallel/orchard collect",
+        );
 
         let mut sprout_result = None;
         let mut sapling_result = None;
@@ -123,7 +133,7 @@ impl NoteCommitmentTrees {
                         sprout,
                         sprout_note_commitments,
                     ));
-                    timer.finish(module_path!(), line!(), "updating sprout note commitment tree");
+                    timer.finish(module_path!(), line!(), "update sprout tree and root");
                 });
             }
 
@@ -134,7 +144,7 @@ impl NoteCommitmentTrees {
                         sapling,
                         sapling_note_commitments,
                     ));
-                    timer.finish(module_path!(), line!(), "updating sapling note commitment tree");
+                    timer.finish(module_path!(), line!(), "update sapling tree and root");
                 });
             }
 
@@ -145,29 +155,23 @@ impl NoteCommitmentTrees {
                         orchard,
                         orchard_note_commitments,
                     ));
-                    timer.finish(module_path!(), line!(), "updating orchard note commitment tree");
+                    timer.finish(module_path!(), line!(), "update orchard tree and root");
                 });
             }
         });
-        all_trees_timer.finish(module_path!(), line!(), "updating all note commitment trees in parallel");
+        all_trees_timer.finish(module_path!(), line!(), "update all trees in parallel");
 
-        let timer = CodeTimer::start();
         if let Some(sprout_result) = sprout_result {
             self.sprout = sprout_result?;
         }
-        timer.finish(module_path!(), line!(), "update_trees_parallel_list 8");
 
-        let timer = CodeTimer::start();
         if let Some(sapling_result) = sapling_result {
             self.sapling = sapling_result?;
         }
-        timer.finish(module_path!(), line!(), "update_trees_parallel_list 9");
 
-        let timer = CodeTimer::start();
         if let Some(orchard_result) = orchard_result {
             self.orchard = orchard_result?;
         }
-        timer.finish(module_path!(), line!(), "update_trees_parallel_list 10");
 
         Ok(())
     }

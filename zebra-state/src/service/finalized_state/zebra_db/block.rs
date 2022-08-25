@@ -19,6 +19,7 @@ use itertools::Itertools;
 use zebra_chain::{
     amount::NonNegative,
     block::{self, Block, Height},
+    diagnostic::CodeTimer,
     history_tree::HistoryTree,
     orchard,
     parallel::tree::NoteCommitmentTrees,
@@ -245,6 +246,8 @@ impl ZebraDb {
         network: Network,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
+        let timer = CodeTimer::start();
+
         let finalized_hash = finalized.hash;
 
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
@@ -319,6 +322,15 @@ impl ZebraDb {
                 .filter_map(|address| Some((address, self.address_balance_location(&address)?)))
                 .collect();
 
+        timer.finish(
+            module_path!(),
+            line!(),
+            format!("write_block/{0:?}/read initial data", finalized.height),
+        );
+
+        let timer = CodeTimer::start();
+        let finalized_height = finalized.height;
+
         let mut batch = DiskWriteBatch::new(network);
 
         // In case of errors, propagate and do not write the batch.
@@ -334,7 +346,21 @@ impl ZebraDb {
             self.finalized_value_pool(),
         )?;
 
+        timer.finish(
+            module_path!(),
+            line!(),
+            format!("write_block/{0:?}/prepare_block_batch", finalized_height),
+        );
+
+        let timer = CodeTimer::start();
+
         self.db.write(batch)?;
+
+        timer.finish(
+            module_path!(),
+            line!(),
+            format!("write_block/{0:?}/write data", finalized_height),
+        );
 
         tracing::trace!(?source, "committed block from");
 
@@ -393,9 +419,20 @@ impl DiskWriteBatch {
             ..
         } = &finalized;
 
+        let timer = CodeTimer::start();
+
         // Commit block and transaction data.
         // (Transaction indexes, note commitments, and UTXOs are committed later.)
         self.prepare_block_header_and_transaction_data_batch(db, &finalized)?;
+
+        timer.finish(
+            module_path!(),
+            line!(),
+            format!(
+                "prepare_block_batch/{0:?}/block_header_and_transaction_data",
+                height
+            ),
+        );
 
         // # Consensus
         //
@@ -410,6 +447,8 @@ impl DiskWriteBatch {
             return Ok(());
         }
 
+        let timer = CodeTimer::start();
+
         // Commit transaction indexes
         self.prepare_transparent_transaction_batch(
             db,
@@ -419,12 +458,43 @@ impl DiskWriteBatch {
             &spent_utxos_by_out_loc,
             address_balances,
         )?;
+
+        timer.finish(
+            module_path!(),
+            line!(),
+            format!("prepare_block_batch/{0:?}/transparent_transactions", height),
+        );
+
+        let timer = CodeTimer::start();
+
         self.prepare_shielded_transaction_batch(db, &finalized, &mut note_commitment_trees)?;
+
+        timer.finish(
+            module_path!(),
+            line!(),
+            format!("prepare_block_batch/{0:?}/shielded_transactions", height),
+        );
+
+        let timer = CodeTimer::start();
 
         self.prepare_note_commitment_batch(db, &finalized, note_commitment_trees, history_tree)?;
 
+        timer.finish(
+            module_path!(),
+            line!(),
+            format!("prepare_block_batch/{0:?}/note_commitments", height),
+        );
+
+        let timer = CodeTimer::start();
+
         // Commit UTXOs and value pools
         self.prepare_chain_value_pools_batch(db, &finalized, spent_utxos_by_outpoint, value_pool)?;
+
+        timer.finish(
+            module_path!(),
+            line!(),
+            format!("prepare_block_batch/{0:?}/chain_value_pools", height),
+        );
 
         // The block has passed contextual validation, so update the metrics
         block_precommit_metrics(block, *hash, *height);

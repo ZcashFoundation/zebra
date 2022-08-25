@@ -21,7 +21,7 @@ use std::{
     path::Path,
 };
 
-use zebra_chain::{block, parameters::Network};
+use zebra_chain::{block, diagnostic::CodeTimer, parameters::Network};
 
 use crate::{
     service::{check, QueuedFinalized},
@@ -241,6 +241,8 @@ impl FinalizedState {
         finalized: FinalizedBlock,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
+        let timer = CodeTimer::start();
+
         let committed_tip_hash = self.db.finalized_tip_hash();
         let committed_tip_height = self.db.finalized_tip_height();
 
@@ -272,6 +274,15 @@ impl FinalizedState {
             );
         }
 
+        timer.finish(
+            module_path!(),
+            line!(),
+            format!(
+                "commit_finalized_direct/{0:?}/read hash and height",
+                finalized.height
+            ),
+        );
+
         // Check the block commitment. For Nu5-onward, the block hash commits only
         // to non-authorizing data (see ZIP-244). This checks the authorizing data
         // commitment, making sure the entire block contents were committed to.
@@ -281,12 +292,37 @@ impl FinalizedState {
         // would be harder to implement.
         //
         // TODO: run this CPU-intensive cryptography in a parallel rayon thread, if it shows up in profiles
+        let timer = CodeTimer::start();
+
         let history_tree = self.db.history_tree();
+
+        timer.finish(
+            module_path!(),
+            line!(),
+            format!(
+                "commit_finalized_direct/{0:?}/fetch history tree",
+                finalized.height
+            ),
+        );
+
+        let timer = CodeTimer::start();
+
         check::block_commitment_is_valid_for_chain_history(
             finalized.block.clone(),
             self.network,
             &history_tree,
         )?;
+
+        timer.finish(
+            module_path!(),
+            line!(),
+            format!(
+                "commit_finalized_direct/{0:?}/update history tree",
+                finalized.height
+            ),
+        );
+
+        let timer = CodeTimer::start();
 
         let finalized_height = finalized.height;
         let finalized_hash = finalized.hash;
@@ -294,6 +330,15 @@ impl FinalizedState {
         let result = self
             .db
             .write_block(finalized, history_tree, self.network, source);
+
+        timer.finish(
+            module_path!(),
+            line!(),
+            format!(
+                "commit_finalized_direct/{0:?}/write_block",
+                finalized_height
+            ),
+        );
 
         // TODO: move the stop height check to the syncer (#3442)
         if result.is_ok() && self.is_at_stop_height(finalized_height) {
