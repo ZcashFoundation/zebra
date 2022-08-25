@@ -59,6 +59,12 @@ on:
         required: false
         type: boolean
         description: 'Does the test use Lightwalletd and Zebra cached state?'
+      # main branch states can be outdated and slower, but they can also be more reliable
+      prefer_main_cached_state:
+        required: false
+        type: boolean
+        default: false
+        description: 'Does the test prefer to use a main branch cached state?'
       saves_to_disk:
         required: true
         type: boolean
@@ -120,6 +126,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -129,9 +136,9 @@ jobs:
         id: create-instance
         run: |
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 100GB \
+          --boot-disk-size 200GB \
           --boot-disk-type pd-ssd \
-          --create-disk name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --create-disk name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=200GB,type=pd-ssd \
           --container-image debian:buster \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
@@ -187,6 +194,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -241,6 +249,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -256,7 +265,10 @@ jobs:
       # - To ${{ inputs.zebra_state_dir || inputs.disk_prefix }} if not
       #
       # If there are multiple disks:
-      # - prefer images generated from this branch, then the `main` branch, then any other branch
+      # - prefer images generated from this branch and commit, then
+      # - if prefer_main_cached_state is true, prefer images from the `main` branch, then
+      # - use images from any other branch.
+      # Within each of these categories:
       # - prefer newer images to older images
       #
       # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable
@@ -275,31 +287,46 @@ jobs:
 
           # Try to find an image generated from this branch and commit
           # Fields are listed in the "Create image from state disk" step
-          BRANCH_DISK_NAME="${DISK_PREFIX}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
-          CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${BRANCH_DISK_NAME}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT} Disk: $CACHED_DISK_NAME"
-
-          if [[ -z "$CACHED_DISK_NAME" ]]; then
-              # Try to find an image generated from the main branch
-              CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-              echo "main Disk: $CACHED_DISK_NAME"
+          COMMIT_DISK_PREFIX="${DISK_PREFIX}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
+          COMMIT_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${COMMIT_DISK_PREFIX}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT} Disk: $COMMIT_CACHED_DISK_NAME"
+          if [[ -n "$COMMIT_CACHED_DISK_NAME" ]]; then
+              echo "Description: $(gcloud compute images describe $COMMIT_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
           fi
 
+          # Try to find an image generated from the main branch
+          MAIN_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "main Disk: $MAIN_CACHED_DISK_NAME"
+          if [[ -n "$MAIN_CACHED_DISK_NAME" ]]; then
+              echo "Description: $(gcloud compute images describe $MAIN_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
+          fi
+
+          # Try to find an image generated from any other branch
+          ANY_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "any branch Disk: $ANY_CACHED_DISK_NAME"
+          if [[ -n "$ANY_CACHED_DISK_NAME" ]]; then
+              echo "Description: $(gcloud compute images describe $ANY_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
+          fi
+
+          # Select a cached disk based on the job settings
+          CACHED_DISK_NAME="$COMMIT_CACHED_DISK_NAME"
+          if [[ -z "$CACHED_DISK_NAME" ]] && [[ "${{ inputs.prefer_main_cached_state }}" == "true" ]]; then
+              echo "Preferring main branch cached state to other branches..."
+              CACHED_DISK_NAME="$MAIN_CACHED_DISK_NAME"
+          fi
           if [[ -z "$CACHED_DISK_NAME" ]]; then
-              # Try to find an image generated from any other branch
-              CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-              echo "any branch Disk: $CACHED_DISK_NAME"
+              CACHED_DISK_NAME="$ANY_CACHED_DISK_NAME"
           fi
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               echo "No cached state disk available"
-              echo "Expected ${BRANCH_DISK_NAME}"
-              echo "Also searched for any commit on main, and any commit on any branch"
+              echo "Expected ${COMMIT_DISK_PREFIX}"
+              echo "Also searched for cached disks from other branches"
               echo "Cached state test jobs must depend on the cached state rebuild job"
               exit 1
           fi
 
-          echo "Description: $(gcloud compute images describe $CACHED_DISK_NAME --format='value(DESCRIPTION)')"
+          echo "Selected Disk: $CACHED_DISK_NAME"
 
           echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
           echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> $GITHUB_ENV
@@ -310,9 +337,9 @@ jobs:
         id: create-instance
         run: |
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 100GB \
+          --boot-disk-size 200GB \
           --boot-disk-type pd-ssd \
-          --create-disk image=${{ env.CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --create-disk image=${{ env.CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=200GB,type=pd-ssd \
           --container-image debian:buster \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
@@ -369,6 +396,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -494,6 +522,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -552,6 +581,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -606,6 +636,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -664,6 +695,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -718,6 +750,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -774,6 +807,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -831,6 +865,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -945,6 +980,23 @@ jobs:
           SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE '${{ inputs.height_grep_text }}\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
 
+      # Sets the $UPDATE_SUFFIX env var to "-update" if using cached state,
+      # and the empty string otherwise.
+      #
+      # Also sets a unique date and time suffix $TIME_SUFFIX.
+      - name: Set update and time suffixes
+        run: |
+          UPDATE_SUFFIX=""
+
+          if [[ "${{ inputs.needs_zebra_state }}" == "true" ]]; then
+              UPDATE_SUFFIX="-update"
+          fi
+
+          TIME_SUFFIX=$(date '+%Y-%m-%d-%H-%M-%S' --utc)
+
+          echo "UPDATE_SUFFIX=$UPDATE_SUFFIX" >> $GITHUB_ENV
+          echo "TIME_SUFFIX=$TIME_SUFFIX" >> $GITHUB_ENV
+
       # Create an image from disk that will be used for following/other tests
       # This image can contain:
       # - Zebra cached state
@@ -955,7 +1007,8 @@ jobs:
       # used by the container
       - name: Create image from state disk
         run: |
-          gcloud compute images create ${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }} \
+          gcloud compute images create \
+          "${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }}$UPDATE_SUFFIX-$TIME_SUFFIX" \
           --force \
           --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           --source-disk-zone=${{ env.ZONE }} \
