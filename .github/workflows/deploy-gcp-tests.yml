@@ -958,15 +958,20 @@ jobs:
 
       # Sets the $UPDATE_SUFFIX env var to "-update" if using cached state,
       # and the empty string otherwise.
-      - name: Set update suffix
+      #
+      # Also sets a unique date and time suffix $TIME_SUFFIX.
+      - name: Set update and time suffixes
         run: |
           UPDATE_SUFFIX=""
 
-          if "${{ inputs.needs_zebra_state }}"; then
-              UPDATE_SUFFIX="-update";
+          if [[ "${{ inputs.needs_zebra_state }}" == "true" ]]; then
+              UPDATE_SUFFIX="-update"
           fi
 
+          TIME_SUFFIX=$(date '+%Y-%m-%d-%H-%M-%S' --utc)
+
           echo "UPDATE_SUFFIX=$UPDATE_SUFFIX" >> $GITHUB_ENV
+          echo "TIME_SUFFIX=$TIME_SUFFIX" >> $GITHUB_ENV
 
       # Create an image from disk that will be used for following/other tests
       # This image can contain:
@@ -979,7 +984,7 @@ jobs:
       - name: Create image from state disk
         run: |
           gcloud compute images create \
-          ${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }}$UPDATE_SUFFIX \
+          "${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }}$UPDATE_SUFFIX-$TIME_SUFFIX" \
           --force \
           --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           --source-disk-zone=${{ env.ZONE }} \
