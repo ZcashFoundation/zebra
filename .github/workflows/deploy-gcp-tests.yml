@@ -310,7 +310,7 @@ jobs:
 
           # Select a cached disk based on the job settings
           CACHED_DISK_NAME="$COMMIT_CACHED_DISK_NAME"
-          if [[ -z "$CACHED_DISK_NAME" -a "${{ inputs.prefer_main_cached_state }}" == "true" ]]; then
+          if [[ -z "$CACHED_DISK_NAME" ]] && [[ "${{ inputs.prefer_main_cached_state }}" == "true" ]]; then
               echo "Preferring main branch cached state to other branches..."
               CACHED_DISK_NAME="$MAIN_CACHED_DISK_NAME"
           fi
