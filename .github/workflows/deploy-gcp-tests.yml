@@ -287,30 +287,31 @@ jobs:
 
           # Try to find an image generated from this branch and commit
           # Fields are listed in the "Create image from state disk" step
-          COMMIT_DISK_PATTERN="${DISK_PREFIX}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
-          COMMIT_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${COMMIT_DISK_PATTERN}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          COMMIT_DISK_PREFIX="${DISK_PREFIX}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
+          COMMIT_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${COMMIT_DISK_PREFIX}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT} Disk: $COMMIT_CACHED_DISK_NAME"
-          if [[ -n "$BRANCH_CACHED_DISK_NAME" ]]; then
+          if [[ -n "$COMMIT_CACHED_DISK_NAME" ]]; then
               echo "Description: $(gcloud compute images describe $COMMIT_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
           fi
 
           # Try to find an image generated from the main branch
           MAIN_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "main Disk: $CACHED_DISK_NAME"
+          echo "main Disk: $MAIN_CACHED_DISK_NAME"
           if [[ -n "$MAIN_CACHED_DISK_NAME" ]]; then
-              echo "Description: $(gcloud compute images describe $MAIN_DISK_NAME --format='value(DESCRIPTION)')"
+              echo "Description: $(gcloud compute images describe $MAIN_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
           fi
 
           # Try to find an image generated from any other branch
           ANY_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "any branch Disk: $CACHED_DISK_NAME"
+          echo "any branch Disk: ANY_$CACHED_DISK_NAME"
           if [[ -n "$ANY_CACHED_DISK_NAME" ]]; then
-              echo "Description: $(gcloud compute images describe $ANY_DISK_NAME --format='value(DESCRIPTION)')"
+              echo "Description: $(gcloud compute images describe $ANY_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
           fi
 
           # Select a cached disk based on the job settings
           CACHED_DISK_NAME="$COMMIT_CACHED_DISK_NAME"
           if [[ -z "$CACHED_DISK_NAME" -a "${{ inputs.prefer_main_cached_state }}" == "true" ]]; then
+              echo "Preferring main branch cached state to other branches..."
               CACHED_DISK_NAME="$MAIN_CACHED_DISK_NAME"
           fi
           if [[ -z "$CACHED_DISK_NAME" ]]; then
@@ -319,8 +320,8 @@ jobs:
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               echo "No cached state disk available"
-              echo "Expected ${BRANCH_DISK_NAME}"
-              echo "Also searched for any commit on main, and any commit on any branch"
+              echo "Expected ${COMMIT_DISK_PREFIX}"
+              echo "Also searched for cached disks from other branches"
               echo "Cached state test jobs must depend on the cached state rebuild job"
               exit 1
           fi
