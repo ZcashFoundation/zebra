@@ -716,7 +716,7 @@ jobs:
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          '(estimated progress.*current_height.*=.*17[4-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks)|(estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks)||(estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks)|(test result:.*finished in)' \
+          '(estimated progress.*current_height.*=.*17[4-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks)|(estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks)|(estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks)|(test result:.*finished in)' \
           "
 
   # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
