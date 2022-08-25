@@ -956,6 +956,18 @@ jobs:
           SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE '${{ inputs.height_grep_text }}\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
 
+      # Sets the $UPDATE_SUFFIX env var to "-update" if using cached state,
+      # and the empty string otherwise.
+      - name: Set update suffix
+        run: |
+          UPDATE_SUFFIX=""
+
+          if "${{ inputs.needs_zebra_state }}"; then
+              UPDATE_SUFFIX="-update";
+          fi
+
+          echo "UPDATE_SUFFIX=$UPDATE_SUFFIX" >> $GITHUB_ENV
+
       # Create an image from disk that will be used for following/other tests
       # This image can contain:
       # - Zebra cached state
@@ -966,7 +978,8 @@ jobs:
       # used by the container
       - name: Create image from state disk
         run: |
-          gcloud compute images create ${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }} \
+          gcloud compute images create \
+          ${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }}$UPDATE_SUFFIX \
           --force \
           --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           --source-disk-zone=${{ env.ZONE }} \
