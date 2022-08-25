@@ -303,7 +303,7 @@ jobs:
 
           # Try to find an image generated from any other branch
           ANY_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "any branch Disk: ANY_$CACHED_DISK_NAME"
+          echo "any branch Disk: $ANY_CACHED_DISK_NAME"
           if [[ -n "$ANY_CACHED_DISK_NAME" ]]; then
               echo "Description: $(gcloud compute images describe $ANY_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
           fi
