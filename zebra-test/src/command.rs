@@ -812,6 +812,7 @@ impl<T> TestChild<T> {
     /// Note: the timeout is only checked after each full line is received from
     /// the child (#1140).
     #[instrument(skip(self, lines))]
+    #[allow(clippy::unwrap_in_result)]
     pub fn expect_line_matching_regexes<L>(
         &mut self,
         lines: &mut L,
