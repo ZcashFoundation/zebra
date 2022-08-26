@@ -446,21 +446,6 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 }
 
 #[test]
-fn app_no_args() -> Result<()> {
-    let _init_guard = zebra_test::init();
-
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
-
-    let child = testdir.spawn_child(args![])?;
-    let output = child.wait_with_output()?;
-    let output = output.assert_success()?;
-
-    output.stdout_line_contains("USAGE:")?;
-
-    Ok(())
-}
-
-#[test]
 fn version_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
