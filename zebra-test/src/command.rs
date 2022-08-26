@@ -107,6 +107,7 @@ impl CommandExt for Command {
             failure_regexes: RegexSet::empty(),
             ignore_regexes: RegexSet::empty(),
             deadline: None,
+            timeout: None,
             bypass_test_capture: false,
         })
     }
@@ -220,6 +221,11 @@ pub struct TestChild<T> {
     ///
     /// Only checked when the command outputs each new line (#1140).
     pub deadline: Option<Instant>,
+
+    /// The timeout for this command to finish.
+    ///
+    /// Only used for debugging output.
+    pub timeout: Option<Duration>,
 
     /// If true, write child output directly to standard output,
     /// bypassing the Rust test harness output capture.
@@ -678,7 +684,9 @@ impl<T> TestChild<T> {
     ///
     /// Does not apply to `wait_with_output`.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
         self.deadline = Some(Instant::now() + timeout);
+
         self
     }
 
@@ -841,9 +849,14 @@ impl<T> TestChild<T> {
             self.kill(true)?;
         }
 
+        let timeout =
+            humantime::format_duration(self.timeout.expect("already checked past_deadline()"));
+
         let report = eyre!(
-            "{} of command did not contain any matches for the given regex",
-            stream_name
+            "{} of command did not log any matches for the given regex,\n\
+             within the {:?} command timeout",
+            stream_name,
+            timeout,
         )
         .with_section(|| format!("{:#?}", success_regexes.patterns()).header("Match Regex:"));
 
