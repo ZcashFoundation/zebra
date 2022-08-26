@@ -206,7 +206,8 @@ where
 ///
 /// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
 /// providing an initial state to the zebrad instance.
-pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
+#[tracing::instrument]
+pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt + std::fmt::Debug>(
     network: Network,
     zebra_directory: P,
     test_type: LightwalletdTestType,
