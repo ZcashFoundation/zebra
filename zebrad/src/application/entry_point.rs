@@ -40,7 +40,7 @@ pub struct EntryPoint {
 }
 
 impl EntryPoint {
-    /// Borrow the underlying command type or print usage info and exit
+    /// Borrow the underlying command type
     fn command(&self) -> &ZebradCmd {
         self.command
             .as_ref()
