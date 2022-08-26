@@ -1,25 +1,22 @@
 //! Zebrad Abscissa Application
 
-use std::{fmt::Write as _, io::Write as _, path::PathBuf, process};
+mod entry_point;
+use self::entry_point::EntryPoint;
+
+use std::{fmt::Write as _, io::Write as _, process};
 
 use abscissa_core::{
     application::{self, fatal_error, AppCell},
-    command::{Command, Usage},
     config::{self, Configurable},
     status_err,
     terminal::{component::Terminal, stderr, stdout, ColorChoice},
-    Application, Component, FrameworkError, Options, Runnable, Shutdown, StandardPaths,
-    Version,
+    Application, Component, FrameworkError, Shutdown, StandardPaths, Version,
 };
 
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
 
-use crate::{
-    commands::{StartCmd, ZebradCmd},
-    components::tracing::Tracing,
-    config::ZebradConfig,
-};
+use crate::{commands::ZebradCmd, components::tracing::Tracing, config::ZebradConfig};
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -41,98 +38,6 @@ pub fn app_writer() -> application::lock::Writer<ZebradApp> {
 /// Panics if the application configuration has not been loaded.
 pub fn app_config() -> config::Reader<ZebradApp> {
     config::Reader::new(&APPLICATION)
-}
-
-/// Toplevel entrypoint command.
-///
-/// Handles obtaining toplevel help as well as verbosity settings.
-#[derive(Debug, Options)]
-pub struct EntryPoint {
-    #[options(help = "tracing filters which override the zebrad.toml config")]
-    filters: Vec<String>,
-
-    /// Path to the configuration file
-    #[options(short = "c", help = "path to configuration file")]
-    pub config: Option<PathBuf>,
-
-    /// Obtain help about the current command
-    #[options(short = "h", help = "print help message")]
-    pub help: bool,
-
-    /// Increase verbosity setting
-    #[options(short = "v", help = "be verbose")]
-    pub verbose: bool,
-
-    /// Subcommand to execute.
-    ///
-    /// The `command` option will delegate option parsing to the command type,
-    /// starting at the first free argument. Defaults to start.
-    #[options(command, default_expr = "Some(ZebradCmd::Start(StartCmd::default()))")]
-    pub command: Option<ZebradCmd>,
-}
-
-impl EntryPoint {
-    /// Borrow the underlying command type or print usage info and exit
-    fn command(&self) -> &ZebradCmd {
-        self.command
-            .as_ref()
-            .expect("Some(ZebradCmd::Start(StartCmd::default()) as default value")
-    }
-}
-
-impl Runnable for EntryPoint {
-    fn run(&self) {
-        self.command().run()
-    }
-}
-
-impl Command for EntryPoint {
-    /// Name of this program as a string
-    fn name() -> &'static str {
-        ZebradCmd::name()
-    }
-
-    /// Description of this program
-    fn description() -> &'static str {
-        ZebradCmd::description()
-    }
-
-    /// Version of this program
-    fn version() -> &'static str {
-        ZebradCmd::version()
-    }
-
-    /// Authors of this program
-    fn authors() -> &'static str {
-        ZebradCmd::authors()
-    }
-
-    /// Get usage information for a particular subcommand (if available)
-    fn subcommand_usage(command: &str) -> Option<Usage> {
-        ZebradCmd::subcommand_usage(command)
-    }
-}
-
-impl Configurable<ZebradConfig> for EntryPoint {
-    /// Path to the command's configuration file
-    fn config_path(&self) -> Option<PathBuf> {
-        match &self.config {
-            // Use explicit `-c`/`--config` argument if passed
-            Some(cfg) => Some(cfg.clone()),
-
-            // Otherwise defer to the toplevel command's config path logic
-            None => self.command.as_ref().and_then(|cmd| cmd.config_path()),
-        }
-    }
-
-    /// Process the configuration after it has been loaded, potentially
-    /// modifying it or returning an error if options are incompatible
-    fn process_config(&self, config: ZebradConfig) -> Result<ZebradConfig, FrameworkError> {
-        match &self.command {
-            Some(cmd) => cmd.process_config(config),
-            None => Ok(config),
-        }
-    }
 }
 
 /// Returns the zebrad version for this build, in SemVer 2.0 format.
