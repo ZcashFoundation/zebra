@@ -531,6 +531,9 @@ jobs:
       # following until Sapling activation (or the test finishes).
       #
       # The log pipeline ignores the exit status of `docker logs`.
+      # It also ignores the expected 'broken pipe' error from `tee`,
+      # which happens when `grep` finds a matching output and moves on to the next job.
+      #
       # Errors in the tests are caught by the final test status job.
       - name: Show logs for ${{ inputs.test_id }} test (sprout)
         run: |
