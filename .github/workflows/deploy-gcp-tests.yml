@@ -148,6 +148,9 @@ jobs:
           --zone ${{ env.ZONE }}
           sleep 60
 
+      # Create a docker volume with the new disk we just created.
+      #
+      # SSH into the just created VM, and create a docker volume with the newly created disk.
       - name: Create ${{ inputs.test_id }} Docker volume
         run: |
           gcloud compute ssh \
@@ -157,7 +160,7 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
-          sudo mkfs.ext4 /dev/sdb \
+          sudo mkfs.ext4 -v /dev/sdb \
           && \
           docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -351,7 +354,10 @@ jobs:
 
       # Create a docker volume with the selected cached state.
       #
-      # SSH into the just created VM, and create a docker volume with the recently attached disk.
+      # SSH into the just created VM, expand the partition and filesystem to fill the entire disk,
+      # then create a docker volume with the recently attached disk.
+      # (The cached state and disk are usually the same size,
+      # but the cached state can be smaller if we just increased the disk size.)
       - name: Create ${{ inputs.test_id }} Docker volume
         run: |
           gcloud compute ssh \
@@ -361,6 +367,10 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
+          sudo growpart --verbose /dev/sdb 1 \
+          && \
+          sudo resize2fs -p /dev/sdb \
+          && \
           docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
