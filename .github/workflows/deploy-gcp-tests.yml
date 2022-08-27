@@ -367,7 +367,7 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
-          sudo e2fsck -v -f /dev/sdb \
+          sudo e2fsck -v -f -p /dev/sdb \
           && \
           sudo resize2fs -p /dev/sdb \
           && \
