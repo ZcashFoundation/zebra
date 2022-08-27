@@ -733,7 +733,7 @@ jobs:
   # (or the test finishing)
   #
   # We chose this height because it was about 9 hours into the NU5 sync, at the end of August 2022.
-  logs-1757k:
+  logs-1760k:
     name: Log ${{ inputs.test_id }} test (1760k)
     needs: [ logs-1740k ]
     # If the previous job fails, we still want to show the logs.
