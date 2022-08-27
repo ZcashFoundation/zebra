@@ -265,8 +265,8 @@ jobs:
       # - To ${{ inputs.zebra_state_dir || inputs.disk_prefix }} if not
       #
       # If there are multiple disks:
-      # - prefer images generated from this branch and commit, then
-      # - if prefer_main_cached_state is true, prefer images from the `main` branch, then
+      # - prefer images generated from this branch, then
+      # - if prefer_main_cached_state is true, prefer images from the `main` branch, else
       # - use images from any other branch.
       # Within each of these categories:
       # - prefer newer images to older images
@@ -285,13 +285,13 @@ jobs:
               DISK_PREFIX=${{ inputs.zebra_state_dir || inputs.disk_prefix }}
           fi
 
-          # Try to find an image generated from this branch and commit
+          # Try to find an image generated from this branch
           # Fields are listed in the "Create image from state disk" step
-          COMMIT_DISK_PREFIX="${DISK_PREFIX}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
-          COMMIT_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${COMMIT_DISK_PREFIX}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT} Disk: $COMMIT_CACHED_DISK_NAME"
-          if [[ -n "$COMMIT_CACHED_DISK_NAME" ]]; then
-              echo "Description: $(gcloud compute images describe $COMMIT_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
+          PR_DISK_PREFIX="${DISK_PREFIX}-${GITHUB_REF_SLUG_URL:0:18}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
+          PR_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${PR_DISK_PREFIX}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "${GITHUB_REF_SLUG_URL} Disk: $PR_CACHED_DISK_NAME"
+          if [[ -n "$PR_CACHED_DISK_NAME" ]]; then
+              echo "Description: $(gcloud compute images describe $PR_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
           fi
 
           # Try to find an image generated from the main branch
@@ -309,7 +309,7 @@ jobs:
           fi
 
           # Select a cached disk based on the job settings
-          CACHED_DISK_NAME="$COMMIT_CACHED_DISK_NAME"
+          CACHED_DISK_NAME="$PR_CACHED_DISK_NAME"
           if [[ -z "$CACHED_DISK_NAME" ]] && [[ "${{ inputs.prefer_main_cached_state }}" == "true" ]]; then
               echo "Preferring main branch cached state to other branches..."
               CACHED_DISK_NAME="$MAIN_CACHED_DISK_NAME"
@@ -320,7 +320,7 @@ jobs:
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               echo "No cached state disk available"
-              echo "Expected ${COMMIT_DISK_PREFIX}"
+              echo "Expected ${PR_DISK_PREFIX}"
               echo "Also searched for cached disks from other branches"
               echo "Cached state test jobs must depend on the cached state rebuild job"
               exit 1
@@ -1005,15 +1005,18 @@ jobs:
       #
       # Force the image creation (--force) as the disk is still attached even though is not being
       # used by the container
+      #
+      # The GITHUB_REF_SLUG_URL variable is truncated here to a max of 18 characters as
+      # the image name can't longer than 61 characters
       - name: Create image from state disk
         run: |
           gcloud compute images create \
-          "${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }}$UPDATE_SUFFIX-$TIME_SUFFIX" \
+          "${{ inputs.disk_prefix }}-${GITHUB_REF_SLUG_URL:0:18}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }}$UPDATE_SUFFIX" \
           --force \
           --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           --source-disk-zone=${{ env.ZONE }} \
           --storage-location=us \
-          --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
+          --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }} at $TIME_SUFFIX"
 
   # delete the Google Cloud instance for this test
   delete-instance:
