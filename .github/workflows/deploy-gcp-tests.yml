@@ -288,11 +288,16 @@ jobs:
               DISK_PREFIX=${{ inputs.zebra_state_dir || inputs.disk_prefix }}
           fi
 
-          # Try to find an image generated from this branch and commit
-          # Fields are listed in the "Create image from state disk" step
-          COMMIT_DISK_PREFIX="${DISK_PREFIX}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
+          # Try to find an image generated from a previous step or run of this commit.
+          # Fields are listed in the "Create image from state disk" step.
+          #
+          # We can't match the full branch name here,
+          # because it might have been shortened for the image.
+          #
+          # The probability of two matching short commit hashes within the same month is very low.
+          COMMIT_DISK_PREFIX="${DISK_PREFIX}-.+-${{ env.GITHUB_SHA_SHORT }}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
           COMMIT_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${COMMIT_DISK_PREFIX}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT} Disk: $COMMIT_CACHED_DISK_NAME"
+          echo "${GITHUB_REF_SLUG_URL}-${{ env.GITHUB_SHA_SHORT }} Disk: $COMMIT_CACHED_DISK_NAME"
           if [[ -n "$COMMIT_CACHED_DISK_NAME" ]]; then
               echo "Description: $(gcloud compute images describe $COMMIT_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
           fi
