@@ -228,7 +228,7 @@ async fn rpc_getbestblockhash() {
     // Get the tip hash using RPC method `get_best_block_hash`
     let get_best_block_hash = rpc
         .get_best_block_hash()
-        .expect("We should have a GetBestBlockHash struct");
+        .expect("We should have a GetBlockHash struct");
     let response_hash = get_best_block_hash.0;
 
     // Check if response is equal to block 10 hash.
@@ -601,4 +601,57 @@ async fn rpc_getaddressutxos_response() {
     assert_eq!(response.len(), 10);
 
     mempool.expect_no_requests().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblockhash() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    // Init RPC
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        read_state,
+        latest_chain_tip,
+        Mainnet,
+    );
+
+    // Query the hashes using positive indexes
+    for (i, block) in blocks.iter().enumerate() {
+        let get_block_hash = rpc
+            .get_block_hash(i.try_into().expect("usize always fits in i32"))
+            .await
+            .expect("We should have a GetBestBlock struct");
+
+        assert_eq!(get_block_hash, GetBlockHash(block.clone().hash()));
+    }
+
+    // Query the hashes using negative indexes
+    for i in (-10..=-1).rev() {
+        let get_block_hash = rpc
+            .get_block_hash(i)
+            .await
+            .expect("We should have a GetBestBlock struct");
+        assert_eq!(
+            get_block_hash,
+            GetBlockHash(blocks[(10 + (i + 1)) as usize].hash())
+        );
+    }
+
+    mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
 }

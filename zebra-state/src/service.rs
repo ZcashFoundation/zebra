@@ -1187,6 +1187,39 @@ impl Service<ReadRequest> for ReadStateService {
                 .map(|join_result| join_result.expect("panic in ReadRequest::UtxosByAddresses"))
                 .boxed()
             }
+
+            // Used by get_block_hash RPC.
+            ReadRequest::Hash(height) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "block_hash",
+                );
+
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                // # Performance
+                //
+                // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let hash = state.best_chain_receiver.with_watch_data(|best_chain| {
+                            read::hash(best_chain, &state.db, height)
+                        });
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::Block");
+
+                        Ok(ReadResponse::Hash(hash))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::Block"))
+                .boxed()
+            }
         }
     }
 }

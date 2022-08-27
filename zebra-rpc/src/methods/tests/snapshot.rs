@@ -100,7 +100,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // `getbestblockhash`
     let get_best_block_hash = rpc
         .get_best_block_hash()
-        .expect("We should have a GetBestBlockHash struct");
+        .expect("We should have a GetBlockHash struct");
     snapshot_rpc_getbestblockhash(get_best_block_hash, &settings);
 
     // `getrawmempool`
@@ -224,7 +224,7 @@ fn snapshot_rpc_getblock_verbose(block: GetBlock, settings: &insta::Settings) {
 }
 
 /// Snapshot `getbestblockhash` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getbestblockhash(tip_hash: GetBestBlockHash, settings: &insta::Settings) {
+fn snapshot_rpc_getbestblockhash(tip_hash: GetBlockHash, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_best_block_hash", tip_hash));
 }
 

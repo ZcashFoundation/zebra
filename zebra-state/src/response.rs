@@ -90,4 +90,8 @@ pub enum ReadResponse {
     /// [`ReadRequest::UtxosByAddresses`](crate::ReadRequest::UtxosByAddresses)
     /// with found utxos and transaction data.
     Utxos(AddressUtxos),
+
+    /// Response to [`ReadRequest::Hash`](crate::ReadRequest::Hash) with the
+    /// specified block hash.
+    Hash(Option<block::Hash>),
 }

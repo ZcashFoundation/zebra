@@ -23,7 +23,7 @@ pub use address::{
     tx_id::transparent_tx_ids,
     utxo::{transparent_utxos, AddressUtxos, ADDRESS_HEIGHTS_FULL_RANGE},
 };
-pub use block::{block, block_header, transaction};
+pub use block::{block, block_header, hash, transaction};
 pub use find::{
     chain_contains_hash, find_chain_hashes, find_chain_headers, hash_by_height, height_by_hash,
     tip_height,

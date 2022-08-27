@@ -145,7 +145,7 @@ pub trait Rpc {
     ///
     /// zcashd reference: [`getbestblockhash`](https://zcash.github.io/rpc/getbestblockhash.html)
     #[rpc(name = "getbestblockhash")]
-    fn get_best_block_hash(&self) -> Result<GetBestBlockHash>;
+    fn get_best_block_hash(&self) -> Result<GetBlockHash>;
 
     /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
@@ -230,6 +230,22 @@ pub trait Rpc {
         &self,
         address_strings: AddressStrings,
     ) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
+
+    /// Returns the hash of the block of a given height iff the index argument correspond
+    /// to a block in the best chain.
+    ///
+    /// zcashd reference: [`getblockhash`](https://zcash-rpc.github.io/getblockhash.html)
+    ///
+    /// # Parameters
+    ///
+    /// - `index`: (numeric, required) The block index.
+    ///
+    /// # Notes
+    ///
+    /// - If `index` is positive then index = block height.
+    /// - If `index` is negative then -1 is the last known valid block.
+    #[rpc(name = "getblockhash")]
+    fn get_block_hash(&self, index: i32) -> BoxFuture<Result<GetBlockHash>>;
 }
 
 /// RPC method implementations.
@@ -567,10 +583,10 @@ where
         .boxed()
     }
 
-    fn get_best_block_hash(&self) -> Result<GetBestBlockHash> {
+    fn get_best_block_hash(&self) -> Result<GetBlockHash> {
         self.latest_chain_tip
             .best_tip_hash()
-            .map(GetBestBlockHash)
+            .map(GetBlockHash)
             .ok_or(Error {
                 code: ErrorCode::ServerError(0),
                 message: "No blocks in state".to_string(),
@@ -938,6 +954,44 @@ where
         }
         .boxed()
     }
+
+    fn get_block_hash(&self, index: i32) -> BoxFuture<Result<GetBlockHash>> {
+        let mut state = self.state.clone();
+
+        let maybe_tip_height = self.latest_chain_tip.best_tip_height();
+
+        async move {
+            let tip_height = maybe_tip_height.ok_or(Error {
+                code: ErrorCode::ServerError(0),
+                message: "No blocks in state".to_string(),
+                data: None,
+            })?;
+
+            let height = get_height_from_int(index, tip_height)?;
+
+            let request = zebra_state::ReadRequest::Hash(height);
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                zebra_state::ReadResponse::Hash(Some(hash)) => Ok(GetBlockHash(hash)),
+                zebra_state::ReadResponse::Hash(None) => Err(Error {
+                    code: MISSING_BLOCK_ERROR_CODE,
+                    message: "Block not found".to_string(),
+                    data: None,
+                }),
+                _ => unreachable!("unmatched response to a block request"),
+            }
+        }
+        .boxed()
+    }
 }
 
 /// Response to a `getinfo` RPC request.
@@ -1098,13 +1152,13 @@ pub enum GetBlock {
     },
 }
 
-/// Response to a `getbestblockhash` RPC request.
+/// Response to a `getbestblockhash` and `getblockhash` RPC request.
 ///
-/// Contains the hex-encoded hash of the tip block.
+/// Contains the hex-encoded hash of the requested block.
 ///
-/// Also see the notes for the [`Rpc::get_best_block_hash` method].
+/// Also see the notes for the [`Rpc::get_best_block_hash`] and [`Rpc::get_block_hash`] methods.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
+pub struct GetBlockHash(#[serde(with = "hex")] block::Hash);
 
 /// Response to a `z_gettreestate` RPC request.
 ///
@@ -1268,4 +1322,42 @@ fn check_height_range(start: Height, end: Height, chain_height: Height) -> Resul
     }
 
     Ok(())
+}
+
+/// Given a potentially negative index, find the corresponding `Height`.
+///
+/// This function is used to parse the integer index argument of `get_block_hash`.
+fn get_height_from_int(index: i32, tip_height: Height) -> Result<Height> {
+    if index >= 0 {
+        let height = index.try_into().expect("Positive i32 always fits in u32");
+        if height > tip_height.0 {
+            return Err(Error::invalid_params(
+                "Provided index is greater than the current tip",
+            ));
+        }
+        Ok(Height(height))
+    } else {
+        let height = (tip_height.0 as i32).checked_add(index + 1);
+
+        let sanitized_height = match height {
+            None => Err(Error::invalid_params("Provided index is not valid")),
+            Some(h) => {
+                if h < 0 {
+                    return Err(Error::invalid_params(
+                        "Provided negative index ends up with a negative height",
+                    ));
+                }
+                let h: u32 = h.try_into().expect("Positive i32 always fits in u32");
+                if h > tip_height.0 {
+                    return Err(Error::invalid_params(
+                        "Provided index is greater than the current tip",
+                    ));
+                }
+
+                Ok(h)
+            }
+        };
+
+        Ok(Height(sanitized_height?))
+    }
 }

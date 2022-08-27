@@ -88,3 +88,24 @@ where
         })
         .or_else(|| db.transaction(hash))
 }
+
+/// Returns the [`Hash`] given [`block::Height`](zebra_chain::block::Height), if it exists in
+/// the non-finalized `chain` or finalized `db`.
+pub fn hash<C>(chain: Option<C>, db: &ZebraDb, height: Height) -> Option<zebra_chain::block::Hash>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // The StateService commits blocks to the finalized state before updating
+    // the latest chain, and it can commit additional blocks after we've cloned
+    // this `chain` variable.
+    //
+    // Since blocks are the same in the finalized and non-finalized state, we
+    // check the most efficient alternative first. (`chain` is always in memory,
+    // but `db` stores blocks on disk, with a memory cache.)
+    chain
+        .as_ref()
+        .and_then(|chain| chain.as_ref().hash_by_height(height))
+        .or_else(|| db.hash(height))
+}

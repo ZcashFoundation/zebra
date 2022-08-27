@@ -8,7 +8,7 @@ use std::{
 
 use zebra_chain::{
     amount::NegativeAllowed,
-    block::{self, Block},
+    block::{self, Block, Height},
     serialization::SerializationError,
     transaction,
     transparent::{self, utxos_from_ordered_utxos},
@@ -503,4 +503,13 @@ pub enum ReadRequest {
     ///
     /// Returns a type with found utxos and transaction information.
     UtxosByAddresses(HashSet<transparent::Address>),
+
+    /// Looks up a block hash by height in the current best chain.
+    ///
+    /// Returns
+    ///
+    /// * [`Response::Hash(Some(Hash))`](Response::Hash) if the block is in the best chain;
+    /// * [`Response::Hash(None)`](Response::Hash) otherwise.
+    ///
+    Hash(Height),
 }
