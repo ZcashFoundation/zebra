@@ -10,6 +10,13 @@ on:
     branches:
       - 'main'
 
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_LOG: info
+  RUST_BACKTRACE: full
+  RUST_LIB_BACKTRACE: full
+  COLORBT_SHOW_HIDDEN: '1'
+
 jobs:
   changed-files:
     runs-on: ubuntu-latest
@@ -25,7 +32,7 @@ jobs:
 
       - name: Rust files
         id: changed-files-rust
-        uses: tj-actions/changed-files@v24
+        uses: tj-actions/changed-files@v29.0.1
         with:
           files: |
             **/*.rs
@@ -37,7 +44,7 @@ jobs:
 
       - name: Workflow files
         id: changed-files-workflows
-        uses: tj-actions/changed-files@v24
+        uses: tj-actions/changed-files@v29.0.1
         with:
           files: |
             .github/workflows/*.yml

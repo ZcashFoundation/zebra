@@ -2,7 +2,7 @@
 
 use std::convert::TryInto;
 
-use chrono::{TimeZone, Utc, MAX_DATETIME, MIN_DATETIME};
+use chrono::{DateTime, TimeZone, Utc};
 use proptest::{arbitrary::any, prelude::*};
 
 use super::{
@@ -41,7 +41,7 @@ impl Arbitrary for DateTime32 {
 pub fn datetime_full() -> impl Strategy<Value = chrono::DateTime<Utc>> {
     (
         // TODO: should we be subtracting 1 from the maximum timestamp?
-        MIN_DATETIME.timestamp()..=MAX_DATETIME.timestamp(),
+        DateTime::<Utc>::MIN_UTC.timestamp()..=DateTime::<Utc>::MAX_UTC.timestamp(),
         0..2_000_000_000_u32,
     )
         .prop_map(|(secs, nsecs)| Utc.timestamp(secs, nsecs))

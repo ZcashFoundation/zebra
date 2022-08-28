@@ -1,6 +1,6 @@
 //! Randomised property tests for transaction verification.
 
-use std::{collections::HashMap, convert::TryInto, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Duration, Utc};
 use proptest::{collection::vec, prelude::*};
@@ -14,8 +14,9 @@ use zebra_chain::{
     transparent,
 };
 
-use super::mock_transparent_transfer;
 use crate::{error::TransactionError, transaction};
+
+use super::mock_transparent_transfer;
 
 /// The maximum number of transparent inputs to include in a mock transaction.
 const MAX_TRANSPARENT_INPUTS: usize = 10;
@@ -204,7 +205,7 @@ proptest! {
             (first_datetime, second_datetime)
         } else if first_datetime > second_datetime {
             (second_datetime, first_datetime)
-        } else if first_datetime == chrono::MAX_DATETIME {
+        } else if first_datetime == DateTime::<Utc>::MAX_UTC {
             (first_datetime - Duration::nanoseconds(1), first_datetime)
         } else {
             (first_datetime, first_datetime + Duration::nanoseconds(1))
