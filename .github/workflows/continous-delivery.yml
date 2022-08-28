@@ -40,6 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       major_version: ${{ steps.set.outputs.major_version }}
+    if: ${{ github.event_name == 'release' }}
     steps:
       - name: Getting Zebrad Version
         id: get
@@ -87,7 +88,7 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
-    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' }}
+    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
 
     steps:
       - name: Inject slug/short variables
