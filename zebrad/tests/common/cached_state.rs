@@ -25,6 +25,7 @@ pub type BoxStateService =
     BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>;
 
 /// Starts a state service using the provided `cache_dir` as the directory with the chain state.
+#[tracing::instrument(skip(cache_dir))]
 pub async fn start_state_service_with_cache_dir(
     network: Network,
     cache_dir: impl Into<PathBuf>,
@@ -47,6 +48,7 @@ pub async fn start_state_service_with_cache_dir(
 }
 
 /// Loads the chain tip height from the state stored in a specified directory.
+#[tracing::instrument]
 pub async fn load_tip_height_from_state_directory(
     network: Network,
     state_path: &Path,
@@ -87,6 +89,7 @@ pub async fn copy_state_directory(source: impl AsRef<Path>) -> Result<TempDir> {
 ///
 /// Copies all files from the `directory` into the destination specified by the concatenation of
 /// the `base_destination_path` and `directory` stripped of its `prefix`.
+#[tracing::instrument]
 async fn copy_directory(
     directory: &Path,
     prefix: &Path,

@@ -10,6 +10,9 @@ on:
       # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
       # workflow definitions
       - '.github/workflows/build-crates-individually.yml'
 

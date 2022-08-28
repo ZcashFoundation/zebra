@@ -59,6 +59,12 @@ on:
         required: false
         type: boolean
         description: 'Does the test use Lightwalletd and Zebra cached state?'
+      # main branch states can be outdated and slower, but they can also be more reliable
+      prefer_main_cached_state:
+        required: false
+        type: boolean
+        default: false
+        description: 'Does the test prefer to use a main branch cached state?'
       saves_to_disk:
         required: true
         type: boolean
@@ -120,6 +126,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -129,9 +136,9 @@ jobs:
         id: create-instance
         run: |
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 100GB \
+          --boot-disk-size 200GB \
           --boot-disk-type pd-ssd \
-          --create-disk name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --create-disk name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=200GB,type=pd-ssd \
           --container-image debian:buster \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
@@ -141,6 +148,9 @@ jobs:
           --zone ${{ env.ZONE }}
           sleep 60
 
+      # Create a docker volume with the new disk we just created.
+      #
+      # SSH into the just created VM, and create a docker volume with the newly created disk.
       - name: Create ${{ inputs.test_id }} Docker volume
         run: |
           gcloud compute ssh \
@@ -150,7 +160,7 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
-          sudo mkfs.ext4 /dev/sdb \
+          sudo mkfs.ext4 -v /dev/sdb \
           && \
           docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -187,6 +197,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -241,6 +252,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -256,7 +268,10 @@ jobs:
       # - To ${{ inputs.zebra_state_dir || inputs.disk_prefix }} if not
       #
       # If there are multiple disks:
-      # - prefer images generated from this branch, then the `main` branch, then any other branch
+      # - prefer images generated from this branch and commit, then
+      # - if prefer_main_cached_state is true, prefer images from the `main` branch, then
+      # - use images from any other branch.
+      # Within each of these categories:
       # - prefer newer images to older images
       #
       # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable
@@ -273,33 +288,53 @@ jobs:
               DISK_PREFIX=${{ inputs.zebra_state_dir || inputs.disk_prefix }}
           fi
 
-          # Try to find an image generated from this branch and commit
-          # Fields are listed in the "Create image from state disk" step
-          BRANCH_DISK_NAME="${DISK_PREFIX}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
-          CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${BRANCH_DISK_NAME}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-          echo "${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT} Disk: $CACHED_DISK_NAME"
-
-          if [[ -z "$CACHED_DISK_NAME" ]]; then
-              # Try to find an image generated from the main branch
-              CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-              echo "main Disk: $CACHED_DISK_NAME"
+          # Try to find an image generated from a previous step or run of this commit.
+          # Fields are listed in the "Create image from state disk" step.
+          #
+          # We can't match the full branch name here,
+          # because it might have been shortened for the image.
+          #
+          # The probability of two matching short commit hashes within the same month is very low.
+          COMMIT_DISK_PREFIX="${DISK_PREFIX}-.+-${{ env.GITHUB_SHA_SHORT }}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
+          COMMIT_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${COMMIT_DISK_PREFIX}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "${GITHUB_REF_SLUG_URL}-${{ env.GITHUB_SHA_SHORT }} Disk: $COMMIT_CACHED_DISK_NAME"
+          if [[ -n "$COMMIT_CACHED_DISK_NAME" ]]; then
+              echo "Description: $(gcloud compute images describe $COMMIT_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
           fi
 
+          # Try to find an image generated from the main branch
+          MAIN_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "main Disk: $MAIN_CACHED_DISK_NAME"
+          if [[ -n "$MAIN_CACHED_DISK_NAME" ]]; then
+              echo "Description: $(gcloud compute images describe $MAIN_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
+          fi
+
+          # Try to find an image generated from any other branch
+          ANY_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          echo "any branch Disk: $ANY_CACHED_DISK_NAME"
+          if [[ -n "$ANY_CACHED_DISK_NAME" ]]; then
+              echo "Description: $(gcloud compute images describe $ANY_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
+          fi
+
+          # Select a cached disk based on the job settings
+          CACHED_DISK_NAME="$COMMIT_CACHED_DISK_NAME"
+          if [[ -z "$CACHED_DISK_NAME" ]] && [[ "${{ inputs.prefer_main_cached_state }}" == "true" ]]; then
+              echo "Preferring main branch cached state to other branches..."
+              CACHED_DISK_NAME="$MAIN_CACHED_DISK_NAME"
+          fi
           if [[ -z "$CACHED_DISK_NAME" ]]; then
-              # Try to find an image generated from any other branch
-              CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
-              echo "any branch Disk: $CACHED_DISK_NAME"
+              CACHED_DISK_NAME="$ANY_CACHED_DISK_NAME"
           fi
 
           if [[ -z "$CACHED_DISK_NAME" ]]; then
               echo "No cached state disk available"
-              echo "Expected ${BRANCH_DISK_NAME}"
-              echo "Also searched for any commit on main, and any commit on any branch"
+              echo "Expected ${COMMIT_DISK_PREFIX}"
+              echo "Also searched for cached disks from other branches"
               echo "Cached state test jobs must depend on the cached state rebuild job"
               exit 1
           fi
 
-          echo "Description: $(gcloud compute images describe $CACHED_DISK_NAME --format='value(DESCRIPTION)')"
+          echo "Selected Disk: $CACHED_DISK_NAME"
 
           echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
           echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> $GITHUB_ENV
@@ -310,9 +345,9 @@ jobs:
         id: create-instance
         run: |
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 100GB \
+          --boot-disk-size 200GB \
           --boot-disk-type pd-ssd \
-          --create-disk image=${{ env.CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=100GB,type=pd-ssd \
+          --create-disk image=${{ env.CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=200GB,type=pd-ssd \
           --container-image debian:buster \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
@@ -324,7 +359,10 @@ jobs:
 
       # Create a docker volume with the selected cached state.
       #
-      # SSH into the just created VM, and create a docker volume with the recently attached disk.
+      # SSH into the just created VM, expand the partition and filesystem to fill the entire disk,
+      # then create a docker volume with the recently attached disk.
+      # (The cached state and disk are usually the same size,
+      # but the cached state can be smaller if we just increased the disk size.)
       - name: Create ${{ inputs.test_id }} Docker volume
         run: |
           gcloud compute ssh \
@@ -334,6 +372,10 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command \
           "\
+          sudo e2fsck -v -f -p /dev/sdb \
+          && \
+          sudo resize2fs -p /dev/sdb \
+          && \
           docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
@@ -369,6 +411,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -494,6 +537,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -502,6 +546,9 @@ jobs:
       # following until Sapling activation (or the test finishes).
       #
       # The log pipeline ignores the exit status of `docker logs`.
+      # It also ignores the expected 'broken pipe' error from `tee`,
+      # which happens when `grep` finds a matching output and moves on to the next job.
+      #
       # Errors in the tests are caught by the final test status job.
       - name: Show logs for ${{ inputs.test_id }} test (sprout)
         run: |
@@ -518,7 +565,12 @@ jobs:
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          '(estimated progress.*network_upgrade.*=.*Sapling)|(estimated progress.*network_upgrade.*=.*Blossom)|(estimated progress.*network_upgrade.*=.*Heartwood)|(estimated progress.*network_upgrade.*=.*Canopy)|(estimated progress.*network_upgrade.*=.*Nu5)|(test result:.*finished in)' \
+          -e 'estimated progress.*network_upgrade.*=.*Sapling' \
+          -e 'estimated progress.*network_upgrade.*=.*Blossom' \
+          -e 'estimated progress.*network_upgrade.*=.*Heartwood' \
+          -e 'estimated progress.*network_upgrade.*=.*Canopy' \
+          -e 'estimated progress.*network_upgrade.*=.*Nu5' \
+          -e 'test result:.*finished in' \
           "
 
   # follow the logs of the test we just launched, up to Canopy activation (or the test finishing)
@@ -552,6 +604,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -572,7 +625,9 @@ jobs:
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          '(estimated progress.*network_upgrade.*=.*Canopy)|(estimated progress.*network_upgrade.*=.*Nu5)|(test result:.*finished in)' \
+          -e 'estimated progress.*network_upgrade.*=.*Canopy' \
+          -e 'estimated progress.*network_upgrade.*=.*Nu5' \
+          -e 'test result:.*finished in' \
           "
 
   # follow the logs of the test we just launched, up to NU5 activation (or the test finishing)
@@ -606,6 +661,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -626,14 +682,14 @@ jobs:
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          '(estimated progress.*network_upgrade.*=.*Nu5)|(test result:.*finished in)' \
+          -e 'estimated progress.*network_upgrade.*=.*Nu5' \
+          -e 'test result:.*finished in' \
           "
 
   # follow the logs of the test we just launched, up to block 1,740,000 or later
   # (or the test finishing)
   #
   # We chose this height because it was about 5 hours into the NU5 sync, at the end of July 2022.
-  # This is a temporary workaround until we improve sync speeds.
   logs-1740k:
     name: Log ${{ inputs.test_id }} test (1740k)
     needs: [ logs-canopy ]
@@ -664,6 +720,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -684,12 +741,18 @@ jobs:
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          '(estimated progress.*current_height.*=.*17[4-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks)|(estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks)||(estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks)|(test result:.*finished in)' \
+          -e 'estimated progress.*current_height.*=.*17[4-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'test result:.*finished in' \
           "
 
-  # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
-  logs-checkpoint:
-    name: Log ${{ inputs.test_id }} test (checkpoint)
+  # follow the logs of the test we just launched, up to block 1,760,000 or later
+  # (or the test finishing)
+  #
+  # We chose this height because it was about 9 hours into the NU5 sync, at the end of August 2022.
+  logs-1760k:
+    name: Log ${{ inputs.test_id }} test (1760k)
     needs: [ logs-1740k ]
     # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() }}
@@ -718,6 +781,65 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+          token_format: 'access_token'
+
+      # Show recent logs, following until block 1,760,000 (or the test finishes)
+      - name: Show logs for ${{ inputs.test_id }} test (1760k)
+        run: |
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command \
+          "\
+          docker logs \
+          --tail all \
+          --follow \
+          ${{ inputs.test_id }} | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          -e 'estimated progress.*current_height.*=.*17[6-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'test result:.*finished in' \
+          "
+
+  # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
+  logs-checkpoint:
+    name: Log ${{ inputs.test_id }} test (checkpoint)
+    needs: [ logs-1760k ]
+    # If the previous job fails, we still want to show the logs.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Downcase network name for disks
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0.8.0
+        with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -740,7 +862,8 @@ jobs:
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          '(verified final checkpoint)|(test result:.*finished in)' \
+          -e 'verified final checkpoint' \
+          -e 'test result:.*finished in' \
           "
 
   # follow the logs of the test we just launched, until it finishes
@@ -774,6 +897,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -798,7 +922,7 @@ jobs:
           "
 
 
-  # check the results of the test
+  # check the results of the test, and show all of the test logs
   test-result:
     # TODO: update the job name here, and in the branch protection rules
     name: Run ${{ inputs.test_id }} test
@@ -831,13 +955,14 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
       # Then wait for the container to finish, and exit with the test's exit status.
-      # Also shows recent test logs.
+      # Also shows all the test logs.
       #
       # If the container has already finished, `docker wait` should return its status.
       # But sometimes this doesn't work, so we use `docker inspect` as a fallback.
@@ -855,7 +980,7 @@ jobs:
           --command=' \
           set -e;
           docker logs \
-          --tail ${{ env.EXTRA_LOG_LINES }} \
+          --tail all \
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
@@ -893,14 +1018,22 @@ jobs:
         with:
           short-length: 7
 
-      # Disk images in GCP are required to be in lowercase, but the blockchain network
-      # uses sentence case, so we need to downcase ${{ inputs.network }}
+      # Performs formatting on disk name components.
       #
-      # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable
-      - name: Downcase network name for disks
+      # Disk images in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase ${{ inputs.network }}.
+      #
+      # Disk image names in GCP are limited to 63 characters, so we need to limit
+      # branch names to 13 characters.
+      #
+      # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
+      # Passes ${{ env.GITHUB_REF_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
+      - name: Format network name and branch name for disks
         run: |
           NETWORK_CAPS=${{ inputs.network }}
           echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+          LONG_GITHUB_REF=${{ env.GITHUB_REF_SLUG_URL }}
+          echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:13}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -945,17 +1078,41 @@ jobs:
           SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE '${{ inputs.height_grep_text }}\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
 
-      # Create an image from disk that will be used for following/other tests
+      # Sets the $UPDATE_SUFFIX env var to "-u" if using cached state,
+      # and the empty string otherwise.
+      #
+      # Also sets a unique date and time suffix $TIME_SUFFIX.
+      - name: Set update and time suffixes
+        run: |
+          UPDATE_SUFFIX=""
+
+          if [[ "${{ inputs.needs_zebra_state }}" == "true" ]]; then
+              UPDATE_SUFFIX="-u"
+          fi
+
+          # We're going to delete old images after a month, so we don't need the year here
+          TIME_SUFFIX=$(date '+%m%d%H%M%S' --utc)
+
+          echo "UPDATE_SUFFIX=$UPDATE_SUFFIX" >> $GITHUB_ENV
+          echo "TIME_SUFFIX=$TIME_SUFFIX" >> $GITHUB_ENV
+
+      # Create an image from disk that will be used for following/other tests.
+      #
       # This image can contain:
       # - Zebra cached state
       # - Zebra + lightwalletd cached state
-      # Which cached state is being saved to the disk is defined by ${{ inputs.disk_prefix }}
+      # Which cached state is being saved to the disk is defined by ${{ inputs.disk_prefix }}.
+      #
+      # The image name must be unique, and be 63 characters or less.
+      # The timestamp makes images from the same commit unique,
+      # as long as they don't finish in the same second.
       #
       # Force the image creation (--force) as the disk is still attached even though is not being
-      # used by the container
+      # used by the container.
       - name: Create image from state disk
         run: |
-          gcloud compute images create ${{ inputs.disk_prefix }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }} \
+          gcloud compute images create \
+          "${{ inputs.disk_prefix }}-${SHORT_GITHUB_REF}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
           --force \
           --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           --source-disk-zone=${{ env.ZONE }} \
