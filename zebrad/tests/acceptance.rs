@@ -354,6 +354,7 @@ fn misconfigured_ephemeral_missing_directory() -> Result<()> {
     )
 }
 
+#[tracing::instrument]
 fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck) -> Result<()> {
     use std::io::ErrorKind;
 
@@ -520,6 +521,7 @@ fn config_test() -> Result<()> {
 }
 
 /// Test that `zebrad start` can parse the output from `zebrad generate`.
+#[tracing::instrument]
 fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -823,6 +825,7 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
     .map(|_tempdir| ())
 }
 
+#[tracing::instrument]
 fn create_cached_database(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height();
     let checkpoint_stop_regex = format!("{}.*CommitFinalized request", STOP_AT_HEIGHT_REGEX);
@@ -839,6 +842,7 @@ fn create_cached_database(network: Network) -> Result<()> {
     )
 }
 
+#[tracing::instrument]
 fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height() + 1200;
     let full_validation_stop_regex =
@@ -862,6 +866,7 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
 /// `timeout_argument_name` parameter. The value of the environment variable must the number of
 /// minutes specified as an integer.
 #[allow(clippy::print_stderr)]
+#[tracing::instrument]
 fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
     let timeout_argument: Option<u64> = env::var(timeout_argument_name)
         .ok()
@@ -1284,6 +1289,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
 /// Set `FullSyncFromGenesis { allow_lightwalletd_cached_state: true }` to speed up manual full sync tests.
 ///
 /// The random ports in this test can cause [rare port conflicts.](#Note on port conflict)
+#[tracing::instrument]
 fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -1686,6 +1692,7 @@ fn zebra_state_conflict() -> Result<()> {
 /// `second_dir`. Check that the first node's stdout contains
 /// `first_stdout_regex`, and the second node's stderr contains
 /// `second_stderr_regex`.
+#[tracing::instrument]
 fn check_config_conflict<T, U>(
     first_dir: T,
     first_stdout_regex: &str,
@@ -1693,8 +1700,8 @@ fn check_config_conflict<T, U>(
     second_stderr_regex: &str,
 ) -> Result<()>
 where
-    T: ZebradTestDirExt,
-    U: ZebradTestDirExt,
+    T: ZebradTestDirExt + std::fmt::Debug,
+    U: ZebradTestDirExt + std::fmt::Debug,
 {
     // Start the first node
     let mut node1 = first_dir.spawn_child(args!["start"])?;

@@ -145,6 +145,7 @@ pub async fn run() -> Result<()> {
 ///
 /// Returns a list of valid transactions that are not in any of the blocks present in the
 /// original `zebrad_state_path`.
+#[tracing::instrument]
 async fn load_transactions_from_a_future_block(
     network: Network,
     zebrad_state_path: PathBuf,
@@ -179,6 +180,7 @@ async fn load_transactions_from_a_future_block(
 ///
 /// If the specified `zebrad_state_path` contains a chain state that's not synchronized to a tip that's
 /// after `height`.
+#[tracing::instrument]
 async fn load_transactions_from_block_after(
     height: block::Height,
     network: Network,
@@ -213,6 +215,7 @@ async fn load_transactions_from_block_after(
 
 /// Performs a request to the provided read-only `state` service to fetch all transactions from a
 /// block at the specified `height`.
+#[tracing::instrument(skip(state))]
 async fn load_transactions_from_block<ReadStateService>(
     height: block::Height,
     state: &mut ReadStateService,

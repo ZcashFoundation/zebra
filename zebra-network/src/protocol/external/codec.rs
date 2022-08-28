@@ -2,7 +2,6 @@
 
 use std::{
     cmp::min,
-    convert::TryInto,
     fmt,
     io::{Cursor, Read, Write},
 };
@@ -724,15 +723,18 @@ impl Codec {
     }
 }
 
-// XXX replace these interior unit tests with exterior integration tests + proptest
+// TODO:
+// - move these unit tests to a separate file
+// - add exterior integration tests + proptest
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-    use chrono::{MAX_DATETIME, MIN_DATETIME};
+    use chrono::DateTime;
     use futures::prelude::*;
     use lazy_static::lazy_static;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    use super::*;
 
     lazy_static! {
         static ref VERSION_TEST_VECTOR: Message = {
@@ -808,8 +810,10 @@ mod tests {
 
         deserialize_version_with_time(1620777600).expect("recent time is valid");
         deserialize_version_with_time(0).expect("zero time is valid");
-        deserialize_version_with_time(MIN_DATETIME.timestamp()).expect("min time is valid");
-        deserialize_version_with_time(MAX_DATETIME.timestamp()).expect("max time is valid");
+        deserialize_version_with_time(DateTime::<Utc>::MIN_UTC.timestamp())
+            .expect("min time is valid");
+        deserialize_version_with_time(DateTime::<Utc>::MAX_UTC.timestamp())
+            .expect("max time is valid");
     }
 
     /// Deserialize a `Version` message containing `time`, and return the result.
