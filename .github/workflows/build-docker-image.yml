@@ -36,12 +36,20 @@ on:
       rust_log:
         required: false
         type: string
+        default: info
+    outputs:
+      image_digest:
+        description: 'The image digest to be used on a caller workflow'
+        value: ${{ jobs.build.outputs.image_digest }}
 
 jobs:
   build:
     name: Build images
     timeout-minutes: 210
     runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.docker_build.outputs.digest }}
+      image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -66,12 +74,12 @@ jobs:
           # generate Docker tags based on the following events/attributes
           tags: |
             type=schedule
+            type=sha
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=sha
 
       # Setup Docker Buildx to allow use of docker cache layers from GH
       - name: Set up Docker Buildx
@@ -82,6 +90,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'

@@ -15,6 +15,9 @@ on:
       # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
       # workflow definitions
       - 'codecov.yml'
       - '.github/workflows/coverage.yml'
@@ -30,6 +33,7 @@ on:
 
 env:
   CARGO_INCREMENTAL: 0
+  RUST_LOG: info
   RUST_BACKTRACE: full
   RUST_LIB_BACKTRACE: full
   COLORBT_SHOW_HIDDEN: '1'

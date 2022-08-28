@@ -86,6 +86,7 @@ pub const MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD: Height =
     Height(3 * sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT as u32);
 
 /// What the expected behavior of the mempool is for a test that uses [`sync_until`].
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MempoolBehavior {
     /// The mempool should be forced to activate at a certain height, for debug purposes.
     ///
@@ -177,6 +178,7 @@ impl MempoolBehavior {
 /// On success, returns the associated `TempDir`. Returns an error if
 /// the child exits or `timeout` elapses before `stop_regex` is found.
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip(reuse_tempdir))]
 pub fn sync_until(
     height: Height,
     network: Network,
@@ -297,6 +299,7 @@ pub fn sync_until(
 /// The zebrad instance is executed on a copy of the partially synchronized chain state. This copy
 /// is returned afterwards, containing the fully synchronized chain state.
 #[allow(dead_code)]
+#[tracing::instrument]
 pub async fn perform_full_sync_starting_from(
     network: Network,
     partial_sync_path: &Path,
@@ -354,6 +357,7 @@ pub fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
 /// Returns an error if the child exits or the fixed timeout elapses
 /// before `STOP_AT_HEIGHT_REGEX` is found.
 #[allow(clippy::print_stderr)]
+#[tracing::instrument]
 pub fn create_cached_database_height(
     network: Network,
     height: Height,
@@ -363,8 +367,8 @@ pub fn create_cached_database_height(
 ) -> Result<()> {
     eprintln!("creating cached database");
 
-    // 16 hours
-    let timeout = Duration::from_secs(60 * 60 * 16);
+    // 24 hours
+    let timeout = Duration::from_secs(24 * 60 * 60);
 
     // Use a persistent state, so we can handle large syncs
     let mut config = cached_mandatory_checkpoint_test_config()?;
