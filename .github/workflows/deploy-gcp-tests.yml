@@ -546,6 +546,9 @@ jobs:
       # following until Sapling activation (or the test finishes).
       #
       # The log pipeline ignores the exit status of `docker logs`.
+      # It also ignores the expected 'broken pipe' error from `tee`,
+      # which happens when `grep` finds a matching output and moves on to the next job.
+      #
       # Errors in the tests are caught by the final test status job.
       - name: Show logs for ${{ inputs.test_id }} test (sprout)
         run: |
@@ -919,7 +922,7 @@ jobs:
           "
 
 
-  # check the results of the test
+  # check the results of the test, and show all of the test logs
   test-result:
     # TODO: update the job name here, and in the branch protection rules
     name: Run ${{ inputs.test_id }} test
@@ -959,7 +962,7 @@ jobs:
 
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
       # Then wait for the container to finish, and exit with the test's exit status.
-      # Also shows recent test logs.
+      # Also shows all the test logs.
       #
       # If the container has already finished, `docker wait` should return its status.
       # But sometimes this doesn't work, so we use `docker inspect` as a fallback.
@@ -977,7 +980,7 @@ jobs:
           --command=' \
           set -e;
           docker logs \
-          --tail ${{ env.EXTRA_LOG_LINES }} \
+          --tail all \
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
