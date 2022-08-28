@@ -8,6 +8,9 @@ on:
       - '**/*.snap'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
       - 'codecov.yml'
       - '.github/workflows/coverage.yml'
 
