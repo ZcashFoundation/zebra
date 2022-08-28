@@ -20,7 +20,8 @@ use zebra_test::{prelude::*, transcript::Transcript};
 
 use crate::{
     arbitrary::Prepare,
-    constants, init_test,
+    constants::{self, MAX_LEGACY_CHAIN_BLOCKS},
+    init_test,
     service::{arbitrary::populated_state, chain_tip::TipAction, StateService},
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
     BoxError, Config, FinalizedBlock, PreparedBlock, Request, Response,
@@ -326,7 +327,7 @@ proptest! {
         prop_assert_eq!(
             response,
             Err(format!(
-                "could not find any transactions in recent blocks: checked 1000 blocks back from {tip_height:?}",
+                "could not find any transactions in recent blocks: checked {MAX_LEGACY_CHAIN_BLOCKS} blocks back from {tip_height:?}",
             ))
         );
     }
