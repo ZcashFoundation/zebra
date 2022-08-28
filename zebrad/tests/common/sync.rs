@@ -367,8 +367,8 @@ pub fn create_cached_database_height(
 ) -> Result<()> {
     eprintln!("creating cached database");
 
-    // 20 hours
-    let timeout = Duration::from_secs(60 * 60 * 20);
+    // 24 hours
+    let timeout = Duration::from_secs(24 * 60 * 60);
 
     // Use a persistent state, so we can handle large syncs
     let mut config = cached_mandatory_checkpoint_test_config()?;
