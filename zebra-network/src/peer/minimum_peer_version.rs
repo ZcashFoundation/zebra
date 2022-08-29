@@ -1,6 +1,6 @@
 //! Watches for chain tip height updates to determine the minimum supported peer protocol version.
 
-use zebra_chain::{chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{block::Height, chain_tip::ChainTip, parameters::Network};
 
 use crate::protocol::external::types::Version;
 
@@ -64,6 +64,16 @@ where
         if self.current_minimum != new_minimum {
             self.current_minimum = new_minimum;
             self.has_changed = true;
+        }
+    }
+
+    /// Return the current chain tip height.
+    ///
+    /// If it is not available return height zero.
+    pub fn chain_tip_height(&self) -> Height {
+        match self.chain_tip.best_tip_height() {
+            Some(height) => height,
+            None => Height(0),
         }
     }
 }
