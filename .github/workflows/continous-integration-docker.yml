@@ -1,8 +1,9 @@
 name: CI Docker
 
-# Ensures that only a single CI workflow runs at a time in Pull Requests. The
-# latest commit will cancel any previous running workflows from the same PR
-concurrency: 
+# Ensures that only one workflow task will run at a time. Previous builds, if
+# already in process, will get cancelled. Only the latest commit will be allowed
+# to run, cancelling any workflows in between
+concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
