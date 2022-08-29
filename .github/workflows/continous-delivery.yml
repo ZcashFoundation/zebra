@@ -14,6 +14,9 @@ on:
   push:
     branches:
       - main
+  release:
+    types:
+      - published
 
 env:
   NETWORK: Mainnet
@@ -23,6 +26,37 @@ env:
   MACHINE_TYPE: c2-standard-4
 
 jobs:
+  # If a release was made we want to extract the first part of the semver from the
+  # tag_name
+  #
+  # Generate the following output to pass to subsequent jobs
+  # - If our semver is `v1.3.0` the resulting output from this job would be `v1`
+  #
+  # Note: We just use the first part of the version to replace old instances, and change
+  # it when a major version is released, to keep a segregation between new and old 
+  # versions.
+  versioning:
+    name: Versioning
+    runs-on: ubuntu-latest
+    outputs:
+      major_version: ${{ steps.set.outputs.major_version }}
+    if: ${{ github.event_name == 'release' }}
+    steps:
+      - name: Getting Zebrad Version
+        id: get
+        uses: actions/github-script@v6.2.0
+        with:
+          result-encoding: string
+          script: |
+            return context.payload.release.tag_name.substring(0,2)
+      - name: Setting API Version
+        id: set
+        run: echo "::set-output name=major_version::${{ steps.get.outputs.result }}"
+
+  # Each time this workflow is executed, a build will be triggered to create a new image
+  # with the corresponding tags using information from Git
+  #
+  # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
   build:
     uses: ./.github/workflows/build-docker-image.yml
     with:
@@ -35,15 +69,26 @@ jobs:
       zebra_skip_ipv6_tests: '1'
       rust_log: info
 
+  # This jobs handles the deployment of a Managed Instance Group (MiG) with 2 nodes in
+  # the us-central1 region. Two different groups of MiGs are deployed one for pushes to
+  # the main branch and another for version releases of Zebra
+  #
+  # Once this workflow is triggered the previous MiG is replaced, on pushes to main its
+  # always replaced, and with releases its only replaced if the same major version is
+  # being deployed, otherwise a new major version is deployed
+  #
+  # Runs:
+  # - on every push/merge to the `main` branch
+  # - on every release, when it's published
   deploy-nodes:
     name: Deploy Mainnet nodes
-    needs: build
+    needs: [ build, versioning ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: 'read'
       id-token: 'write'
-    if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
 
     steps:
       - name: Inject slug/short variables
@@ -56,15 +101,16 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
       - name: Create instance template
         run: |
-          gcloud compute instance-templates create-with-container zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --boot-disk-type=pd-ssd \
-          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}:${{ env.GITHUB_SHA_SHORT }} \
+          --container-image ${{ env.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
           --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-ssd \
           --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
@@ -76,15 +122,15 @@ jobs:
         id: does-group-exist
         continue-on-error: true
         run: |
-          gcloud compute instance-groups list | grep "zebrad-${{ env.GITHUB_REF_SLUG_URL }}" | grep "${{ env.REGION }}"
+          gcloud compute instance-groups list | grep "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}" | grep "${{ env.REGION }}"
 
       # Deploy new managed instance group using the new instance template
       - name: Create managed instance group
         if: steps.does-group-exist.outcome == 'failure'
         run: |
           gcloud compute instance-groups managed create \
-          "zebrad-${{ env.GITHUB_REF_SLUG_URL }}" \
-          --template "zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}" \
+          --template "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --health-check zebrad-tracing-filter \
           --initial-delay 30 \
           --region "${{ env.REGION }}" \
@@ -95,10 +141,17 @@ jobs:
         if: steps.does-group-exist.outcome == 'success'
         run: |
           gcloud compute instance-groups managed rolling-action start-update \
-          "zebrad-${{ env.GITHUB_REF_SLUG_URL }}" \
-          --version template="zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}" \
+          --version template="zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --region "${{ env.REGION }}"
 
+  # This jobs handles the deployment of a single node (1) in the us-central1-a zone
+  # when an instance is required to test a specific commit
+  #
+  # Runs:
+  # - on request, using workflow_dispatch with regenerate-disks
+  #
+  # Note: this instances are not automatically replaced or deleted
   deploy-instance:
     name: Deploy single instance
     needs: build
@@ -120,6 +173,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v0.8.0
         with:
+          retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
@@ -132,7 +186,7 @@ jobs:
           --boot-disk-type=pd-ssd \
           --container-stdin \
           --container-tty \
-          --container-image ${{ env.GAR_BASE }}/${{ env.GITHUB_REF_SLUG_URL }}:${{ env.GITHUB_SHA_SHORT }} \
+          --container-image ${{ env.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
           --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=100GB,type=pd-ssd \
           --container-mount-disk mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \

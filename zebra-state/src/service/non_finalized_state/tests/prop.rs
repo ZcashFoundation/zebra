@@ -613,8 +613,9 @@ fn different_blocks_different_chains() -> Result<()> {
                 chain1.orchard_note_commitment_tree = chain2.orchard_note_commitment_tree.clone();
                 chain1.orchard_trees_by_height = chain2.orchard_trees_by_height.clone();
 
-                // history tree
+                // history trees
                 chain1.history_tree = chain2.history_tree.clone();
+                chain1.history_trees_by_height = chain2.history_trees_by_height.clone();
 
                 // anchors
                 chain1.sprout_anchors = chain2.sprout_anchors.clone();

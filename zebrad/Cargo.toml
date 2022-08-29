@@ -77,12 +77,12 @@ zebra-state = { path = "../zebra-state" }
 
 abscissa_core = "0.5"
 gumdrop = { version = "0.7", features = ["default_expr"]}
-chrono = "0.4.19"
+chrono = { version = "0.4.20", default-features = false, features = ["clock", "std"] }
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
 indexmap = "1.9.1"
 lazy_static = "1.4.0"
-serde = { version = "1.0.142", features = ["serde_derive"] }
+serde = { version = "1.0.144", features = ["serde_derive"] }
 toml = "0.5.9"
 
 futures = "0.3.21"

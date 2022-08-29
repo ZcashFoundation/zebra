@@ -86,6 +86,7 @@ pub struct Chain {
     /// The ZIP-221 history tree of the tip of this [`Chain`],
     /// including all finalized blocks, and the non-finalized `blocks` in this chain.
     pub(crate) history_tree: Arc<HistoryTree>,
+    pub(crate) history_trees_by_height: BTreeMap<block::Height, Arc<HistoryTree>>,
 
     /// The Sprout anchors created by `blocks`.
     pub(crate) sprout_anchors: MultiSet<sprout::tree::Root>,
@@ -161,6 +162,7 @@ impl Chain {
             partial_transparent_transfers: Default::default(),
             partial_cumulative_work: Default::default(),
             history_tree,
+            history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
         }
     }
@@ -190,12 +192,13 @@ impl Chain {
             self.sprout_note_commitment_tree.root() == other.sprout_note_commitment_tree.root() &&
             self.sprout_trees_by_anchor == other.sprout_trees_by_anchor &&
             self.sapling_note_commitment_tree.root() == other.sapling_note_commitment_tree.root() &&
-            self.sapling_trees_by_height== other.sapling_trees_by_height &&
+            self.sapling_trees_by_height == other.sapling_trees_by_height &&
             self.orchard_note_commitment_tree.root() == other.orchard_note_commitment_tree.root() &&
-            self.orchard_trees_by_height== other.orchard_trees_by_height &&
+            self.orchard_trees_by_height == other.orchard_trees_by_height &&
 
-            // history tree
-            self.history_tree.as_ref().as_ref().map(|tree| tree.hash()) == other.history_tree.as_ref().as_ref().map(|other_tree| other_tree.hash()) &&
+            // history trees
+            self.history_tree == other.history_tree &&
+            self.history_trees_by_height == other.history_trees_by_height &&
 
             // anchors
             self.sprout_anchors == other.sprout_anchors &&
@@ -752,6 +755,7 @@ impl Chain {
             partial_transparent_transfers: self.partial_transparent_transfers.clone(),
             partial_cumulative_work: self.partial_cumulative_work,
             history_tree,
+            history_trees_by_height: self.history_trees_by_height.clone(),
             chain_value_pools: self.chain_value_pools,
         }
     }
@@ -835,6 +839,9 @@ impl Chain {
             sapling_root,
             orchard_root,
         )?;
+
+        self.history_trees_by_height
+            .insert(height, self.history_tree.clone());
 
         Ok(())
     }
@@ -1035,6 +1042,11 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         // This method is called on two scenarios:
         // - When popping the root: the history tree does not change.
         // - When popping the tip: the history tree is rebuilt in fork().
+        //
+        // However, `history_trees_by_height` is reverted.
+        self.history_trees_by_height
+            .remove(&height)
+            .expect("History tree must be present if block was added to chain");
 
         // for each transaction in block
         for (transaction, transaction_hash) in

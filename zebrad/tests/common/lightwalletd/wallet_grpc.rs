@@ -25,6 +25,7 @@ pub type LightwalletdRpcClient =
 /// Waits for `lightwalletd` to sync to near the tip, if `wait_for_sync` is true.
 ///
 /// Returns the lightwalletd instance and the port number that it is listening for RPC connections.
+#[tracing::instrument]
 pub fn spawn_lightwalletd_with_rpc_server(
     zebrad_rpc_address: SocketAddr,
     lightwalletd_state_path: Option<PathBuf>,
@@ -56,6 +57,7 @@ pub fn spawn_lightwalletd_with_rpc_server(
 }
 
 /// Connect to a lightwalletd RPC instance.
+#[tracing::instrument]
 pub async fn connect_to_lightwalletd(lightwalletd_rpc_port: u16) -> Result<LightwalletdRpcClient> {
     let lightwalletd_rpc_address = format!("http://127.0.0.1:{lightwalletd_rpc_port}");
 
