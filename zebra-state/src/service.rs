@@ -206,27 +206,28 @@ impl StateService {
         let timer = CodeTimer::start();
 
         if let Some(tip) = state.best_tip() {
-            if let Some(nu5_activation_height) = NetworkUpgrade::Nu5.activation_height(network) {
-                if check::legacy_chain(
-                    nu5_activation_height,
-                    state.any_ancestor_blocks(tip.1),
-                    state.network,
-                )
-                .is_err()
-                {
-                    let legacy_db_path = Some(state.disk.path().to_path_buf());
-                    panic!(
-                        "Cached state contains a legacy chain. \
-                        An outdated Zebra version did not know about a recent network upgrade, \
-                        so it followed a legacy chain using outdated rules. \
-                        Hint: Delete your database, and restart Zebra to do a full sync. \
-                        Database path: {:?}",
-                        legacy_db_path,
-                    );
-                }
+            let nu5_activation_height = NetworkUpgrade::Nu5
+                .activation_height(network)
+                .expect("NU5 activation height is set");
+
+            if let Err(error) = check::legacy_chain(
+                nu5_activation_height,
+                state.any_ancestor_blocks(tip.1),
+                state.network,
+            ) {
+                let legacy_db_path = state.disk.path().to_path_buf();
+                panic!(
+                    "Cached state contains a legacy chain.\n\
+                     An outdated Zebra version did not know about a recent network upgrade,\n\
+                     so it followed a legacy chain using outdated consensus branch rules.\n\
+                     Hint: Delete your database, and restart Zebra to do a full sync.\n\
+                     Database path: {legacy_db_path:?}\n\
+                     Error: {error:?}",
+                );
             }
         }
-        tracing::info!("no legacy chain found");
+
+        tracing::info!("cached state consensus branch is valid: no legacy chain found");
         timer.finish(module_path!(), line!(), "legacy chain check");
 
         (state, read_only_service, latest_chain_tip, chain_tip_change)
