@@ -99,6 +99,7 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 thiserror = "1.0.33"
 
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
+tracing-appender = "0.2.2"
 tracing-error = "0.2.0"
 tracing-futures = "0.2.5"
 tracing = "0.1.31"
