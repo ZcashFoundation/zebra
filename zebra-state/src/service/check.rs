@@ -297,7 +297,10 @@ pub(crate) fn legacy_chain<I>(
 where
     I: Iterator<Item = Arc<Block>>,
 {
-    for (count, block) in ancestors.enumerate() {
+    let mut ancestors = ancestors.peekable();
+    let tip_height = ancestors.peek().and_then(|block| block.coinbase_height());
+
+    for (index, block) in ancestors.enumerate() {
         // Stop checking if the chain reaches Canopy. We won't find any more V5 transactions,
         // so the rest of our checks are useless.
         //
@@ -313,8 +316,13 @@ where
 
         // If we are past our NU5 activation height, but there are no V5 transactions in recent blocks,
         // the Zebra instance that verified those blocks had no NU5 activation height.
-        if count >= constants::MAX_LEGACY_CHAIN_BLOCKS {
-            return Err("giving up after checking too many blocks".into());
+        if index >= constants::MAX_LEGACY_CHAIN_BLOCKS {
+            return Err(format!(
+                "could not find any transactions in recent blocks: \
+                 checked {index} blocks back from {:?}",
+                tip_height.expect("database contains valid blocks"),
+            )
+            .into());
         }
 
         // If a transaction `network_upgrade` field is different from the network upgrade calculated
@@ -322,7 +330,9 @@ where
         // network upgrade heights.
         block
             .check_transaction_network_upgrade_consistency(network)
-            .map_err(|_| "inconsistent network upgrade found in transaction")?;
+            .map_err(|error| {
+                format!("inconsistent network upgrade found in transaction: {error:?}")
+            })?;
 
         // If we find at least one transaction with a valid `network_upgrade` field, the Zebra instance that
         // verified those blocks used the same network upgrade heights. (Up to this point in the chain.)
