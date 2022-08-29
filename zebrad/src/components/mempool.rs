@@ -280,6 +280,11 @@ impl Mempool {
             .copied()
             .collect()
     }
+
+    /// TBA
+    pub fn skip_full_validation(&self) -> bool {
+        self.config.skip_full_validation
+    }
 }
 
 impl Service<Request> for Mempool {
@@ -384,6 +389,8 @@ impl Service<Request> for Mempool {
     /// and will cause callers to disconnect from the remote peer.
     #[instrument(name = "mempool", skip(self, req))]
     fn call(&mut self, req: Request) -> Self::Future {
+        let skip_full_validation = self.skip_full_validation();
+
         match &mut self.active_state {
             ActiveState::Enabled {
                 storage,
@@ -414,13 +421,15 @@ impl Service<Request> for Mempool {
                         .map(|gossiped_tx| -> Result<(), MempoolError> {
                             storage.should_download_or_verify(gossiped_tx.id())?;
                             tx_downloads.download_if_needed_and_verify(gossiped_tx.clone())?;
-                            if let Some(tx) = gossiped_tx.tx() {
-                                storage.insert(
-                                    zebra_chain::transaction::VerifiedUnminedTx::new(
-                                        tx,
-                                        zebra_chain::amount::Amount::zero(),
-                                    ),
-                                )?;
+                            if skip_full_validation {
+                                if let Some(tx) = gossiped_tx.tx() {
+                                    storage.insert(
+                                        zebra_chain::transaction::VerifiedUnminedTx::new(
+                                            tx,
+                                            zebra_chain::amount::Amount::zero(),
+                                        ),
+                                    )?;
+                                }
                             }
                             Ok(())
                         })

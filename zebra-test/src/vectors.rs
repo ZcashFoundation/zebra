@@ -191,7 +191,7 @@ lazy_static! {
 
     /// https://explorer.zcha.in/transactions/91c61ef8770986f27651a73fe8ea35607c6ebe91201894f3cd7c6a97359a2751 but with the
     /// expiration height modified to hex 00093d (4000000 decimal in little endian).
-    /// v5 transaction with transparent inputs and outpouts, no shielded.
+    /// v5 transaction with transparent inputs and outputs, no shielded.
     pub static ref DUMMY_TX2: Vec<u8> = <Vec<u8>>::from_hex("050000800a27a726b4d0d6c23fbe190000093d0001ce6336775066a26ef5b38e91c73c907d255da7488d40cb0682284aeac84c8af4000000006b483045022100eaf7fdcaff8f0716385cefb997dd1b64a6d2cf4cdfc25b04352376ea610e937702202c17f82f3ce506bdcc3e5d74a103305cfdd838f75095495dc5e4995ecab7ae37012103f68dd6a595fa8381470462eef99803eccbc24aea0cdda5a88c2010ab10943db8feffffff0258252800000000001976a9141cb70d902612db048aa9b0462cea068f81aed9cc88ac491a2400000000001976a914fe4637b0103af2339fb69105e2f17a6d37c282a788ac000000")
         .expect("Transaction bytes are in valid hex representation");
 
