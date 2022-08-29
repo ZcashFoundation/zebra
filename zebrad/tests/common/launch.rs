@@ -220,6 +220,7 @@ pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt + std::fmt
     config.network.initial_testnet_peers = IndexSet::new();
     config.network.network = network;
     config.mempool.debug_enable_at_height = Some(0);
+    config.mempool.skip_full_validation = true;
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 
