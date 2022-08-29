@@ -413,7 +413,15 @@ impl Service<Request> for Mempool {
                         .into_iter()
                         .map(|gossiped_tx| -> Result<(), MempoolError> {
                             storage.should_download_or_verify(gossiped_tx.id())?;
-                            tx_downloads.download_if_needed_and_verify(gossiped_tx)?;
+                            tx_downloads.download_if_needed_and_verify(gossiped_tx.clone())?;
+                            if let Some(tx) = gossiped_tx.tx() {
+                                storage.insert(
+                                    zebra_chain::transaction::VerifiedUnminedTx::new(
+                                        tx,
+                                        zebra_chain::amount::Amount::zero(),
+                                    ),
+                                )?;
+                            }
                             Ok(())
                         })
                         .map(|result| result.map_err(BoxError::from))

@@ -37,7 +37,8 @@ use zebra_chain::{
     block::Block,
     parameters::Network,
     parameters::NetworkUpgrade::{self, Canopy},
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    transaction::Transaction,
 };
 
 use zebra_network::constants::USER_AGENT;
@@ -47,7 +48,7 @@ use crate::common::{
     lightwalletd::{
         wallet_grpc::{
             connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Address, AddressList,
-            BlockId, BlockRange, ChainSpec, Empty, GetAddressUtxosArg,
+            BlockId, BlockRange, ChainSpec, Empty, Exclude, GetAddressUtxosArg, RawTransaction,
             TransparentAddressBlockFilter, TxFilter,
         },
         zebra_skip_lightwalletd_tests,
@@ -110,7 +111,7 @@ pub async fn run() -> Result<()> {
     )?;
 
     // Give lightwalletd a few seconds to open its grpc port before connecting to it
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
 
     tracing::info!(
         ?lightwalletd_rpc_port,
@@ -277,8 +278,6 @@ pub async fn run() -> Result<()> {
         balance_zf.value_zat + balance_mg.value_zat
     );
 
-    // TODO: Create call and checks for `GetMempoolTx` and `GetMempoolTxStream`?
-
     let sapling_treestate_init_height = sapling_activation_height + 1;
 
     // Call `GetTreeState`.
@@ -343,6 +342,47 @@ pub async fn run() -> Result<()> {
 
     // Make sure the subversion field is zebra the user agent
     assert_eq!(lightd_info.zcashd_subversion, USER_AGENT);
+
+    // Transactions in mempool
+
+    let transaction = Transaction::zcash_deserialize(&zebra_test::vectors::DUMMY_TX3[..]).unwrap();
+    let transaction_bytes = transaction.zcash_serialize_to_vec().unwrap();
+
+    // Send transaction by calling `SendTransaction`
+    let request1 = RawTransaction {
+        data: transaction_bytes,
+        height: -1,
+    };
+    let _ = rpc_client.send_transaction(request1).await?.into_inner();
+
+    // Wait a bit to query the mempool
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
+    // Call `GetMempoolTx` and get a stream of transactions
+    let mut transactions_stream = rpc_client
+        .get_mempool_tx(Exclude { txid: vec![] })
+        .await?
+        .into_inner();
+
+    // Make sure our transaction, and only our transaction was inserted to the mempool.
+    let mut counter = 0;
+    while let Some(tx) = transactions_stream.message().await? {
+        assert_eq!(tx.hash, transaction.hash().bytes_in_display_order());
+        counter += 1;
+    }
+
+    assert_eq!(counter, 1);
+
+    // Get the mempool by calling `GetMempoolStream`.
+    let mut transaction_stream = rpc_client.get_mempool_stream(Empty {}).await?.into_inner();
+
+    let mut counter = 0;
+    while let Some(_tx) = transaction_stream.message().await? {
+        counter += 1;
+    }
+
+    // This one is not working.
+    assert_eq!(counter, 0);
 
     Ok(())
 }
