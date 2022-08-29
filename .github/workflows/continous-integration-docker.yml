@@ -1,5 +1,11 @@
 name: CI Docker
 
+# Ensures that only a single CI workflow runs at a time in Pull Requests. The latest
+# commit will cancel any previous running workflows from the same PR.
+concurrency: 
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
     inputs:
@@ -312,6 +318,12 @@ jobs:
       saves_to_disk: true
       disk_suffix: tip
       height_grep_text: 'current_height.*=.*Height'
+    # As the general workflow concurrency group just get matched in Pull Requests,
+    # it has no impact on this job, but we want to cancel running full syncs in
+    # `main` if a new PR gets merged
+    concurrency: 
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
 
   # Test that Zebra can sync to the chain tip, using a cached Zebra tip state,
   # without launching `lightwalletd`.

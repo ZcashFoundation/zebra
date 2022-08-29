@@ -1,5 +1,11 @@
 name: CI OSes
 
+# Ensures that only a single CI workflow runs at a time in Pull Requests. The latest
+# commit will cancel any previous running workflows from the same PR.
+concurrency: 
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   # we build Rust and Zcash parameter caches on main,
