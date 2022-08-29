@@ -248,6 +248,60 @@ fn help_args() -> Result<()> {
 }
 
 #[test]
+fn start_no_args() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // start caches state, so run one of the start tests with persistent state
+    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
+
+    let mut child = testdir.spawn_child(args!["-v", "start"])?;
+
+    // Run the program and kill it after a few seconds
+    std::thread::sleep(LAUNCH_DELAY);
+    child.kill()?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_line_contains("Starting zebrad")?;
+
+    // Make sure the command passed the legacy chain check
+    output.stdout_line_contains("starting legacy chain check")?;
+    output.stdout_line_contains("no legacy chain found")?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    Ok(())
+}
+
+#[test]
+fn start_args() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
+    let testdir = &testdir;
+
+    let mut child = testdir.spawn_child(args!["start"])?;
+    // Run the program and kill it after a few seconds
+    std::thread::sleep(LAUNCH_DELAY);
+    child.kill()?;
+    let output = child.wait_with_output()?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    output.assert_failure()?;
+
+    // unrecognized option `-f`
+    let child = testdir.spawn_child(args!["start", "-f"])?;
+    let output = child.wait_with_output()?;
+    output.assert_failure()?;
+
+    Ok(())
+}
+
+#[test]
 fn persistent_mode() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -447,10 +501,8 @@ fn config_test() -> Result<()> {
     // Check that an older stored configuration we have for Zebra works
     stored_config_works()?;
 
-    // Runs zebrad start tests serially to avoid potential port conflicts
+    // Runs `zebrad` serially to avoid potential port conflicts
     app_no_args()?;
-    start_no_args()?;
-    start_args()?;
 
     Ok(())
 }
@@ -479,58 +531,6 @@ fn app_no_args() -> Result<()> {
 
     // Make sure the command was killed
     output.assert_was_killed()?;
-
-    Ok(())
-}
-
-fn start_no_args() -> Result<()> {
-    let _init_guard = zebra_test::init();
-
-    // start caches state, so run one of the start tests with persistent state
-    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
-
-    let mut child = testdir.spawn_child(args!["-v", "start"])?;
-
-    // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
-
-    let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    output.stdout_line_contains("Starting zebrad")?;
-
-    // Make sure the command passed the legacy chain check
-    output.stdout_line_contains("starting legacy chain check")?;
-    output.stdout_line_contains("no legacy chain found")?;
-
-    // Make sure the command was killed
-    output.assert_was_killed()?;
-
-    Ok(())
-}
-
-fn start_args() -> Result<()> {
-    let _init_guard = zebra_test::init();
-
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
-    let testdir = &testdir;
-
-    let mut child = testdir.spawn_child(args!["start"])?;
-    // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
-    let output = child.wait_with_output()?;
-
-    // Make sure the command was killed
-    output.assert_was_killed()?;
-
-    output.assert_failure()?;
-
-    // unrecognized option `-f`
-    let child = testdir.spawn_child(args!["start", "-f"])?;
-    let output = child.wait_with_output()?;
-    output.assert_failure()?;
 
     Ok(())
 }
