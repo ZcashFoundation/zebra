@@ -16,7 +16,7 @@ bench = ["zebra-test"]
 
 # Cryptography
 aes = "0.7.5"
-bech32 = "0.9.0"
+bech32 = "0.9.1"
 bitvec = "1.0.1"
 bitflags = "1.3.2"
 blake2b_simd = "1.0.0"
