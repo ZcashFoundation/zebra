@@ -6,6 +6,8 @@ use tracing_subscriber::{
     fmt::Formatter, layer::SubscriberExt, reload::Handle, util::SubscriberInitExt, EnvFilter,
 };
 
+use tracing_appender::non_blocking::WorkerGuard;
+
 use crate::{application::app_version, config::TracingSection};
 
 #[cfg(feature = "flamegraph")]
@@ -25,8 +27,7 @@ pub struct Tracing {
     #[cfg(feature = "flamegraph")]
     flamegrapher: Option<flame::Grapher>,
 
-    #[cfg(not(all(feature = "tokio-console", tokio_unstable)))]
-    _guard: tracing_appender::non_blocking::WorkerGuard,
+    _guard: WorkerGuard,
 }
 
 impl Tracing {
@@ -34,6 +35,7 @@ impl Tracing {
     pub fn new(config: TracingSection) -> Result<Self, FrameworkError> {
         let filter = config.filter.unwrap_or_else(|| "".to_string());
         let flame_root = &config.flamegraph;
+        let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::stdout());
 
         // Only use color if tracing output is being sent to a terminal or if it was explicitly
         // forced to.
@@ -45,10 +47,9 @@ impl Tracing {
         //
         // TODO: when fmt::Subscriber supports per-layer filtering, always enable this code
         #[cfg(not(all(feature = "tokio-console", tokio_unstable)))]
-        let (subscriber, _guard, filter_handle) = {
+        let (subscriber, filter_handle) = {
             use tracing_subscriber::FmtSubscriber;
             // By default, the built NonBlocking will be lossy. (with a line limit of 128_000)
-            let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::stdout());
 
             let logger = FmtSubscriber::builder()
                 .with_ansi(use_color)
@@ -68,7 +69,7 @@ impl Tracing {
 
             let subscriber = logger.finish().with(ErrorLayer::default());
 
-            (subscriber, _guard, filter_handle)
+            (subscriber, filter_handle)
         };
 
         // Construct a tracing registry with the supplied per-layer logging filter,
@@ -88,6 +89,7 @@ impl Tracing {
             // Using `FmtSubscriber` as the base subscriber, all the logs get filtered.
             let logger = fmt::Layer::new()
                 .with_ansi(use_color)
+                .with_writer(non_blocking)
                 .with_filter(EnvFilter::from(&filter));
 
             let subscriber = subscriber.with(logger);
@@ -191,7 +193,6 @@ impl Tracing {
             initial_filter: filter,
             #[cfg(feature = "flamegraph")]
             flamegrapher,
-            #[cfg(not(all(feature = "tokio-console", tokio_unstable)))]
             _guard,
         })
     }
