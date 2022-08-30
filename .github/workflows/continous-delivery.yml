@@ -1,5 +1,12 @@
 name: CD
 
+# Ensures that only one workflow task will run at a time. Previous deployments, if
+# already in process, won't get cancelled. Instead, we let the first to complete
+# then queue the latest pending workflow, cancelling any workflows in between
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:
@@ -40,10 +47,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       major_version: ${{ steps.set.outputs.major_version }}
+    if: ${{ github.event_name == 'release' }}
     steps:
       - name: Getting Zebrad Version
         id: get
-        uses: actions/github-script@v6.1.0
+        uses: actions/github-script@v6.2.0
         with:
           result-encoding: string
           script: |
@@ -87,7 +95,7 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
-    if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' }}
+    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
 
     steps:
       - name: Inject slug/short variables

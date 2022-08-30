@@ -22,7 +22,7 @@ pub const DATABASE_FORMAT_VERSION: u32 = 25;
 
 /// The maximum number of blocks to check for NU5 transactions,
 /// before we assume we are on a pre-NU5 legacy chain.
-pub const MAX_LEGACY_CHAIN_BLOCKS: usize = 100;
+pub const MAX_LEGACY_CHAIN_BLOCKS: usize = 1000;
 
 use lazy_static::lazy_static;
 use regex::Regex;

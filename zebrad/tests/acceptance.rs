@@ -258,7 +258,7 @@ fn start_no_args() -> Result<()> {
 
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
+    child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
@@ -285,7 +285,7 @@ fn start_args() -> Result<()> {
     let mut child = testdir.spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
+    child.kill(false)?;
     let output = child.wait_with_output()?;
 
     // Make sure the command was killed
@@ -312,7 +312,7 @@ fn persistent_mode() -> Result<()> {
 
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
+    child.kill(false)?;
     let output = child.wait_with_output()?;
 
     // Make sure the command was killed
@@ -380,7 +380,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
         .spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
+    child.kill(false)?;
     let output = child.wait_with_output()?;
 
     // Make sure the command was killed
@@ -447,21 +447,6 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 }
 
 #[test]
-fn app_no_args() -> Result<()> {
-    let _init_guard = zebra_test::init();
-
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
-
-    let child = testdir.spawn_child(args![])?;
-    let output = child.wait_with_output()?;
-    let output = output.assert_success()?;
-
-    output.stdout_line_contains("USAGE:")?;
-
-    Ok(())
-}
-
-#[test]
 fn version_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -517,6 +502,37 @@ fn config_test() -> Result<()> {
     // Check that an older stored configuration we have for Zebra works
     stored_config_works()?;
 
+    // Runs `zebrad` serially to avoid potential port conflicts
+    app_no_args()?;
+
+    Ok(())
+}
+
+/// Test that `zebrad` runs the start command with no args
+fn app_no_args() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // start caches state, so run one of the start tests with persistent state
+    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
+
+    let mut child = testdir.spawn_child(args![])?;
+
+    // Run the program and kill it after a few seconds
+    std::thread::sleep(LAUNCH_DELAY);
+    child.kill(true)?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_line_contains("Starting zebrad")?;
+
+    // Make sure the command passed the legacy chain check
+    output.stdout_line_contains("starting legacy chain check")?;
+    output.stdout_line_contains("no legacy chain found")?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
     Ok(())
 }
 
@@ -547,7 +563,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
     // Run command using temp dir and kill it after a few seconds
     let mut child = testdir.spawn_child(args![command])?;
     std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
+    child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
@@ -629,8 +645,11 @@ fn invalid_generated_config() -> Result<()> {
     // and terminate.
     std::thread::sleep(Duration::from_secs(2));
     if child.is_running() {
-        child.kill()?;
-        return Err(eyre!("Zebra should not be running anymore."));
+        // We're going to error anyway, so return an error that makes sense to the developer.
+        child.kill(true)?;
+        return Err(eyre!(
+            "Zebra should have exited after reading the invalid config"
+        ));
     }
 
     let output = child.wait_with_output()?;
@@ -654,7 +673,7 @@ fn stored_config_works() -> Result<()> {
     child.expect_stdout_line_matches("Starting zebrad".to_string())?;
 
     // finish
-    child.kill()?;
+    child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
@@ -1007,7 +1026,7 @@ async fn metrics_endpoint() -> Result<()> {
     assert!(res.status().is_success());
     let body = hyper::body::to_bytes(res).await;
     let (body, mut child) = child.kill_on_error(body)?;
-    child.kill()?;
+    child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
@@ -1082,7 +1101,7 @@ async fn tracing_endpoint() -> Result<()> {
     let tracing_body = hyper::body::to_bytes(tracing_res).await;
     let (tracing_body, mut child) = child.kill_on_error(tracing_body)?;
 
-    child.kill()?;
+    child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
@@ -1180,7 +1199,7 @@ async fn rpc_endpoint() -> Result<()> {
     let subversion = parsed["result"]["subversion"].as_str().unwrap();
     assert!(subversion.contains("Zebra"), "Got {}", subversion);
 
-    child.kill()?;
+    child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
@@ -1503,10 +1522,10 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     //
     // zcash/lightwalletd exits by itself, but
     // adityapk00/lightwalletd keeps on going, so it gets killed by the test harness.
-    zebrad.kill()?;
+    zebrad.kill(false)?;
 
     if let Some(mut lightwalletd) = lightwalletd {
-        lightwalletd.kill()?;
+        lightwalletd.kill(false)?;
 
         let lightwalletd_output = lightwalletd.wait_with_output()?.assert_failure()?;
 
@@ -1719,7 +1738,7 @@ where
     // Wait a few seconds and kill first node.
     // Second node is terminated by panic, no need to kill.
     std::thread::sleep(LAUNCH_DELAY);
-    let node1_kill_res = node1.kill();
+    let node1_kill_res = node1.kill(false);
     let (_, mut node2) = node2.kill_on_error(node1_kill_res)?;
 
     // node2 should have panicked due to a conflict. Kill it here anyway, so it
@@ -1872,7 +1891,7 @@ async fn delete_old_databases() -> Result<()> {
     assert!(outside_dir.as_path().exists());
 
     // finish
-    child.kill()?;
+    child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;

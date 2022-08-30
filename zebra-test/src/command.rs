@@ -3,7 +3,7 @@
 use std::{
     convert::Infallible as NoDir,
     fmt::{self, Debug, Write as _},
-    io::{BufRead, BufReader, Read, Write as _},
+    io::{BufRead, BufReader, ErrorKind, Read, Write as _},
     path::Path,
     process::{Child, Command, ExitStatus, Output, Stdio},
     time::{Duration, Instant},
@@ -107,6 +107,7 @@ impl CommandExt for Command {
             failure_regexes: RegexSet::empty(),
             ignore_regexes: RegexSet::empty(),
             deadline: None,
+            timeout: None,
             bypass_test_capture: false,
         })
     }
@@ -221,59 +222,73 @@ pub struct TestChild<T> {
     /// Only checked when the command outputs each new line (#1140).
     pub deadline: Option<Instant>,
 
+    /// The timeout for this command to finish.
+    ///
+    /// Only used for debugging output.
+    pub timeout: Option<Duration>,
+
     /// If true, write child output directly to standard output,
     /// bypassing the Rust test harness output capture.
     bypass_test_capture: bool,
 }
 
 /// Checks command output log `line` from `cmd` against a `failure_regexes` regex set,
-/// and panics if any regex matches. The line is skipped if it matches `ignore_regexes`.
+/// and returns an error if any regex matches. The line is skipped if it matches `ignore_regexes`.
 ///
-/// # Panics
-///
-/// - if any stdout or stderr lines match any failure regex, but do not match any ignore regex
+/// Passes through errors from the underlying reader.
 pub fn check_failure_regexes(
-    line: &std::io::Result<String>,
+    line: std::io::Result<String>,
     failure_regexes: &RegexSet,
     ignore_regexes: &RegexSet,
     cmd: &str,
     bypass_test_capture: bool,
-) {
-    if let Ok(line) = line {
-        let ignore_matches = ignore_regexes.matches(line);
-        let ignore_matches: Vec<&str> = ignore_matches
-            .iter()
-            .map(|index| ignore_regexes.patterns()[index].as_str())
-            .collect();
+) -> std::io::Result<String> {
+    let line = line?;
 
-        let failure_matches = failure_regexes.matches(line);
-        let failure_matches: Vec<&str> = failure_matches
-            .iter()
-            .map(|index| failure_regexes.patterns()[index].as_str())
-            .collect();
+    // Check if the line matches any patterns
+    let ignore_matches = ignore_regexes.matches(&line);
+    let ignore_matches: Vec<&str> = ignore_matches
+        .iter()
+        .map(|index| ignore_regexes.patterns()[index].as_str())
+        .collect();
 
-        if !ignore_matches.is_empty() {
-            let ignore_matches = ignore_matches.join(",");
+    let failure_matches = failure_regexes.matches(&line);
+    let failure_matches: Vec<&str> = failure_matches
+        .iter()
+        .map(|index| failure_regexes.patterns()[index].as_str())
+        .collect();
 
-            let ignore_msg = if failure_matches.is_empty() {
-                format!(
-                    "Log matched ignore regexes: {:?}, but no failure regexes",
-                    ignore_matches,
-                )
-            } else {
-                let failure_matches = failure_matches.join(",");
-                format!(
-                    "Ignoring failure regexes: {:?}, because log matched ignore regexes: {:?}",
-                    failure_matches, ignore_matches,
-                )
-            };
+    // If we match an ignore pattern, ignore any failure matches
+    if !ignore_matches.is_empty() {
+        let ignore_matches = ignore_matches.join(",");
 
-            write_to_test_logs(ignore_msg, bypass_test_capture);
-            return;
-        }
+        let ignore_msg = if failure_matches.is_empty() {
+            format!(
+                "Log matched ignore regexes: {:?}, but no failure regexes",
+                ignore_matches,
+            )
+        } else {
+            let failure_matches = failure_matches.join(",");
+            format!(
+                "Ignoring failure regexes: {:?}, because log matched ignore regexes: {:?}",
+                failure_matches, ignore_matches,
+            )
+        };
 
-        assert!(
-            failure_matches.is_empty(),
+        write_to_test_logs(ignore_msg, bypass_test_capture);
+
+        return Ok(line);
+    }
+
+    // If there were no failures, pass the log line through
+    if failure_matches.is_empty() {
+        return Ok(line);
+    }
+
+    // Otherwise, if the process logged a failure message, return an error
+    let error = std::io::Error::new(
+        ErrorKind::Other,
+        format!(
             "test command:\n\
              {cmd}\n\n\
              Logged a failure message:\n\
@@ -283,8 +298,10 @@ pub fn check_failure_regexes(
              All Failure regexes: \
              {:#?}\n",
             failure_regexes.patterns(),
-        );
-    }
+        ),
+    );
+
+    Err(error)
 }
 
 /// Write `line` to stdout, so it can be seen in the test logs.
@@ -444,7 +461,7 @@ impl<T> TestChild<T> {
         let bypass_test_capture = self.bypass_test_capture;
 
         let reader = BufReader::new(reader);
-        let lines = BufRead::lines(reader).inspect(move |line| {
+        let lines = BufRead::lines(reader).map(move |line| {
             check_failure_regexes(
                 line,
                 &failure_regexes,
@@ -459,32 +476,62 @@ impl<T> TestChild<T> {
 
     /// Kill the child process.
     ///
+    /// If `ignore_exited` is `true`, log "can't kill an exited process" errors,
+    /// rather than returning them.
+    ///
+    /// Returns the result of the kill.
+    ///
     /// ## BUGS
     ///
     /// On Windows (and possibly macOS), this function can return `Ok` for
     /// processes that have panicked. See #1781.
     #[spandoc::spandoc]
-    pub fn kill(&mut self) -> Result<()> {
+    pub fn kill(&mut self, ignore_exited: bool) -> Result<()> {
         let child = match self.child.as_mut() {
             Some(child) => child,
-            None => return Err(eyre!("child was already taken")).context_from(self.as_mut()),
+            None if ignore_exited => {
+                Self::write_to_test_logs(
+                    "test child was already taken\n\
+                     ignoring kill because ignore_exited is true",
+                    self.bypass_test_capture,
+                );
+                return Ok(());
+            }
+            None => {
+                return Err(eyre!(
+                    "test child was already taken\n\
+                     call kill() once for each child process, or set ignore_exited to true"
+                ))
+                .context_from(self.as_mut())
+            }
         };
 
         /// SPANDOC: Killing child process
-        child.kill().context_from(self.as_mut())?;
+        let kill_result = child.kill().or_else(|error| {
+            if ignore_exited && error.kind() == ErrorKind::InvalidInput {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        });
+
+        kill_result.context_from(self.as_mut())?;
 
         Ok(())
     }
 
     /// Kill the process, and consume all its remaining output.
     ///
+    /// If `ignore_exited` is `true`, log "can't kill an exited process" errors,
+    /// rather than returning them.
+    ///
     /// Returns the result of the kill.
-    pub fn kill_and_consume_output(&mut self) -> Result<()> {
+    pub fn kill_and_consume_output(&mut self, ignore_exited: bool) -> Result<()> {
         self.apply_failure_regexes_to_outputs();
 
         // Prevent a hang when consuming output,
         // by making sure the child's output actually finishes.
-        let kill_result = self.kill();
+        let kill_result = self.kill(ignore_exited);
 
         // Read unread child output.
         //
@@ -496,7 +543,7 @@ impl<T> TestChild<T> {
 
             if wrote_lines {
                 // Write an empty line, to make output more readable
-                self.write_to_test_logs("");
+                Self::write_to_test_logs("", self.bypass_test_capture);
             }
         }
 
@@ -506,7 +553,7 @@ impl<T> TestChild<T> {
             while self.wait_for_stderr_line(None) {}
 
             if wrote_lines {
-                self.write_to_test_logs("");
+                Self::write_to_test_logs("", self.bypass_test_capture);
             }
         }
 
@@ -526,12 +573,19 @@ impl<T> TestChild<T> {
     {
         self.apply_failure_regexes_to_outputs();
 
-        if let Some(Ok(line)) = self.stdout.as_mut().and_then(|iter| iter.next()) {
+        if let Some(line_result) = self.stdout.as_mut().and_then(|iter| iter.next()) {
+            let bypass_test_capture = self.bypass_test_capture;
+
             if let Some(write_context) = write_context.into() {
-                self.write_to_test_logs(write_context);
+                Self::write_to_test_logs(write_context, bypass_test_capture);
             }
 
-            self.write_to_test_logs(line);
+            Self::write_to_test_logs(
+                line_result
+                    .context_from(self)
+                    .expect("failure reading test process logs"),
+                bypass_test_capture,
+            );
 
             return true;
         }
@@ -552,12 +606,19 @@ impl<T> TestChild<T> {
     {
         self.apply_failure_regexes_to_outputs();
 
-        if let Some(Ok(line)) = self.stderr.as_mut().and_then(|iter| iter.next()) {
+        if let Some(line_result) = self.stderr.as_mut().and_then(|iter| iter.next()) {
+            let bypass_test_capture = self.bypass_test_capture;
+
             if let Some(write_context) = write_context.into() {
-                self.write_to_test_logs(write_context);
+                Self::write_to_test_logs(write_context, bypass_test_capture);
             }
 
-            self.write_to_test_logs(line);
+            Self::write_to_test_logs(
+                line_result
+                    .context_from(self)
+                    .expect("failure reading test process logs"),
+                bypass_test_capture,
+            );
 
             return true;
         }
@@ -583,8 +644,8 @@ impl<T> TestChild<T> {
             // either in `context_from`, or on drop.
             None => {
                 return Err(eyre!(
-                    "child was already taken.\n\
-                 wait_with_output can only be called once for each child process",
+                    "test child was already taken\n\
+                     wait_with_output can only be called once for each child process",
                 ))
                 .context_from(self.as_mut())
             }
@@ -623,7 +684,9 @@ impl<T> TestChild<T> {
     ///
     /// Does not apply to `wait_with_output`.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
         self.deadline = Some(Instant::now() + timeout);
+
         self
     }
 
@@ -654,10 +717,15 @@ impl<T> TestChild<T> {
 
         match self.expect_line_matching_regex_set(&mut lines, success_regex, "stdout") {
             Ok(()) => {
+                // Replace the log lines for the next check
                 self.stdout = Some(lines);
                 Ok(self)
             }
-            Err(report) => Err(report),
+            Err(report) => {
+                // Read all the log lines for error context
+                self.stdout = Some(lines);
+                Err(report).context_from(self)
+            }
         }
     }
 
@@ -681,10 +749,15 @@ impl<T> TestChild<T> {
 
         match self.expect_line_matching_regex_set(&mut lines, success_regex, "stderr") {
             Ok(()) => {
+                // Replace the log lines for the next check
                 self.stderr = Some(lines);
                 Ok(self)
             }
-            Err(report) => Err(report),
+            Err(report) => {
+                // Read all the log lines for error context
+                self.stderr = Some(lines);
+                Err(report).context_from(self)
+            }
         }
     }
 
@@ -739,6 +812,7 @@ impl<T> TestChild<T> {
     /// Note: the timeout is only checked after each full line is received from
     /// the child (#1140).
     #[instrument(skip(self, lines))]
+    #[allow(clippy::unwrap_in_result)]
     pub fn expect_line_matching_regexes<L>(
         &mut self,
         lines: &mut L,
@@ -762,7 +836,7 @@ impl<T> TestChild<T> {
             };
 
             // Since we're about to discard this line write it to stdout.
-            self.write_to_test_logs(&line);
+            Self::write_to_test_logs(&line, self.bypass_test_capture);
 
             if success_regexes.is_match(&line) {
                 return Ok(());
@@ -771,16 +845,20 @@ impl<T> TestChild<T> {
 
         if self.is_running() {
             // If the process exits between is_running and kill, we will see
-            // spurious errors here. If that happens, ignore "no such process"
+            // spurious errors here. So we want to ignore "no such process"
             // errors from kill.
-            self.kill()?;
+            self.kill(true)?;
         }
 
+        let timeout =
+            humantime::format_duration(self.timeout.expect("already checked past_deadline()"));
+
         let report = eyre!(
-            "{} of command did not contain any matches for the given regex",
-            stream_name
+            "{} of command did not log any matches for the given regex,\n\
+             within the {:?} command timeout",
+            stream_name,
+            timeout,
         )
-        .context_from(self)
         .with_section(|| format!("{:#?}", success_regexes.patterns()).header("Match Regex:"));
 
         Err(report)
@@ -794,11 +872,11 @@ impl<T> TestChild<T> {
     /// May cause weird reordering for stdout / stderr.
     /// Uses stdout even if the original lines were from stderr.
     #[allow(clippy::print_stdout)]
-    fn write_to_test_logs<S>(&self, line: S)
+    fn write_to_test_logs<S>(line: S, bypass_test_capture: bool)
     where
         S: AsRef<str>,
     {
-        write_to_test_logs(line, self.bypass_test_capture);
+        write_to_test_logs(line, bypass_test_capture);
     }
 
     /// Kill `child`, wait for its output, and use that output as the context for
@@ -814,7 +892,7 @@ impl<T> TestChild<T> {
         };
 
         if self.is_running() {
-            let kill_res = self.kill();
+            let kill_res = self.kill(true);
             if let Err(kill_err) = kill_res {
                 error = error.wrap_err(kill_err);
             }
@@ -872,9 +950,8 @@ impl<T> Drop for TestChild<T> {
     fn drop(&mut self) {
         // Clean up child processes when the test finishes,
         // and check for failure logs.
-        //
-        // We don't care about the kill result here.
-        let _ = self.kill_and_consume_output();
+        self.kill_and_consume_output(true)
+            .expect("failure reading test process logs")
     }
 }
 
@@ -1198,7 +1275,9 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
 
         if let Some(stdout) = &mut source.stdout {
             for line in stdout {
-                let line = if let Ok(line) = line { line } else { break };
+                let line = line.unwrap_or_else(|error| {
+                    format!("failure reading test process logs: {:?}", error)
+                });
                 let _ = writeln!(&mut stdout_buf, "{}", line);
             }
         } else if let Some(child) = &mut source.child {
@@ -1209,7 +1288,9 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
 
         if let Some(stderr) = &mut source.stderr {
             for line in stderr {
-                let line = if let Ok(line) = line { line } else { break };
+                let line = line.unwrap_or_else(|error| {
+                    format!("failure reading test process logs: {:?}", error)
+                });
                 let _ = writeln!(&mut stderr_buf, "{}", line);
             }
         } else if let Some(child) = &mut source.child {
