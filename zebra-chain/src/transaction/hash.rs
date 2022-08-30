@@ -114,6 +114,17 @@ impl Hash {
         reversed_bytes.reverse();
         reversed_bytes
     }
+
+    /// Convert bytes in big-endian byte-order into a [`Hash`].
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> Hash {
+        let mut internal_byte_order = *bytes_in_display_order;
+        internal_byte_order.reverse();
+
+        Hash(internal_byte_order)
+    }
 }
 
 impl ToHex for &Hash {
