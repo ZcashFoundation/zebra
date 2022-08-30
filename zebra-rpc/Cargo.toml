@@ -12,13 +12,8 @@ default = []
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain" }
-zebra-network = { path = "../zebra-network" }
-zebra-node-services = { path = "../zebra-node-services" }
-zebra-state = { path = "../zebra-state" }
-
-chrono = "0.4.19"
-futures = "0.3.21"
+chrono = { version = "0.4.20", default-features = false, features = ["clock", "std"] }
+futures = "0.3.23"
 
 # lightwalletd sends JSON-RPC requests over HTTP 1.1
 hyper = { version = "0.14.20", features = ["http1", "server"] }
@@ -37,10 +32,15 @@ tracing = "0.1.31"
 tracing-futures = "0.2.5"
 
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.142", features = ["serde_derive"] }
+serde = { version = "1.0.144", features = ["serde_derive"] }
 
 proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
+
+zebra-chain = { path = "../zebra-chain" }
+zebra-network = { path = "../zebra-network" }
+zebra-node-services = { path = "../zebra-node-services" }
+zebra-state = { path = "../zebra-state" }
 
 [dev-dependencies]
 insta = { version = "1.17.1", features = ["redactions"] }

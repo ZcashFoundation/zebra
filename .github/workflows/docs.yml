@@ -1,5 +1,12 @@
 name: Docs
 
+# Ensures that only one workflow task will run at a time. Previous deployments, if
+# already in process, won't get cancelled. Instead, we let the first to complete
+# then queue the latest pending workflow, cancelling any workflows in between
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
   push:
@@ -16,6 +23,12 @@ on:
       - '**/Cargo.lock'
       # workflow definitions
       - '.github/workflows/docs.yml'
+
+env:
+  RUST_LOG: info
+  RUST_BACKTRACE: full
+  RUST_LIB_BACKTRACE: full
+  COLORBT_SHOW_HIDDEN: '1'
 
 jobs:
   build:
@@ -52,7 +65,7 @@ jobs:
           mdbook build book/
 
       - name: Deploy Zebra book to firebase
-        uses: w9jds/firebase-action@v2.2.2
+        uses: w9jds/firebase-action@v11.5.0
         with:
           args: deploy
         env:
@@ -68,7 +81,7 @@ jobs:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
       - name: Deploy external docs to firebase
-        uses: w9jds/firebase-action@v2.2.2
+        uses: w9jds/firebase-action@v11.5.0
         with:
           args: deploy
         env:
@@ -82,7 +95,7 @@ jobs:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
       - name: Deploy internal docs to firebase
-        uses: w9jds/firebase-action@v2.2.2
+        uses: w9jds/firebase-action@v11.5.0
         with:
           args: deploy
         env:

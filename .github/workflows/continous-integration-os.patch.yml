@@ -9,6 +9,8 @@ on:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - '**/deny.toml'
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
       - '.github/workflows/continous-integration-os.yml'
 
 jobs:

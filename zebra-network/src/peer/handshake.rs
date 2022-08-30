@@ -27,7 +27,6 @@ use tracing::{span, Level, Span};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block,
     chain_tip::{ChainTip, NoChainTip},
     parameters::Network,
     serialization::SerializationError,
@@ -580,9 +579,7 @@ where
         address_from: AddrInVersion::new(our_listen_addr, our_services),
         nonce: local_nonce,
         user_agent: user_agent.clone(),
-        // The protocol works fine if we don't reveal our current block height,
-        // and not sending it means we don't need to be connected to the chain state.
-        start_height: block::Height(0),
+        start_height: minimum_peer_version.chain_tip_height(),
         relay,
     };
 

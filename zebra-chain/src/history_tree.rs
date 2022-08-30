@@ -507,3 +507,11 @@ impl Deref for HistoryTree {
         &self.0
     }
 }
+
+impl PartialEq for HistoryTree {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref().map(|tree| tree.hash()) == other.as_ref().map(|other_tree| other_tree.hash())
+    }
+}
+
+impl Eq for HistoryTree {}

@@ -6,8 +6,8 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-futures = "0.3.21"
-futures-core = "0.3.21"
+futures = "0.3.23"
+futures-core = "0.3.23"
 pin-project = "1.0.12"
 rayon = "1.5.3"
 tokio = { version = "1.20.1", features = ["time", "sync", "tracing", "macros"] }

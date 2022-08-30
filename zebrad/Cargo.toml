@@ -76,16 +76,16 @@ zebra-rpc = { path = "../zebra-rpc" }
 zebra-state = { path = "../zebra-state" }
 
 abscissa_core = "0.5"
-gumdrop = "0.7"
-chrono = "0.4.19"
+gumdrop = { version = "0.7", features = ["default_expr"]}
+chrono = { version = "0.4.20", default-features = false, features = ["clock", "std"] }
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
 indexmap = "1.9.1"
 lazy_static = "1.4.0"
-serde = { version = "1.0.142", features = ["serde_derive"] }
+serde = { version = "1.0.144", features = ["serde_derive"] }
 toml = "0.5.9"
 
-futures = "0.3.21"
+futures = "0.3.23"
 rayon = "1.5.3"
 tokio = { version = "1.20.1", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }

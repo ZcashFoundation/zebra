@@ -9,9 +9,11 @@ mod version;
 
 use self::ZebradCmd::*;
 use self::{
-    copy_state::CopyStateCmd, download::DownloadCmd, generate::GenerateCmd, start::StartCmd,
+    copy_state::CopyStateCmd, download::DownloadCmd, generate::GenerateCmd,
     tip_height::TipHeightCmd, version::VersionCmd,
 };
+
+pub use self::start::StartCmd;
 
 use crate::config::ZebradConfig;
 

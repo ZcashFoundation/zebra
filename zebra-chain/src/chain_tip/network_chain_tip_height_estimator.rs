@@ -93,7 +93,7 @@ impl NetworkChainTipHeightEstimator {
             let target_spacing_seconds = self.current_target_spacing.num_seconds();
             let time_to_activation = Duration::seconds(remaining_blocks * target_spacing_seconds);
 
-            self.current_block_time = self.current_block_time + time_to_activation;
+            self.current_block_time += time_to_activation;
             self.current_height = max_height;
         }
     }

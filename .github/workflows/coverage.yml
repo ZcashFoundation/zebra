@@ -1,5 +1,12 @@
 name: Coverage
 
+# Ensures that only one workflow task will run at a time. Previous builds, if
+# already in process, will get cancelled. Only the latest commit will be allowed
+# to run, cancelling any workflows in between
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:
@@ -15,6 +22,9 @@ on:
       # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
       # workflow definitions
       - 'codecov.yml'
       - '.github/workflows/coverage.yml'
@@ -30,6 +40,7 @@ on:
 
 env:
   CARGO_INCREMENTAL: 0
+  RUST_LOG: info
   RUST_BACKTRACE: full
   RUST_LIB_BACKTRACE: full
   COLORBT_SHOW_HIDDEN: '1'
