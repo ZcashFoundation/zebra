@@ -90,7 +90,7 @@ use crate::{
 };
 
 /// `start` subcommand
-#[derive(Command, Debug, Options)]
+#[derive(Command, Debug, Options, Default)]
 pub struct StartCmd {
     /// Filter strings which override the config file and defaults
     #[options(free, help = "tracing filters which override the zebrad.toml config")]

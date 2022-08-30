@@ -447,21 +447,6 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 }
 
 #[test]
-fn app_no_args() -> Result<()> {
-    let _init_guard = zebra_test::init();
-
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
-
-    let child = testdir.spawn_child(args![])?;
-    let output = child.wait_with_output()?;
-    let output = output.assert_success()?;
-
-    output.stdout_line_contains("USAGE:")?;
-
-    Ok(())
-}
-
-#[test]
 fn version_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -516,6 +501,37 @@ fn config_test() -> Result<()> {
 
     // Check that an older stored configuration we have for Zebra works
     stored_config_works()?;
+
+    // Runs `zebrad` serially to avoid potential port conflicts
+    app_no_args()?;
+
+    Ok(())
+}
+
+/// Test that `zebrad` runs the start command with no args
+fn app_no_args() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // start caches state, so run one of the start tests with persistent state
+    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
+
+    let mut child = testdir.spawn_child(args![])?;
+
+    // Run the program and kill it after a few seconds
+    std::thread::sleep(LAUNCH_DELAY);
+    child.kill(true)?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_line_contains("Starting zebrad")?;
+
+    // Make sure the command passed the legacy chain check
+    output.stdout_line_contains("starting legacy chain check")?;
+    output.stdout_line_contains("no legacy chain found")?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
 
     Ok(())
 }

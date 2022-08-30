@@ -1,5 +1,8 @@
 //! Zebrad Abscissa Application
 
+mod entry_point;
+use self::entry_point::EntryPoint;
+
 use std::{fmt::Write as _, io::Write as _, process};
 
 use abscissa_core::{
@@ -7,7 +10,7 @@ use abscissa_core::{
     config::{self, Configurable},
     status_err,
     terminal::{component::Terminal, stderr, stdout, ColorChoice},
-    Application, Component, EntryPoint, FrameworkError, Shutdown, StandardPaths, Version,
+    Application, Component, FrameworkError, Shutdown, StandardPaths, Version,
 };
 
 use zebra_network::constants::PORT_IN_USE_ERROR;
@@ -138,7 +141,7 @@ impl Default for ZebradApp {
 
 impl Application for ZebradApp {
     /// Entrypoint command for this application.
-    type Cmd = EntryPoint<ZebradCmd>;
+    type Cmd = EntryPoint;
 
     /// Application configuration.
     type Cfg = ZebradConfig;
