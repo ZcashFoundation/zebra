@@ -76,7 +76,7 @@ zebra-rpc = { path = "../zebra-rpc" }
 zebra-state = { path = "../zebra-state" }
 
 abscissa_core = "0.5"
-gumdrop = "0.7"
+gumdrop = { version = "0.7", features = ["default_expr"]}
 chrono = { version = "0.4.20", default-features = false, features = ["clock", "std"] }
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
