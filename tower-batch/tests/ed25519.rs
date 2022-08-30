@@ -37,7 +37,7 @@ where
         };
 
         verifier.ready().await?;
-        results.push(span.in_scope(|| verifier.call((vk_bytes, sig, msg).into())))
+        results.push_back(span.in_scope(|| verifier.call((vk_bytes, sig, msg).into())))
     }
 
     let mut numbered_results = results.enumerate();
