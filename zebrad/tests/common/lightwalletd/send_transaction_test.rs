@@ -90,8 +90,9 @@ pub async fn run() -> Result<()> {
         "got transactions to send",
     );
 
+    // TODO: change debug_skip_parameter_preload to true if we do the mempool test in the wallet gRPC test
     let (_zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc_without_initial_peers(Network::Mainnet, zebrad_state_path, test_type)?;
+        spawn_zebrad_for_rpc_without_initial_peers(Network::Mainnet, zebrad_state_path, test_type, false)?;
 
     tracing::info!(
         ?zebra_rpc_address,
