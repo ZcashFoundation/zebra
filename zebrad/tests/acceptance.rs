@@ -519,7 +519,7 @@ fn app_no_args() -> Result<()> {
 
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
+    child.kill(true)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
