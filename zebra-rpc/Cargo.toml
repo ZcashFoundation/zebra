@@ -13,7 +13,7 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "ze
 
 [dependencies]
 chrono = { version = "0.4.20", default-features = false, features = ["clock", "std"] }
-futures = "0.3.21"
+futures = "0.3.23"
 
 # lightwalletd sends JSON-RPC requests over HTTP 1.1
 hyper = { version = "0.14.20", features = ["http1", "server"] }
