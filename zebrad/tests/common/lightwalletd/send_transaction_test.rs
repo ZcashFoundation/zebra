@@ -25,7 +25,7 @@ use tower::{Service, ServiceExt};
 
 use zebra_chain::{
     block, chain_tip::ChainTip, parameters::Network, serialization::ZcashSerialize,
-    transaction::Transaction,
+    transaction::{self, Transaction},
 };
 use zebra_rpc::queue::CHANNEL_AND_QUEUE_CAPACITY;
 use zebra_state::HashOrHeight;
@@ -35,12 +35,21 @@ use crate::common::{
     cached_state::{load_tip_height_from_state_directory, start_state_service_with_cache_dir},
     launch::spawn_zebrad_for_rpc_without_initial_peers,
     lightwalletd::{
-        wallet_grpc::{self, connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server},
+        wallet_grpc::{self, connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Exclude, Empty},
         zebra_skip_lightwalletd_tests,
         LightwalletdTestType::*,
     },
     sync::copy_state_and_perform_full_sync,
 };
+
+/// The maximum number of transactions we want to send in the test.
+/// This avoids filling the mempool queue and generating errors.
+///
+/// TODO: replace with a const when `min()` stabilises as a const function:
+///       https://github.com/rust-lang/rust/issues/92391
+fn max_sent_transactions() -> usize {
+    min(CHANNEL_AND_QUEUE_CAPACITY, MAX_INBOUND_CONCURRENCY) - 1
+}
 
 /// The test entry point.
 pub async fn run() -> Result<()> {
@@ -82,7 +91,7 @@ pub async fn run() -> Result<()> {
     );
 
     let mut transactions =
-        load_transactions_from_a_future_block(network, zebrad_state_path.clone()).await?;
+        load_transactions_from_future_blocks(network, zebrad_state_path.clone()).await?;
 
     tracing::info!(
         transaction_count = ?transactions.len(),
@@ -114,18 +123,28 @@ pub async fn run() -> Result<()> {
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
 
     // To avoid filling the mempool queue, limit the transactions to be sent to the RPC and mempool queue limits
-    transactions.truncate(min(CHANNEL_AND_QUEUE_CAPACITY, MAX_INBOUND_CONCURRENCY) - 1);
+    transactions.truncate(max_sent_transactions());
+
+    let transaction_hashes: Vec<transaction::Hash> = transactions.iter().map(|tx| tx.hash()).collect();
 
     tracing::info!(
         transaction_count = ?transactions.len(),
+        ?transaction_hashes,
         "connected gRPC client to lightwalletd, sending transactions...",
     );
 
     for transaction in transactions {
+        let transaction_hash = transaction.hash();
+
         let expected_response = wallet_grpc::SendResponse {
             error_code: 0,
-            error_message: format!("\"{}\"", transaction.hash()),
+            error_message: format!("\"{}\"", transaction_hash),
         };
+
+        tracing::info!(
+            ?transaction_hash,
+            "sending transaction...",
+        );
 
         let request = prepare_send_transaction_request(transaction);
 
@@ -133,6 +152,46 @@ pub async fn run() -> Result<()> {
 
         assert_eq!(response, expected_response);
     }
+
+    // Wait a bit to query the mempool.
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+
+    // Call `GetMempoolTx` and get a stream of transactions.
+    let mut transactions_stream = rpc_client
+        .get_mempool_tx(Exclude { txid: vec![] })
+        .await?
+        .into_inner();
+
+    // Make sure at least one of the transactions were inserted into the mempool.
+    let mut counter = 0;
+    while let Some(tx) = transactions_stream.message().await? {
+        let hash: [u8; 32] = tx.hash.clone().try_into().expect("hash is correct length");
+        let hash = transaction::Hash::from_bytes_in_display_order(&hash);
+
+        assert!(
+            transaction_hashes.contains(&hash),
+            "unexpected transaction {hash:?}\n\
+             in isolated mempool: {tx:?}",
+        );
+
+        counter += 1;
+    }
+
+    assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
+
+    // Get the mempool transactions by calling `GetMempoolStream`.
+    let mut transaction_stream = rpc_client.get_mempool_stream(Empty {}).await?.into_inner();
+
+    let mut counter = 0;
+    while let Some(_tx) = transaction_stream.message().await? {
+        counter += 1;
+    }
+
+    // This RPC has temporarily been disabled in `lightwalletd`:
+    // https://github.com/adityapk00/lightwalletd/blob/b563f765f620e38f482954cd8ff3cc6d17cf2fa7/frontend/service.go#L515-L517
+    //
+    // TODO: re-enable it when lightwalletd starts streaming transactions again.
+    assert_eq!(counter, 0);
 
     Ok(())
 }
@@ -147,7 +206,7 @@ pub async fn run() -> Result<()> {
 /// Returns a list of valid transactions that are not in any of the blocks present in the
 /// original `zebrad_state_path`.
 #[tracing::instrument]
-async fn load_transactions_from_a_future_block(
+async fn load_transactions_from_future_blocks(
     network: Network,
     zebrad_state_path: PathBuf,
 ) -> Result<Vec<Arc<Transaction>>> {
@@ -202,7 +261,7 @@ async fn load_transactions_from_block_after(
     let mut target_height = height.0;
     let mut transactions = Vec::new();
 
-    while transactions.is_empty() {
+    while transactions.len() < max_sent_transactions() {
         transactions =
             load_transactions_from_block(block::Height(target_height), &mut state).await?;
 
