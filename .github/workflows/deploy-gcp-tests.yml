@@ -268,9 +268,9 @@ jobs:
       # - To ${{ inputs.zebra_state_dir || inputs.disk_prefix }} if not
       #
       # If there are multiple disks:
-      # - prefer images generated from this branch and commit, then
+      # - prefer images generated from the same commit, then
       # - if prefer_main_cached_state is true, prefer images from the `main` branch, then
-      # - use images from any other branch.
+      # - use any images from any other branch or commit.
       # Within each of these categories:
       # - prefer newer images to older images
       #
@@ -291,8 +291,13 @@ jobs:
           # Try to find an image generated from a previous step or run of this commit.
           # Fields are listed in the "Create image from state disk" step.
           #
-          # We can't match the full branch name here,
-          # because it might have been shortened for the image.
+          # We don't want to match the full branch name here, because:
+          # - we want to ignore the different GITHUB_REFs across manually triggered jobs,
+          #   pushed branches, and PRs,
+          # - previous commits might have been buggy,
+          #   or they might have worked and hide bugs in this commit
+          #   (we can't avoid this issue entirely, but we don't want to make it more likely), and
+          # - the branch name might have been shortened for the image.
           #
           # The probability of two matching short commit hashes within the same month is very low.
           COMMIT_DISK_PREFIX="${DISK_PREFIX}-.+-${{ env.GITHUB_SHA_SHORT }}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
@@ -1096,16 +1101,28 @@ jobs:
           echo "UPDATE_SUFFIX=$UPDATE_SUFFIX" >> $GITHUB_ENV
           echo "TIME_SUFFIX=$TIME_SUFFIX" >> $GITHUB_ENV
 
-      # Create an image from disk that will be used for following/other tests.
+      # Create an image from the state disk, which will be used for any tests that start
+      # after it is created. These tests can be in the same workflow, or in a different PR.
       #
-      # This image can contain:
-      # - Zebra cached state
-      # - Zebra + lightwalletd cached state
+      # Using the newest image makes future jobs faster, because it is closer to the chain tip.
+      #
+      # The image can contain:
+      # - Zebra cached state, or
+      # - Zebra + lightwalletd cached state.
       # Which cached state is being saved to the disk is defined by ${{ inputs.disk_prefix }}.
       #
-      # The image name must be unique, and be 63 characters or less.
+      # Google Cloud doesn't have an atomic image replacement operation.
+      # We don't want to delete and re-create the image, because that causes a ~5 minute
+      # window where might be no recent image. So we add an extra image with a unique name,
+      # which gets selected because it has a later creation time.
+      # This also simplifies the process of deleting old images,
+      # because we don't have to worry about accidentally deleting all the images.
+      #
       # The timestamp makes images from the same commit unique,
       # as long as they don't finish in the same second.
+      # (This is unlikely, because each image created by a workflow has a different name.)
+      #
+      # The image name must also be 63 characters or less.
       #
       # Force the image creation (--force) as the disk is still attached even though is not being
       # used by the container.
