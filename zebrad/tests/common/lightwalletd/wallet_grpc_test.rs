@@ -59,6 +59,11 @@ use crate::common::{
 };
 
 /// The test entry point.
+//
+// TODO:
+// - check output of zebrad and lightwalletd in different threads,
+//   to avoid test hangs due to full output pipes
+//   (see lightwalletd_integration_test for an example)
 pub async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -98,12 +103,12 @@ pub async fn run() -> Result<()> {
     // Launch zebra using a predefined zebrad state path
     //
     // TODO: change debug_skip_parameter_preload to true if we do the mempool test in the send transaction test
-    let (_zebrad, zebra_rpc_address) =
+    let (mut zebrad, zebra_rpc_address) =
         spawn_zebrad_for_rpc_without_initial_peers(network, zebrad_state_path.unwrap(), test_type, false)?;
 
     tracing::info!(
         ?zebra_rpc_address,
-        "launching lightwalletd connected to zebrad...",
+        "launching lightwalletd connected to zebrad, waiting for the mempool to activate...",
     );
 
     // Launch lightwalletd
@@ -114,7 +119,18 @@ pub async fn run() -> Result<()> {
         false,
     )?;
 
-    // Give lightwalletd a few seconds to open its grpc port before connecting to it
+    tracing::info!(
+        ?lightwalletd_rpc_port,
+        "spawned lightwalletd connected to zebrad, waiting for zebrad mempool activation...",
+    );
+
+    zebrad.expect_stdout_line_matches("activating mempool")?;
+
+    // Give lightwalletd a few seconds to sync to the tip before connecting to it
+    //
+    // TODO: check that lightwalletd is at the tip using gRPC (#4894)
+    //
+    // If this takes a long time, we might need to check zebrad logs for failures in a separate thread.
     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
 
     tracing::info!(

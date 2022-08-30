@@ -52,6 +52,11 @@ fn max_sent_transactions() -> usize {
 }
 
 /// The test entry point.
+//
+// TODO:
+// - check output of zebrad and lightwalletd in different threads,
+//   to avoid test hangs due to full output pipes
+//   (see lightwalletd_integration_test for an example)
 pub async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -100,13 +105,14 @@ pub async fn run() -> Result<()> {
     );
 
     // TODO: change debug_skip_parameter_preload to true if we do the mempool test in the wallet gRPC test
-    let (_zebrad, zebra_rpc_address) =
+    let (mut zebrad, zebra_rpc_address) =
         spawn_zebrad_for_rpc_without_initial_peers(Network::Mainnet, zebrad_state_path, test_type, false)?;
 
     tracing::info!(
         ?zebra_rpc_address,
-        "spawned disconnected zebrad with shorter chain",
+        "spawned disconnected zebrad with shorter chain, waiting for mempool activation...",
     );
+
 
     let (_lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(
         zebra_rpc_address,
@@ -117,7 +123,18 @@ pub async fn run() -> Result<()> {
 
     tracing::info!(
         ?lightwalletd_rpc_port,
-        "spawned lightwalletd connected to zebrad",
+        "spawned lightwalletd connected to zebrad, waiting for zebrad mempool activation...",
+    );
+
+    zebrad.expect_stdout_line_matches("activating mempool")?;
+
+    // TODO: check that lightwalletd is at the tip using gRPC (#4894)
+    //
+    // If this takes a long time, we might need to check zebrad logs for failures in a separate thread.
+
+    tracing::info!(
+        ?lightwalletd_rpc_port,
+        "connecting gRPC client to lightwalletd...",
     );
 
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
