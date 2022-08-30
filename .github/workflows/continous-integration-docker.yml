@@ -324,8 +324,12 @@ jobs:
     # first sync complete, then queue the latest pending sync, cancelling any syncs in between.
     # (As the general workflow concurrency group just gets matched in Pull Requests,
     # it has no impact on this job.)
+    #
+    # TODO:
+    # - allow multiple manual syncs on a branch, and isolate manual syncs from automatic syncs, by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
+    # - stop multiple automatic full syncs across different PRs by removing '−${{ github.ref }}' when needs.get-available-disks.outputs.zebra_tip_disk is true
     concurrency: 
-      group: github.workflow−{{ github.ref }}
+      group: ${{ github.workflow }}−${{ github.ref }}
       cancel-in-progress: false
 
   # Test that Zebra can sync to the chain tip, using a cached Zebra tip state,
