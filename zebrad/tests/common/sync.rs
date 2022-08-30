@@ -300,11 +300,11 @@ pub fn sync_until(
 /// is returned afterwards, containing the fully synchronized chain state.
 #[allow(dead_code)]
 #[tracing::instrument]
-pub async fn perform_full_sync_starting_from(
+pub async fn copy_state_and_perform_full_sync(
     network: Network,
     partial_sync_path: &Path,
 ) -> Result<TempDir> {
-    let fully_synced_path = copy_state_directory(&partial_sync_path).await?;
+    let fully_synced_path = copy_state_directory(network, &partial_sync_path).await?;
 
     sync_until(
         Height::MAX,

@@ -39,7 +39,7 @@ use crate::common::{
         zebra_skip_lightwalletd_tests,
         LightwalletdTestType::*,
     },
-    sync::perform_full_sync_starting_from,
+    sync::copy_state_and_perform_full_sync,
 };
 
 /// The test entry point.
@@ -160,7 +160,7 @@ async fn load_transactions_from_a_future_block(
     );
 
     let full_sync_path =
-        perform_full_sync_starting_from(network, zebrad_state_path.as_ref()).await?;
+        copy_state_and_perform_full_sync(network, zebrad_state_path.as_ref()).await?;
 
     tracing::info!(?full_sync_path, "loading transactions...");
 

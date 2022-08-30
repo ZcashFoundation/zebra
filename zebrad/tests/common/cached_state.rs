@@ -63,21 +63,37 @@ pub async fn load_tip_height_from_state_directory(
     Ok(chain_tip_height)
 }
 
-/// Recursively copy a chain state directory into a new temporary directory.
-pub async fn copy_state_directory(source: impl AsRef<Path>) -> Result<TempDir> {
+/// Recursively copy a chain state database directory into a new temporary directory.
+pub async fn copy_state_directory(network: Network, source: impl AsRef<Path>) -> Result<TempDir> {
+    // Copy the database files for this state and network, excluding testnet and other state versions
     let source = source.as_ref();
+    let state_config = zebra_state::Config {
+        cache_dir: source.into(),
+        ..Default::default()
+    };
+    let source_net_dir = state_config.db_path(network);
+    let source_net_dir = source_net_dir.as_path();
+    let state_suffix = source_net_dir
+        .strip_prefix(source)
+        .expect("db_path() is a subdirectory");
+
     let destination = testdir()?;
+    let destination_net_dir = destination.path().join(state_suffix);
 
     tracing::info!(
         ?source,
+        ?source_net_dir,
+        ?state_suffix,
         ?destination,
+        ?destination_net_dir,
         "copying cached state files (this may take some time)...",
     );
 
-    let mut remaining_directories = vec![PathBuf::from(source)];
+    let mut remaining_directories = vec![PathBuf::from(source_net_dir)];
 
     while let Some(directory) = remaining_directories.pop() {
-        let sub_directories = copy_directory(&directory, source, destination.as_ref()).await?;
+        let sub_directories =
+            copy_directory(&directory, source_net_dir, destination_net_dir.as_ref()).await?;
 
         remaining_directories.extend(sub_directories);
     }
