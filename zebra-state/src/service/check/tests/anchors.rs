@@ -1,6 +1,6 @@
 //! Tests for whether cited anchors are checked properly.
 
-use std::{convert::TryInto, ops::Deref, sync::Arc};
+use std::{ops::Deref, sync::Arc};
 
 use zebra_chain::{
     amount::Amount,
@@ -207,7 +207,7 @@ fn check_sapling_anchors() {
                 Transaction::V4 {
                     sapling_shielded_data,
                     ..
-                } => (sapling_shielded_data.clone()),
+                } => sapling_shielded_data.clone(),
                 _ => unreachable!("These are known v4 transactions"),
             };
 
