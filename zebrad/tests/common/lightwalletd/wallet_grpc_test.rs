@@ -13,14 +13,15 @@
 //! - `GetBlockRange`: Covered.
 //!
 //! - `GetTransaction`: Covered.
-//! - `SendTransaction`: Not covered and it will never be, it has its own test.
+//! - `SendTransaction`: Covered by the send_transaction_test.
 //!
 //! - `GetTaddressTxids`: Covered.
 //! - `GetTaddressBalance`: Covered.
 //! - `GetTaddressBalanceStream`: Covered.
 //!
-//! - `GetMempoolTx`: Not covered.
-//! - `GetMempoolStream`: Not covered.
+//! - `GetMempoolTx`: Covered by the send_transaction_test.
+//! - `GetMempoolStream`: Covered by the send_transaction_test,
+//!                       currently disabled by `lightwalletd`.
 //!
 //! - `GetTreeState`: Covered.
 //!
@@ -28,6 +29,7 @@
 //! - `GetAddressUtxosStream`: Covered.
 //!
 //! - `GetLightdInfo`: Covered.
+//!
 //! - `Ping`: Not covered and it will never be. `Ping` is only used for testing
 //! purposes.
 
