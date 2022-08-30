@@ -296,6 +296,8 @@ impl Service<Request> for Mempool {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let is_state_changed = self.update_state();
 
+        tracing::info!(is_enabled = ?self.is_enabled(), ?is_state_changed, "started polling the mempool...");
+
         // When the mempool is disabled we still return that the service is ready.
         // Otherwise, callers could block waiting for the mempool to be enabled.
         if !self.is_enabled() {
@@ -343,21 +345,31 @@ impl Service<Request> for Mempool {
             while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
                 match r {
                     Ok(tx) => {
-                        if let Ok(inserted_id) = storage.insert(tx.clone()) {
+                        let insert_result = storage.insert(tx.clone());
+
+                        tracing::info!(
+                            ?insert_result,
+                            "got Ok(_) transaction verify, tried to store",
+                        );
+
+                        if let Ok(inserted_id) = insert_result {
                             // Save transaction ids that we will send to peers
                             send_to_peers_ids.insert(inserted_id);
                         }
                     }
-                    Err((txid, e)) => {
-                        metrics::counter!("mempool.failed.verify.tasks.total", 1, "reason" => e.to_string());
-                        storage.reject_if_needed(txid, e);
-                        // TODO: should we also log the result?
+                    Err((txid, error)) => {
+                        tracing::info!(?txid, ?error, "mempool transaction failed to verify");
+
+                        metrics::counter!("mempool.failed.verify.tasks.total", 1, "reason" => error.to_string());
+                        storage.reject_if_needed(txid, error);
                     }
                 };
             }
 
             // Handle best chain tip changes
             if let Some(TipAction::Grow { block }) = tip_action {
+                tracing::info!(block_height = ?block.height, "handling blocks added to tip");
+
                 // Cancel downloads/verifications/storage of transactions
                 // with the same mined IDs as recently mined transactions.
                 let mined_ids = block.transaction_hashes.iter().cloned().collect();
@@ -372,10 +384,19 @@ impl Service<Request> for Mempool {
                 // Remove transactions that are expired from the peers list
                 send_to_peers_ids =
                     Self::remove_expired_from_peer_list(&send_to_peers_ids, &expired_transactions);
+
+                if !expired_transactions.is_empty() {
+                    tracing::info!(
+                        ?expired_transactions,
+                        "removed expired transactions from the mempool",
+                    );
+                }
             }
 
             // Send transactions that were not rejected nor expired to peers
             if !send_to_peers_ids.is_empty() {
+                tracing::info!(?send_to_peers_ids, "sending new transactions to peers");
+
                 self.transaction_sender.send(send_to_peers_ids)?;
             }
         }
@@ -398,24 +419,49 @@ impl Service<Request> for Mempool {
             } => match req {
                 // Queries
                 Request::TransactionIds => {
+                    info!(?req, "got mempool request");
+
                     let res = storage.tx_ids().collect();
+
+                    info!(?req, ?res, "answered mempool request");
+
                     async move { Ok(Response::TransactionIds(res)) }.boxed()
                 }
-                Request::TransactionsById(ids) => {
-                    let res = storage.transactions_exact(ids).cloned().collect();
+                Request::TransactionsById(ref ids) => {
+                    info!(?req, "got mempool request");
+
+                    let res: Vec<_> = storage.transactions_exact(ids.clone()).cloned().collect();
+
+                    info!(?req, res_count = ?res.len(), "answered mempool request");
+
                     async move { Ok(Response::Transactions(res)) }.boxed()
                 }
-                Request::TransactionsByMinedId(ids) => {
-                    let res = storage.transactions_same_effects(ids).cloned().collect();
+                Request::TransactionsByMinedId(ref ids) => {
+                    info!(?req, "got mempool request");
+
+                    let res: Vec<_> = storage
+                        .transactions_same_effects(ids.clone())
+                        .cloned()
+                        .collect();
+
+                    info!(?req, res_count = ?res.len(), "answered mempool request");
+
                     async move { Ok(Response::Transactions(res)) }.boxed()
                 }
-                Request::RejectedTransactionIds(ids) => {
-                    let res = storage.rejected_transactions(ids).collect();
+                Request::RejectedTransactionIds(ref ids) => {
+                    info!(?req, "got mempool request");
+
+                    let res = storage.rejected_transactions(ids.clone()).collect();
+
+                    info!(?req, ?res, "answered mempool request");
+
                     async move { Ok(Response::RejectedTransactionIds(res)) }.boxed()
                 }
 
                 // Queue mempool candidates
                 Request::Queue(gossiped_txs) => {
+                    info!(req_count = ?gossiped_txs.len(), "got mempool Queue request");
+
                     let rsp: Vec<Result<(), BoxError>> = gossiped_txs
                         .into_iter()
                         .map(|gossiped_tx| -> Result<(), MempoolError> {
@@ -440,11 +486,17 @@ impl Service<Request> for Mempool {
 
                 // Store successfully downloaded and verified transactions in the mempool
                 Request::CheckForVerifiedTransactions => {
+                    info!(?req, "got mempool request");
+
                     // all the work for this request is done in poll_ready
                     async move { Ok(Response::CheckedForVerifiedTransactions) }.boxed()
                 }
             },
             ActiveState::Disabled => {
+                // TODO: add the name of the request, but not the content,
+                //       like the command() or Display impls of network requests
+                info!("got mempool request while mempool is disabled");
+
                 // We can't return an error since that will cause a disconnection
                 // by the peer connection handler. Therefore, return successful
                 // empty responses.
