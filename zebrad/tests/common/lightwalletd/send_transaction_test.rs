@@ -153,10 +153,10 @@ pub async fn run() -> Result<()> {
         assert_eq!(response, expected_response);
     }
 
-    // Wait a bit to query the mempool.
-    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    tracing::info!("waiting for mempool to verify some transactions...");
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
-    // Call `GetMempoolTx` and get a stream of transactions.
+    tracing::info!("calling GetMempoolTx gRPC to fetch transactions...");
     let mut transactions_stream = rpc_client
         .get_mempool_tx(Exclude { txid: vec![] })
         .await?
@@ -179,7 +179,7 @@ pub async fn run() -> Result<()> {
 
     assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
 
-    // Get the mempool transactions by calling `GetMempoolStream`.
+    tracing::info!("calling GetMempoolStream gRPC to fetch transactions...");
     let mut transaction_stream = rpc_client.get_mempool_stream(Empty {}).await?.into_inner();
 
     let mut counter = 0;
