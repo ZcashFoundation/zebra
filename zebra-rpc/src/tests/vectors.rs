@@ -1,3 +1,5 @@
+//! Fixed Zebra RPC serialization test vectors.
+
 use crate::methods::{GetBlock, GetRawTransaction};
 
 #[test]
