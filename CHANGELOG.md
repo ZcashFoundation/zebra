@@ -82,6 +82,11 @@ This release contains a variety of CI fixes, test fixes and dependency updates.
 - Run build and test jobs on cargo and clippy config changes (#4941)
 - Increase Mergify batch sizes (#4947)
 
+#### Networking
+
+- Send height to peers (#4904)
+- Fix handshake timing and error handling (#4772)
+
 #### Tests
 
 - Show full Zebra test panic details in CI logs (#4942)
@@ -90,11 +95,6 @@ This release contains a variety of CI fixes, test fixes and dependency updates.
 - Use `FuturesOrdered` in `fallback_verification` test (#4867)
 - Skip some RPC tests when `ZEBRA_SKIP_NETWORK_TESTS` is set (#4849)
 - Truncate the number of transactions in send transaction test (#4848)
-
-#### Networking
-
-- Send height to peers (#4904)
-- Fix handshake timing and error handling (#4772)
 
 ## [Zebra 1.0.0-beta.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.13) - 2022-07-29
 
