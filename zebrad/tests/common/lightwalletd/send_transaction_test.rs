@@ -171,13 +171,15 @@ pub async fn run() -> Result<()> {
     }
 
     tracing::info!("waiting for mempool to verify some transactions...");
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    zebrad.expect_stdout_line_matches("sending new transactions to peers")?;
 
     tracing::info!("calling GetMempoolTx gRPC to fetch transactions...");
     let mut transactions_stream = rpc_client
         .get_mempool_tx(Exclude { txid: vec![] })
         .await?
         .into_inner();
+
+    zebrad.expect_stdout_line_matches("answered mempool request req=TransactionIds")?;
 
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
     let mut counter = 0;
@@ -206,15 +208,8 @@ pub async fn run() -> Result<()> {
     let mut transaction_stream = rpc_client.get_mempool_stream(Empty {}).await?.into_inner();
 
     let mut counter = 0;
-    while let Some(tx) = transaction_stream.message().await? {
-        let hash: [u8; 32] = tx.hash.clone().try_into().expect("hash is correct length");
-        let hash = transaction::Hash::from_bytes_in_display_order(&hash);
-
-        assert!(
-            transaction_hashes.contains(&hash),
-            "unexpected transaction {hash:?}\n\
-             in isolated mempool: {tx:?}",
-        );
+    while let Some(_tx) = transaction_stream.message().await? {
+        // TODO: check tx.data or tx.height here?
 
         counter += 1;
     }
