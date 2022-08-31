@@ -19,7 +19,8 @@
 //! - `GetTaddressBalance`: Covered.
 //! - `GetTaddressBalanceStream`: Covered.
 //!
-//! - `GetMempoolTx`: Covered by the send_transaction_test.
+//! - `GetMempoolTx`: Covered by the send_transaction_test,
+//!                   currently disabled by `lightwalletd`.
 //! - `GetMempoolStream`: Covered by the send_transaction_test,
 //!                       currently disabled by `lightwalletd`.
 //!
@@ -39,8 +40,7 @@ use zebra_chain::{
     block::Block,
     parameters::Network,
     parameters::NetworkUpgrade::{self, Canopy},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
-    transaction::Transaction,
+    serialization::ZcashDeserializeInto,
 };
 
 use zebra_network::constants::USER_AGENT;
@@ -50,7 +50,7 @@ use crate::common::{
     lightwalletd::{
         wallet_grpc::{
             connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Address, AddressList,
-            BlockId, BlockRange, ChainSpec, Empty, Exclude, GetAddressUtxosArg, RawTransaction,
+            BlockId, BlockRange, ChainSpec, Empty, GetAddressUtxosArg,
             TransparentAddressBlockFilter, TxFilter,
         },
         zebra_skip_lightwalletd_tests,
@@ -103,8 +103,12 @@ pub async fn run() -> Result<()> {
     // Launch zebra using a predefined zebrad state path
     //
     // TODO: change debug_skip_parameter_preload to true if we do the mempool test in the send transaction test
-    let (mut zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc_without_initial_peers(network, zebrad_state_path.unwrap(), test_type, false)?;
+    let (mut zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
+        network,
+        zebrad_state_path.unwrap(),
+        test_type,
+        false,
+    )?;
 
     tracing::info!(
         ?zebra_rpc_address,
@@ -362,47 +366,6 @@ pub async fn run() -> Result<()> {
 
     // Make sure the subversion field is zebra the user agent
     assert_eq!(lightd_info.zcashd_subversion, USER_AGENT);
-
-    // Transactions in mempool
-
-    let transaction = Transaction::zcash_deserialize(&zebra_test::vectors::DUMMY_TX3[..]).unwrap();
-    let transaction_bytes = transaction.zcash_serialize_to_vec().unwrap();
-
-    // Send transaction by calling `SendTransaction`
-    let request1 = RawTransaction {
-        data: transaction_bytes,
-        height: -1,
-    };
-    let _ = rpc_client.send_transaction(request1).await?.into_inner();
-
-    // Wait a bit to query the mempool
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-
-    // Call `GetMempoolTx` and get a stream of transactions
-    let mut transactions_stream = rpc_client
-        .get_mempool_tx(Exclude { txid: vec![] })
-        .await?
-        .into_inner();
-
-    // Make sure our transaction, and only our transaction was inserted to the mempool.
-    let mut counter = 0;
-    while let Some(tx) = transactions_stream.message().await? {
-        assert_eq!(tx.hash, transaction.hash().bytes_in_display_order());
-        counter += 1;
-    }
-
-    assert_eq!(counter, 1);
-
-    // Get the mempool by calling `GetMempoolStream`.
-    let mut transaction_stream = rpc_client.get_mempool_stream(Empty {}).await?.into_inner();
-
-    let mut counter = 0;
-    while let Some(_tx) = transaction_stream.message().await? {
-        counter += 1;
-    }
-
-    // This one is not working.
-    assert_eq!(counter, 0);
 
     Ok(())
 }

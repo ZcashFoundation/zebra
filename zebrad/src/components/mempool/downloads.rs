@@ -234,7 +234,7 @@ where
         let txid = gossiped_tx.id();
 
         if self.cancel_handles.contains_key(&txid) {
-            info!(
+            debug!(
                 ?txid,
                 queue_len = self.pending.len(),
                 ?MAX_INBOUND_CONCURRENCY,
@@ -249,7 +249,7 @@ where
         }
 
         if self.pending.len() >= MAX_INBOUND_CONCURRENCY {
-            info!(
+            debug!(
                 ?txid,
                 queue_len = self.pending.len(),
                 ?MAX_INBOUND_CONCURRENCY,
@@ -274,7 +274,7 @@ where
             // Don't download/verify if the transaction is already in the state.
             Self::transaction_in_state(&mut state, txid).await?;
 
-            info!(?txid, "transaction is not in state");
+            trace!(?txid, "transaction is not in state");
 
             let next_height = match state.oneshot(zs::Request::Tip).await {
                 Ok(zs::Response::Tip(None)) => Ok(Height(0)),
@@ -287,7 +287,7 @@ where
                 Err(e) => Err(TransactionDownloadVerifyError::StateError(e)),
             }?;
 
-            info!(?txid, ?next_height, "got next height");
+            trace!(?txid, ?next_height, "got next height");
 
             let tx = match gossiped_tx {
                 Gossip::Id(txid) => {
@@ -327,7 +327,7 @@ where
                 }
             };
 
-            info!(?txid, "got tx");
+            trace!(?txid, "got tx");
 
             let result = verifier
                 .oneshot(tx::Request::Mempool {
@@ -341,7 +341,7 @@ where
                 .await;
 
             // Hide the transaction data to avoid filling the logs
-            info!(?txid, result = ?result.as_ref().map(|_tx| ()), "verified transaction for the mempool");
+            trace!(?txid, result = ?result.as_ref().map(|_tx| ()), "verified transaction for the mempool");
 
             result.map_err(|e| TransactionDownloadVerifyError::Invalid(e.into()))
         }
@@ -359,7 +359,7 @@ where
             .inspect(move |result| {
                 // Hide the transaction data to avoid filling the logs
                 let result = result.as_ref().map(|_tx| txid);
-                info!("mempool transaction result: {result:?}");
+                debug!("mempool transaction result: {result:?}");
             })
         .in_current_span();
 

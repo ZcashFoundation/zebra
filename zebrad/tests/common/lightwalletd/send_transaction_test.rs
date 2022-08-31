@@ -24,7 +24,10 @@ use futures::TryFutureExt;
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
-    block, chain_tip::ChainTip, parameters::Network, serialization::ZcashSerialize,
+    block,
+    chain_tip::ChainTip,
+    parameters::Network,
+    serialization::ZcashSerialize,
     transaction::{self, Transaction},
 };
 use zebra_rpc::queue::CHANNEL_AND_QUEUE_CAPACITY;
@@ -35,7 +38,9 @@ use crate::common::{
     cached_state::{load_tip_height_from_state_directory, start_state_service_with_cache_dir},
     launch::spawn_zebrad_for_rpc_without_initial_peers,
     lightwalletd::{
-        wallet_grpc::{self, connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Exclude, Empty},
+        wallet_grpc::{
+            self, connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Empty, Exclude,
+        },
         zebra_skip_lightwalletd_tests,
         LightwalletdTestType::*,
     },
@@ -105,14 +110,17 @@ pub async fn run() -> Result<()> {
     );
 
     // TODO: change debug_skip_parameter_preload to true if we do the mempool test in the wallet gRPC test
-    let (mut zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc_without_initial_peers(Network::Mainnet, zebrad_state_path, test_type, false)?;
+    let (mut zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
+        Network::Mainnet,
+        zebrad_state_path,
+        test_type,
+        false,
+    )?;
 
     tracing::info!(
         ?zebra_rpc_address,
         "spawned disconnected zebrad with shorter chain, waiting for mempool activation...",
     );
-
 
     let (_lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(
         zebra_rpc_address,
@@ -142,7 +150,8 @@ pub async fn run() -> Result<()> {
     // To avoid filling the mempool queue, limit the transactions to be sent to the RPC and mempool queue limits
     transactions.truncate(max_sent_transactions());
 
-    let transaction_hashes: Vec<transaction::Hash> = transactions.iter().map(|tx| tx.hash()).collect();
+    let transaction_hashes: Vec<transaction::Hash> =
+        transactions.iter().map(|tx| tx.hash()).collect();
 
     tracing::info!(
         transaction_count = ?transactions.len(),
@@ -158,10 +167,7 @@ pub async fn run() -> Result<()> {
             error_message: format!("\"{}\"", transaction_hash),
         };
 
-        tracing::info!(
-            ?transaction_hash,
-            "sending transaction...",
-        );
+        tracing::info!(?transaction_hash, "sending transaction...");
 
         let request = prepare_send_transaction_request(transaction);
 
@@ -201,7 +207,10 @@ pub async fn run() -> Result<()> {
     //
     // TODO: re-enable it when lightwalletd starts returning transactions again.
     //assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
-    assert_eq!(counter, 0, "developers: update this test for lightwalletd sending transactions");
+    assert_eq!(
+        counter, 0,
+        "developers: update this test for lightwalletd sending transactions"
+    );
 
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
     tracing::info!("calling GetMempoolStream gRPC to fetch transactions...");
@@ -219,7 +228,10 @@ pub async fn run() -> Result<()> {
     //
     // TODO: re-enable it when lightwalletd starts streaming transactions again.
     //assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
-    assert_eq!(counter, 0, "developers: update this test for lightwalletd sending transactions");
+    assert_eq!(
+        counter, 0,
+        "developers: update this test for lightwalletd sending transactions"
+    );
 
     Ok(())
 }

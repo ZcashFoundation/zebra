@@ -291,7 +291,7 @@ impl Service<Request> for Mempool {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let is_state_changed = self.update_state();
 
-        tracing::info!(is_enabled = ?self.is_enabled(), ?is_state_changed, "started polling the mempool...");
+        tracing::trace!(is_enabled = ?self.is_enabled(), ?is_state_changed, "started polling the mempool...");
 
         // When the mempool is disabled we still return that the service is ready.
         // Otherwise, callers could block waiting for the mempool to be enabled.
@@ -342,7 +342,7 @@ impl Service<Request> for Mempool {
                     Ok(tx) => {
                         let insert_result = storage.insert(tx.clone());
 
-                        tracing::info!(
+                        tracing::trace!(
                             ?insert_result,
                             "got Ok(_) transaction verify, tried to store",
                         );
@@ -353,7 +353,7 @@ impl Service<Request> for Mempool {
                         }
                     }
                     Err((txid, error)) => {
-                        tracing::info!(?txid, ?error, "mempool transaction failed to verify");
+                        tracing::debug!(?txid, ?error, "mempool transaction failed to verify");
 
                         metrics::counter!("mempool.failed.verify.tasks.total", 1, "reason" => error.to_string());
                         storage.reject_if_needed(txid, error);
@@ -363,7 +363,7 @@ impl Service<Request> for Mempool {
 
             // Handle best chain tip changes
             if let Some(TipAction::Grow { block }) = tip_action {
-                tracing::info!(block_height = ?block.height, "handling blocks added to tip");
+                tracing::trace!(block_height = ?block.height, "handling blocks added to tip");
 
                 // Cancel downloads/verifications/storage of transactions
                 // with the same mined IDs as recently mined transactions.
@@ -381,7 +381,7 @@ impl Service<Request> for Mempool {
                     Self::remove_expired_from_peer_list(&send_to_peers_ids, &expired_transactions);
 
                 if !expired_transactions.is_empty() {
-                    tracing::info!(
+                    tracing::debug!(
                         ?expired_transactions,
                         "removed expired transactions from the mempool",
                     );
@@ -414,48 +414,48 @@ impl Service<Request> for Mempool {
             } => match req {
                 // Queries
                 Request::TransactionIds => {
-                    info!(?req, "got mempool request");
+                    trace!(?req, "got mempool request");
 
                     let res = storage.tx_ids().collect();
 
-                    info!(?req, ?res, "answered mempool request");
+                    trace!(?req, ?res, "answered mempool request");
 
                     async move { Ok(Response::TransactionIds(res)) }.boxed()
                 }
                 Request::TransactionsById(ref ids) => {
-                    info!(?req, "got mempool request");
+                    trace!(?req, "got mempool request");
 
                     let res: Vec<_> = storage.transactions_exact(ids.clone()).cloned().collect();
 
-                    info!(?req, res_count = ?res.len(), "answered mempool request");
+                    trace!(?req, res_count = ?res.len(), "answered mempool request");
 
                     async move { Ok(Response::Transactions(res)) }.boxed()
                 }
                 Request::TransactionsByMinedId(ref ids) => {
-                    info!(?req, "got mempool request");
+                    trace!(?req, "got mempool request");
 
                     let res: Vec<_> = storage
                         .transactions_same_effects(ids.clone())
                         .cloned()
                         .collect();
 
-                    info!(?req, res_count = ?res.len(), "answered mempool request");
+                    trace!(?req, res_count = ?res.len(), "answered mempool request");
 
                     async move { Ok(Response::Transactions(res)) }.boxed()
                 }
                 Request::RejectedTransactionIds(ref ids) => {
-                    info!(?req, "got mempool request");
+                    trace!(?req, "got mempool request");
 
                     let res = storage.rejected_transactions(ids.clone()).collect();
 
-                    info!(?req, ?res, "answered mempool request");
+                    trace!(?req, ?res, "answered mempool request");
 
                     async move { Ok(Response::RejectedTransactionIds(res)) }.boxed()
                 }
 
                 // Queue mempool candidates
                 Request::Queue(gossiped_txs) => {
-                    info!(req_count = ?gossiped_txs.len(), "got mempool Queue request");
+                    trace!(req_count = ?gossiped_txs.len(), "got mempool Queue request");
 
                     let rsp: Vec<Result<(), BoxError>> = gossiped_txs
                         .into_iter()
@@ -472,7 +472,7 @@ impl Service<Request> for Mempool {
 
                 // Store successfully downloaded and verified transactions in the mempool
                 Request::CheckForVerifiedTransactions => {
-                    info!(?req, "got mempool request");
+                    trace!(?req, "got mempool request");
 
                     // all the work for this request is done in poll_ready
                     async move { Ok(Response::CheckedForVerifiedTransactions) }.boxed()
@@ -481,7 +481,7 @@ impl Service<Request> for Mempool {
             ActiveState::Disabled => {
                 // TODO: add the name of the request, but not the content,
                 //       like the command() or Display impls of network requests
-                info!("got mempool request while mempool is disabled");
+                trace!("got mempool request while mempool is disabled");
 
                 // We can't return an error since that will cause a disconnection
                 // by the peer connection handler. Therefore, return successful

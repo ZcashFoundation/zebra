@@ -304,8 +304,6 @@ where
         let tx_id = req.tx_id();
         let span = tracing::debug_span!("tx", ?tx_id);
 
-        let is_mempool = req.is_mempool();
-
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
@@ -317,7 +315,7 @@ where
             check::has_inputs_and_outputs(&tx)?;
             check::has_enough_orchard_flags(&tx)?;
 
-            if is_mempool && tx.is_coinbase() {
+            if req.is_mempool() && tx.is_coinbase() {
                 return Err(TransactionError::CoinbaseInMempool);
             }
             if tx.is_coinbase() {

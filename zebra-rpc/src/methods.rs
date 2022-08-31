@@ -522,7 +522,7 @@ where
                 "mempool service returned more results than expected"
             );
 
-            tracing::info!("sent transaction to mempool: {:?}", &queue_results[0]);
+            tracing::debug!("sent transaction to mempool: {:?}", &queue_results[0]);
 
             match &queue_results[0] {
                 Ok(()) => Ok(SentTransactionHash(transaction_hash)),
