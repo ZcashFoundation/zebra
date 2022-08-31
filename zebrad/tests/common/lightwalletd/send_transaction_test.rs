@@ -179,7 +179,7 @@ pub async fn run() -> Result<()> {
         .await?
         .into_inner();
 
-    // Make sure at least one of the transactions were inserted into the mempool.
+    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
     let mut counter = 0;
     while let Some(tx) = transactions_stream.message().await? {
         let hash: [u8; 32] = tx.hash.clone().try_into().expect("hash is correct length");
@@ -194,13 +194,28 @@ pub async fn run() -> Result<()> {
         counter += 1;
     }
 
-    assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
+    // This RPC has temporarily been disabled in `lightwalletd`:
+    // https://github.com/adityapk00/lightwalletd/blob/b563f765f620e38f482954cd8ff3cc6d17cf2fa7/frontend/service.go#L529-L531
+    //
+    // TODO: re-enable it when lightwalletd starts returning transactions again.
+    //assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
+    assert_eq!(counter, 0, "developers: update this test for lightwalletd sending transactions");
 
+    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
     tracing::info!("calling GetMempoolStream gRPC to fetch transactions...");
     let mut transaction_stream = rpc_client.get_mempool_stream(Empty {}).await?.into_inner();
 
     let mut counter = 0;
-    while let Some(_tx) = transaction_stream.message().await? {
+    while let Some(tx) = transaction_stream.message().await? {
+        let hash: [u8; 32] = tx.hash.clone().try_into().expect("hash is correct length");
+        let hash = transaction::Hash::from_bytes_in_display_order(&hash);
+
+        assert!(
+            transaction_hashes.contains(&hash),
+            "unexpected transaction {hash:?}\n\
+             in isolated mempool: {tx:?}",
+        );
+
         counter += 1;
     }
 
@@ -208,7 +223,8 @@ pub async fn run() -> Result<()> {
     // https://github.com/adityapk00/lightwalletd/blob/b563f765f620e38f482954cd8ff3cc6d17cf2fa7/frontend/service.go#L515-L517
     //
     // TODO: re-enable it when lightwalletd starts streaming transactions again.
-    assert_eq!(counter, 0);
+    //assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
+    assert_eq!(counter, 0, "developers: update this test for lightwalletd sending transactions");
 
     Ok(())
 }
