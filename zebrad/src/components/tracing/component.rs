@@ -27,6 +27,8 @@ pub struct Tracing {
     #[cfg(feature = "flamegraph")]
     flamegrapher: Option<flame::Grapher>,
 
+    /// Drop guard for worker thread of non-blocking logger,
+    /// responsible for flushing any remaining logs when the program terminates
     _guard: WorkerGuard,
 }
 
@@ -35,6 +37,8 @@ impl Tracing {
     pub fn new(config: TracingSection) -> Result<Self, FrameworkError> {
         let filter = config.filter.unwrap_or_else(|| "".to_string());
         let flame_root = &config.flamegraph;
+
+        // By default, the built NonBlocking will be lossy. (with a line limit of 128_000)
         let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::stdout());
 
         // Only use color if tracing output is being sent to a terminal or if it was explicitly
@@ -49,7 +53,6 @@ impl Tracing {
         #[cfg(not(all(feature = "tokio-console", tokio_unstable)))]
         let (subscriber, filter_handle) = {
             use tracing_subscriber::FmtSubscriber;
-            // By default, the built NonBlocking will be lossy. (with a line limit of 128_000)
 
             let logger = FmtSubscriber::builder()
                 .with_ansi(use_color)
