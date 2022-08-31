@@ -94,9 +94,10 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
+    # for zcash_proofs > 0.7.1 while it's still not published
+    "https://github.com/zcash/librustzcash.git"
 ]
 
 [sources.allow-org]
 github = [
-    "ZcashFoundation",
 ]
