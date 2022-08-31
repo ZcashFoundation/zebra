@@ -41,7 +41,7 @@ CI sync jobs near the tip will take different amounts of time as:
 - the blockchain grows, and
 - Zebra's checkpoints are updated.
 
-To resolve a CI sync timeout:
+To fix a CI sync timeout, follow these steps until the timeouts are fixed:
 1. Check for recent PRs that could have caused a performance decrease
 2. [Update Zebra's checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-utils/README.md#zebra-checkpoints)
 3. Wait for a full or update sync to finish with the new checkpoints
@@ -58,9 +58,14 @@ To resolve a CI sync timeout:
 Zebra's CI checks for duplicate crate dependencies: multiple dependencies on different versions of the same crate.
 If a developer or dependabot adds a duplicate dependency, the `Check deny.toml bans` CI job will fail.
 
-Here is how you can fix those failures:
-1. Check for other dependency updates that are mentioned in the `Check deny.toml bans` logs, and try doing them in the same PR
-2. Add an exception to [`deny.toml`](https://github.com/ZcashFoundation/zebra/blob/main/deny.toml). If possible:
-  a. Choose immediate dependencies of the Zebra crates, sometimes this resolves other duplicates as well
-  b. Choose the earlier version of duplicate dependencies
-  c. Add a comment about why the dependency exception is needed - what was the dependency update that caused it?
+To fix duplicate dependencies, follow these steps until the duplicate dependencies are fixed:
+1. Check for updates to the crates mentioned in the `Check deny.toml bans` logs, and try doing them in the same PR:
+  a. Check for open dependabot PRs
+  b. Manually check for updates to those crates on https://crates.io
+2. If there are still duplicate dependencies, try removing those dependencies by disabling crate features:
+  a. Check for features that Zebra activates, and try turning them off
+  b. Try `default-features = false`
+3. If there are still duplicate dependencies, add an exception to [`deny.toml`](https://github.com/ZcashFoundation/zebra/blob/main/deny.toml):
+  a. Add exceptions for direct dependencies of the Zebra crates (sometimes this resolves other duplicates as well)
+  b. Add exceptions for the earlier version of duplicate dependencies, not the later version
+  c. Add a comment about why the dependency exception is needed: what was the dependency update that caused it?
