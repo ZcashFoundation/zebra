@@ -115,7 +115,7 @@ impl Hash {
         reversed_bytes
     }
 
-    /// Convert bytes in big-endian byte-order into a [`Hash`].
+    /// Convert bytes in big-endian byte-order into a [`transaction::Hash`](crate::transaction::Hash).
     ///
     /// Zebra displays transaction and block hashes in big-endian byte-order,
     /// following the u256 convention set by Bitcoin and zcashd.
