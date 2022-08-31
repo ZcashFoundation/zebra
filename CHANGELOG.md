@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Zebra 1.0.0-beta.14](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.13) - 2022-08-30
 
 This release contains a variety of CI fixes, test fixes and dependency updates.
+It contains two breaking changes:
+
+- the recommended disk capacity and network bandwidth are higher, and
+- the `start` command line subcommand is now the default one.
+
+The sync performance of `lightwalletd` is also improved.
 
 ### Added
 
