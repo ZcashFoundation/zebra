@@ -80,7 +80,7 @@ This release contains a variety of CI fixes, test fixes and dependency updates.
 - Do not run versioning job when pushing to main (#4970)
 - Deploy long running node instances on release (#4939)
 - Run build and test jobs on cargo and clippy config changes (#4941)
-- Increase batch sizes (#4947)
+- Increase Mergify batch sizes (#4947)
 
 #### Tests
 
