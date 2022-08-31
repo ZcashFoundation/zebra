@@ -31,6 +31,8 @@ The sync performance of `lightwalletd` is also improved.
 
 - Increase disk and network requirements for long-term deployment (#4948, #4963)
 - Update supported Rust versions in `README.md` (#4938)
+- Document edge cases in sync workflows (#4973)
+- Add missing status badges & sections (#4817)
 
 #### Rust Dependencies
 
