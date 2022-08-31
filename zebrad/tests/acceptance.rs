@@ -102,6 +102,16 @@
 //! ```
 //!
 //! Please refer to the documentation of each test for more information.
+//!
+//! ## Disk Space for Testing
+//!
+//! The full sync and lightwalletd tests with cached state expect a temporary directory with
+//! at least 300 GB of disk space (2 copies of the full chain). To use another disk for the
+//! temporary test files:
+//!
+//! ```sh
+//! export TMPDIR=/path/to/disk/directory
+//! ```
 
 use std::{collections::HashSet, env, fs, panic, path::PathBuf, time::Duration};
 
