@@ -15,7 +15,7 @@ This release contains a variety of CI fixes, test fixes and dependency updates.
 
 ### Changed
 
-- Revert deserializing stored transactions in a rayon thread (#4933)
+- Fix a performance regression when serving blocks via the Zcash network protocol and RPCs (#4933)
 - Update block hash checkpoints for mainnet (#4919)
 - Enable a `tinyvec` feature to speed up compilation (#4796)
 - Split the `zebra_state::service::read` module (#4827)
