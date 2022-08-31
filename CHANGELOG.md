@@ -16,7 +16,7 @@ This release contains a variety of CI fixes, test fixes and dependency updates.
 ### Changed
 
 - Fix a performance regression when serving blocks via the Zcash network protocol and RPCs (#4933)
-- Update block hash checkpoints for mainnet (#4919)
+- Update block hash checkpoints for mainnet (#4919, #4972)
 - Enable a `tinyvec` feature to speed up compilation (#4796)
 - Split the `zebra_state::service::read` module (#4827)
 - Disallow Orchard `ivk = 0` on `IncomingViewingKey::from` & `SpendingKey` generation (#3962)
@@ -65,7 +65,6 @@ This release contains a variety of CI fixes, test fixes and dependency updates.
 - Stop cancelling manual full syncs (#5000)
 - Run a single CI workflow as required (#4981)
 - Fix some clippy warnings (#4927, #4931)
-- Update mainnet and testnet checkpoints (#4972)
 - Improve Zebra acceptance test diagnostics (#4958)
 - Expand cached state disks before running tests (#4962)
 - Increase full sync timeouts for longer syncs (#4961)
