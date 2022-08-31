@@ -227,8 +227,6 @@ pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt + std::fmt
     config.mempool.debug_enable_at_height = Some(0);
     config.consensus.debug_skip_parameter_preload = debug_skip_parameter_preload;
 
-    config.mempool.skip_full_validation = true;
-
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 
     let mut zebrad = zebra_directory
