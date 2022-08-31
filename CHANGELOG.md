@@ -9,8 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 This release contains a variety of CI fixes, test fixes and dependency updates.
 It contains two breaking changes:
 
-- the recommended disk capacity and network bandwidth are higher, and
-- the `start` command line subcommand is now the default one.
+- the recommended disk capacity for Zebra is now 300 GB, and the recommended network bandwidth is 100 GB per month, and
+- when no command is provided on the command line, `zebrad` automatically starts syncing (like `zcashd`).
 
 The sync performance of `lightwalletd` is also improved.
 
