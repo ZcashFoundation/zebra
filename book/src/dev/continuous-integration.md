@@ -52,3 +52,11 @@ To resolve a CI sync timeout:
 5. If a Rust test fails with "command did not log any matches for the given regex, within the ... timeout":
    a. If it's the full sync test, [increase the full sync timeout](https://github.com/ZcashFoundation/zebra/commit/9fb87425b76ba3747985ea2f22043ff0276a03bd#diff-8fbc73b0a92a4f48656ffe7d85d55c612c755202dcb7284d8f6742a38a6e9614R367)
    b. If it's an update sync test, [increase the update sync timeouts](https://github.com/ZcashFoundation/zebra/commit/9fb87425b76ba3747985ea2f22043ff0276a03bd#diff-92f93c26e696014d82c3dc1dbf385c669aa61aa292f44848f52167ab747cb6f6R51)
+   
+### Resolving Duplicate Dependencies in `cargo deny`
+
+1. Check for other dependency updates that are mentioned in the `cargo deny` logs, and try doing them in the same PR
+2. Add an exception to [`deny.toml`](https://github.com/ZcashFoundation/zebra/blob/main/deny.toml). If possible:
+  a. Choose immediate dependencies of the Zebra crates, sometimes this resolves other duplicates as well
+  b. Choose the earlier version of duplicate dependencies
+  c. Add a comment about why the dependency exception is needed - what was the dependency update that caused it?
