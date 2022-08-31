@@ -15,9 +15,23 @@ use zebra_test::mock_service::MockService;
 
 use super::super::*;
 
-/// Test if the RPC server will spawn on a randomly generated port.
+/// Test that the JSON-RPC server spawns when configured with a single thread.
 #[test]
-fn rpc_server_spawn() {
+fn rpc_server_spawn_single_thread() {
+    rpc_server_spawn(false)
+}
+
+/// Test that the JSON-RPC server spawns when configured with multiple threads.
+#[test]
+fn rpc_sever_spawn_parallel_threads() {
+    rpc_server_spawn(true)
+}
+
+/// Test if the RPC server will spawn on a randomly generated port.
+///
+/// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
+#[tracing::instrument]
+fn rpc_server_spawn(parallel_cpu_threads: bool) {
     let _init_guard = zebra_test::init();
 
     let port = zebra_test::net::random_known_port();
@@ -63,57 +77,25 @@ fn rpc_server_spawn() {
     rt.shutdown_timeout(Duration::from_secs(1));
 }
 
-/// Test if the RPC server will spawn on a randomly generated port with multiple threads.
+/// Test that the JSON-RPC server spawns when configured with a single thread,
+/// on an OS-assigned unallocated port.
 #[test]
-fn rpc_server_spawn_parallel() {
-    let _init_guard = zebra_test::init();
+fn rpc_server_spawn_unallocated_port_single_thread() {
+    rpc_server_spawn_unallocated_port(false)
+}
 
-    let port = zebra_test::net::random_known_port();
-    let config = Config {
-        listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
-        parallel_cpu_threads: 2,
-    };
-
-    let rt = tokio::runtime::Runtime::new().unwrap();
-
-    rt.block_on(async {
-        let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-
-        info!("spawning parallel RPC server...");
-
-        let (rpc_server_task_handle, rpc_tx_queue_task_handle) = RpcServer::spawn(
-            config,
-            "RPC server test",
-            Buffer::new(mempool.clone(), 1),
-            Buffer::new(state.clone(), 1),
-            NoChainTip,
-            Mainnet,
-        );
-
-        info!("spawned parallel RPC server, checking services...");
-
-        mempool.expect_no_requests().await;
-        state.expect_no_requests().await;
-
-        // The server and queue tasks should continue without errors or panics
-        let rpc_server_task_result = rpc_server_task_handle.now_or_never();
-        assert!(matches!(rpc_server_task_result, None));
-
-        let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-        assert!(matches!(rpc_tx_queue_task_result, None));
-
-        // TODO: when we return server.close_handle(), use it to shut down the server here,
-        //       and remove the shutdown timeout
-    });
-
-    info!("waiting for parallel RPC server to shut down...");
-    rt.shutdown_timeout(Duration::from_secs(1));
+/// Test that the JSON-RPC server spawn when configured with multiple threads,
+/// on an OS-assigned unallocated port.
+#[test]
+fn rpc_sever_spawn_unallocated_port_parallel_threads() {
+    rpc_server_spawn_unallocated_port(true)
 }
 
 /// Test if the RPC server will spawn on an OS-assigned unallocated port.
-#[test]
-fn rpc_server_spawn_unallocated_port() {
+///
+/// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
+#[tracing::instrument]
+fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool) {
     let _init_guard = zebra_test::init();
 
     let port = zebra_test::net::random_unallocated_port();
@@ -156,55 +138,6 @@ fn rpc_server_spawn_unallocated_port() {
     });
 
     info!("waiting for RPC server to shut down...");
-    rt.shutdown_timeout(Duration::from_secs(1));
-}
-
-/// Test if the RPC server will spawn on an OS-assigned unallocated port,
-/// with automatically configured parallelism.
-#[test]
-fn rpc_server_spawn_unallocated_port_parallel_auto() {
-    let _init_guard = zebra_test::init();
-
-    let port = zebra_test::net::random_unallocated_port();
-    let config = Config {
-        listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
-        parallel_cpu_threads: 0,
-    };
-
-    let rt = tokio::runtime::Runtime::new().unwrap();
-
-    rt.block_on(async {
-        let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-
-        info!("spawning parallel RPC server...");
-
-        let (rpc_server_task_handle, rpc_tx_queue_task_handle) = RpcServer::spawn(
-            config,
-            "RPC server test",
-            Buffer::new(mempool.clone(), 1),
-            Buffer::new(state.clone(), 1),
-            NoChainTip,
-            Mainnet,
-        );
-
-        info!("spawned parallel RPC server, checking services...");
-
-        mempool.expect_no_requests().await;
-        state.expect_no_requests().await;
-
-        // The server and queue tasks should continue without errors or panics
-        let rpc_server_task_result = rpc_server_task_handle.now_or_never();
-        assert!(matches!(rpc_server_task_result, None));
-
-        let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-        assert!(matches!(rpc_tx_queue_task_result, None));
-
-        // TODO: when we return server.close_handle(), use it to shut down the server here
-        //       and remove the shutdown timeout
-    });
-
-    info!("waiting for parallel RPC server to shut down...");
     rt.shutdown_timeout(Duration::from_secs(1));
 }
 

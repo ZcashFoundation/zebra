@@ -212,7 +212,8 @@ pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt + std::fmt
     zebra_directory: P,
     test_type: LightwalletdTestType,
 ) -> Result<(TestChild<P>, SocketAddr)> {
-    let mut config = random_known_rpc_port_config()
+    // This is what we recommend our users configure.
+    let mut config = random_known_rpc_port_config(true)
         .expect("Failed to create a config file with a known RPC listener port");
 
     config.state.ephemeral = false;

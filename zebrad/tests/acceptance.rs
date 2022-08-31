@@ -1145,8 +1145,25 @@ async fn tracing_endpoint() -> Result<()> {
     Ok(())
 }
 
+/// Test that the JSON-RPC endpoint responds to a request,
+/// when configured with a single thread.
 #[tokio::test]
-async fn rpc_endpoint() -> Result<()> {
+async fn rpc_endpoint_single_thread() -> Result<()> {
+    rpc_endpoint(false).await
+}
+
+/// Test that the JSON-RPC endpoint responds to a request,
+/// when configured with multiple threads.
+#[tokio::test]
+async fn rpc_endpoint_parallel_threads() -> Result<()> {
+    rpc_endpoint(true).await
+}
+
+/// Test that the JSON-RPC endpoint responds to a request.
+///
+/// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
+#[tracing::instrument]
+async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     use hyper::{body::to_bytes, Body, Client, Method, Request};
     use serde_json::Value;
 
@@ -1157,7 +1174,7 @@ async fn rpc_endpoint() -> Result<()> {
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = random_known_rpc_port_config()?;
+    let mut config = random_known_rpc_port_config(parallel_cpu_threads)?;
     let url = format!("http://{}", config.rpc.listen_addr.unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
@@ -1648,7 +1665,9 @@ fn zebra_rpc_conflict() -> Result<()> {
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = random_known_rpc_port_config()?;
+    //
+    // This is the required setting to detect port conflicts.
+    let mut config = random_known_rpc_port_config(false)?;
 
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(

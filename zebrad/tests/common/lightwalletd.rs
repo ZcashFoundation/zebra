@@ -83,7 +83,9 @@ pub fn zebra_skip_lightwalletd_tests() -> bool {
 }
 
 /// Returns a `zebrad` config with a random known RPC port.
-pub fn random_known_rpc_port_config() -> Result<ZebradConfig> {
+///
+/// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
+pub fn random_known_rpc_port_config(parallel_cpu_threads: bool) -> Result<ZebradConfig> {
     // [Note on port conflict](#Note on port conflict)
     let listen_port = random_known_port();
     let listen_ip = "127.0.0.1".parse().expect("hard-coded IP is valid");
@@ -93,6 +95,13 @@ pub fn random_known_rpc_port_config() -> Result<ZebradConfig> {
     // TODO: split this config into another function?
     let mut config = default_test_config()?;
     config.rpc.listen_addr = Some(zebra_rpc_listener);
+    if parallel_cpu_threads {
+        // Auto-configure to the number of CPU cores: most users configre this
+        config.rpc.parallel_cpu_threads = 0;
+    } else {
+        // Default config, users who want to detect port conflicts configure this
+        config.rpc.parallel_cpu_threads = 1;
+    }
 
     Ok(config)
 }
@@ -306,7 +315,8 @@ impl LightwalletdTestType {
     /// and `Some(Err(_))` if the config could not be created.
     pub fn zebrad_config(&self, test_name: String) -> Option<Result<ZebradConfig>> {
         let config = if self.launches_lightwalletd() {
-            random_known_rpc_port_config()
+            // This is what we recommend our users configure.
+            random_known_rpc_port_config(true)
         } else {
             default_test_config()
         };
