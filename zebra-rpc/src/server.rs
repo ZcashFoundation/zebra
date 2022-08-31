@@ -65,8 +65,14 @@ impl RpcServer {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
             // Initialize the rpc methods with the zebra version
-            let (rpc_impl, rpc_tx_queue_task_handle) =
-                RpcImpl::new(app_version, mempool, state, latest_chain_tip, network);
+            let (rpc_impl, rpc_tx_queue_task_handle) = RpcImpl::new(
+                app_version,
+                network,
+                config.debug_force_finished_sync,
+                mempool,
+                state,
+                latest_chain_tip,
+            );
 
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io: MetaIoHandler<(), _> =
