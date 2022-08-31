@@ -177,7 +177,7 @@ pub async fn run() -> Result<()> {
     }
 
     tracing::info!("waiting for mempool to verify some transactions...");
-    zebrad.expect_stdout_line_matches("sending new transactions to peers")?;
+    zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
 
     tracing::info!("calling GetMempoolTx gRPC to fetch transactions...");
     let mut transactions_stream = rpc_client

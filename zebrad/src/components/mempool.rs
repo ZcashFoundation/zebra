@@ -390,7 +390,7 @@ impl Service<Request> for Mempool {
 
             // Send transactions that were not rejected nor expired to peers
             if !send_to_peers_ids.is_empty() {
-                tracing::info!(?send_to_peers_ids, "sending new transactions to peers");
+                tracing::trace!(?send_to_peers_ids, "sending new transactions to peers");
 
                 self.transaction_sender.send(send_to_peers_ids)?;
             }
@@ -416,9 +416,13 @@ impl Service<Request> for Mempool {
                 Request::TransactionIds => {
                     trace!(?req, "got mempool request");
 
-                    let res = storage.tx_ids().collect();
+                    let res: HashSet<_> = storage.tx_ids().collect();
 
-                    trace!(?req, ?res, "answered mempool request");
+                    // This log line is checked by tests,
+                    // because lightwalletd doesn't return mempool transactions at the moment.
+                    //
+                    // TODO: downgrade to trace level when we can check transactions via gRPC
+                    info!(?req, res_count = ?res.len(), "answered mempool request");
 
                     async move { Ok(Response::TransactionIds(res)) }.boxed()
                 }
