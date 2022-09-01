@@ -678,6 +678,10 @@ impl Service<Request> for StateService {
 
                 self.pending_utxos.check_against(&finalized.new_outputs);
 
+                timer.finish(module_path!(), line!(), "pending_utxos.check_against()");
+
+                let timer = CodeTimer::start();
+
                 // # Performance
                 //
                 // Allow other async tasks to make progress while blocks are being verified

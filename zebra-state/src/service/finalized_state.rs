@@ -148,6 +148,9 @@ impl FinalizedState {
         let height = queued.0.height;
         self.queued_by_prev_hash.insert(prev_hash, queued);
 
+        let timer = CodeTimer::start();
+        let finalized_tip = self.db.finalized_tip_height();
+
         while let Some(queued_block) = self
             .queued_by_prev_hash
             .remove(&self.db.finalized_tip_hash())
@@ -158,6 +161,20 @@ impl FinalizedState {
                 // the last block in the queue failed, so we can't commit the next block
                 break;
             }
+        }
+
+        if let Some(highest_queue_commit) = highest_queue_commit.as_ref() {
+            let finalized_tip: i64 = finalized_tip.map(|height| height.0.into()).unwrap_or(-1);
+            let highest_queue_commit: i64 = highest_queue_commit.height.0.into();
+            let committed_blocks = highest_queue_commit - finalized_tip;
+
+            timer.finish(
+                module_path!(),
+                line!(),
+                format!("queue_and_commit_finalized: {finalized_tip}..={highest_queue_commit}, {committed_blocks} blocks")
+            );
+        } else {
+            timer.ignore();
         }
 
         if self.queued_by_prev_hash.is_empty() {
