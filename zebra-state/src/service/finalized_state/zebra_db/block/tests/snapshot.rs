@@ -32,6 +32,8 @@
 
 use std::sync::Arc;
 
+use itertools::Itertools;
+
 use serde::Serialize;
 
 use zebra_chain::{
@@ -462,7 +464,8 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
         .count();
 
     let addresses: Vec<transparent::Address> = addresses
-        .map(|(key, _value)| transparent::Address::from_bytes(key))
+        .map_ok(|(key, _value)| transparent::Address::from_bytes(key))
+        .filter_map(|kv| kv.ok())
         .collect();
 
     // # Consensus

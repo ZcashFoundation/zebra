@@ -29,6 +29,8 @@
 
 use std::sync::Arc;
 
+use itertools::Itertools;
+
 use zebra_chain::{
     block::Block,
     parameters::Network::{self, *},
@@ -124,12 +126,12 @@ fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[Str
             .expect("RocksDB API provides correct names");
 
         // Correctness: Multi-key iteration causes hangs in concurrent code, but seems ok in tests.
-        let mut cf_iter = db.full_iterator_cf(&cf_handle, rocksdb::IteratorMode::Start);
+        let cf_iter = db.full_iterator_cf(&cf_handle, rocksdb::IteratorMode::Start);
 
         // The default raw data serialization is very verbose, so we hex-encode the bytes.
         let cf_data: Vec<KV> = cf_iter
-            .by_ref()
-            .map(|(key, value)| KV::new(key, value))
+            .map_ok(|(key, value)| KV::new(key, value))
+            .filter_map(|kv| kv.ok())
             .collect();
 
         if cf_name == "default" {
@@ -143,12 +145,6 @@ fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[Str
             // because those roots are used to populate the anchor column families.
             insta::assert_ron_snapshot!(format!("{}_raw_data", cf_name), cf_data);
         }
-
-        assert_eq!(
-            cf_iter.status(),
-            Ok(()),
-            "unexpected column family iterator error",
-        );
     }
 
     insta::assert_ron_snapshot!("empty_column_families", empty_column_families);

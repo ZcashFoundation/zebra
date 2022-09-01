@@ -12,6 +12,7 @@
 
 use std::{fmt::Debug, path::Path, sync::Arc};
 
+use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
 use zebra_chain::parameters::Network;
@@ -207,13 +208,12 @@ impl ReadDisk for DiskDb {
     where
         C: rocksdb::AsColumnFamilyRef,
     {
-        // Empty column families return invalid forward iterators.
-        //
-        // Checking iterator validity does not seem to cause database hangs.
-        !self
+        // Check if the requested column family is empty
+        let column_family = self
             .db
             .iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .valid()
+            .collect_vec();
+        column_family.is_empty()
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -264,8 +264,9 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .next()
+            .next()?
             .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .ok()
     }
 
     fn zs_last_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
@@ -277,8 +278,9 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, rocksdb::IteratorMode::End)
-            .next()
+            .next()?
             .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .ok()
     }
 
     fn zs_next_key_value_from<C, K, V>(&self, cf: &C, lower_bound: &K) -> Option<(K, V)>
@@ -293,8 +295,9 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, from)
-            .next()
+            .next()?
             .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .ok()
     }
 
     fn zs_prev_key_value_back_from<C, K, V>(&self, cf: &C, upper_bound: &K) -> Option<(K, V)>
@@ -309,8 +312,9 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, from)
-            .next()
+            .next()?
             .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .ok()
     }
 }
 
