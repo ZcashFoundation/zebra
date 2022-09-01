@@ -1,12 +1,12 @@
 [package]
 name = "tower-batch"
-version = "0.2.28"
+version = "0.2.29"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT"
 edition = "2021"
 
 [dependencies]
-futures = "0.3.21"
+futures = "0.3.23"
 futures-core = "0.3.23"
 pin-project = "1.0.10"
 rayon = "1.5.3"

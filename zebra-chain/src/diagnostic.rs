@@ -7,10 +7,14 @@ use std::time::{Duration, Instant};
 use crate::fmt::duration_short;
 
 /// The default minimum info-level message time.
-pub const DEFAULT_MIN_INFO_TIME: Duration = Duration::from_secs(5);
+///
+/// This is high enough to ignore most slow code.
+pub const DEFAULT_MIN_INFO_TIME: Duration = Duration::from_secs(5 * 60);
 
 /// The default minimum warning message time.
-pub const DEFAULT_MIN_WARN_TIME: Duration = Duration::from_secs(20);
+///
+/// This is a little lower than the block verify timeout.
+pub const DEFAULT_MIN_WARN_TIME: Duration = Duration::from_secs(9 * 60);
 
 /// A guard that logs code execution time when dropped.
 #[derive(Debug)]

@@ -4,6 +4,104 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-beta.14](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.13) - 2022-08-30
+
+This release contains a variety of CI fixes, test fixes and dependency updates.
+It contains two breaking changes:
+
+- the recommended disk capacity for Zebra is now 300 GB, and the recommended network bandwidth is 100 GB per month, and
+- when no command is provided on the command line, `zebrad` automatically starts syncing (like `zcashd`).
+
+The sync performance of `lightwalletd` is also improved.
+
+### Added
+
+- Store history trees by height in the non-finalized state (#4928)
+- Breaking: Add `start` as default subcommand for `zebrad` (#4957)
+
+### Changed
+
+- Fix a performance regression when serving blocks via the Zcash network protocol and RPCs (#4933)
+- Update block hash checkpoints for mainnet (#4919, #4972)
+- Enable a `tinyvec` feature to speed up compilation (#4796)
+- Split the `zebra_state::service::read` module (#4827)
+- Disallow Orchard `ivk = 0` on `IncomingViewingKey::from` & `SpendingKey` generation (#3962)
+
+#### Docs
+
+- Increase disk and network requirements for long-term deployment (#4948, #4963)
+- Update supported Rust versions in `README.md` (#4938)
+- Document edge cases in sync workflows (#4973)
+- Add missing status badges & sections (#4817)
+
+#### Rust Dependencies
+
+- Bump `serde` from 1.0.137 to 1.0.144 (#4865, #4876, #4925)
+- Bump `serde_json` from 1.0.81 to 1.0.83 (#4727, #4877)
+- Bump `serde_with` from 1.14.0 to 2.0.0 (#4785)
+- Bump `futures` from 0.3.21 to 0.3.23 (#4913)
+- Bump `futures-core` from 0.3.21 to 0.3.23 (#4915)
+- Bump `chrono` from 0.4.19 to 0.4.20 (#4898)
+- Bump `criterion` from 0.3.5 to 0.3.6 (#4761)
+- Bump `thiserror` from 1.0.31 to 1.0.32 (#4878)
+- Bump `vergen` from 7.2.1 to 7.3.2 (#4890)
+- Bump `tinyvec` from 1.5.1 to 1.6.0 (#4888)
+- Bump `insta` from 1.15.0 to 1.17.1 (#4884)
+- Bump `semver` from 1.0.12 to 1.0.13 (#4879)
+- Bump `bytes` from 1.1.0 to 1.2.1 (#4843)
+- Bump `tokio` from 1.20.0 to 1.20.1 (#4864)
+- Bump `hyper` from 0.14.19 to 0.14.20 (#4764)
+- Bump `once_cell` from 1.12.0 to 1.13.0 (#4749)
+- Bump `regex` from 1.5.6 to 1.6.0 (#4755)
+- Bump `inferno` from 0.11.6 to 0.11.7 (#4829)
+
+#### CI Dependencies
+
+- Bump `actions/github-script` from 6.1.0 to 6.2.0 (#4986)
+- Bump `reviewdog/action-actionlint` from 1.27.0 to 1.29.0 (#4923, #4987)
+- Bump `tj-actions/changed-files` from 24 to 29.0.2 (#4936, #4959, #4985)
+- Bump `w9jds/firebase-action` from 2.2.2 to 11.5.0 (#4905)
+- Bump `docker/build-push-action` from 3.0.0 to 3.1.1 (#4797, #4895)
+
+### Fixed
+
+- Increase the number of blocks checked for legacy transactions (#4804)
+
+#### CI
+
+- Split a long full sync job (#5001)
+- Stop cancelling manual full syncs (#5000)
+- Run a single CI workflow as required (#4981)
+- Fix some clippy warnings (#4927, #4931)
+- Improve Zebra acceptance test diagnostics (#4958)
+- Expand cached state disks before running tests (#4962)
+- Increase full sync timeouts for longer syncs (#4961)
+- Fix a regular expression typo in a full sync job (#4950)
+- Write cached state images after update syncs, and use the latest image from any commit (#4949)
+- Increase CI disk size to 200GB (#4945)
+- Make sure Rust tests actually run in `deploy-gcp-tests.yml` (#4710)
+- Copy lightwalletd from the correct path during Docker builds (#4886)
+- Use FHS for deployments and artifacts (#4786)
+- Retry gcloud authentication if it fails (#4940)
+- Disable beta Rust tests and add parameter download logging (#4930)
+- Do not run versioning job when pushing to main (#4970)
+- Deploy long running node instances on release (#4939)
+- Run build and test jobs on cargo and clippy config changes (#4941)
+- Increase Mergify batch sizes (#4947)
+
+#### Networking
+
+- Send height to peers (#4904)
+- Fix handshake timing and error handling (#4772)
+
+#### Tests
+
+- Show full Zebra test panic details in CI logs (#4942)
+- Update timeout for Zebra sync tests (#4918)
+- Improve test reliability and performance (#4869)
+- Use `FuturesOrdered` in `fallback_verification` test (#4867)
+- Skip some RPC tests when `ZEBRA_SKIP_NETWORK_TESTS` is set (#4849)
+- Truncate the number of transactions in send transaction test (#4848)
 
 ## [Zebra 1.0.0-beta.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.13) - 2022-07-29
 
