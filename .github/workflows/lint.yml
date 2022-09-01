@@ -37,9 +37,6 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1
-
       - name: Rust files
         id: changed-files-rust
         uses: tj-actions/changed-files@v29.0.3
@@ -70,6 +67,9 @@ jobs:
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
+
+      - name: Install last version of Protoc
+        uses: arduino/setup-protoc@v1
 
       - name: Check workflow permissions
         id: check_permissions
@@ -112,6 +112,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install last version of Protoc
+        uses: arduino/setup-protoc@v1
+
       - uses: actions-rs/toolchain@v1.0.6
         with:
           toolchain: stable
@@ -136,6 +139,9 @@ jobs:
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
+
+      - name: Install last version of Protoc
+        uses: arduino/setup-protoc@v1
 
       - uses: actions-rs/toolchain@v1.0.6
         with:
