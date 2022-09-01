@@ -1237,6 +1237,7 @@ async fn non_blocking_logger() -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     let mut config = random_known_rpc_port_config()?;
     let zebra_rpc_address = config.rpc.listen_addr.unwrap();
+    config.tracing.filter = Some("trace".to_string());
 
     let dir = testdir()?.with_config(&mut config)?;
     let mut child = dir.spawn_child(args!["start"])?;

@@ -47,7 +47,8 @@ impl Tracing {
         let filter = config.filter.unwrap_or_else(|| "".to_string());
         let flame_root = &config.flamegraph;
 
-        // By default, the built NonBlocking will be lossy. (with a line limit of 128_000)
+        // By default, the built NonBlocking will be lossy with a line limit of 128_000, lines sent to the worker past
+        // this limit will be dropped without being written to stdout
         let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::stdout());
 
         // Only use color if tracing output is being sent to a terminal or if it was explicitly
