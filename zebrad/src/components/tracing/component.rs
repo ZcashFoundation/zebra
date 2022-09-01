@@ -3,10 +3,14 @@
 use abscissa_core::{Component, FrameworkError, Shutdown};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
-    fmt::Formatter, layer::SubscriberExt, reload::Handle, util::SubscriberInitExt, EnvFilter,
+    fmt::{format, Formatter},
+    layer::SubscriberExt,
+    reload::Handle,
+    util::SubscriberInitExt,
+    EnvFilter,
 };
 
-use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 
 use crate::{application::app_version, config::TracingSection};
 
@@ -18,7 +22,12 @@ pub struct Tracing {
     /// The installed filter reloading handle, if enabled.
     //
     // TODO: when fmt::Subscriber supports per-layer filtering, remove the Option
-    filter_handle: Option<Handle<EnvFilter, Formatter>>,
+    filter_handle: Option<
+        Handle<
+            EnvFilter,
+            Formatter<format::DefaultFields, format::Format<format::Full>, NonBlocking>,
+        >,
+    >,
 
     /// The originally configured filter.
     initial_filter: String,
@@ -56,8 +65,8 @@ impl Tracing {
 
             let logger = FmtSubscriber::builder()
                 .with_ansi(use_color)
-                .with_env_filter(&filter)
-                .with_writer(non_blocking);
+                .with_writer(non_blocking)
+                .with_env_filter(&filter);
 
             // Enable reloading if that feature is selected.
             #[cfg(feature = "filter-reload")]
