@@ -55,7 +55,7 @@ humantime = "2.1.0"
 # Error Handling & Formatting
 displaydoc = "0.2.3"
 static_assertions = "1.1.0"
-thiserror = "1.0.32"
+thiserror = "1.0.33"
 tracing = "0.1.31"
 
 # Serialization
