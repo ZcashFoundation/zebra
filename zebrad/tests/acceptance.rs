@@ -1229,6 +1229,51 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn non_blocking_logger() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // Write a configuration that has RPC listen_addr set
+    // [Note on port conflict](#Note on port conflict)
+    let mut config = random_known_rpc_port_config()?;
+    let zebra_rpc_address = config.rpc.listen_addr.unwrap();
+
+    let dir = testdir()?.with_config(&mut config)?;
+    let mut child = dir.spawn_child(args!["start"])?;
+
+    // Wait until port is open.
+    child.expect_stdout_line_matches(
+        format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
+    )?;
+
+    // Create an http client
+    let client = reqwest::Client::new();
+
+    for _ in 0..10_000 {
+        let res = client
+            .post(format!("http://{}", &zebra_rpc_address))
+            .body(r#"{"jsonrpc":"1.0","method":"getinfo","params":[],"id":123}"#)
+            .header("Content-Type", "application/json")
+            .send()
+            .await?;
+
+        // Test that zebrad rpc endpoint is still responding to requests
+        assert!(res.status().is_success());
+    }
+
+    child.kill(false)?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+    Ok(())
+}
+
 /// Make sure `lightwalletd` works with Zebra, when both their states are empty.
 ///
 /// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` env var is set.
