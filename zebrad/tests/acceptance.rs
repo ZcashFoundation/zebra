@@ -1248,6 +1248,11 @@ async fn non_blocking_logger() -> Result<()> {
         format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
     )?;
 
+    let mut cmd2 = std::process::Command::new("echo")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()?;
+
     // Create an http client
     let client = reqwest::Client::new();
 
@@ -1265,6 +1270,7 @@ async fn non_blocking_logger() -> Result<()> {
         assert!(res.status().is_success());
     }
 
+    cmd2.kill()?;
     child.kill(false)?;
 
     let output = child.wait_with_output()?;
