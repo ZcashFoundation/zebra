@@ -1,6 +1,6 @@
 [package]
 name = "zebra-test"
-version = "1.0.0-beta.13"
+version = "1.0.0-beta.14"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -11,7 +11,7 @@ edition = "2021"
 hex = "0.4.3"
 indexmap = "1.9.1"
 lazy_static = "1.4.0"
-insta = "1.17.1"
+insta = "1.19.1"
 proptest = "0.10.1"
 once_cell = "1.13.0"
 rand = { version = "0.8.5", package = "rand" }
@@ -29,7 +29,7 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 humantime = "2.1.0"
 owo-colors = "3.4.0"
 spandoc = "0.2.2"
-thiserror = "1.0.32"
+thiserror = "1.0.33"
 
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 tracing-error = "0.2.0"

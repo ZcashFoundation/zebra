@@ -117,7 +117,7 @@ fn test_block_db_round_trip_with(
         // Skip validation by writing the block directly to the database
         let mut batch = DiskWriteBatch::new(Mainnet);
         batch
-            .prepare_block_header_transactions_batch(&state.db, &finalized)
+            .prepare_block_header_and_transaction_data_batch(&state.db, &finalized)
             .expect("block is valid for batch");
         state.db.write(batch).expect("block is valid for writing");
 

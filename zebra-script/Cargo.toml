@@ -1,6 +1,6 @@
 [package]
 name = "zebra-script"
-version = "1.0.0-beta.13"
+version = "1.0.0-beta.14"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -8,12 +8,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# TODO: make a release and point to it
-zcash_script = "0.1.6"
+zcash_script = "0.1.7"
 
 zebra-chain = { path = "../zebra-chain" }
 
-thiserror = "1.0.32"
+thiserror = "1.0.33"
 displaydoc = "0.2.3"
 
 [dev-dependencies]

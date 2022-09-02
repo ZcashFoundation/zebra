@@ -37,7 +37,7 @@ impl fmt::Debug for SproutShieldedAddress {
             // Use hex formatting for the transmission key.
             .field(
                 "transmission_key",
-                &hex::encode(&self.transmission_key.as_bytes()),
+                &hex::encode(self.transmission_key.as_bytes()),
             )
             .finish()
     }

@@ -105,7 +105,7 @@ pub struct Root(#[serde(with = "serde_helpers::Base")] pub(crate) pallas::Base);
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Root")
-            .field(&hex::encode(&self.0.to_repr()))
+            .field(&hex::encode(self.0.to_repr()))
             .finish()
     }
 }

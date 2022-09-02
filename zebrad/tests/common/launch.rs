@@ -33,14 +33,17 @@ use crate::common::lightwalletd::{random_known_rpc_port_config, LightwalletdTest
 pub const LAUNCH_DELAY: Duration = Duration::from_secs(15);
 
 /// After we launch `lightwalletd`, wait this long for the command to start up,
-/// take the actions expected by the tests, and log the expected logs.
+/// take the actions expected by the quick tests, and log the expected logs.
 ///
 /// `lightwalletd`'s actions also depend on the actions of the `zebrad` instance
 /// it is using for its RPCs.
 pub const LIGHTWALLETD_DELAY: Duration = Duration::from_secs(60);
 
 /// The amount of time we wait between launching two conflicting nodes.
-pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(2);
+///
+/// We use a longer time to make sure the first node has launched before the second starts,
+/// even if CI is under load.
+pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(5);
 
 /// The amount of time we wait for lightwalletd to update to the tip.
 ///
@@ -192,7 +195,7 @@ where
             let cache_dir = dir.join("state");
             fs::create_dir_all(&cache_dir)?;
         } else {
-            fs::create_dir_all(&dir)?;
+            fs::create_dir_all(dir)?;
         }
 
         let config_file = dir.join("zebrad.toml");

@@ -244,7 +244,7 @@ impl Address {
     /// <https://en.bitcoin.it/Base58Check_encoding#Encoding_a_Bitcoin_address>
     fn hash_payload(bytes: &[u8]) -> [u8; 20] {
         let sha_hash = Sha256::digest(bytes);
-        let ripe_hash = Ripemd160::digest(&sha_hash);
+        let ripe_hash = Ripemd160::digest(sha_hash);
         let mut payload = [0u8; 20];
         payload[..].copy_from_slice(&ripe_hash[..]);
         payload

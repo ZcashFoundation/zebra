@@ -1,3 +1,5 @@
+//! Authorizing digests for Zcash transactions.
+
 use std::{fmt, sync::Arc};
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -78,7 +80,7 @@ impl fmt::Display for AuthDigest {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut reversed_bytes = self.0;
         reversed_bytes.reverse();
-        f.write_str(&hex::encode(&reversed_bytes))
+        f.write_str(&hex::encode(reversed_bytes))
     }
 }
 

@@ -196,7 +196,7 @@ impl AsRef<[u8]> for PayingKey {
 impl fmt::Debug for PayingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("PayingKey")
-            .field(&hex::encode(&self.0))
+            .field(&hex::encode(self.0))
             .finish()
     }
 }
@@ -245,11 +245,8 @@ impl fmt::Debug for IncomingViewingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("IncomingViewingKey")
             .field("network", &self.network)
-            .field("paying_key", &hex::encode(&self.paying_key.0))
-            .field(
-                "receiving_key",
-                &hex::encode(&self.receiving_key.to_bytes()),
-            )
+            .field("paying_key", &hex::encode(self.paying_key.0))
+            .field("receiving_key", &hex::encode(self.receiving_key.to_bytes()))
             .finish()
     }
 }

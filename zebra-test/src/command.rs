@@ -537,7 +537,7 @@ impl<T> TestChild<T> {
         //
         // This checks for failure logs, and prevents some test hangs and deadlocks.
         if self.child.is_some() || self.stdout.is_some() {
-            let wrote_lines = self.wait_for_stdout_line("Child Stdout:".to_string());
+            let wrote_lines = self.wait_for_stdout_line("\nChild Stdout:".to_string());
 
             while self.wait_for_stdout_line(None) {}
 
@@ -548,7 +548,7 @@ impl<T> TestChild<T> {
         }
 
         if self.child.is_some() || self.stderr.is_some() {
-            let wrote_lines = self.wait_for_stderr_line("Child Stderr:".to_string());
+            let wrote_lines = self.wait_for_stderr_line("\nChild Stderr:".to_string());
 
             while self.wait_for_stderr_line(None) {}
 
@@ -854,10 +854,8 @@ impl<T> TestChild<T> {
             humantime::format_duration(self.timeout.expect("already checked past_deadline()"));
 
         let report = eyre!(
-            "{} of command did not log any matches for the given regex,\n\
-             within the {:?} command timeout",
-            stream_name,
-            timeout,
+            "{stream_name} of command did not log any matches for the given regex,\n\
+             within the {timeout} command timeout",
         )
         .with_section(|| format!("{:#?}", success_regexes.patterns()).header("Match Regex:"));
 
