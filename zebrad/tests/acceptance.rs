@@ -1236,8 +1236,9 @@ async fn non_blocking_logger() -> Result<()> {
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
     let mut config = random_known_rpc_port_config()?;
-    let zebra_rpc_address = config.rpc.listen_addr.unwrap();
     config.tracing.filter = Some("trace".to_string());
+    config.tracing.buffer_limit = 100;
+    let zebra_rpc_address = config.rpc.listen_addr.unwrap();
 
     let dir = testdir()?.with_config(&mut config)?;
     let mut child = dir.spawn_child(args!["start"])?;
@@ -1250,7 +1251,9 @@ async fn non_blocking_logger() -> Result<()> {
     // Create an http client
     let client = reqwest::Client::new();
 
-    for _ in 0..20_000 {
+    // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
+    // fill the channel logs are queued onto, and drop logs rather than block execution.
+    for _ in 0..5_000 {
         let res = client
             .post(format!("http://{}", &zebra_rpc_address))
             .body(r#"{"jsonrpc":"1.0","method":"getinfo","params":[],"id":123}"#)

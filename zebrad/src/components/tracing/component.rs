@@ -47,12 +47,11 @@ impl Tracing {
         let filter = config.filter.unwrap_or_else(|| "".to_string());
         let flame_root = &config.flamegraph;
 
-        // Builds a lossy NonBlocking logger with a line limit of 8_000, lines sent to the worker past
-        // this limit (via the write method which sends it to a crossbeam::bounded channel) 
-        // will be dropped without being written to stdout
+        // Builds a lossy NonBlocking logger with a default line limit of 128_000 or an explicit buffer_limit.
+        // The write method queues lines down a bounded channel with this capacity to a worker thread that writes to stdout.
+        // Increments error_counter and drops lines when the buffer is full.
         let (non_blocking, _guard) = NonBlockingBuilder::default()
-            .lossy(true)
-            .buffered_lines_limit(8_000)
+            .buffered_lines_limit(config.buffer_limit.max(100))
             .finish(std::io::stdout());
 
         // Only use color if tracing output is being sent to a terminal or if it was explicitly

@@ -20,7 +20,7 @@ use crate::{commands::ZebradCmd, components::tracing::Tracing, config::ZebradCon
 
 /// See https://docs.rs/abscissa_core/latest/src/abscissa_core/application/exit.rs.html#7-10Z
 /// Print a fatal error message and exit
-fn fatal_error(app_name: String, err: &dyn std::error::Error) {
+fn fatal_error(app_name: String, err: &dyn std::error::Error) -> ! {
     status_err!("{} fatal error: {}", app_name, err);
     process::exit(1)
 }
@@ -470,6 +470,8 @@ impl Application for ZebradApp {
 
         if let Err(e) = self.state().components.shutdown(self, shutdown) {
             let app_name = self.name().to_string();
+
+            // Swap out a fake app so we can trigger the destructor on the original
             let _ = std::mem::take(self);
             fatal_error(app_name, &e);
         }
