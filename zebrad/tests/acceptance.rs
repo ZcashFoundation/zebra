@@ -1909,9 +1909,9 @@ async fn delete_old_databases() -> Result<()> {
 /// See [`common::lightwalletd::send_transaction_test`] for more information.
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
-#[cfg(feature = "lightwalletd-grpc-tests")]
 #[tokio::test]
 #[ignore]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 #[cfg(not(target_os = "windows"))]
 async fn sending_transactions_using_lightwalletd() -> Result<()> {
     common::lightwalletd::send_transaction_test::run().await
@@ -1922,9 +1922,9 @@ async fn sending_transactions_using_lightwalletd() -> Result<()> {
 /// See [`common::lightwalletd::wallet_grpc_test`] for more information.
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
-#[cfg(feature = "lightwalletd-grpc-tests")]
 #[tokio::test]
 #[ignore]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 #[cfg(not(target_os = "windows"))]
 async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
     common::lightwalletd::wallet_grpc_test::run().await
