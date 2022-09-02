@@ -1,7 +1,6 @@
 //! The Bitcoin-inherited Merkle tree of transactions.
 #![allow(clippy::unit_arg)]
 
-use std::convert::TryInto;
 use std::iter;
 use std::{fmt, io::Write};
 
@@ -74,7 +73,7 @@ pub struct Root(pub [u8; 32]);
 
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Root").field(&hex::encode(&self.0)).finish()
+        f.debug_tuple("Root").field(&hex::encode(self.0)).finish()
     }
 }
 
@@ -150,7 +149,7 @@ pub struct AuthDataRoot(pub(crate) [u8; 32]);
 impl fmt::Debug for AuthDataRoot {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("AuthRoot")
-            .field(&hex::encode(&self.0))
+            .field(&hex::encode(self.0))
             .finish()
     }
 }

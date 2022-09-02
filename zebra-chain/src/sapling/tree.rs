@@ -106,7 +106,7 @@ pub struct Root(#[serde(with = "serde_helpers::Fq")] pub(crate) jubjub::Base);
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Root")
-            .field(&hex::encode(&self.0.to_bytes()))
+            .field(&hex::encode(self.0.to_bytes()))
             .finish()
     }
 }
