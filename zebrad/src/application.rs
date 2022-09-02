@@ -18,7 +18,7 @@ use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
 
 use crate::{commands::ZebradCmd, components::tracing::Tracing, config::ZebradConfig};
 
-/// See https://docs.rs/abscissa_core/latest/src/abscissa_core/application/exit.rs.html#7-10Z
+/// See <https://docs.rs/abscissa_core/latest/src/abscissa_core/application/exit.rs.html#7-10>
 /// Print a fatal error message and exit
 fn fatal_error(app_name: String, err: &dyn std::error::Error) -> ! {
     status_err!("{} fatal error: {}", app_name, err);
