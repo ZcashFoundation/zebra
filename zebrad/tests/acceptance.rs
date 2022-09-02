@@ -1229,59 +1229,75 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn non_blocking_logger() -> Result<()> {
-    let _init_guard = zebra_test::init();
+#[test]
+fn non_blocking_logger() -> Result<()> {
+    use futures::FutureExt as _;
 
-    // Write a configuration that has RPC listen_addr set
-    // [Note on port conflict](#Note on port conflict)
-    let mut config = random_known_rpc_port_config()?;
-    config.tracing.filter = Some("trace".to_string());
-    config.tracing.buffer_limit = 100;
-    let zebra_rpc_address = config.rpc.listen_addr.unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
 
-    let dir = testdir()?.with_config(&mut config)?;
-    let mut child = dir.spawn_child(args!["start"])?;
+    let test_task_handle: tokio::task::JoinHandle<Result<()>> = rt.spawn(async {
+        let _init_guard = zebra_test::init();
 
-    // Wait until port is open.
-    child.expect_stdout_line_matches(
-        format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
-    )?;
+        // Write a configuration that has RPC listen_addr set
+        // [Note on port conflict](#Note on port conflict)
+        let mut config = random_known_rpc_port_config()?;
+        config.tracing.filter = Some("trace".to_string());
+        config.tracing.buffer_limit = 100;
+        let zebra_rpc_address = config.rpc.listen_addr.unwrap();
 
-    let mut cmd2 = std::process::Command::new("echo")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .spawn()?;
+        let dir = testdir()?.with_config(&mut config)?;
+        let mut child = dir.spawn_child(args!["start"])?;
+        // Wait until port is open.
+        child.expect_stdout_line_matches(
+            format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
+        )?;
 
-    // Create an http client
-    let client = reqwest::Client::new();
+        let mut cmd2 = std::process::Command::new("echo")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()?;
 
-    // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
-    // fill the channel logs are queued onto, and drop logs rather than block execution.
-    for _ in 0..5_000 {
-        let res = client
-            .post(format!("http://{}", &zebra_rpc_address))
-            .body(r#"{"jsonrpc":"1.0","method":"getinfo","params":[],"id":123}"#)
-            .header("Content-Type", "application/json")
-            .send()
-            .await?;
+        // Create an http client
+        let client = reqwest::Client::new();
 
-        // Test that zebrad rpc endpoint is still responding to requests
-        assert!(res.status().is_success());
+        // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
+        // fill the channel logs are queued onto, and drop logs rather than block execution.
+        for _ in 0..5_000 {
+            let res = client
+                .post(format!("http://{}", &zebra_rpc_address))
+                .body(r#"{"jsonrpc":"1.0","method":"getinfo","params":[],"id":123}"#)
+                .header("Content-Type", "application/json")
+                .send()
+                .await?;
+
+            // Test that zebrad rpc endpoint is still responding to requests
+            assert!(res.status().is_success());
+        }
+
+        cmd2.kill()?;
+        child.kill(false)?;
+
+        let output = child.wait_with_output()?;
+        let output = output.assert_failure()?;
+
+        // [Note on port conflict](#Note on port conflict)
+        output
+            .assert_was_killed()
+            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+        Ok(())
+    });
+
+    // Wait until the spawned task finishes
+    std::thread::sleep(Duration::from_secs(10));
+
+    rt.shutdown_timeout(Duration::from_secs(3));
+
+    match test_task_handle.now_or_never() {
+        Some(Ok(result)) => result,
+        Some(Err(_)) => Err(eyre!("join error")),
+        None => Err(eyre!("unexpected test task hang")),
     }
-
-    cmd2.kill()?;
-    child.kill(false)?;
-
-    let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
-
-    // [Note on port conflict](#Note on port conflict)
-    output
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
-
-    Ok(())
 }
 
 /// Make sure `lightwalletd` works with Zebra, when both their states are empty.
