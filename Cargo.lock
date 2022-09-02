@@ -40,7 +40,7 @@ dependencies = [
  "ident_case",
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
  "synstructure",
 ]
 
@@ -142,12 +142,6 @@ dependencies = [
 
 [[package]]
 name = "arrayvec"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
-
-[[package]]
-name = "arrayvec"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
@@ -207,7 +201,7 @@ checksum = "648ed8c8d2ce5409ccd57453d9d1b214b342a0d69376a6feda1fd6cae3299308"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -218,7 +212,7 @@ checksum = "061a7acccaa286c011ddc30970520b98fa40e00c9d644633fb26b5fc63a265e3"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -365,15 +359,21 @@ checksum = "8a32fd6af2b5827bce66c29053ba0e7c42b9dcab01835835058558c10851a46b"
 
 [[package]]
 name = "bech32"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf9ff0bbfd639f15c74af777d81383cf53efb7c93613f6cab67c6c11e05bbf8b"
+
+[[package]]
+name = "bech32"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
 
 [[package]]
 name = "bellman"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d96d7f4f3dc9a699bdef1d19648f6f20ef966b51892d224582a4475be669cb5"
+checksum = "a4dd656ef4fdf7debb6d87d4dd92642fcbcdb78cbf6600c13e25c87e4d1a3807"
 dependencies = [
  "bitvec",
  "blake2s_simd",
@@ -471,17 +471,6 @@ dependencies = [
 
 [[package]]
 name = "blake2b_simd"
-version = "0.5.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afa748e348ad3be8263be728124b24a24f268266f6f5d58af9d75f6a40b5c587"
-dependencies = [
- "arrayref",
- "arrayvec 0.5.2",
- "constant_time_eq",
-]
-
-[[package]]
-name = "blake2b_simd"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72936ee4afc7f8f736d1c38383b56480b5497b4617b4a77bdbf1d2ababc76127"
@@ -510,7 +499,7 @@ checksum = "7b04ce3d2372d05d1ef4ea3fdf427da6ae3c17ca06d688a107b5344836276bc3"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -807,6 +796,16 @@ dependencies = [
  "once_cell",
  "wasi 0.11.0+wasi-snapshot-preview1",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "codespan-reporting"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3538270d33cc669650c4b093848450d380def10c331d38c768e34cac80576e6e"
+dependencies = [
+ "termcolor",
+ "unicode-width",
 ]
 
 [[package]]
@@ -1122,6 +1121,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "cxx"
+version = "1.0.72"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7c14d679239b1ccaad7acaf972a19b41b6c1d7a8cb942158294b4f11ec71bd8"
+dependencies = [
+ "cc",
+ "cxxbridge-flags",
+ "cxxbridge-macro",
+ "link-cplusplus",
+]
+
+[[package]]
+name = "cxx-gen"
+version = "0.7.74"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ef0ef97778a72b6f87aba1583443ce71daa701b6aff82ae9e86b22b81afae56"
+dependencies = [
+ "codespan-reporting",
+ "proc-macro2 1.0.42",
+ "quote 1.0.20",
+ "syn 1.0.99",
+]
+
+[[package]]
+name = "cxxbridge-flags"
+version = "1.0.72"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fdfa84261f05a9b69c0afe03270f9f26d6899ca7df6f442563908b646e8a376"
+
+[[package]]
+name = "cxxbridge-macro"
+version = "1.0.72"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0269826813dfbda75223169c774fede73401793e9af3970e4edbe93879782c1d"
+dependencies = [
+ "proc-macro2 1.0.42",
+ "quote 1.0.20",
+ "syn 1.0.99",
+]
+
+[[package]]
 name = "darling"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1162,7 +1202,7 @@ dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
  "strsim 0.9.3",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1176,7 +1216,7 @@ dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
  "strsim 0.10.0",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1190,7 +1230,7 @@ dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
  "strsim 0.10.0",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1201,7 +1241,7 @@ checksum = "d9b5a2f4ac4969822c62224815d069952656cadc7084fdca9751e6d959189b72"
 dependencies = [
  "darling_core 0.10.2",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1212,7 +1252,7 @@ checksum = "29b5acf0dea37a7f66f7b25d2c5e93fd46f8f6968b1a5d7a3e02e97768afc95a"
 dependencies = [
  "darling_core 0.12.4",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1223,7 +1263,7 @@ checksum = "ddfc69c5bfcbd2fc09a0f38451d2daf0e372e367986a83906d1b0dbc88134fb5"
 dependencies = [
  "darling_core 0.14.1",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1264,7 +1304,7 @@ dependencies = [
  "darling 0.12.4",
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1274,7 +1314,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "58a94ace95092c5acb1e97a7e846b310cfbd499652f72297da7493f618a98d73"
 dependencies = [
  "derive_builder_core",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1287,7 +1327,7 @@ dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
  "rustc_version",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1376,7 +1416,7 @@ checksum = "3bf95dc3f046b9da4f2d51833c0d3547d8564ef6910f5c1ed130306a75b92886"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1456,7 +1496,7 @@ checksum = "b13f1e69590421890f90448c3cd5f554746a31adc6dc0dac406ec6901db8dc25"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1484,30 +1524,20 @@ dependencies = [
 
 [[package]]
 name = "equihash"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4127688f6177e3f57521881cb1cfd90d1228214f9dc43b8efe6f6c6948cd8280"
-dependencies = [
- "blake2b_simd 0.5.11",
- "byteorder",
-]
-
-[[package]]
-name = "equihash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab579d7cf78477773b03e80bc2f89702ef02d7112c711d54ca93dcdce68533d5"
 dependencies = [
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "byteorder",
 ]
 
 [[package]]
 name = "equihash"
 version = "0.2.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=4567a37ceccbd506a58aaaded39ba14c952c1510#4567a37ceccbd506a58aaaded39ba14c952c1510"
+source = "git+https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766#ca84123038b64f0f4aa5615f7cf224fbf7ece766"
 dependencies = [
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "byteorder",
 ]
 
@@ -1519,6 +1549,14 @@ checksum = "9289ed2c0440a6536e65119725cf91fc2c6b5e513bfd2e36e1134d7cca6ca12f"
 dependencies = [
  "indenter",
  "once_cell",
+]
+
+[[package]]
+name = "f4jumble"
+version = "0.1.0"
+source = "git+https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766#ca84123038b64f0f4aa5615f7cf224fbf7ece766"
+dependencies = [
+ "blake2b_simd",
 ]
 
 [[package]]
@@ -1706,7 +1744,7 @@ checksum = "0db9cce532b0eae2ccf2766ab246f114b56b9cf6d445e00c2549fbc100ca045d"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1800,7 +1838,7 @@ dependencies = [
  "proc-macro-error",
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1870,7 +1908,7 @@ checksum = "90454ce4de40b7ca6a8968b5ef367bdab48413962588d0d2b1638d60090c35d7"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -1900,24 +1938,6 @@ checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 
 [[package]]
 name = "halo2_gadgets"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13f3914f58cc4af5e4fe83d48b02d582be18976bc7e96c3151aa2bf1c98e9f60"
-dependencies = [
- "arrayvec 0.7.2",
- "bitvec",
- "ff",
- "group",
- "halo2_proofs 0.1.0",
- "lazy_static",
- "pasta_curves",
- "rand 0.8.5",
- "subtle",
- "uint",
-]
-
-[[package]]
-name = "halo2_gadgets"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85e10bf9924da1754e443641c9e7f9f00483749f8fb837fde696ef6ed6e2f079"
@@ -1926,7 +1946,7 @@ dependencies = [
  "bitvec",
  "ff",
  "group",
- "halo2_proofs 0.2.0",
+ "halo2_proofs",
  "lazy_static",
  "pasta_curves",
  "rand 0.8.5",
@@ -1936,25 +1956,11 @@ dependencies = [
 
 [[package]]
 name = "halo2_proofs"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e925780549adee8364c7f2b685c753f6f3df23bde520c67416e93bf615933760"
-dependencies = [
- "blake2b_simd 1.0.0",
- "ff",
- "group",
- "pasta_curves",
- "rand_core 0.6.3",
- "rayon",
-]
-
-[[package]]
-name = "halo2_proofs"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cff771b9a2445cd2545c9ef26d863c290fbb44ae440c825a20eb7156f67a949a"
 dependencies = [
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "ff",
  "group",
  "pasta_curves",
@@ -2228,7 +2234,7 @@ checksum = "11d7a9f6330b71fea57921c9b61c47ee6e84f72d394754eff6163ae67e7395eb"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -2369,7 +2375,7 @@ dependencies = [
  "proc-macro-crate 0.1.5",
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -2509,6 +2515,15 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "link-cplusplus"
+version = "1.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9272ab7b96c9046fbc5bc56c06c117cb639fe2d509df0c421cad82d2915cf369"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -2683,7 +2698,7 @@ checksum = "49e30813093f757be5cf21e50389a24dc7dbb22c49f23b7e8f51d69b508a5ffa"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -2991,45 +3006,18 @@ dependencies = [
 
 [[package]]
 name = "orchard"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f918076e191a68d55c5517a16e075ecfe58fc63ed112408263f3d6194597bfcf"
-dependencies = [
- "aes",
- "bitvec",
- "blake2b_simd 1.0.0",
- "ff",
- "fpe",
- "group",
- "halo2_gadgets 0.1.0",
- "halo2_proofs 0.1.0",
- "hex",
- "incrementalmerkletree",
- "lazy_static",
- "memuse",
- "nonempty",
- "pasta_curves",
- "rand 0.8.5",
- "reddsa",
- "serde",
- "subtle",
- "zcash_note_encryption 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "orchard"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7619db7f917afd9b1139044c595fab1b6166de2db62317794b5f5e34a2104ae1"
 dependencies = [
  "aes",
  "bitvec",
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "ff",
  "fpe",
  "group",
- "halo2_gadgets 0.2.0",
- "halo2_proofs 0.2.0",
+ "halo2_gadgets",
+ "halo2_proofs",
  "hex",
  "incrementalmerkletree",
  "lazy_static",
@@ -3101,7 +3089,7 @@ dependencies = [
  "proc-macro-crate 1.1.3",
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -3169,7 +3157,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "369d7785168ad7ff0cbe467d968ca3e19a927d8536b11ef9c21b4e454b15ba42"
 dependencies = [
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "ff",
  "group",
  "lazy_static",
@@ -3238,7 +3226,7 @@ dependencies = [
  "pest_meta",
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -3294,7 +3282,7 @@ dependencies = [
  "proc-macro-hack",
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -3332,7 +3320,7 @@ checksum = "044964427019eed9d49d9d5bbce6047ef18f37100ea400912a9fa4a3523ab12a"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -3343,7 +3331,7 @@ checksum = "710faf75e1b33345361201d36d04e98ac1ed8909151a017ed384700836104c74"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -3454,7 +3442,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b83ec2d0af5c5c556257ff52c9f98934e243b9fd39604bfb2a9b75ec2e97f18"
 dependencies = [
  "proc-macro2 1.0.42",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -3496,7 +3484,7 @@ dependencies = [
  "proc-macro-error-attr",
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
  "version_check",
 ]
 
@@ -3608,7 +3596,7 @@ dependencies = [
  "itertools",
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -3681,7 +3669,7 @@ checksum = "608c156fd8e97febc07dc9c2e2c80bf74cfc6ef26893eae3daf8bc2bc94a4b7f"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -3827,7 +3815,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cc8038c8b7e481bdf688d0585d4897ed0e9e0cee10aa365dde51238c20e4182"
 dependencies = [
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "byteorder",
  "group",
  "jubjub",
@@ -3844,7 +3832,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6039ff156887caf92df308cbaccdc058c9d3155a913da046add6e48c4cdbd91d"
 dependencies = [
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "byteorder",
  "digest 0.9.0",
  "jubjub",
@@ -4368,7 +4356,7 @@ checksum = "94ed3a816fb1d101812f83e789f888322c34e291f894f19590dc310963e87a00"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -4420,7 +4408,7 @@ dependencies = [
  "darling 0.14.1",
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -4602,7 +4590,7 @@ checksum = "5bdfb59103e43a0f99a346b57860d50f2138a7008d08acd964e9ac0fef3ae9a5"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -4677,7 +4665,7 @@ dependencies = [
  "proc-macro-error",
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -4699,9 +4687,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "1.0.98"
+version = "1.0.99"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c50aef8a904de4c23c788f104b7dddc7d6f79c647c7c8ce4cc8f73eb0ca773dd"
+checksum = "58dbef6ec655055e20b86b15a8cc6d439cca19b667537ac6a1369572d151ab13"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
@@ -4722,7 +4710,7 @@ checksum = "f36bdaa60a83aca3921b5259d5400cbf5e90fc51931376a9bd4a0eb79aa7210f"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
  "unicode-xid 0.2.2",
 ]
 
@@ -4791,7 +4779,7 @@ checksum = "c251e90f708e16c49a16f4917dc2131e75222b72edfa9cb7f7c58ae56aae0c09"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -4899,7 +4887,7 @@ checksum = "b557f72f448c511a979e2564e55d74e6c4432fc96ff4f6241bc6bded342643b7"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -5028,7 +5016,7 @@ dependencies = [
  "proc-macro2 1.0.42",
  "prost-build",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -5541,7 +5529,7 @@ checksum = "8276d9a4a3a558d7b7ad5303ad50b53d58264641b82914b7ada36bd762e7a716"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
 ]
 
 [[package]]
@@ -5883,7 +5871,7 @@ dependencies = [
  "log",
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
  "wasm-bindgen-shared",
 ]
 
@@ -5917,7 +5905,7 @@ checksum = "bfa8a30d46208db204854cadbb5d4baf5fcf8071ba5bf48190c3e59937962ebc"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
  "wasm-bindgen-backend",
  "wasm-bindgen-shared",
 ]
@@ -6097,6 +6085,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_address"
+version = "0.1.0"
+source = "git+https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766#ca84123038b64f0f4aa5615f7cf224fbf7ece766"
+dependencies = [
+ "bech32 0.8.1",
+ "bs58",
+ "f4jumble",
+ "zcash_encoding 0.1.0 (git+https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766)",
+]
+
+[[package]]
 name = "zcash_encoding"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6109,7 +6108,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.1.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=4567a37ceccbd506a58aaaded39ba14c952c1510#4567a37ceccbd506a58aaaded39ba14c952c1510"
+source = "git+https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766#ca84123038b64f0f4aa5615f7cf224fbf7ece766"
 dependencies = [
  "byteorder",
  "nonempty",
@@ -6121,7 +6120,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb611a28a4e13ac715ee712f4344d6b279b767daf6345dafefb2c4bf582b6679"
 dependencies = [
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "byteorder",
  "primitive-types",
 ]
@@ -6141,49 +6140,12 @@ dependencies = [
 [[package]]
 name = "zcash_note_encryption"
 version = "0.1.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=4567a37ceccbd506a58aaaded39ba14c952c1510#4567a37ceccbd506a58aaaded39ba14c952c1510"
+source = "git+https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766#ca84123038b64f0f4aa5615f7cf224fbf7ece766"
 dependencies = [
  "chacha20",
  "chacha20poly1305",
  "rand_core 0.6.3",
  "subtle",
-]
-
-[[package]]
-name = "zcash_primitives"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcb1ef5719fb24b42450dcd6b10e6155793be5668f0d962ad8132b6e4d108635"
-dependencies = [
- "aes",
- "bip0039",
- "bitvec",
- "blake2b_simd 1.0.0",
- "blake2s_simd",
- "bls12_381",
- "bs58",
- "byteorder",
- "chacha20poly1305",
- "equihash 0.1.0",
- "ff",
- "fpe",
- "group",
- "hdwallet",
- "hex",
- "incrementalmerkletree",
- "jubjub",
- "lazy_static",
- "memuse",
- "nonempty",
- "orchard 0.1.0",
- "rand 0.8.5",
- "rand_core 0.6.3",
- "ripemd",
- "secp256k1",
- "sha2",
- "subtle",
- "zcash_encoding 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "zcash_note_encryption 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -6195,7 +6157,7 @@ dependencies = [
  "aes",
  "bip0039",
  "bitvec",
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "blake2s_simd",
  "bls12_381",
  "bs58",
@@ -6212,7 +6174,7 @@ dependencies = [
  "lazy_static",
  "memuse",
  "nonempty",
- "orchard 0.2.0",
+ "orchard",
  "rand 0.8.5",
  "rand_core 0.6.3",
  "ripemd",
@@ -6226,17 +6188,17 @@ dependencies = [
 [[package]]
 name = "zcash_primitives"
 version = "0.7.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=4567a37ceccbd506a58aaaded39ba14c952c1510#4567a37ceccbd506a58aaaded39ba14c952c1510"
+source = "git+https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766#ca84123038b64f0f4aa5615f7cf224fbf7ece766"
 dependencies = [
  "aes",
  "bip0039",
  "bitvec",
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "blake2s_simd",
  "bls12_381",
  "byteorder",
  "chacha20poly1305",
- "equihash 0.2.0 (git+https://github.com/ZcashFoundation/librustzcash.git?rev=4567a37ceccbd506a58aaaded39ba14c952c1510)",
+ "equihash 0.2.0 (git+https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766)",
  "ff",
  "fpe",
  "group",
@@ -6246,22 +6208,23 @@ dependencies = [
  "lazy_static",
  "memuse",
  "nonempty",
- "orchard 0.2.0",
+ "orchard",
  "rand 0.8.5",
  "rand_core 0.6.3",
  "sha2",
  "subtle",
- "zcash_encoding 0.1.0 (git+https://github.com/ZcashFoundation/librustzcash.git?rev=4567a37ceccbd506a58aaaded39ba14c952c1510)",
- "zcash_note_encryption 0.1.0 (git+https://github.com/ZcashFoundation/librustzcash.git?rev=4567a37ceccbd506a58aaaded39ba14c952c1510)",
+ "zcash_address",
+ "zcash_encoding 0.1.0 (git+https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766)",
+ "zcash_note_encryption 0.1.0 (git+https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766)",
 ]
 
 [[package]]
 name = "zcash_proofs"
-version = "0.7.0"
-source = "git+https://github.com/ZcashFoundation/librustzcash.git?rev=4567a37ceccbd506a58aaaded39ba14c952c1510#4567a37ceccbd506a58aaaded39ba14c952c1510"
+version = "0.7.1"
+source = "git+https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766#ca84123038b64f0f4aa5615f7cf224fbf7ece766"
 dependencies = [
  "bellman",
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "bls12_381",
  "byteorder",
  "directories",
@@ -6271,26 +6234,31 @@ dependencies = [
  "lazy_static",
  "minreq",
  "rand_core 0.6.3",
- "zcash_primitives 0.7.0 (git+https://github.com/ZcashFoundation/librustzcash.git?rev=4567a37ceccbd506a58aaaded39ba14c952c1510)",
+ "redjubjub",
+ "tracing",
+ "zcash_primitives 0.7.0 (git+https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766)",
 ]
 
 [[package]]
 name = "zcash_script"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f584be367800e38503e66c446f011b580dc181edb28cc2afea8d6c5545765508"
+checksum = "81e4255f320dead417a91cbf00a178b0d702b813d5a8c95a5f2e4cc7ccced17f"
 dependencies = [
  "bindgen",
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "cc",
+ "cxx",
+ "cxx-gen",
  "libc",
  "memuse",
- "orchard 0.1.0",
+ "orchard",
  "rand_core 0.6.3",
+ "syn 1.0.99",
  "tracing",
  "zcash_encoding 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zcash_note_encryption 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "zcash_primitives 0.6.0",
+ "zcash_primitives 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -6298,10 +6266,10 @@ name = "zebra-chain"
 version = "1.0.0-beta.14"
 dependencies = [
  "aes",
- "bech32",
+ "bech32 0.9.1",
  "bitflags",
  "bitvec",
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "blake2s_simd",
  "bls12_381",
  "bs58",
@@ -6311,18 +6279,18 @@ dependencies = [
  "criterion",
  "displaydoc",
  "ed25519-zebra",
- "equihash 0.1.0",
+ "equihash 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "fpe",
  "futures",
  "group",
- "halo2_proofs 0.2.0",
+ "halo2_proofs",
  "hex",
  "humantime",
  "incrementalmerkletree",
  "itertools",
  "jubjub",
  "lazy_static",
- "orchard 0.2.0",
+ "orchard",
  "primitive-types",
  "proptest",
  "proptest-derive",
@@ -6362,7 +6330,7 @@ name = "zebra-consensus"
 version = "1.0.0-beta.14"
 dependencies = [
  "bellman",
- "blake2b_simd 1.0.0",
+ "blake2b_simd",
  "bls12_381",
  "chrono",
  "color-eyre",
@@ -6370,13 +6338,13 @@ dependencies = [
  "displaydoc",
  "futures",
  "futures-util",
- "halo2_proofs 0.2.0",
+ "halo2_proofs",
  "hex",
  "jubjub",
  "lazy_static",
  "metrics",
  "once_cell",
- "orchard 0.2.0",
+ "orchard",
  "proptest",
  "proptest-derive",
  "rand 0.7.3",
@@ -6498,7 +6466,7 @@ dependencies = [
  "dirs",
  "displaydoc",
  "futures",
- "halo2_proofs 0.2.0",
+ "halo2_proofs",
  "hex",
  "insta",
  "itertools",
@@ -6647,7 +6615,7 @@ checksum = "3f8f187641dad4f680d25c4bfc4225b418165984179f26ca76ec4fb6441d3a17"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
- "syn 1.0.98",
+ "syn 1.0.99",
  "synstructure",
 ]
 

@@ -8,8 +8,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# TODO: make a release and point to it
-zcash_script = "0.1.6"
+zcash_script = "0.1.7"
 
 zebra-chain = { path = "../zebra-chain" }
 
