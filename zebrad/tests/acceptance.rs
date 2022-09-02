@@ -1250,7 +1250,7 @@ async fn non_blocking_logger() -> Result<()> {
     // Create an http client
     let client = reqwest::Client::new();
 
-    for _ in 0..10_000 {
+    for _ in 0..20_000 {
         let res = client
             .post(format!("http://{}", &zebra_rpc_address))
             .body(r#"{"jsonrpc":"1.0","method":"getinfo","params":[],"id":123}"#)
