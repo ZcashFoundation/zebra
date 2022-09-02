@@ -7,10 +7,7 @@
 #[cfg(test)]
 mod tests;
 
-use std::{
-    convert::{From, Into, TryFrom, TryInto},
-    fmt, io,
-};
+use std::{fmt, io};
 
 use aes::Aes256;
 use bech32::{self, ToBase32, Variant};
@@ -765,7 +762,7 @@ impl ConstantTimeEq for OutgoingViewingKey {
 impl fmt::Debug for OutgoingViewingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("OutgoingViewingKey")
-            .field(&hex::encode(&self.0))
+            .field(&hex::encode(self.0))
             .finish()
     }
 }
@@ -898,7 +895,7 @@ pub struct Diversifier(pub(crate) [u8; 11]);
 impl fmt::Debug for Diversifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Diversifier")
-            .field(&hex::encode(&self.0))
+            .field(&hex::encode(self.0))
             .finish()
     }
 }

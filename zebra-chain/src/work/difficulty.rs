@@ -15,7 +15,6 @@ use crate::{block, parameters::Network};
 
 use std::{
     cmp::{Ordering, PartialEq, PartialOrd},
-    convert::TryFrom,
     fmt,
     iter::Sum,
     ops::Add,
@@ -108,7 +107,7 @@ impl fmt::Debug for ExpandedDifficulty {
         // Use the same byte order as block::Hash
         self.0.to_big_endian(&mut buf);
         f.debug_tuple("ExpandedDifficulty")
-            .field(&hex::encode(&buf))
+            .field(&hex::encode(buf))
             .finish()
     }
 }

@@ -195,7 +195,7 @@ where
             let cache_dir = dir.join("state");
             fs::create_dir_all(&cache_dir)?;
         } else {
-            fs::create_dir_all(&dir)?;
+            fs::create_dir_all(dir)?;
         }
 
         let config_file = dir.join("zebrad.toml");
