@@ -66,6 +66,11 @@ impl CodeTimer {
         self.finish_inner(Some(module_path), Some(line), description);
     }
 
+    /// Ignore this timer: it will not check the elapsed time or log any warnings.
+    pub fn ignore(mut self) {
+        self.has_finished = true;
+    }
+
     /// Finish timing the execution of a function, method, or other code region.
     ///
     /// This private method can be called from [`CodeTimer::finish()`] or `drop()`.
