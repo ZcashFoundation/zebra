@@ -395,7 +395,7 @@ impl DiskWriteBatch {
 
         // Commit block and transaction data.
         // (Transaction indexes, note commitments, and UTXOs are committed later.)
-        self.prepare_block_header_transactions_batch(db, &finalized)?;
+        self.prepare_block_header_and_transaction_data_batch(db, &finalized)?;
 
         // # Consensus
         //
@@ -432,14 +432,14 @@ impl DiskWriteBatch {
         Ok(())
     }
 
-    /// Prepare a database batch containing the block header and transactions
+    /// Prepare a database batch containing the block header and transaction data
     /// from `finalized.block`, and return it (without actually writing anything).
     ///
     /// # Errors
     ///
     /// - This method does not currently return any errors.
     #[allow(clippy::unwrap_in_result)]
-    pub fn prepare_block_header_transactions_batch(
+    pub fn prepare_block_header_and_transaction_data_batch(
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
