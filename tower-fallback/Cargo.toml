@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 pin-project = "0.4.29"
 tower = "0.4.13"
-futures-core = "0.3.23"
+futures-core = "0.3.24"
 tracing = "0.1.31"
 
 [dev-dependencies]
