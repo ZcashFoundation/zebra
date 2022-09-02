@@ -6,7 +6,7 @@ use self::entry_point::EntryPoint;
 use std::{fmt::Write as _, io::Write as _, process};
 
 use abscissa_core::{
-    application::{self, fatal_error, AppCell},
+    application::{self, AppCell},
     config::{self, Configurable},
     status_err,
     terminal::{component::Terminal, stderr, stdout, ColorChoice},
@@ -17,6 +17,13 @@ use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::constants::{DATABASE_FORMAT_VERSION, LOCK_FILE_ERROR};
 
 use crate::{commands::ZebradCmd, components::tracing::Tracing, config::ZebradConfig};
+
+/// See https://docs.rs/abscissa_core/latest/src/abscissa_core/application/exit.rs.html#7-10Z
+/// Print a fatal error message and exit
+fn fatal_error(app_name: String, err: &dyn std::error::Error) {
+    status_err!("{} fatal error: {}", app_name, err);
+    process::exit(1)
+}
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
@@ -462,7 +469,9 @@ impl Application for ZebradApp {
         let _ = stderr().lock().flush();
 
         if let Err(e) = self.state().components.shutdown(self, shutdown) {
-            fatal_error(self, &e)
+            let app_name = self.name().to_string();
+            let _ = std::mem::take(self);
+            fatal_error(app_name, &e);
         }
 
         // Swap out a fake app so we can trigger the destructor on the original
