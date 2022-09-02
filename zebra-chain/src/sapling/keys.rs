@@ -17,7 +17,6 @@ mod test_vectors;
 mod tests;
 
 use std::{
-    convert::{From, Into, TryFrom, TryInto},
     fmt,
     io::{self, Write},
     str::FromStr,
@@ -426,7 +425,7 @@ pub struct OutgoingViewingKey(pub(crate) [u8; 32]);
 impl fmt::Debug for OutgoingViewingKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("OutgoingViewingKey")
-            .field(&hex::encode(&self.0))
+            .field(&hex::encode(self.0))
             .finish()
     }
 }
@@ -741,7 +740,7 @@ pub struct Diversifier(pub(crate) [u8; 11]);
 impl fmt::Debug for Diversifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Diversifier")
-            .field(&hex::encode(&self.0))
+            .field(&hex::encode(self.0))
             .finish()
     }
 }
