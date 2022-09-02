@@ -66,9 +66,6 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         rust: [stable, beta]
         exclude:
-        # TODO: re-enable beta Rust tests on ubuntu (#4929)
-          - os: ubuntu-latest
-            rust: beta
         # We're excluding macOS for the following reasons:
         # - the concurrent macOS runner limit is much lower than the Linux limit
         # - macOS is slower than Linux, and shouldn't have a build or test difference with Linux
