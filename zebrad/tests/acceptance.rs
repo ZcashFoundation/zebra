@@ -1261,7 +1261,7 @@ fn non_blocking_logger() -> Result<()> {
         let client = reqwest::Client::new();
 
         // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
-        // fill the channel logs are queued onto, and drop logs rather than block execution.
+        // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
         for _ in 0..5_000 {
             let res = client
                 .post(format!("http://{}", &zebra_rpc_address))
