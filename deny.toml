@@ -50,6 +50,7 @@ skip-tree = [
 
     # ticket #3000: upgrade tower-fallback dependencies
     { name = "pin-project", version = "=0.4.29" },
+    { name = "pin-project", version = "=1.0.12" },
 
     # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
