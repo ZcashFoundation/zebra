@@ -19,7 +19,7 @@ regex = "1.6.0"
 
 tokio = { version = "1.21.0", features = ["full", "tracing", "test-util"] }
 tower = { version = "0.4.13", features = ["util"] }
-futures = "0.3.23"
+futures = "0.3.24"
 
 color-eyre = "0.6.1"
 # This is a transitive dependency via color-eyre.
