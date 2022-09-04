@@ -73,6 +73,12 @@ impl RpcServer {
                 MetaIoHandler::new(Compatibility::Both, TracingMiddleware);
             io.extend_with(rpc_impl.to_delegate());
 
+            // If zero, automatically scale threads to the number of CPU cores
+            let mut parallel_cpu_threads = config.parallel_cpu_threads;
+            if parallel_cpu_threads == 0 {
+                parallel_cpu_threads = num_cpus::get();
+            }
+
             // The server is a blocking task, which blocks on executor shutdown.
             // So we need to create and spawn it on a std::thread, inside a tokio blocking task.
             // (Otherwise tokio panics when we shut down the RPC server.)
@@ -85,12 +91,8 @@ impl RpcServer {
                     // TODO:
                     // - return server.close_handle(), which can shut down the RPC server,
                     //   and add it to the server tests
-                    // - allow multiple RPC threads
-                    //   (when jsonrpc_http_server has multiple threads,
-                    //   it lets any process share its port - do we need to warn users?)
-                    // - make the number of RPC threads configurable
                     let server = ServerBuilder::new(io)
-                        .threads(1)
+                        .threads(parallel_cpu_threads)
                         // TODO: disable this security check if we see errors from lightwalletd
                         //.allowed_hosts(DomainsValidation::Disabled)
                         .request_middleware(FixHttpRequestMiddleware)
