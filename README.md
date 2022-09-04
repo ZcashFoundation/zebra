@@ -13,6 +13,7 @@
 - [Beta Releases](#beta-releases)
 - [Getting Started](#getting-started)
   - [Build and Run Instructions](#build-and-run-instructions)
+  - [Configuring JSON-RPC for lightwalletd](#configuring-json-rpc-for-lightwalletd)
   - [Optional Features](#optional-features)
   - [System Requirements](#system-requirements)
     - [Memory Troubleshooting](#memory-troubleshooting)
@@ -90,6 +91,22 @@ for your platform:
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 For more detailed instructions, refer to the [documentation](https://zebra.zfnd.org/user/install.html).
+
+### Configuring JSON-RPC for lightwalletd
+
+To use `zebrad` as a `lightwalletd` backend, give it this `~/.config/zebrad.toml`:
+
+```toml
+[rpc]
+# listen for RPC queries on localhost
+listen_addr = '127.0.0.1:8232'
+
+# automatically use multiple CPU threads
+parallel_cpu_threads = 0
+```
+
+**WARNING:** This config allows multiple Zebra instances to share the same RPC port.
+See the [RPC config documentation](https://doc.zebra.zfnd.org/zebra_rpc/config/struct.Config.html) for details.
 
 ### Optional Features
 
