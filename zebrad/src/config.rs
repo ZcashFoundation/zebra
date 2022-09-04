@@ -213,7 +213,7 @@ pub struct SyncSection {
     /// The number of threads used to verify signatures, proofs, and other CPU-intensive code.
     ///
     /// Set to `0` by default, which uses one thread per available CPU core.
-    /// For details, see [the rayon documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
+    /// For details, see [the `rayon` documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
     pub parallel_cpu_threads: usize,
 }
 
