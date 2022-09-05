@@ -296,20 +296,37 @@ async fn load_transactions_from_block_after(
 
     assert!(
         tip_height > height,
-        "Chain not synchronized to a block after the specified height"
+        "Chain not synchronized to a block after the specified height",
     );
 
     let mut target_height = height.0;
     let mut transactions = Vec::new();
 
     while transactions.len() < max_sent_transactions() {
-        transactions =
+        let new_transactions =
             load_transactions_from_block(block::Height(target_height), &mut state).await?;
 
-        transactions.retain(|transaction| !transaction.is_coinbase());
+        if let Some(mut new_transactions) = new_transactions {
+            new_transactions.retain(|transaction| !transaction.is_coinbase());
+            transactions.append(&mut new_transactions);
+        } else {
+            tracing::info!(
+                "Reached the end of the finalized chain\n\
+                 collected {} transactions from {} blocks before {target_height:?}",
+                transactions.len(),
+                target_height - height.0 - 1,
+            );
+            break;
+        }
 
         target_height += 1;
     }
+
+    tracing::info!(
+        "Collected {} transactions from {} blocks before {target_height:?}",
+        transactions.len(),
+        target_height - height.0 - 1,
+    );
 
     Ok(transactions)
 }
@@ -320,7 +337,7 @@ async fn load_transactions_from_block_after(
 async fn load_transactions_from_block<ReadStateService>(
     height: block::Height,
     state: &mut ReadStateService,
-) -> Result<Vec<Arc<Transaction>>>
+) -> Result<Option<Vec<Arc<Transaction>>>>
 where
     ReadStateService: Service<
         zebra_state::ReadRequest,
@@ -339,12 +356,15 @@ where
     let block = match response {
         zebra_state::ReadResponse::Block(Some(block)) => block,
         zebra_state::ReadResponse::Block(None) => {
-            panic!("Missing block at {height:?} from state")
+            tracing::info!(
+                "Reached the end of the finalized chain, state is missing block at {height:?}",
+            );
+            return Ok(None);
         }
         _ => unreachable!("Incorrect response from state service: {response:?}"),
     };
 
-    Ok(block.transactions.to_vec())
+    Ok(Some(block.transactions.to_vec()))
 }
 
 /// Prepare a request to send to lightwalletd that contains a transaction to be sent.
