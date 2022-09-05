@@ -210,10 +210,10 @@ impl ReadDisk for DiskDb {
         // Empty column families return invalid forward iterators.
         //
         // Checking iterator validity does not seem to cause database hangs.
-        !self
-            .db
-            .iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .valid()
+        let iterator = self.db.iterator_cf(cf, rocksdb::IteratorMode::Start);
+        let raw_iterator: rocksdb::DBRawIteratorWithThreadMode<DB> = iterator.into();
+
+        !raw_iterator.valid()
     }
 
     #[allow(clippy::unwrap_in_result)]
