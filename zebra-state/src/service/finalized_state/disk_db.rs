@@ -231,7 +231,7 @@ impl ReadDisk for DiskDb {
         let value_bytes = self
             .db
             .get_pinned_cf(cf, key_bytes)
-            .expect("expected that disk errors would not occur");
+            .expect("unexpected database failure");
 
         value_bytes.map(V::from_bytes)
     }
@@ -247,7 +247,7 @@ impl ReadDisk for DiskDb {
         // value, because we don't use the value at all. This avoids an extra copy.
         self.db
             .get_pinned_cf(cf, key_bytes)
-            .expect("expected that disk errors would not occur")
+            .expect("unexpected database failure")
             .is_some()
     }
 
@@ -260,8 +260,11 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .next()
-            .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .next()?
+            .map(|(key_bytes, value_bytes)| {
+                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            })
+            .expect("unexpected database failure")
     }
 
     fn zs_last_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
@@ -273,8 +276,11 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, rocksdb::IteratorMode::End)
-            .next()
-            .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .next()?
+            .map(|(key_bytes, value_bytes)| {
+                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            })
+            .expect("unexpected database failure")
     }
 
     fn zs_next_key_value_from<C, K, V>(&self, cf: &C, lower_bound: &K) -> Option<(K, V)>
@@ -289,8 +295,11 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, from)
-            .next()
-            .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .next()?
+            .map(|(key_bytes, value_bytes)| {
+                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            })
+            .expect("unexpected database failure")
     }
 
     fn zs_prev_key_value_back_from<C, K, V>(&self, cf: &C, upper_bound: &K) -> Option<(K, V)>
@@ -305,8 +314,11 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, from)
-            .next()
-            .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .next()?
+            .map(|(key_bytes, value_bytes)| {
+                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            })
+            .expect("unexpected database failure")
     }
 }
 

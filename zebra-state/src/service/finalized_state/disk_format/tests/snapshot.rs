@@ -133,6 +133,7 @@ fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[Str
         // The default raw data serialization is very verbose, so we hex-encode the bytes.
         let cf_data: Vec<KV> = cf_iter
             .by_ref()
+            .map(|result| result.expect("unexpected database error"))
             .map(|(key, value)| KV::new(key, value))
             .collect();
 
