@@ -22,6 +22,7 @@ jobs:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
+          create_credentials_file: false
 
       # Deletes all the instances template older than 30 days
       - name: Delete old instance templates
