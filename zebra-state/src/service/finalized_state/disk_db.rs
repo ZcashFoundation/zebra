@@ -228,8 +228,6 @@ impl ReadDisk for DiskDb {
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
         // value, because we're going to deserialize it anyways, which avoids an
         // extra copy
-        //
-        // TODO: move disk reads to a blocking thread (#2188)
         let value_bytes = self
             .db
             .get_pinned_cf(cf, key_bytes)
@@ -247,8 +245,6 @@ impl ReadDisk for DiskDb {
 
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
         // value, because we don't use the value at all. This avoids an extra copy.
-        //
-        // TODO: move disk reads to a blocking thread (#2188)
         self.db
             .get_pinned_cf(cf, key_bytes)
             .expect("expected that disk errors would not occur")
