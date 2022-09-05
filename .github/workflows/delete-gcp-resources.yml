@@ -43,6 +43,10 @@ jobs:
       # TODO: we should improve this approach and filter by disk type, and just keep the 2 latest images of each type (zebra checkpoint, zebra tip, lwd tip)
       - name: Delete old cache disks
         run: |
+          # Temporarily print the fields available for an image
+          gcloud compute images list --format=yaml --limit=1
+          exit 0
+
           PR_OLD_CACHE_DISKS=$(gcloud compute images list --sort-by=creationTimestamp --filter="name~-cache-.+[0-9a-f]+-merge AND creationTimestamp < $(date --date='7 days ago' '+%Y%m%d')" --format='value(NAME)')
           for DISK in $PR_OLD_CACHE_DISKS
           do
