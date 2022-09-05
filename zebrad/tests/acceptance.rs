@@ -1295,7 +1295,7 @@ fn non_blocking_logger() -> Result<()> {
 
     match test_task_handle.now_or_never() {
         Some(Ok(result)) => result,
-        Some(Err(_)) => Err(eyre!("join error")),
+        Some(Err(error)) => Err(eyre!("join error: {:?}", error)),
         None => Err(eyre!("unexpected test task hang")),
     }
 }
