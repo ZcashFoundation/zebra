@@ -38,6 +38,7 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
     let config = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
         parallel_cpu_threads: if parallel_cpu_threads { 2 } else { 1 },
+        debug_force_finished_sync: false,
     };
 
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -102,6 +103,7 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool) {
     let config = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
         parallel_cpu_threads: if parallel_cpu_threads { 0 } else { 1 },
+        debug_force_finished_sync: false,
     };
 
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -151,6 +153,7 @@ fn rpc_server_spawn_port_conflict() {
     let config = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
         parallel_cpu_threads: 1,
+        debug_force_finished_sync: false,
     };
 
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -242,6 +245,7 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
     let config = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
         parallel_cpu_threads: 2,
+        debug_force_finished_sync: false,
     };
 
     let rt = tokio::runtime::Runtime::new().unwrap();
