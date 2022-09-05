@@ -70,6 +70,8 @@ jobs:
 
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
 
       - name: Check workflow permissions
         id: check_permissions
@@ -114,6 +116,8 @@ jobs:
 
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
 
       - uses: actions-rs/toolchain@v1.0.6
         with:
@@ -142,6 +146,8 @@ jobs:
 
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
 
       - uses: actions-rs/toolchain@v1.0.6
         with:
