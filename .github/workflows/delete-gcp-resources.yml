@@ -32,3 +32,31 @@ jobs:
           do
             gcloud compute instance-templates delete ${TEMPLATE} --quiet || continue
           done
+
+      # Deletes cached images older than 90 days
+      #
+      # A search is done is done for each of this images:
+      # - Images created on Pull Requests older than 30 days
+      # - Images created on the `main` branch older than 60 days
+      # - Any other remaining image older than 90 days
+      # TODO: we should improve this approach and filter by disk type, and just keep the 2 latest images of each type (zebra checkpoint, zebra tip, lwd tip)
+      - name: Delete old cache disks
+        run: |
+          PR_OLD_CACHE_DISKS=$(gcloud compute images list --sort-by=creationTimestamp --filter="name~-cache-.+[0-9a-f]+-merge AND creationTimestamp < $(date --date='30 days ago' '+%Y%m%d')" --format='value(NAME)')
+          for DISK in $PR_OLD_CACHE_DISKS
+          do
+            gcloud compute image delete ${DISK} --quiet || continue
+          done
+
+          MAIN_OLD_CACHE_DISKS=$(gcloud compute images list --sort-by=creationTimestamp --filter="name~-cache-main AND creationTimestamp < $(date --date='60 days ago' '+%Y%m%d')" --format='value(NAME)')
+          for DISK in $MAIN_OLD_CACHE_DISKS
+          do
+            gcloud compute image delete ${DISK} --quiet || continue
+          done
+
+
+          ALL_OLD_CACHE_DISKS=$(gcloud compute images list --sort-by=creationTimestamp --filter="name~-cache- AND creationTimestamp < $(date --date='90 days ago' '+%Y%m%d')" --format='value(NAME)')
+          for DISK in $ALL_OLD_CACHE_DISKS
+          do
+            gcloud compute image delete ${DISK} --quiet || continue
+          done
