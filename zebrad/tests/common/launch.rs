@@ -50,7 +50,7 @@ pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(5);
 
 /// The amount of time we wait for lightwalletd to update to the tip.
 ///
-/// `lightwalletd` takes about 30-60 minutes to fully sync,
+/// `lightwalletd` takes about 60-120 minutes to fully sync,
 /// and `zebrad` can take hours to update to the tip under load.
 pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = FINISH_PARTIAL_SYNC_TIMEOUT;
 
