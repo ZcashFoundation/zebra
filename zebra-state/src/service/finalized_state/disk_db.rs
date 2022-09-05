@@ -251,6 +251,7 @@ impl ReadDisk for DiskDb {
             .is_some()
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn zs_first_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -267,6 +268,7 @@ impl ReadDisk for DiskDb {
             .expect("unexpected database failure")
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn zs_last_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -283,6 +285,7 @@ impl ReadDisk for DiskDb {
             .expect("unexpected database failure")
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn zs_next_key_value_from<C, K, V>(&self, cf: &C, lower_bound: &K) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -302,6 +305,7 @@ impl ReadDisk for DiskDb {
             .expect("unexpected database failure")
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn zs_prev_key_value_back_from<C, K, V>(&self, cf: &C, upper_bound: &K) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
