@@ -210,10 +210,10 @@ impl ReadDisk for DiskDb {
         // Empty column families return invalid forward iterators.
         //
         // Checking iterator validity does not seem to cause database hangs.
-        !self
-            .db
-            .iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .valid()
+        let iterator = self.db.iterator_cf(cf, rocksdb::IteratorMode::Start);
+        let raw_iterator: rocksdb::DBRawIteratorWithThreadMode<DB> = iterator.into();
+
+        !raw_iterator.valid()
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -228,12 +228,10 @@ impl ReadDisk for DiskDb {
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
         // value, because we're going to deserialize it anyways, which avoids an
         // extra copy
-        //
-        // TODO: move disk reads to a blocking thread (#2188)
         let value_bytes = self
             .db
             .get_pinned_cf(cf, key_bytes)
-            .expect("expected that disk errors would not occur");
+            .expect("unexpected database failure");
 
         value_bytes.map(V::from_bytes)
     }
@@ -247,14 +245,13 @@ impl ReadDisk for DiskDb {
 
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
         // value, because we don't use the value at all. This avoids an extra copy.
-        //
-        // TODO: move disk reads to a blocking thread (#2188)
         self.db
             .get_pinned_cf(cf, key_bytes)
-            .expect("expected that disk errors would not occur")
+            .expect("unexpected database failure")
             .is_some()
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn zs_first_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -264,10 +261,14 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .next()
-            .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .next()?
+            .map(|(key_bytes, value_bytes)| {
+                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            })
+            .expect("unexpected database failure")
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn zs_last_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -277,10 +278,14 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, rocksdb::IteratorMode::End)
-            .next()
-            .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .next()?
+            .map(|(key_bytes, value_bytes)| {
+                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            })
+            .expect("unexpected database failure")
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn zs_next_key_value_from<C, K, V>(&self, cf: &C, lower_bound: &K) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -293,10 +298,14 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, from)
-            .next()
-            .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .next()?
+            .map(|(key_bytes, value_bytes)| {
+                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            })
+            .expect("unexpected database failure")
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn zs_prev_key_value_back_from<C, K, V>(&self, cf: &C, upper_bound: &K) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -309,8 +318,11 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, from)
-            .next()
-            .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .next()?
+            .map(|(key_bytes, value_bytes)| {
+                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            })
+            .expect("unexpected database failure")
     }
 }
 

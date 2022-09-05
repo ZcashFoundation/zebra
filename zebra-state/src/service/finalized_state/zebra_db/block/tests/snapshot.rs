@@ -462,6 +462,7 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
         .count();
 
     let addresses: Vec<transparent::Address> = addresses
+        .map(|result| result.expect("unexpected database error"))
         .map(|(key, _value)| transparent::Address::from_bytes(key))
         .collect();
 
