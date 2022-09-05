@@ -76,12 +76,13 @@ To fix duplicate dependencies, follow these steps until the duplicate dependenci
    a. Check for features that Zebra activates in its `Cargo.toml` files, and try turning them off, then
   
    b. Try adding `default-features = false` to Zebra's dependencies (see [PR #4082](https://github.com/ZcashFoundation/zebra/pull/4082/files)).
-3. If there are still duplicate dependencies, add an exception to [`deny.toml`](https://github.com/ZcashFoundation/zebra/blob/main/deny.toml):
+
+3. If there are still duplicate dependencies, add or update the exceptions in [`deny.toml`](https://github.com/ZcashFoundation/zebra/blob/main/deny.toml):
 
    a. Prefer exceptions for dependencies that are closer to Zebra in the dependency tree (sometimes this resolves other duplicates as well),
-  
-   b. Add exceptions for the earlier version of duplicate dependencies, not the later version, and
-  
+
+   b. Add or update exceptions for the earlier version of duplicate dependencies, not the later version, and
+
    c. Add a comment about why the dependency exception is needed: what was the dependency update that caused it?
   
    d. For an example, see [PR #4890](https://github.com/ZcashFoundation/zebra/pull/4890/files).
