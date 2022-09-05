@@ -1231,16 +1231,18 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
 
 #[test]
 fn non_blocking_logger() -> Result<()> {
-    use futures::FutureExt as _;
+    use futures::FutureExt;
+    use std::{sync::mpsc, time::Duration};
 
     let rt = tokio::runtime::Runtime::new().unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
 
-    let test_task_handle: tokio::task::JoinHandle<Result<()>> = rt.spawn(async {
+    let test_task_handle: tokio::task::JoinHandle<Result<()>> = rt.spawn(async move {
         let _init_guard = zebra_test::init();
 
         // Write a configuration that has RPC listen_addr set
         // [Note on port conflict](#Note on port conflict)
-        let mut config = random_known_rpc_port_config()?;
+        let mut config = random_known_rpc_port_config(false)?;
         config.tracing.filter = Some("trace".to_string());
         config.tracing.buffer_limit = 100;
         let zebra_rpc_address = config.rpc.listen_addr.unwrap();
@@ -1252,17 +1254,12 @@ fn non_blocking_logger() -> Result<()> {
             format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
         )?;
 
-        let mut cmd2 = std::process::Command::new("echo")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .spawn()?;
-
         // Create an http client
         let client = reqwest::Client::new();
 
         // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
         // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
-        for _ in 0..5_000 {
+        for _ in 0..500 {
             let res = client
                 .post(format!("http://{}", &zebra_rpc_address))
                 .body(r#"{"jsonrpc":"1.0","method":"getinfo","params":[],"id":123}"#)
@@ -1274,7 +1271,6 @@ fn non_blocking_logger() -> Result<()> {
             assert!(res.status().is_success());
         }
 
-        cmd2.kill()?;
         child.kill(false)?;
 
         let output = child.wait_with_output()?;
@@ -1285,11 +1281,15 @@ fn non_blocking_logger() -> Result<()> {
             .assert_was_killed()
             .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
+        done_tx.send(())?;
+
         Ok(())
     });
 
-    // Wait until the spawned task finishes
-    std::thread::sleep(Duration::from_secs(10));
+    // Wait until the spawned task finishes or return an error in 45 seconds
+    if done_rx.recv_timeout(Duration::from_secs(45)).is_err() {
+        return Err(eyre!("unexpected test task hang"));
+    }
 
     rt.shutdown_timeout(Duration::from_secs(3));
 
