@@ -714,6 +714,7 @@ impl Service<Request> for StateService {
                 let timer = CodeTimer::start();
 
                 // TODO: move this work into the future, like Block and Transaction?
+                //       move disk reads to a blocking thread (#2188)
                 let rsp = Ok(Response::Depth(self.best_depth(hash)));
 
                 // The work is all done, the future just returns the result.
@@ -734,6 +735,7 @@ impl Service<Request> for StateService {
                 let timer = CodeTimer::start();
 
                 // TODO: move this work into the future, like Block and Transaction?
+                //       move disk reads to a blocking thread (#2188)
                 let rsp = Ok(Response::Tip(self.best_tip()));
 
                 // The work is all done, the future just returns the result.
@@ -752,6 +754,7 @@ impl Service<Request> for StateService {
                 let timer = CodeTimer::start();
 
                 // TODO: move this work into the future, like Block and Transaction?
+                //       move disk reads to a blocking thread (#2188)
                 let rsp = Ok(Response::BlockLocator(
                     self.block_locator().unwrap_or_default(),
                 ));
@@ -836,6 +839,7 @@ impl Service<Request> for StateService {
 
                 let fut = self.pending_utxos.queue(outpoint);
 
+                // TODO: move disk reads (in `any_utxo()`) to a blocking thread (#2188)
                 if let Some(utxo) = self.any_utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
                 }

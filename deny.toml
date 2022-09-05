@@ -78,6 +78,10 @@ skip-tree = [
 
     # wait for primitive-types to upgrade
     { name = "proc-macro-crate", version = "=0.1.5" },
+
+    # wait for zcash_script to upgrade bindgen
+    # https://github.com/ZcashFoundation/zcash_script/issues/40
+    { name = "bindgen", version = "=0.59.2" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
