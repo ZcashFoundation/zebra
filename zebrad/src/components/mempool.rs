@@ -405,8 +405,6 @@ impl Service<Request> for Mempool {
     /// and will cause callers to disconnect from the remote peer.
     #[instrument(name = "mempool", skip(self, req))]
     fn call(&mut self, req: Request) -> Self::Future {
-        //let skip_full_validation = self.skip_full_validation();
-
         match &mut self.active_state {
             ActiveState::Enabled {
                 storage,
