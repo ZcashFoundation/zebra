@@ -142,8 +142,12 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool) {
 }
 
 /// Test if the RPC server will panic correctly when there is a port conflict.
+///
+/// This test is sometimes unreliable on Windows, and hangs on macOS.
+/// We believe this is a CI infrastructure issue, not a platform-specific issue.
 #[test]
 #[should_panic(expected = "Unable to start RPC server")]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn rpc_server_spawn_port_conflict() {
     let _init_guard = zebra_test::init();
 
@@ -234,7 +238,11 @@ fn rpc_server_spawn_port_conflict() {
 ///
 /// If this test fails, that's great!
 /// We can make parallel the default, and remove the warnings in the config docs.
+///
+/// This test is sometimes unreliable on Windows, and hangs on macOS.
+/// We believe this is a CI infrastructure issue, not a platform-specific issue.
 #[test]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn rpc_server_spawn_port_conflict_parallel_auto() {
     let _init_guard = zebra_test::init();
 
