@@ -35,6 +35,24 @@ Tests can depend on:
 To support this test state, some Docker tests depend on other tests finishing first.
 This means that the entire workflow must be re-run when a single test fails.
 
+### Finding Errors
+
+Look for the earliest job that failed, and find the earliest failure.
+
+For example, this failure doesn't tell us what actually went wrong:
+>  Error: The template is not valid. ZcashFoundation/zebra/.github/workflows/build-docker-image.yml@8bbc5b21c97fafc83b70fbe7f3b5e9d0ffa19593 (Line: 52, Col: 19): Error reading JToken from JsonReader. Path '', line 0, position 0.
+
+https://github.com/ZcashFoundation/zebra/runs/8181760421?check_suite_focus=true#step:41:4
+
+But the specific failure is a few steps earlier:
+>  #24 2117.3 error[E0308]: mismatched types
+>  ...
+
+https://github.com/ZcashFoundation/zebra/runs/8181760421?check_suite_focus=true#step:8:2112
+
+The earlier failure can also be in another job, check out the whole workflow run for details.
+(Use the "Summary" button on the top left of the job details, and zoom in.)
+
 ### Resolving CI Sync Timeouts
 
 CI sync jobs near the tip will take different amounts of time as:
