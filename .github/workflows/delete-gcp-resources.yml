@@ -1,9 +1,16 @@
 name: Delete GCP resources
 
 on:
+  # Run right before Teor's week starts (UTC+10)
   schedule:
-    - cron: "0 0 1 * *"
+    - cron: "0 19 * * 0"
   workflow_dispatch:
+
+env:
+  # Delete all resources created before $DELETE_AGE_DAYS days ago.
+  DELETE_AGE_DAYS: 7
+  # But keep the latest $KEEP_LATEST_IMAGE_COUNT images of each type.
+  KEEP_LATEST_IMAGE_COUNT: 2
 
 jobs:
   delete-resources:
@@ -13,6 +20,10 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
+      - uses: actions/checkout@v3.0.2
+        with:
+          persist-credentials: false
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -22,42 +33,98 @@ jobs:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
-          create_credentials_file: false
 
-      # Deletes all the instances template older than 30 days
+      # Deletes all the instance templates older than $DELETE_AGE_DAYS days.
       - name: Delete old instance templates
         run: |
-          TEMPLATES=$(gcloud compute instance-templates list --sort-by=creationTimestamp  --filter="creationTimestamp < $(date --date='30 days ago' '+%Y%m%d')" --format='value(NAME)')
+          DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
+          TEMPLATES=$(gcloud compute instance-templates list --sort-by=creationTimestamp  --filter="creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
 
           for TEMPLATE in $TEMPLATES
           do
             gcloud compute instance-templates delete ${TEMPLATE} || continue
           done
 
-      # Deletes cached images older than 7-14 days.
+      # Deletes all the disks older than $DELETE_AGE_DAYS days.
       #
-      # A search is done is done for each of this images:
-      # - Images created on Pull Requests older than 7 days
-      # - Images created on the `main` branch older than 14 days
-      # - Any other remaining images older than 14 days
+      # Disks that are attached to an instance template can't be deleted, so it is safe to delete all disks here.
+      - name: Delete old disks
+        run: |
+          DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
+
+          # Disks created by PR jobs, and other jobs that use a commit hash
+          COMMIT_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp  --filter="name~-[0-9a-f]+$ creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+
+          for DISK in $COMMIT_DISKS
+          do
+            gcloud compute disks delete ${DISK} || continue
+          done
+          
+          # Disks created by managed instance groups, and other jobs that start with "zebrad-"
+          ZEBRAD_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp  --filter="name~^zebrad- creationTimestamp < $(date --date='7 days ago' '+%Y%m%d')" --format='value(NAME)')
+
+          for DISK in $ZEBRAD_DISKS
+          do
+            gcloud compute disks delete ${DISK} || continue
+          done
+
+      # Deletes cache images older than $DELETE_AGE_DAYS days.
       #
-      # TODO: we should improve this approach and filter by disk type, and just keep the 2 latest images of each type (zebra checkpoint, zebra tip, lwd tip)
+      # Keeps the latest $KEEP_LATEST_IMAGE_COUNT images of each type:
+      # - zebrad checkpoint cache
+      # - zebrad tip cache
+      # - lightwalletd + zebrad tip cache
+      #
+      # TODO: when we add testnet to the workflows, keep the latest 2 testnet images, and the latest 2 mainnet images.
       - name: Delete old cache disks
         run: |
-          PR_OLD_CACHE_DISKS=$(gcloud compute images list --sort-by=creationTimestamp --filter="name~-cache-.+[0-9a-f]+-merge AND creationTimestamp < $(date --date='7 days ago' '+%Y%m%d')" --format='value(NAME)')
-          for DISK in $PR_OLD_CACHE_DISKS
+          DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
+
+          ZEBRAD_CHECKPOINT_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*net-checkpoint AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          KEPT_IMAGES=0
+          for IMAGE in $ZEBRAD_CHECKPOINT_IMAGES
           do
-            gcloud compute images delete ${DISK} || continue
+            if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
+            then              
+              KEPT_IMAGES=$((KEPT_IMAGES+1))
+              echo "Keeping image $KEPT_IMAGES named $IMAGE"
+              continue
+            fi
+            
+            echo gcloud compute images delete ${IMAGE} || continue
           done
 
-          MAIN_OLD_CACHE_DISKS=$(gcloud compute images list --sort-by=creationTimestamp --filter="name~-cache-main AND creationTimestamp < $(date --date='14 days ago' '+%Y%m%d')" --format='value(NAME)')
-          for DISK in $MAIN_OLD_CACHE_DISKS
+          ZEBRAD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*net-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          KEPT_IMAGES=0
+          for IMAGE in $ZEBRAD_TIP_IMAGES
           do
-            gcloud compute images delete ${DISK} || continue
+            if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
+            then              
+              KEPT_IMAGES=$((KEPT_IMAGES+1))
+              echo "Keeping image $KEPT_IMAGES named $IMAGE"
+              continue
+            fi
+            
+            echo gcloud compute images delete ${IMAGE} || continue
           done
-
-          ALL_OLD_CACHE_DISKS=$(gcloud compute images list --sort-by=creationTimestamp --filter="name~-cache- AND creationTimestamp < $(date --date='14 days ago' '+%Y%m%d')" --format='value(NAME)')
-          for DISK in $ALL_OLD_CACHE_DISKS
+          
+          LWD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^lwd-cache-.*net-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          KEPT_IMAGES=0
+          for IMAGE in $LWD_TIP_IMAGES
           do
-            gcloud compute images delete ${DISK} || continue
+            if [[ "$KEPT_IMAGES" -lt "$KEEP_LATEST_IMAGE_COUNT" ]];
+            then              
+              KEPT_IMAGES=$((KEPT_IMAGES+1))
+              echo "Keeping image $KEPT_IMAGES named $IMAGE"
+              continue
+            fi
+            
+            echo gcloud compute images delete ${IMAGE} || continue
+          done
+          
+          # TODO: delete this after the first run, the images were created by an outdated workflow
+          CANOPY_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~canopy AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          for IMAGE in $CANOPY_IMAGES
+          do
+            echo gcloud compute images delete ${IMAGE} || continue
           done
