@@ -78,7 +78,7 @@ on:
         required: false
         type: string
         default: 'zebra'
-        description: 'Application name for Google Cloud instance metadata'
+        description: 'Application name, used to work out when a job is an update job'
 
 env:
   # where we get the Docker image from
@@ -94,6 +94,9 @@ env:
   # but we don't know how long it will be between jobs.
   # 200 lines is about 6-15 minutes of sync logs, or one panic log.
   EXTRA_LOG_LINES: 200
+  # How many blocks to wait before creating an updated cached state image.
+  # 1 day is approximately 1152 blocks.
+  CACHED_STATE_UPDATE_LIMIT: 1152
 
 jobs:
   # set up the test, if it doesn't use any cached state
@@ -1111,7 +1114,7 @@ jobs:
           token_format: 'access_token'
 
       # Get the state version from the local constants.rs file to be used in the image creation,
-      # as the state version is part of the disk image name.
+      # as the state version is part of the disk image.
       #
       # Passes the state version to subsequent steps using $STATE_VERSION env variable
       - name: Get state version from constants.rs
@@ -1120,31 +1123,8 @@ jobs:
           echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
           echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
-
-      # Get the sync height from the test logs, which is later used as part of the
-      # disk description.
-      #
-      # The regex used to grep the sync height is provided by ${{ inputs.height_grep_text }},
-      # this allows to dynamically change the height as needed by different situations or
-      # based on the logs output from different tests
-      #
-      # Passes the sync height to subsequent steps using $SYNC_HEIGHT env variable
-      - name: Get sync height from logs
-        run: |
-          SYNC_HEIGHT=""
-
-          DOCKER_LOGS=$(\
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker logs ${{ inputs.test_id }} --tail 200")
-
-          SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE '${{ inputs.height_grep_text }}[0-9]+' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
-          echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
-
-      # Sets the $UPDATE_SUFFIX env var to "-u" if using cached state,
+          
+      # Sets the $UPDATE_SUFFIX env var to "-u" if updating a previous cached state,
       # and the empty string otherwise.
       #
       # Also sets a unique date and time suffix $TIME_SUFFIX.
@@ -1152,20 +1132,85 @@ jobs:
         run: |
           UPDATE_SUFFIX=""
 
-          if [[ "${{ inputs.needs_zebra_state }}" == "true" ]]; then
+          if [[ "${{ inputs.needs_zebra_state }}" == "true" ]] && [[ "${{ inputs.app_name }}" == "zebrad" ]]; then
               UPDATE_SUFFIX="-u"
           fi
 
+          # TODO: find a better logic for the lwd-full-sync case
+          if [[ "${{ inputs.needs_lwd_state }}" == "true" ]] && [[ "${{ inputs.app_name }}" == "lightwalletd" ]] && [[ "${{ inputs.test_id }}" != 'lwd-full-sync' ]]; then
+              UPDATE_SUFFIX="-u"
+          fi
+ 
           # We're going to delete old images after a month, so we don't need the year here
           TIME_SUFFIX=$(date '+%m%d%H%M%S' --utc)
 
           echo "UPDATE_SUFFIX=$UPDATE_SUFFIX" >> $GITHUB_ENV
           echo "TIME_SUFFIX=$TIME_SUFFIX" >> $GITHUB_ENV
 
+      # Get the sync height from the test logs, which is later used as part of the
+      # disk description and labels.
+      #
+      # The regex used to grep the sync height is provided by ${{ inputs.height_grep_text }},
+      # this allows to dynamically change the height as needed by different situations or
+      # based on the logs output from different tests.
+      #
+      # If the sync height is missing from the logs, the job fails.
+      #
+      # Passes the sync height to subsequent steps using $SYNC_HEIGHT env variable.
+      - name: Get sync height from logs
+        run: |
+          SYNC_HEIGHT=$( \
+          gcloud compute ssh \
+          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --quiet \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --command=" \
+          docker logs ${{ inputs.test_id }} --tail 200 | \
+          tee --output-error=exit /dev/stderr | \
+          grep --extended-regexp --only-matching --color=never \
+          '${{ inputs.height_grep_text }}[0-9]+' | \
+          grep --extended-regexp --only-matching --color=never \
+          '[0-9]+' | \
+          tail -1 \
+          ")
+          
+          if [[ -z "$SYNC_HEIGHT" ]]; then
+              echo "Missing sync height in logs: $SYNC_HEIGHT"
+              # Fail the tests, because Zebra and lightwalletd didn't log their sync heights,
+              # or the CI workflow sync height regex is wrong.
+              false
+          fi
+
+          echo "Found sync height in logs: $SYNC_HEIGHT"
+          echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
+
+      # Get the original cached state height from google cloud.
+      #
+      # If the height is missing from the image labels, uses zero instead.
+      # TODO: fail the job if needs_zebra_state but the height is missing
+      #       after all the old images have been deleted, this should happen around 15 September 2022
+      #       we'll also need to do a manual checkpoint rebuild before opening the PR for this change
+      #
+      # Passes the original height to subsequent steps using $ORIGINAL_HEIGHT env variable.
+      - name: Get original cached state height from google cloud
+        run: |
+          ORIGINAL_HEIGHT="0"
+
+          if [[ "${{ inputs.needs_zebra_state }}" == "true" ]]; then
+              ORIGINAL_HEIGHT=$(gcloud compute images list --filter="name=${CACHED_DISK_NAME}" --format="value(labels.height)")
+              echo "$CACHED_DISK_NAME height: $ORIGINAL_HEIGHT"
+          fi
+          
+          echo "ORIGINAL_HEIGHT=$ORIGINAL_HEIGHT" >> $GITHUB_ENV
+          
       # Create an image from the state disk, which will be used for any tests that start
       # after it is created. These tests can be in the same workflow, or in a different PR.
       #
       # Using the newest image makes future jobs faster, because it is closer to the chain tip.
+      #
+      # Skips creating updated images if the original image is less than $CACHED_STATE_UPDATE_LIMIT behind the current tip.
+      # Full sync images are always created.
       #
       # The image can contain:
       # - Zebra cached state, or
@@ -1189,14 +1234,19 @@ jobs:
       # used by the container.
       - name: Create image from state disk
         run: |
-          gcloud compute images create \
-          "${{ inputs.disk_prefix }}-${SHORT_GITHUB_REF}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
-          --force \
-          --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
-          --source-disk-zone=${{ env.ZONE }} \
-          --storage-location=us \
-          --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
-          --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},network=${{ env.NETWORK }},target-height=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
+          MINIMUM_UPDATE_HEIGHT=$((ORIGINAL_HEIGHT+CACHED_STATE_UPDATE_LIMIT))
+          if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]]; then
+             gcloud compute images create \
+              "${{ inputs.disk_prefix }}-${SHORT_GITHUB_REF}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${{ env.NETWORK }}-${{ inputs.disk_suffix }}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
+              --force \
+              --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
+              --source-disk-zone=${{ env.ZONE }} \
+              --storage-location=us \
+              --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
+              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},network=${{ env.NETWORK }},target-height=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},updated-from-height=${ORIGINAL_HEIGHT},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
+          else
+              echo "Skipped cached state update because the new sync height $SYNC_HEIGHT was less than $CACHED_STATE_UPDATE_LIMIT blocks above the original height $ORIGINAL_HEIGHT"
+          fi          
 
   # delete the Google Cloud instance for this test
   delete-instance:
