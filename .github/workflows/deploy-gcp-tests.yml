@@ -231,6 +231,8 @@ jobs:
     name: Setup ${{ inputs.test_id }} test
     if: ${{ inputs.needs_zebra_state }}
     runs-on: ubuntu-latest
+    outputs:
+      cached_disk_name: ${{ steps.get-disk-name.outputs.cached_disk_name }}
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -343,6 +345,7 @@ jobs:
           fi
 
           echo "Selected Disk: $CACHED_DISK_NAME"
+          echo "::set-output name=cached_disk_name::$CACHED_DISK_NAME"
 
           echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
           echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> $GITHUB_ENV
@@ -1068,7 +1071,7 @@ jobs:
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
     runs-on: ubuntu-latest
-    needs: [ test-result ]
+    needs: [ test-result, setup-with-cached-state ]
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # Normally, if a job is skipped, all the jobs that depend on it are also skipped.
     # So we need to override the default success() check to make this job run.
@@ -1192,6 +1195,7 @@ jobs:
       # Get the original cached state height from google cloud.
       #
       # If the height is missing from the image labels, uses zero instead.
+      #
       # TODO: fail the job if needs_zebra_state but the height is missing
       #       we can make this change after all the old images have been deleted, this should happen around 15 September 2022
       #       we'll also need to do a manual checkpoint rebuild before opening the PR for this change
@@ -1201,8 +1205,9 @@ jobs:
         run: |
           ORIGINAL_HEIGHT="0"
 
-          if [[ "${{ inputs.needs_zebra_state }}" == "true" ]]; then
-              ORIGINAL_HEIGHT=$(gcloud compute images list --filter="name=${CACHED_DISK_NAME}" --format="value(labels.height)")
+          if [[ -n "${{ format('{0}', needs.setup-with-cached-state.outputs.cached_disk_name) }}" ]]; then
+              ORIGINAL_HEIGHT=$(gcloud compute images list --filter="name=${{ needs.setup-with-cached-state.outputs.cached_disk_name }}" --format="value(labels.height)")
+              ORIGINAL_HEIGHT=${ORIGINAL_HEIGHT:-0}
               echo "$CACHED_DISK_NAME height: $ORIGINAL_HEIGHT"
           fi
           
