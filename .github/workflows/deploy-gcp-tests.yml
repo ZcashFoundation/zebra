@@ -1139,7 +1139,7 @@ jobs:
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
-          --command="docker logs ${{ inputs.test_id }} --tail 20")
+          --command="docker logs ${{ inputs.test_id }} --tail 200")
 
           SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE '${{ inputs.height_grep_text }}\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
