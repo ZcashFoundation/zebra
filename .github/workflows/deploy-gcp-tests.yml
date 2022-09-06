@@ -1141,7 +1141,7 @@ jobs:
           --ssh-flag="-o ServerAliveInterval=5" \
           --command="docker logs ${{ inputs.test_id }} --tail 200")
 
-          SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE '${{ inputs.height_grep_text }}\([0-9]+\)' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
+          SYNC_HEIGHT=$(echo $DOCKER_LOGS | grep -oE '${{ inputs.height_grep_text }}[0-9]+' | grep -oE '[0-9]+' | tail -1 || [[ $? == 1 ]])
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
 
       # Sets the $UPDATE_SUFFIX env var to "-u" if using cached state,
@@ -1196,6 +1196,7 @@ jobs:
           --source-disk-zone=${{ env.ZONE }} \
           --storage-location=us \
           --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }}"
+          --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},network=${{ env.NETWORK }},target-height=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
 
   # delete the Google Cloud instance for this test
   delete-instance:
