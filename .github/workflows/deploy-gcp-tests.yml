@@ -1114,7 +1114,7 @@ jobs:
           token_format: 'access_token'
 
       # Get the state version from the local constants.rs file to be used in the image creation,
-      # as the state version is part of the disk image.
+      # as the state version is part of the disk image name.
       #
       # Passes the state version to subsequent steps using $STATE_VERSION env variable
       - name: Get state version from constants.rs
