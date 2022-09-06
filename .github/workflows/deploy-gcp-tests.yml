@@ -1189,7 +1189,7 @@ jobs:
       #
       # If the height is missing from the image labels, uses zero instead.
       # TODO: fail the job if needs_zebra_state but the height is missing
-      #       after all the old images have been deleted, this should happen around 15 September 2022
+      #       we can make this change after all the old images have been deleted, this should happen around 15 September 2022
       #       we'll also need to do a manual checkpoint rebuild before opening the PR for this change
       #
       # Passes the original height to subsequent steps using $ORIGINAL_HEIGHT env variable.
