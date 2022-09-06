@@ -27,7 +27,7 @@ rand = { version = "0.8.5", package = "rand" }
 rayon = "1.5.3"
 regex = "1.6.0"
 serde = { version = "1.0.144", features = ["serde_derive"] }
-thiserror = "1.0.33"
+thiserror = "1.0.34"
 
 futures = "0.3.24"
 tokio = { version = "1.21.0", features = ["net", "time", "tracing", "macros", "rt-multi-thread"] }
