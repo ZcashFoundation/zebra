@@ -68,6 +68,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install last version of Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Check workflow permissions
         id: check_permissions
         uses: scherermichael-oss/action-has-permission@1.0.6
@@ -109,6 +115,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install last version of Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: actions-rs/toolchain@v1.0.6
         with:
           toolchain: stable
@@ -133,6 +145,12 @@ jobs:
       - uses: actions/checkout@v3.0.2
         with:
           persist-credentials: false
+
+      - name: Install last version of Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions-rs/toolchain@v1.0.6
         with:
