@@ -40,7 +40,7 @@ jobs:
       - name: Delete old instance templates
         run: |
           DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
-          TEMPLATES=$(gcloud compute instance-templates list --sort-by=creationTimestamp  --filter="creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          TEMPLATES=$(gcloud compute instance-templates list --sort-by=creationTimestamp  --filter="name~-[0-9a-f]+$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
 
           for TEMPLATE in $TEMPLATES
           do
@@ -55,7 +55,7 @@ jobs:
           DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
 
           # Disks created by PR jobs, and other jobs that use a commit hash
-          COMMIT_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp  --filter="name~-[0-9a-f]+$ creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          COMMIT_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp  --filter="name~-[0-9a-f]+$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
 
           for DISK in $COMMIT_DISKS
           do
@@ -63,7 +63,7 @@ jobs:
           done
           
           # Disks created by managed instance groups, and other jobs that start with "zebrad-"
-          ZEBRAD_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp  --filter="name~^zebrad- creationTimestamp < $(date --date='7 days ago' '+%Y%m%d')" --format='value(NAME)')
+          ZEBRAD_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp  --filter="name~^zebrad- AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
 
           for DISK in $ZEBRAD_DISKS
           do
@@ -122,12 +122,5 @@ jobs:
               continue
             fi
             
-            gcloud compute images delete ${IMAGE} || continue
-          done
-          
-          # TODO: delete this after the first run, the images were created by an outdated workflow
-          CANOPY_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~canopy$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
-          for IMAGE in $CANOPY_IMAGES
-          do
             gcloud compute images delete ${IMAGE} || continue
           done
