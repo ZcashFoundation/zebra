@@ -57,7 +57,7 @@ jobs:
 
           for DISK in $COMMIT_DISKS
           do
-            gcloud compute disks delete ${DISK} || continue
+            gcloud compute disks delete --verbosity=info ${DISK} || continue
           done
           
           # Disks created by managed instance groups, and other jobs that start with "zebrad-"
@@ -65,7 +65,7 @@ jobs:
 
           for DISK in $ZEBRAD_DISKS
           do
-            gcloud compute disks delete ${DISK} || continue
+            gcloud compute disks delete --verbosity=info ${DISK} || continue
           done
 
       # Deletes cache images older than $DELETE_AGE_DAYS days.
