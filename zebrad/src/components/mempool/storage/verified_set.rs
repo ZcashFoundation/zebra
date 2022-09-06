@@ -72,7 +72,7 @@ impl VerifiedSet {
     }
 
     /// Returns `true` if the set of verified transactions contains the transaction with the
-    /// specified `id.
+    /// specified [`UnminedTxId`].
     pub fn contains(&self, id: &UnminedTxId) -> bool {
         self.transactions.iter().any(|tx| &tx.transaction.id == id)
     }

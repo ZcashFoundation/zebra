@@ -24,8 +24,11 @@ use futures::TryFutureExt;
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
-    block, chain_tip::ChainTip, parameters::Network, serialization::ZcashSerialize,
-    transaction::Transaction,
+    block,
+    chain_tip::ChainTip,
+    parameters::Network,
+    serialization::ZcashSerialize,
+    transaction::{self, Transaction},
 };
 use zebra_rpc::queue::CHANNEL_AND_QUEUE_CAPACITY;
 use zebra_state::HashOrHeight;
@@ -35,14 +38,30 @@ use crate::common::{
     cached_state::{load_tip_height_from_state_directory, start_state_service_with_cache_dir},
     launch::spawn_zebrad_for_rpc_without_initial_peers,
     lightwalletd::{
-        wallet_grpc::{self, connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server},
+        wallet_grpc::{
+            self, connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Empty, Exclude,
+        },
         zebra_skip_lightwalletd_tests,
         LightwalletdTestType::*,
     },
-    sync::perform_full_sync_starting_from,
+    sync::copy_state_and_perform_full_sync,
 };
 
+/// The maximum number of transactions we want to send in the test.
+/// This avoids filling the mempool queue and generating errors.
+///
+/// TODO: replace with a const when `min()` stabilises as a const function:
+///       https://github.com/rust-lang/rust/issues/92391
+fn max_sent_transactions() -> usize {
+    min(CHANNEL_AND_QUEUE_CAPACITY, MAX_INBOUND_CONCURRENCY) - 1
+}
+
 /// The test entry point.
+//
+// TODO:
+// - check output of zebrad and lightwalletd in different threads,
+//   to avoid test hangs due to full output pipes
+//   (see lightwalletd_integration_test for an example)
 pub async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -82,7 +101,7 @@ pub async fn run() -> Result<()> {
     );
 
     let mut transactions =
-        load_transactions_from_a_future_block(network, zebrad_state_path.clone()).await?;
+        load_transactions_from_future_blocks(network, zebrad_state_path.clone()).await?;
 
     tracing::info!(
         transaction_count = ?transactions.len(),
@@ -90,12 +109,17 @@ pub async fn run() -> Result<()> {
         "got transactions to send",
     );
 
-    let (_zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc_without_initial_peers(Network::Mainnet, zebrad_state_path, test_type)?;
+    // TODO: change debug_skip_parameter_preload to true if we do the mempool test in the wallet gRPC test
+    let (mut zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
+        Network::Mainnet,
+        zebrad_state_path,
+        test_type,
+        false,
+    )?;
 
     tracing::info!(
         ?zebra_rpc_address,
-        "spawned disconnected zebrad with shorter chain",
+        "spawned disconnected zebrad with shorter chain, waiting for mempool activation...",
     );
 
     let (_lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(
@@ -107,24 +131,43 @@ pub async fn run() -> Result<()> {
 
     tracing::info!(
         ?lightwalletd_rpc_port,
-        "spawned lightwalletd connected to zebrad",
+        "spawned lightwalletd connected to zebrad, waiting for zebrad mempool activation...",
+    );
+
+    zebrad.expect_stdout_line_matches("activating mempool")?;
+
+    // TODO: check that lightwalletd is at the tip using gRPC (#4894)
+    //
+    // If this takes a long time, we might need to check zebrad logs for failures in a separate thread.
+
+    tracing::info!(
+        ?lightwalletd_rpc_port,
+        "connecting gRPC client to lightwalletd...",
     );
 
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
 
     // To avoid filling the mempool queue, limit the transactions to be sent to the RPC and mempool queue limits
-    transactions.truncate(min(CHANNEL_AND_QUEUE_CAPACITY, MAX_INBOUND_CONCURRENCY) - 1);
+    transactions.truncate(max_sent_transactions());
+
+    let transaction_hashes: Vec<transaction::Hash> =
+        transactions.iter().map(|tx| tx.hash()).collect();
 
     tracing::info!(
         transaction_count = ?transactions.len(),
+        ?transaction_hashes,
         "connected gRPC client to lightwalletd, sending transactions...",
     );
 
     for transaction in transactions {
+        let transaction_hash = transaction.hash();
+
         let expected_response = wallet_grpc::SendResponse {
             error_code: 0,
-            error_message: format!("\"{}\"", transaction.hash()),
+            error_message: format!("\"{}\"", transaction_hash),
         };
+
+        tracing::info!(?transaction_hash, "sending transaction...");
 
         let request = prepare_send_transaction_request(transaction);
 
@@ -132,6 +175,64 @@ pub async fn run() -> Result<()> {
 
         assert_eq!(response, expected_response);
     }
+
+    tracing::info!("waiting for mempool to verify some transactions...");
+    zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
+
+    tracing::info!("calling GetMempoolTx gRPC to fetch transactions...");
+    let mut transactions_stream = rpc_client
+        .get_mempool_tx(Exclude { txid: vec![] })
+        .await?
+        .into_inner();
+
+    // We'd like to check that lightwalletd queries the mempool, but it looks like it doesn't do it after each GetMempoolTx request.
+    //zebrad.expect_stdout_line_matches("answered mempool request req=TransactionIds")?;
+
+    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
+    let mut counter = 0;
+    while let Some(tx) = transactions_stream.message().await? {
+        let hash: [u8; 32] = tx.hash.clone().try_into().expect("hash is correct length");
+        let hash = transaction::Hash::from_bytes_in_display_order(&hash);
+
+        assert!(
+            transaction_hashes.contains(&hash),
+            "unexpected transaction {hash:?}\n\
+             in isolated mempool: {tx:?}",
+        );
+
+        counter += 1;
+    }
+
+    // This RPC has temporarily been disabled in `lightwalletd`:
+    // https://github.com/adityapk00/lightwalletd/blob/b563f765f620e38f482954cd8ff3cc6d17cf2fa7/frontend/service.go#L529-L531
+    //
+    // TODO: re-enable it when lightwalletd starts returning transactions again.
+    //assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
+    assert_eq!(
+        counter, 0,
+        "developers: update this test for lightwalletd sending transactions"
+    );
+
+    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
+    tracing::info!("calling GetMempoolStream gRPC to fetch transactions...");
+    let mut transaction_stream = rpc_client.get_mempool_stream(Empty {}).await?.into_inner();
+
+    let mut counter = 0;
+    while let Some(_tx) = transaction_stream.message().await? {
+        // TODO: check tx.data or tx.height here?
+
+        counter += 1;
+    }
+
+    // This RPC has temporarily been disabled in `lightwalletd`:
+    // https://github.com/adityapk00/lightwalletd/blob/b563f765f620e38f482954cd8ff3cc6d17cf2fa7/frontend/service.go#L515-L517
+    //
+    // TODO: re-enable it when lightwalletd starts streaming transactions again.
+    //assert!(counter >= 1, "all transactions from future blocks failed to send to an isolated mempool");
+    assert_eq!(
+        counter, 0,
+        "developers: update this test for lightwalletd sending transactions"
+    );
 
     Ok(())
 }
@@ -146,7 +247,7 @@ pub async fn run() -> Result<()> {
 /// Returns a list of valid transactions that are not in any of the blocks present in the
 /// original `zebrad_state_path`.
 #[tracing::instrument]
-async fn load_transactions_from_a_future_block(
+async fn load_transactions_from_future_blocks(
     network: Network,
     zebrad_state_path: PathBuf,
 ) -> Result<Vec<Arc<Transaction>>> {
@@ -160,7 +261,7 @@ async fn load_transactions_from_a_future_block(
     );
 
     let full_sync_path =
-        perform_full_sync_starting_from(network, zebrad_state_path.as_ref()).await?;
+        copy_state_and_perform_full_sync(network, zebrad_state_path.as_ref()).await?;
 
     tracing::info!(?full_sync_path, "loading transactions...");
 
@@ -195,20 +296,37 @@ async fn load_transactions_from_block_after(
 
     assert!(
         tip_height > height,
-        "Chain not synchronized to a block after the specified height"
+        "Chain not synchronized to a block after the specified height",
     );
 
     let mut target_height = height.0;
     let mut transactions = Vec::new();
 
-    while transactions.is_empty() {
-        transactions =
+    while transactions.len() < max_sent_transactions() {
+        let new_transactions =
             load_transactions_from_block(block::Height(target_height), &mut state).await?;
 
-        transactions.retain(|transaction| !transaction.is_coinbase());
+        if let Some(mut new_transactions) = new_transactions {
+            new_transactions.retain(|transaction| !transaction.is_coinbase());
+            transactions.append(&mut new_transactions);
+        } else {
+            tracing::info!(
+                "Reached the end of the finalized chain\n\
+                 collected {} transactions from {} blocks before {target_height:?}",
+                transactions.len(),
+                target_height - height.0 - 1,
+            );
+            break;
+        }
 
         target_height += 1;
     }
+
+    tracing::info!(
+        "Collected {} transactions from {} blocks before {target_height:?}",
+        transactions.len(),
+        target_height - height.0 - 1,
+    );
 
     Ok(transactions)
 }
@@ -219,7 +337,7 @@ async fn load_transactions_from_block_after(
 async fn load_transactions_from_block<ReadStateService>(
     height: block::Height,
     state: &mut ReadStateService,
-) -> Result<Vec<Arc<Transaction>>>
+) -> Result<Option<Vec<Arc<Transaction>>>>
 where
     ReadStateService: Service<
         zebra_state::ReadRequest,
@@ -238,12 +356,15 @@ where
     let block = match response {
         zebra_state::ReadResponse::Block(Some(block)) => block,
         zebra_state::ReadResponse::Block(None) => {
-            panic!("Missing block at {height:?} from state")
+            tracing::info!(
+                "Reached the end of the finalized chain, state is missing block at {height:?}",
+            );
+            return Ok(None);
         }
         _ => unreachable!("Incorrect response from state service: {response:?}"),
     };
 
-    Ok(block.transactions.to_vec())
+    Ok(Some(block.transactions.to_vec()))
 }
 
 /// Prepare a request to send to lightwalletd that contains a transaction to be sent.

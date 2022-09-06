@@ -102,6 +102,16 @@
 //! ```
 //!
 //! Please refer to the documentation of each test for more information.
+//!
+//! ## Disk Space for Testing
+//!
+//! The full sync and lightwalletd tests with cached state expect a temporary directory with
+//! at least 300 GB of disk space (2 copies of the full chain). To use another disk for the
+//! temporary test files:
+//!
+//! ```sh
+//! export TMPDIR=/path/to/disk/directory
+//! ```
 
 use std::{collections::HashSet, env, fs, panic, path::PathBuf, time::Duration};
 
@@ -1819,8 +1829,12 @@ async fn fully_synced_rpc_test() -> Result<()> {
 
     let network = Network::Mainnet;
 
-    let (_zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc_without_initial_peers(network, cached_state_path.unwrap(), test_type)?;
+    let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
+        network,
+        cached_state_path.unwrap(),
+        test_type,
+        true,
+    )?;
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
