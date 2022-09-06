@@ -20,6 +20,26 @@ any branch and commit, as long as the state version is the same.
 Zebra also does [a smaller set of tests](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/continous-integration-os.yml) on tier 2 platforms using GitHub actions runners.
 
 
+## Manually Using Google Cloud
+
+Some Zebra developers have access to the Zcash Foundation's Google Cloud instance, which also runs our automatic CI.
+
+Please shut down large instances when they are not being used.
+
+### Automated Deletion
+
+The [Delete GCP Resources](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/delete-gcp-resources.yml)
+workflow automatically deletes instance templates, disks, and images older than 1 week.
+
+Running instances and their disks are protected from deletion.
+
+If you want to keep instance templates, disks, or images in Google Cloud, name them so they don't match the automated names:
+- deleted instance templates and disks end in a commit hash, so use a name ending in `-` or `-[^0-9a-f]+`
+- deleted images start with `zebrad-cache` or `lwd-cache`, so use a name starting with anything else
+
+Our other Google Cloud projects don't have automated deletion, so you can also use them for experiments or production deployments.
+
+
 ## Troubleshooting
 
 To improve CI performance, some Docker tests are stateful.
