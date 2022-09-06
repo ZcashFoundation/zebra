@@ -93,7 +93,7 @@ pub(crate) fn new_state_with_mainnet_genesis() -> (StateService, FinalizedBlock)
     let genesis = FinalizedBlock::from(genesis);
     state
         .disk
-        .commit_finalized_direct(genesis.clone(), "test")
+        .commit_finalized_direct(genesis.clone().into(), "test")
         .expect("unexpected invalid genesis block test vector");
 
     assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());

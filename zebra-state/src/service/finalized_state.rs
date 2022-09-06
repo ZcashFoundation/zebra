@@ -19,11 +19,13 @@ use std::{
     collections::HashMap,
     io::{stderr, stdout, Write},
     path::Path,
+    sync::Arc,
 };
 
 use zebra_chain::{block, parameters::Network};
 
 use crate::{
+    request::FinalizedWithTrees,
     service::{check, QueuedFinalized},
     BoxError, Config, FinalizedBlock,
 };
@@ -188,7 +190,8 @@ impl FinalizedState {
     /// public API of the [`FinalizedState`].
     fn commit_finalized(&mut self, queued_block: QueuedFinalized) -> Result<FinalizedBlock, ()> {
         let (finalized, rsp_tx) = queued_block;
-        let result = self.commit_finalized_direct(finalized.clone(), "CommitFinalized request");
+        let result =
+            self.commit_finalized_direct(finalized.clone().into(), "CommitFinalized request");
 
         let block_result = if result.is_ok() {
             metrics::counter!("state.checkpoint.finalized.block.count", 1);
@@ -238,9 +241,10 @@ impl FinalizedState {
     #[allow(clippy::unwrap_in_result)]
     pub fn commit_finalized_direct(
         &mut self,
-        finalized: FinalizedBlock,
+        finalized_with_trees: FinalizedWithTrees,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
+        let finalized = finalized_with_trees.finalized;
         let committed_tip_hash = self.db.finalized_tip_hash();
         let committed_tip_height = self.db.finalized_tip_height();
 
@@ -272,28 +276,73 @@ impl FinalizedState {
             );
         }
 
-        // Check the block commitment. For Nu5-onward, the block hash commits only
-        // to non-authorizing data (see ZIP-244). This checks the authorizing data
-        // commitment, making sure the entire block contents were committed to.
-        // The test is done here (and not during semantic validation) because it needs
-        // the history tree root. While it _is_ checked during contextual validation,
-        // that is not called by the checkpoint verifier, and keeping a history tree there
-        // would be harder to implement.
-        //
-        // TODO: run this CPU-intensive cryptography in a parallel rayon thread, if it shows up in profiles
-        let history_tree = self.db.history_tree();
-        check::block_commitment_is_valid_for_chain_history(
-            finalized.block.clone(),
-            self.network,
-            &history_tree,
-        )?;
+        let (history_tree, note_commitment_trees) = match finalized_with_trees.treestate {
+            // If the treestate associated with the block was supplied, use it
+            // without recomputing it.
+            Some(ref treestate) => (
+                treestate.history_tree.clone(),
+                treestate.note_commitment_trees.clone(),
+            ),
+            // If the treestate was not supplied, retrieve a previous treestate
+            // from the database, and update it for the block being committed.
+            None => {
+                let mut history_tree = self.db.history_tree();
+                let mut note_commitment_trees = self.db.note_commitment_trees();
+
+                // Update the note commitment trees.
+                note_commitment_trees.update_trees_parallel(&finalized.block)?;
+
+                // Check the block commitment if the history tree was not
+                // supplied by the non-finalized state. Note that we don't do
+                // this check for history trees supplied by the non-finalized
+                // state because the non-finalized state checks the block
+                // commitment.
+                //
+                // For Nu5-onward, the block hash commits only to
+                // non-authorizing data (see ZIP-244). This checks the
+                // authorizing data commitment, making sure the entire block
+                // contents were committed to. The test is done here (and not
+                // during semantic validation) because it needs the history tree
+                // root. While it _is_ checked during contextual validation,
+                // that is not called by the checkpoint verifier, and keeping a
+                // history tree there would be harder to implement.
+                //
+                // TODO: run this CPU-intensive cryptography in a parallel rayon
+                // thread, if it shows up in profiles
+                check::block_commitment_is_valid_for_chain_history(
+                    finalized.block.clone(),
+                    self.network,
+                    &history_tree,
+                )?;
+
+                // Update the history tree.
+                //
+                // TODO: run this CPU-intensive cryptography in a parallel rayon
+                // thread, if it shows up in profiles
+                let history_tree_mut = Arc::make_mut(&mut history_tree);
+                let sapling_root = note_commitment_trees.sapling.root();
+                let orchard_root = note_commitment_trees.orchard.root();
+                history_tree_mut.push(
+                    self.network(),
+                    finalized.block.clone(),
+                    sapling_root,
+                    orchard_root,
+                )?;
+
+                (history_tree, note_commitment_trees)
+            }
+        };
 
         let finalized_height = finalized.height;
         let finalized_hash = finalized.hash;
 
-        let result = self
-            .db
-            .write_block(finalized, history_tree, self.network, source);
+        let result = self.db.write_block(
+            finalized,
+            history_tree,
+            note_commitment_trees,
+            self.network,
+            source,
+        );
 
         // TODO: move the stop height check to the syncer (#3442)
         if result.is_ok() && self.is_at_stop_height(finalized_height) {
