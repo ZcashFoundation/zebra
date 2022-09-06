@@ -1159,21 +1159,25 @@ jobs:
       # Passes the sync height to subsequent steps using $SYNC_HEIGHT env variable.
       - name: Get sync height from logs
         run: |
-          SYNC_HEIGHT=$( \
+          SYNC_HEIGHT=""
+
+          DOCKER_LOGS=$( \
           gcloud compute ssh \
           ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ env.ZONE }} \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --command=" \
-          docker logs ${{ inputs.test_id }} --tail 200 | \
-          tee --output-error=exit /dev/stderr | \
-          grep --extended-regexp --only-matching --color=never \
-          '${{ inputs.height_grep_text }}[0-9]+' | \
-          grep --extended-regexp --only-matching --color=never \
-          '[0-9]+' | \
-          tail -1 \
+          docker logs ${{ inputs.test_id }} --tail 200 \
           ")
+          
+          SYNC_HEIGHT=$( \
+          echo "$DOCKER_LOGS" | \
+          grep --extended-regexp --only-matching '${{ inputs.height_grep_text }}[0-9]+' | \
+          grep --extended-regexp --only-matching  '[0-9]+' | \
+          tail -1 || \
+          [[ $? == 1 ]] \
+          )
           
           if [[ -z "$SYNC_HEIGHT" ]]; then
               echo "Missing sync height in logs: $SYNC_HEIGHT"
@@ -1181,7 +1185,7 @@ jobs:
               # or the CI workflow sync height regex is wrong.
               false
           fi
-
+          
           echo "Found sync height in logs: $SYNC_HEIGHT"
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
 
