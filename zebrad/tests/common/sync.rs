@@ -72,8 +72,7 @@ pub const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
 /// The partially synchronized state is expected to be close to the tip, so this timeout can be
 /// lower than what's expected for a full synchronization. However, a value that's too short may
 /// cause the test to fail.
-#[allow(dead_code)]
-pub const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+pub const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(11 * 60 * 60);
 
 /// The test sync height where we switch to using the default lookahead limit.
 ///
@@ -300,11 +299,11 @@ pub fn sync_until(
 /// is returned afterwards, containing the fully synchronized chain state.
 #[allow(dead_code)]
 #[tracing::instrument]
-pub async fn perform_full_sync_starting_from(
+pub async fn copy_state_and_perform_full_sync(
     network: Network,
     partial_sync_path: &Path,
 ) -> Result<TempDir> {
-    let fully_synced_path = copy_state_directory(&partial_sync_path).await?;
+    let fully_synced_path = copy_state_directory(network, &partial_sync_path).await?;
 
     sync_until(
         Height::MAX,

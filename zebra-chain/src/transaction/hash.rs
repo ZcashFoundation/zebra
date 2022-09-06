@@ -109,10 +109,21 @@ impl Hash {
     ///
     /// Zebra displays transaction and block hashes in big-endian byte-order,
     /// following the u256 convention set by Bitcoin and zcashd.
-    fn bytes_in_display_order(&self) -> [u8; 32] {
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
         let mut reversed_bytes = self.0;
         reversed_bytes.reverse();
         reversed_bytes
+    }
+
+    /// Convert bytes in big-endian byte-order into a [`transaction::Hash`](crate::transaction::Hash).
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> Hash {
+        let mut internal_byte_order = *bytes_in_display_order;
+        internal_byte_order.reverse();
+
+        Hash(internal_byte_order)
     }
 }
 

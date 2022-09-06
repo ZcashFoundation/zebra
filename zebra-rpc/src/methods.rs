@@ -243,9 +243,20 @@ where
     >,
     Tip: ChainTip,
 {
+    // Configuration
+    //
     /// Zebra's application version.
     app_version: String,
 
+    /// The configured network for this RPC service.
+    network: Network,
+
+    /// Test-only option that makes Zebra say it is at the chain tip,
+    /// no matter what the estimated height or local clock is.
+    debug_force_finished_sync: bool,
+
+    // Services
+    //
     /// A handle to the mempool service.
     mempool: Buffer<Mempool, mempool::Request>,
 
@@ -255,10 +266,8 @@ where
     /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: Tip,
 
-    /// The configured network for this RPC service.
-    #[allow(dead_code)]
-    network: Network,
-
+    // Tasks
+    //
     /// A sender component of a channel used to send transactions to the queue.
     queue_sender: Sender<Option<UnminedTx>>,
 }
@@ -279,10 +288,11 @@ where
     /// Create a new instance of the RPC handler.
     pub fn new<Version>(
         app_version: Version,
+        network: Network,
+        debug_force_finished_sync: bool,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
-        network: Network,
     ) -> (Self, JoinHandle<()>)
     where
         Version: ToString,
@@ -300,10 +310,11 @@ where
 
         let rpc_impl = RpcImpl {
             app_version,
+            network,
+            debug_force_finished_sync,
             mempool: mempool.clone(),
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
-            network,
             queue_sender: runner.sender(),
         };
 
@@ -379,12 +390,17 @@ where
                 data: None,
             })?;
 
-        let estimated_height =
+        let mut estimated_height =
             if current_block_time > Utc::now() || zebra_estimated_height < tip_height {
                 tip_height
             } else {
                 zebra_estimated_height
             };
+
+        // If we're testing the mempool, force the estimated height to be the actual tip height.
+        if self.debug_force_finished_sync {
+            estimated_height = tip_height;
+        }
 
         // `upgrades` object
         //
@@ -505,6 +521,8 @@ where
                 1,
                 "mempool service returned more results than expected"
             );
+
+            tracing::debug!("sent transaction to mempool: {:?}", &queue_results[0]);
 
             match &queue_results[0] {
                 Ok(()) => Ok(SentTransactionHash(transaction_hash)),

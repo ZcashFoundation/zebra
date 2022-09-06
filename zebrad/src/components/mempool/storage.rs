@@ -179,6 +179,13 @@ impl Storage {
 
         // First, check if we have a cached rejection for this transaction.
         if let Some(error) = self.rejection_error(&tx_id) {
+            tracing::trace!(
+                ?tx_id,
+                ?error,
+                stored_transaction_count = ?self.verified.transaction_count(),
+                "returning cached error for transaction",
+            );
+
             return Err(error);
         }
 
@@ -187,12 +194,25 @@ impl Storage {
         // Security: transactions must not get refreshed by new queries,
         // because that allows malicious peers to keep transactions live forever.
         if self.verified.contains(&tx_id) {
+            tracing::trace!(
+                ?tx_id,
+                stored_transaction_count = ?self.verified.transaction_count(),
+                "returning InMempool error for transaction that is already in the mempool",
+            );
+
             return Err(MempoolError::InMempool);
         }
 
         // Then, we try to insert into the pool. If this fails the transaction is rejected.
         let mut result = Ok(tx_id);
         if let Err(rejection_error) = self.verified.insert(tx) {
+            tracing::debug!(
+                ?tx_id,
+                ?rejection_error,
+                stored_transaction_count = ?self.verified.transaction_count(),
+                "insertion error for transaction",
+            );
+
             // We could return here, but we still want to check the mempool size
             self.reject(tx_id, rejection_error.clone().into());
             result = Err(rejection_error.into());
