@@ -11,6 +11,10 @@ On every PR change, Zebra runs [these Docker tests](https://github.com/ZcashFoun
 - lightwalletd integration with Zebra JSON-RPC and Light Wallet gRPC calls
 
 When a PR is merged to the `main` branch, we also run a Zebra full sync test from genesis.
+Some of our builds and tests are repeated on the `main` branch, due to:
+- GitHub's cache sharing rules,
+- our cached state sharing rules, or
+- generating base coverage for PR coverage reports.
 
 Currently, each Zebra and lightwalletd full and update sync will updates cached state images,
 which are shared by all tests. Tests prefer the latest image generated from the same commit.
@@ -19,6 +23,20 @@ any branch and commit, as long as the state version is the same.
 
 Zebra also does [a smaller set of tests](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/continous-integration-os.yml) on tier 2 platforms using GitHub actions runners.
 
+## Automated Merges
+
+We use [Mergify](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) to automatically merge most pull requests.
+To merge, a PR has to pass all required `main` branch protection checks, and be approved by a Zebra developer.
+
+We try to use Mergify as much as we can, so all PRs get consistent checks.
+
+Some PRs don't use Mergify:
+- Mergify config updates
+- Admin merges, which happen when there are multiple failures on the `main` branch
+- Manual merges
+
+We use workflow conditions to skip some checks on PRs, Mergify, or the `main` branch.
+For example, some workflow changes skip Rust code checks.
 
 ## Manually Using Google Cloud
 
