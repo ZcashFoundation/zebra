@@ -353,6 +353,9 @@ impl FinalizedState {
         let _ = stdout().lock().flush();
         let _ = stderr().lock().flush();
 
+        // Give some time to logger thread to flush out any remaining lines to stdout
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
         // Exits before calling drop on the WorkerGuard for the logger thread,
         // dropping any lines that haven't already been written to stdout.
         // This is okay for now because this is test-only code
