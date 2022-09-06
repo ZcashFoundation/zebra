@@ -10,7 +10,9 @@ env:
   # Delete all resources created before $DELETE_AGE_DAYS days ago.
   DELETE_AGE_DAYS: 7
   # But keep the latest $KEEP_LATEST_IMAGE_COUNT images of each type.
-  KEEP_LATEST_IMAGE_COUNT: 2
+  #
+  # TODO: reduce this to 1 or 2 after "The resource is not ready" errors get fixed?
+  KEEP_LATEST_IMAGE_COUNT: 3
 
 jobs:
   delete-resources:
@@ -75,7 +77,8 @@ jobs:
       # - zebrad tip cache
       # - lightwalletd + zebrad tip cache
       #
-      # TODO: when we add testnet to the workflows, keep the latest 2 testnet images, and the latest 2 mainnet images.
+      # TODO: when we add testnet to the workflows, keep the latest $KEEP_LATEST_IMAGE_COUNT testnet images, 
+      #       and the latest $KEEP_LATEST_IMAGE_COUNT mainnet images.
       - name: Delete old cache disks
         run: |
           DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
@@ -91,7 +94,7 @@ jobs:
               continue
             fi
             
-            echo gcloud compute images delete ${IMAGE} || continue
+            gcloud compute images delete ${IMAGE} || continue
           done
 
           ZEBRAD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*net-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
@@ -105,7 +108,7 @@ jobs:
               continue
             fi
             
-            echo gcloud compute images delete ${IMAGE} || continue
+            gcloud compute images delete ${IMAGE} || continue
           done
           
           LWD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^lwd-cache-.*net-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
@@ -119,12 +122,12 @@ jobs:
               continue
             fi
             
-            echo gcloud compute images delete ${IMAGE} || continue
+            gcloud compute images delete ${IMAGE} || continue
           done
           
           # TODO: delete this after the first run, the images were created by an outdated workflow
-          CANOPY_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~canopy AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          CANOPY_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~canopy$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
           for IMAGE in $CANOPY_IMAGES
           do
-            echo gcloud compute images delete ${IMAGE} || continue
+            gcloud compute images delete ${IMAGE} || continue
           done
