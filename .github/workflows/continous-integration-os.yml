@@ -102,8 +102,8 @@ jobs:
         # TODO: Remove this workaround once the build is more efficient (#3005).
         if: matrix.os == 'windows-latest'
         run: |
-          mkdir C:\zebra-target
-          echo "CARGO_TARGET_DIR=C:\zebra-target" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          mkdir "C:\\zebra-target"
+          echo "CARGO_TARGET_DIR=C:\\zebra-target" | Out-File -FilePath "$env:GITHUB_ENV" -Encoding utf8 -Append
 
       - name: cargo fetch
         uses: actions-rs/cargo@v1.0.3
