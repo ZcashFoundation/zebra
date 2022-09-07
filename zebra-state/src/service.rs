@@ -669,6 +669,14 @@ impl Service<Request> for StateService {
 
                 let timer = CodeTimer::start();
 
+                // # Consensus
+                //
+                // A non-finalized block verification could have called AwaitUtxo
+                // before this finalized block arrived in the state.
+                // So we need to check for pending UTXOs here for non-finalized blocks,
+                // even though it is redundant for most finalized blocks.
+                // (Finalized blocks are verified using block hash checkpoints
+                // and transaction merkle tree block header commitments.)
                 self.pending_utxos.check_against(&finalized.new_outputs);
 
                 // # Performance
