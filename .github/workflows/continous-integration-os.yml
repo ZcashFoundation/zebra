@@ -223,7 +223,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v1
         with:
-          shared-key: "clippy-cargo-lock"
+          # TODO: change to shared-key when we switch to Swatinem/rust-cache@v2
+          sharedKey: "clippy-cargo-lock"
 
       - name: Check Cargo.lock is up to date
         uses: actions-rs/cargo@v1.0.3
