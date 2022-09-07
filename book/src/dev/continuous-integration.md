@@ -155,9 +155,10 @@ If the Docker cached state disks are full, increase the disk sizes in:
 - [deploy-gcp-tests.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/deploy-gcp-tests.yml)
 - [continous-delivery.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/continous-delivery.yml)
 
-If the GitHub Actions disks are full:
-1. clear the GitHub Actions cache for the failing branch
-2. clear the GitHub Actions caches for all the branches and the `main` branch
+If the GitHub Actions disks are full, follow these steps until the errors are fixed:
+1. Update your branch to the latest `main` branch, this builds with all the latest dependencies in the `main` branch cache
+2. Clear the GitHub Actions cache for the failing branch
+3. Clear the GitHub Actions caches for all the branches and the `main` branch
 
 If the `*-sprout-and-sapling-params` caches are around 765 MB, they are the correct size.
 There is no need to clear them, the replacement cache will be the same size.
