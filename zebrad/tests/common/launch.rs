@@ -23,7 +23,10 @@ use zebra_test::{
 };
 use zebrad::config::ZebradConfig;
 
-use crate::common::lightwalletd::{random_known_rpc_port_config, LightwalletdTestType};
+use crate::common::{
+    lightwalletd::{random_known_rpc_port_config, LightwalletdTestType},
+    sync::FINISH_PARTIAL_SYNC_TIMEOUT,
+};
 
 /// After we launch `zebrad`, wait this long for the command to start up,
 /// take the actions expected by the tests, and log the expected logs.
@@ -47,27 +50,14 @@ pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(5);
 
 /// The amount of time we wait for lightwalletd to update to the tip.
 ///
-/// `lightwalletd` takes about 90 minutes to fully sync,
-/// and `zebrad` takes about 30 minutes to update to the tip.
-///
-/// TODO: reduce to 20 minutes when `zebrad` sync performance improves
-pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = Duration::from_secs(11 * 60 * 60);
+/// `lightwalletd` takes about 60-120 minutes to fully sync,
+/// and `zebrad` can take hours to update to the tip under load.
+pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = FINISH_PARTIAL_SYNC_TIMEOUT;
 
 /// The amount of time we wait for lightwalletd to do a full sync to the tip.
 ///
 /// See [`LIGHTWALLETD_UPDATE_TIP_DELAY`] for details.
-pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = Duration::from_secs(11 * 60 * 60);
-
-/// The amount of extra time we wait for Zebra to sync to the tip,
-/// after we ignore a lightwalletd failure.
-///
-/// Since we restart `lightwalletd` after a hang, we allow time for another full `lightwalletd` sync.
-///
-/// See [`LIGHTWALLETD_UPDATE_TIP_DELAY`] for details.
-///
-/// TODO: remove this extra time when lightwalletd hangs are fixed
-pub const ZEBRAD_EXTRA_DELAY_FOR_LIGHTWALLETD_WORKAROUND: Duration =
-    LIGHTWALLETD_FULL_SYNC_TIP_DELAY;
+pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = FINISH_PARTIAL_SYNC_TIMEOUT;
 
 /// Extension trait for methods on `tempfile::TempDir` for using it as a test
 /// directory for `zebrad`.
@@ -214,6 +204,7 @@ pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt + std::fmt
     network: Network,
     zebra_directory: P,
     test_type: LightwalletdTestType,
+    debug_skip_parameter_preload: bool,
 ) -> Result<(TestChild<P>, SocketAddr)> {
     // This is what we recommend our users configure.
     let mut config = random_known_rpc_port_config(true)
@@ -224,6 +215,7 @@ pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt + std::fmt
     config.network.initial_testnet_peers = IndexSet::new();
     config.network.network = network;
     config.mempool.debug_enable_at_height = Some(0);
+    config.consensus.debug_skip_parameter_preload = debug_skip_parameter_preload;
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 

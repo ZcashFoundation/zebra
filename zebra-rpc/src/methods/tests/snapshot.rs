@@ -44,10 +44,11 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // Init RPC
     let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        network,
+        false,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
-        network,
     );
 
     // Start snapshots of RPC responses.

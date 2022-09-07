@@ -49,6 +49,10 @@ pub struct Config {
     ///
     /// If some of those instances are outdated or failed, RPC queries can be slow or inconsistent.
     pub parallel_cpu_threads: usize,
+
+    /// Test-only option that makes Zebra say it is at the chain tip,
+    /// no matter what the estimated height or local clock is.
+    pub debug_force_finished_sync: bool,
 }
 
 impl Default for Config {
@@ -59,6 +63,9 @@ impl Default for Config {
 
             // Use a single thread, so we can detect RPC port conflicts.
             parallel_cpu_threads: 1,
+
+            // Debug options are always off by default.
+            debug_force_finished_sync: false,
         }
     }
 }

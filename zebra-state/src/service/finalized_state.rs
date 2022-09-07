@@ -108,6 +108,11 @@ impl FinalizedState {
                 // So we want to drop it before we exit.
                 std::mem::drop(new_state);
 
+                // Drops tracing log output that's hasn't already been written to stdout
+                // since this exits before calling drop on the WorkerGuard for the logger thread.
+                // This is okay for now because this is test-only code
+                //
+                // TODO: Call ZebradApp.shutdown or drop its Tracing component before calling exit_process to flush logs to stdout
                 Self::exit_process();
             }
         }
@@ -356,6 +361,11 @@ impl FinalizedState {
             // We're just about to do a forced exit, so it's ok to do a forced db shutdown
             self.db.shutdown(true);
 
+            // Drops tracing log output that's hasn't already been written to stdout
+            // since this exits before calling drop on the WorkerGuard for the logger thread.
+            // This is okay for now because this is test-only code
+            //
+            // TODO: Call ZebradApp.shutdown or drop its Tracing component before calling exit_process to flush logs to stdout
             Self::exit_process();
         }
 
@@ -392,6 +402,13 @@ impl FinalizedState {
         let _ = stdout().lock().flush();
         let _ = stderr().lock().flush();
 
+        // Give some time to logger thread to flush out any remaining lines to stdout
+        // and yield so that tests pass on MacOS
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
+        // Exits before calling drop on the WorkerGuard for the logger thread,
+        // dropping any lines that haven't already been written to stdout.
+        // This is okay for now because this is test-only code
         std::process::exit(0);
     }
 }

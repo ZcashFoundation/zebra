@@ -3,7 +3,7 @@
 use zebra_chain::transaction::{UnminedTx, UnminedTxId};
 
 /// A gossiped transaction, which can be the transaction itself or just its ID.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Gossip {
     /// Just the ID of an unmined transaction.
     Id(UnminedTxId),
@@ -18,6 +18,14 @@ impl Gossip {
         match self {
             Gossip::Id(txid) => *txid,
             Gossip::Tx(tx) => tx.id,
+        }
+    }
+
+    /// Return the [`UnminedTx`] of a gossiped transaction, if we have it.
+    pub fn tx(&self) -> Option<UnminedTx> {
+        match self {
+            Gossip::Id(_) => None,
+            Gossip::Tx(tx) => Some(tx.clone()),
         }
     }
 }

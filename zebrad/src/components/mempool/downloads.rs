@@ -36,6 +36,7 @@ use futures::{
     future::TryFutureExt,
     ready,
     stream::{FuturesUnordered, Stream},
+    FutureExt,
 };
 use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
@@ -273,6 +274,8 @@ where
             // Don't download/verify if the transaction is already in the state.
             Self::transaction_in_state(&mut state, txid).await?;
 
+            trace!(?txid, "transaction is not in state");
+
             let next_height = match state.oneshot(zs::Request::Tip).await {
                 Ok(zs::Response::Tip(None)) => Ok(Height(0)),
                 Ok(zs::Response::Tip(Some((height, _hash)))) => {
@@ -283,6 +286,8 @@ where
                 Ok(_) => unreachable!("wrong response"),
                 Err(e) => Err(TransactionDownloadVerifyError::StateError(e)),
             }?;
+
+            trace!(?txid, ?next_height, "got next height");
 
             let tx = match gossiped_tx {
                 Gossip::Id(txid) => {
@@ -322,6 +327,8 @@ where
                 }
             };
 
+            trace!(?txid, "got tx");
+
             let result = verifier
                 .oneshot(tx::Request::Mempool {
                     transaction: tx.clone(),
@@ -333,7 +340,8 @@ where
                 })
                 .await;
 
-            debug!(?txid, ?result, "verified transaction for the mempool");
+            // Hide the transaction data to avoid filling the logs
+            trace!(?txid, result = ?result.as_ref().map(|_tx| ()), "verified transaction for the mempool");
 
             result.map_err(|e| TransactionDownloadVerifyError::Invalid(e.into()))
         }
@@ -348,6 +356,11 @@ where
         // Tack the hash onto the error so we can remove the cancel handle
         // on failure as well as on success.
         .map_err(move |e| (e, txid))
+            .inspect(move |result| {
+                // Hide the transaction data to avoid filling the logs
+                let result = result.as_ref().map(|_tx| txid);
+                debug!("mempool transaction result: {result:?}");
+            })
         .in_current_span();
 
         let task = tokio::spawn(async move {
