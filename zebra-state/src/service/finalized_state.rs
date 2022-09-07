@@ -354,6 +354,7 @@ impl FinalizedState {
         let _ = stderr().lock().flush();
 
         // Give some time to logger thread to flush out any remaining lines to stdout
+        // and yield so that tests pass on MacOS
         std::thread::sleep(std::time::Duration::from_secs(3));
 
         // Exits before calling drop on the WorkerGuard for the logger thread,
