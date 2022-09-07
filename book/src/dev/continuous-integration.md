@@ -148,3 +148,29 @@ To fix duplicate dependencies, follow these steps until the duplicate dependenci
    d. For an example, see [PR #4890](https://github.com/ZcashFoundation/zebra/pull/4890/files).
 
 4. Repeat step 3 until the dependency warnings are fixed. Adding a single exception can resolve multiple warnings.
+
+### Resolving Disk Full Errors
+
+If the Docker cached state disks are full, increase the disk sizes in:
+- [deploy-gcp-tests.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/deploy-gcp-tests.yml)
+- [continous-delivery.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/continous-delivery.yml)
+
+If the GitHub Actions disks are full, follow these steps until the errors are fixed:
+1. Update your branch to the latest `main` branch, this builds with all the latest dependencies in the `main` branch cache
+2. Clear the GitHub Actions cache for the failing branch
+3. Clear the GitHub Actions caches for all the branches and the `main` branch
+
+If the `*-sprout-and-sapling-params` caches are around 765 MB, they are the correct size.
+There is no need to clear them, the replacement cache will be the same size.
+
+You can find a list of caches using:
+```sh
+gh api -H "Accept: application/vnd.github+json" repos/ZcashFoundation/Zebra/actions/caches
+```
+
+And delete a cache by `id` using:
+```sh
+gh api --method DELETE -H "Accept: application/vnd.github+json" /repos/ZcashFoundation/Zebra/actions/caches/<id>
+```
+
+These commands are from the [GitHub Actions Cache API reference](https://docs.github.com/en/rest/actions/cache).
