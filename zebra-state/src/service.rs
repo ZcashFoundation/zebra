@@ -240,10 +240,17 @@ impl StateService {
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
+        // TODO: move this code into the state block commit task:
+        //   - queue_and_commit_finalized()'s commit_finalized() call becomes a send to the block commit channel
+        //   - run commit_finalized() in the state block commit task
+        //   - run the metrics update in queue_and_commit_finalized() in the block commit task
+        //   - run the set_finalized_tip() in this function in the state block commit task
+        //   - move all that code to the inner service
         let tip_block = self
             .disk
             .queue_and_commit_finalized((finalized, rsp_tx))
             .map(ChainTipBlock::from);
+
         self.chain_tip_sender.set_finalized_tip(tip_block);
 
         rsp_rx
@@ -292,6 +299,11 @@ impl StateService {
             return rsp_rx;
         }
 
+        // TODO: move this code into the state block commit task:
+        //   - process_queued()'s validate_and_commit() call becomes a send to the block commit channel
+        //   - run validate_and_commit() in the state block commit task
+        //   - run all the rest of the code in this function in the state block commit task
+        //   - move all that code to the inner service
         self.process_queued(parent_hash);
 
         while self.mem.best_chain_len() > crate::constants::MAX_BLOCK_REORG_HEIGHT {
@@ -711,6 +723,14 @@ impl Service<Request> for StateService {
                 .instrument(span)
                 .boxed()
             }
+
+            // TODO: move these requests into the state block commit task:
+            //   - send the request to the block commit task channel
+            //   - run the response code in the block commit task (for example, self.best_depth())
+            //     - move all the response code to the inner service
+            //   - get the response back on a oneshot channel (like CommitFinalizedBlock)
+            //   - await the oneshot in the future
+            //   - feel free to delete the timers, we can add them back in later
             Request::Depth(hash) => {
                 metrics::counter!(
                     "state.requests",
