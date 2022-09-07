@@ -17,9 +17,9 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyValidBlock,
+    request::{ContextuallyValidBlock, FinalizedWithTrees},
     service::{check, finalized_state::ZebraDb},
-    FinalizedBlock, PreparedBlock, ValidateContextError,
+    PreparedBlock, ValidateContextError,
 };
 
 mod chain;
@@ -80,7 +80,7 @@ impl NonFinalizedState {
 
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
-    pub fn finalize(&mut self) -> FinalizedBlock {
+    pub fn finalize(&mut self) -> FinalizedWithTrees {
         // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
         // Neither of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
@@ -90,14 +90,16 @@ impl NonFinalizedState {
 
         // extract best chain
         let mut best_chain = chains.next_back().expect("there's at least one chain");
+
         // clone if required
-        let write_best_chain = Arc::make_mut(&mut best_chain);
+        let mut_best_chain = Arc::make_mut(&mut best_chain);
 
         // extract the rest into side_chains so they can be mutated
         let side_chains = chains;
 
-        // remove the lowest height block from the best_chain to be finalized
-        let finalizing = write_best_chain.pop_root();
+        // Pop the lowest height block from the best chain to be finalized, and
+        // also obtain its associated treestate.
+        let (best_chain_root, root_treestate) = mut_best_chain.pop_root();
 
         // add best_chain back to `self.chain_set`
         if !best_chain.is_empty() {
@@ -105,11 +107,11 @@ impl NonFinalizedState {
         }
 
         // for each remaining chain in side_chains
-        for mut chain in side_chains {
-            if chain.non_finalized_root_hash() != finalizing.hash {
+        for mut side_chain in side_chains {
+            if side_chain.non_finalized_root_hash() != best_chain_root.hash {
                 // If we popped the root, the chain would be empty or orphaned,
                 // so just drop it now.
-                drop(chain);
+                drop(side_chain);
 
                 continue;
             }
@@ -117,19 +119,20 @@ impl NonFinalizedState {
             // otherwise, the popped root block is the same as the finalizing block
 
             // clone if required
-            let write_chain = Arc::make_mut(&mut chain);
+            let mut_side_chain = Arc::make_mut(&mut side_chain);
 
             // remove the first block from `chain`
-            let chain_start = write_chain.pop_root();
-            assert_eq!(chain_start.hash, finalizing.hash);
+            let (side_chain_root, _treestate) = mut_side_chain.pop_root();
+            assert_eq!(side_chain_root.hash, best_chain_root.hash);
 
             // add the chain back to `self.chain_set`
-            self.chain_set.insert(chain);
+            self.chain_set.insert(side_chain);
         }
 
         self.update_metrics_for_chains();
 
-        finalizing.into()
+        // Add the treestate to the finalized block.
+        FinalizedWithTrees::new(best_chain_root, root_treestate)
     }
 
     /// Commit block to the non-finalized state, on top of:

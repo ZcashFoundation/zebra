@@ -102,6 +102,16 @@
 //! ```
 //!
 //! Please refer to the documentation of each test for more information.
+//!
+//! ## Disk Space for Testing
+//!
+//! The full sync and lightwalletd tests with cached state expect a temporary directory with
+//! at least 300 GB of disk space (2 copies of the full chain). To use another disk for the
+//! temporary test files:
+//!
+//! ```sh
+//! export TMPDIR=/path/to/disk/directory
+//! ```
 
 use std::{collections::HashSet, env, fs, panic, path::PathBuf, time::Duration};
 
@@ -1229,6 +1239,77 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn non_blocking_logger() -> Result<()> {
+    use futures::FutureExt;
+    use std::{sync::mpsc, time::Duration};
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+
+    let test_task_handle: tokio::task::JoinHandle<Result<()>> = rt.spawn(async move {
+        let _init_guard = zebra_test::init();
+
+        // Write a configuration that has RPC listen_addr set
+        // [Note on port conflict](#Note on port conflict)
+        let mut config = random_known_rpc_port_config(false)?;
+        config.tracing.filter = Some("trace".to_string());
+        config.tracing.buffer_limit = 100;
+        let zebra_rpc_address = config.rpc.listen_addr.unwrap();
+
+        let dir = testdir()?.with_config(&mut config)?;
+        let mut child = dir.spawn_child(args!["start"])?;
+        // Wait until port is open.
+        child.expect_stdout_line_matches(
+            format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
+        )?;
+
+        // Create an http client
+        let client = reqwest::Client::new();
+
+        // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
+        // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
+        for _ in 0..500 {
+            let res = client
+                .post(format!("http://{}", &zebra_rpc_address))
+                .body(r#"{"jsonrpc":"1.0","method":"getinfo","params":[],"id":123}"#)
+                .header("Content-Type", "application/json")
+                .send()
+                .await?;
+
+            // Test that zebrad rpc endpoint is still responding to requests
+            assert!(res.status().is_success());
+        }
+
+        child.kill(false)?;
+
+        let output = child.wait_with_output()?;
+        let output = output.assert_failure()?;
+
+        // [Note on port conflict](#Note on port conflict)
+        output
+            .assert_was_killed()
+            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+        done_tx.send(())?;
+
+        Ok(())
+    });
+
+    // Wait until the spawned task finishes or return an error in 45 seconds
+    if done_rx.recv_timeout(Duration::from_secs(45)).is_err() {
+        return Err(eyre!("unexpected test task hang"));
+    }
+
+    rt.shutdown_timeout(Duration::from_secs(3));
+
+    match test_task_handle.now_or_never() {
+        Some(Ok(result)) => result,
+        Some(Err(error)) => Err(eyre!("join error: {:?}", error)),
+        None => Err(eyre!("unexpected test task hang")),
+    }
+}
+
 /// Make sure `lightwalletd` works with Zebra, when both their states are empty.
 ///
 /// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` env var is set.
@@ -1819,8 +1900,12 @@ async fn fully_synced_rpc_test() -> Result<()> {
 
     let network = Network::Mainnet;
 
-    let (_zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc_without_initial_peers(network, cached_state_path.unwrap(), test_type)?;
+    let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
+        network,
+        cached_state_path.unwrap(),
+        test_type,
+        true,
+    )?;
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used

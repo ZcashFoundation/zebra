@@ -11,6 +11,10 @@ On every PR change, Zebra runs [these Docker tests](https://github.com/ZcashFoun
 - lightwalletd integration with Zebra JSON-RPC and Light Wallet gRPC calls
 
 When a PR is merged to the `main` branch, we also run a Zebra full sync test from genesis.
+Some of our builds and tests are repeated on the `main` branch, due to:
+- GitHub's cache sharing rules,
+- our cached state sharing rules, or
+- generating base coverage for PR coverage reports.
 
 Currently, each Zebra and lightwalletd full and update sync will updates cached state images,
 which are shared by all tests. Tests prefer the latest image generated from the same commit.
@@ -18,6 +22,40 @@ But if a state from the same commit is not available, tests will use the latest 
 any branch and commit, as long as the state version is the same.
 
 Zebra also does [a smaller set of tests](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/continous-integration-os.yml) on tier 2 platforms using GitHub actions runners.
+
+## Automated Merges
+
+We use [Mergify](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) to automatically merge most pull requests.
+To merge, a PR has to pass all required `main` branch protection checks, and be approved by a Zebra developer.
+
+We try to use Mergify as much as we can, so all PRs get consistent checks.
+
+Some PRs don't use Mergify:
+- Mergify config updates
+- Admin merges, which happen when there are multiple failures on the `main` branch
+- Manual merges
+
+We use workflow conditions to skip some checks on PRs, Mergify, or the `main` branch.
+For example, some workflow changes skip Rust code checks.
+
+## Manually Using Google Cloud
+
+Some Zebra developers have access to the Zcash Foundation's Google Cloud instance, which also runs our automatic CI.
+
+Please shut down large instances when they are not being used.
+
+### Automated Deletion
+
+The [Delete GCP Resources](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/delete-gcp-resources.yml)
+workflow automatically deletes instance templates, disks, and images older than 1 week.
+
+Running instances and their disks are protected from deletion.
+
+If you want to keep instance templates, disks, or images in Google Cloud, name them so they don't match the automated names:
+- deleted instance templates and disks end in a commit hash, so use a name ending in `-` or `-[^0-9a-f]+`
+- deleted images start with `zebrad-cache` or `lwd-cache`, so use a name starting with anything else
+
+Our other Google Cloud projects don't have automated deletion, so you can also use them for experiments or production deployments.
 
 
 ## Troubleshooting
@@ -110,3 +148,29 @@ To fix duplicate dependencies, follow these steps until the duplicate dependenci
    d. For an example, see [PR #4890](https://github.com/ZcashFoundation/zebra/pull/4890/files).
 
 4. Repeat step 3 until the dependency warnings are fixed. Adding a single exception can resolve multiple warnings.
+
+### Resolving Disk Full Errors
+
+If the Docker cached state disks are full, increase the disk sizes in:
+- [deploy-gcp-tests.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/deploy-gcp-tests.yml)
+- [continous-delivery.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/continous-delivery.yml)
+
+If the GitHub Actions disks are full, follow these steps until the errors are fixed:
+1. Update your branch to the latest `main` branch, this builds with all the latest dependencies in the `main` branch cache
+2. Clear the GitHub Actions cache for the failing branch
+3. Clear the GitHub Actions caches for all the branches and the `main` branch
+
+If the `*-sprout-and-sapling-params` caches are around 765 MB, they are the correct size.
+There is no need to clear them, the replacement cache will be the same size.
+
+You can find a list of caches using:
+```sh
+gh api -H "Accept: application/vnd.github+json" repos/ZcashFoundation/Zebra/actions/caches
+```
+
+And delete a cache by `id` using:
+```sh
+gh api --method DELETE -H "Accept: application/vnd.github+json" /repos/ZcashFoundation/Zebra/actions/caches/<id>
+```
+
+These commands are from the [GitHub Actions Cache API reference](https://docs.github.com/en/rest/actions/cache).
