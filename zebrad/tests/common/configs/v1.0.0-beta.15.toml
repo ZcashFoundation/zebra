@@ -48,6 +48,8 @@ network = 'Mainnet'
 peerset_initial_target_size = 25
 
 [rpc]
+debug_force_finished_sync = false
+parallel_cpu_threads = 1
 
 [state]
 cache_dir = 'cache_dir'
@@ -61,6 +63,7 @@ full_verify_concurrency_limit = 20
 parallel_cpu_threads = 0
 
 [tracing]
+buffer_limit = 128000
 force_use_color = false
 use_color = true
 use_journald = false
