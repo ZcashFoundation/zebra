@@ -85,7 +85,13 @@ pub fn testdir() -> Result<TempDir> {
         .map_err(Into::into)
 }
 
-/// Get stored config path
-pub fn stored_config_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common/config.toml")
+/// Get the directory where we have different config files.
+pub fn configs_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common/configs")
+}
+
+/// Given a config file name, return full path to it.
+pub fn config_file_full_path(config_file: PathBuf) -> PathBuf {
+    let path = configs_dir().join(config_file);
+    Path::new(&path).into()
 }
