@@ -1309,7 +1309,7 @@ impl Service<ReadRequest> for ReadStateService {
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::UtxosByAddresses");
 
-                        utxos.map(ReadResponse::Utxos)
+                        utxos.map(ReadResponse::AddressUtxos)
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::UtxosByAddresses"))

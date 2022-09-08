@@ -89,7 +89,7 @@ pub enum ReadResponse {
     AddressesTransactionIds(BTreeMap<TransactionLocation, transaction::Hash>),
 
     /// Response to [`ReadRequest::UtxosByAddresses`] with found utxos and transaction data.
-    Utxos(AddressUtxos),
+    AddressUtxos(AddressUtxos),
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.
@@ -117,8 +117,7 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::AddressBalance(_) => unimplemented!(),
             ReadResponse::AddressesTransactionIds(_) => unimplemented!(),
-            // TODO: Rename to AddressUtxos
-            ReadResponse::Utxos(_) => unimplemented!(),
+            ReadResponse::AddressUtxos(_) => unimplemented!(),
         }
     }
 }
