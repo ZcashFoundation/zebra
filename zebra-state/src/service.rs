@@ -495,23 +495,21 @@ impl StateService {
     }
 
     /// Return the [`transparent::Utxo`] pointed to by `outpoint`, if it exists
-    /// in any chain, or in any pending block.
+    /// in any non-finalized chain, or in any pending block.
     ///
     /// Some of the returned UTXOs may be invalid, because:
+    /// - they have already been spent,
     /// - they are not in the best chain, or
     /// - their block fails contextual validation.
-    pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        // We ignore any UTXOs in FinalizedState.queued_by_prev_hash,
-        // because it is only used during checkpoint verification.
+    ///
+    /// Finalized UTXOs are handled via [`ReadRequest::ChainUtxo`].
+    pub fn any_non_finalized_utxo(
+        &self,
+        outpoint: &transparent::OutPoint,
+    ) -> Option<transparent::Utxo> {
         self.mem
             .any_utxo(outpoint)
             .or_else(|| self.queued_blocks.utxo(outpoint))
-            .or_else(|| {
-                self.disk
-                    .db()
-                    .utxo(outpoint)
-                    .map(|ordered_utxo| ordered_utxo.utxo)
-            })
     }
 
     /// Return an iterator over the relevant chain of the block identified by
@@ -706,7 +704,7 @@ impl Service<Request> for StateService {
 
             // Uses pending_utxos and queued_blocks in the StateService.
             // Accesses shared writeable state in the StateService.
-            // Runs a StoredUtxo request concurrently using the ReadStateService.
+            // Runs a ChainUtxo request using the ReadStateService, but without any concurrency.
             Request::AwaitUtxo(outpoint) => {
                 metrics::counter!(
                     "state.requests",
@@ -716,19 +714,62 @@ impl Service<Request> for StateService {
                 );
 
                 let timer = CodeTimer::start();
+
+                let response_fut = self.pending_utxos.queue(outpoint);
                 let span = Span::current();
+                let response_fut = response_fut.instrument(span).boxed();
 
-                let fut = self.pending_utxos.queue(outpoint);
-
-                // TODO: move disk reads (in `any_utxo()`) to a blocking thread (#2188)
-                if let Some(utxo) = self.any_utxo(&outpoint) {
+                if let Some(utxo) = self.any_non_finalized_utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
+
+                    // We're finished, the returned future gets the UTXO from the respond() channel.
+                    timer.finish(module_path!(), line!(), "AwaitUtxo/any-non-finalized");
+
+                    return response_fut;
                 }
 
-                // The future waits on a channel for a response.
-                timer.finish(module_path!(), line!(), "AwaitUtxo");
+                // We ignore any UTXOs in FinalizedState.queued_by_prev_hash,
+                // because it is only used during checkpoint verification.
+                //
+                // This creates a rare race condition between concurrent:
+                // - pending blocks in the last few checkpoints, and
+                // - the first few blocks doing full validation using UTXOs.
+                //
+                // But it doesn't seem to happen much in practice.
+                // If it did, some blocks would temporarily fail full validation,
+                // until they get retried after the checkpointed blocks are committed.
 
-                fut.instrument(span).boxed()
+                // Send a request to the ReadStateService, to get UTXOs from the finalized chain.
+                let read_service = self.read_service.clone();
+
+                // Optional TODO:
+                //  - make pending_utxos.respond() async using a channel,
+                //    so we can use ReadRequest::ChainUtxo here, and avoid a block_in_place().
+
+                let span = Span::current();
+                let utxo = tokio::task::block_in_place(move || {
+                    span.in_scope(move || {
+                        read_service
+                            .best_chain_receiver
+                            .with_watch_data(|best_chain| {
+                                read::utxo(best_chain, &read_service.db, outpoint)
+                            })
+                    })
+                });
+
+                if let Some(utxo) = utxo {
+                    self.pending_utxos.respond(&outpoint, utxo);
+
+                    // We're finished, the returned future gets the UTXO from the respond() channel.
+                    timer.finish(module_path!(), line!(), "AwaitUtxo/finalized");
+
+                    return response_fut;
+                }
+
+                // We're finished, but the returned future is waiting on the respond() channel.
+                timer.finish(module_path!(), line!(), "AwaitUtxo/waiting");
+
+                response_fut
             }
 
             // TODO: add a name() method to Request, and combine all the generic read requests
@@ -984,7 +1025,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
-            // Used by get_block RPC.
+            // Used by get_block RPC and the StateService.
             ReadRequest::Block(hash_or_height) => {
                 metrics::counter!(
                     "state.requests",
@@ -1014,7 +1055,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
-            // For the get_raw_transaction RPC.
+            // For the get_raw_transaction RPC and the StateService.
             ReadRequest::Transaction(hash) => {
                 metrics::counter!(
                     "state.requests",
@@ -1042,6 +1083,36 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::Transaction"))
+                .boxed()
+            }
+
+            // Currently unused.
+            ReadRequest::ChainUtxo(outpoint) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "chain_utxo",
+                );
+
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let utxo = state.best_chain_receiver.with_watch_data(|best_chain| {
+                            read::utxo(best_chain, &state.db, outpoint)
+                        });
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::ChainUtxo");
+
+                        Ok(ReadResponse::ChainUtxo(utxo))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::ChainUtxo"))
                 .boxed()
             }
 

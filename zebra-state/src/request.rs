@@ -445,9 +445,11 @@ pub enum Request {
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
 
-    /// Request a UTXO identified by the given
-    /// [`OutPoint`](transparent::OutPoint), waiting until it becomes available
-    /// if it is unknown.
+    /// Request a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
+    /// waiting until it becomes available if it is unknown.
+    ///
+    /// Checks the finalized chain, non-finalized chain, queued unverified blocks,
+    /// and any blocks that arrive at the state after the request future has been created.
     ///
     /// This request is purely informational, and there are no guarantees about
     /// whether the UTXO remains unspent or is on the best chain, or any chain.
@@ -458,6 +460,8 @@ pub enum Request {
     /// UTXO requests should be wrapped in a timeout, so that
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
+    ///
+    /// Outdated requests are pruned on a regular basis.
     AwaitUtxo(transparent::OutPoint),
 
     /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
@@ -541,6 +545,15 @@ pub enum ReadRequest {
     /// * [`ReadResponse::Transaction(Some(Arc<Transaction>))`](ReadResponse::Transaction) if the transaction is in the best chain;
     /// * [`ReadResponse::Transaction(None)`](ReadResponse::Transaction) otherwise.
     Transaction(transaction::Hash),
+
+    /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
+    /// returning `None` immediately if it is unknown.
+    ///
+    /// Checks verified blocks in the finalized chain and non-finalized chain.
+    ///
+    /// This request is purely informational, there is no guarantee that
+    /// the UTXO remains unspent in the best chain.
+    ChainUtxo(transparent::OutPoint),
 
     /// Computes a block locator object based on the current best chain.
     ///
@@ -662,8 +675,6 @@ impl TryFrom<Request> for ReadRequest {
             Request::Block(hash_or_height) => Ok(ReadRequest::Block(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
 
-            Request::AwaitUtxo(_) => unimplemented!("use StoredUtxo here"),
-
             Request::BlockLocator => Ok(ReadRequest::BlockLocator),
             Request::FindBlockHashes { known_blocks, stop } => {
                 Ok(ReadRequest::FindBlockHashes { known_blocks, stop })
@@ -674,6 +685,11 @@ impl TryFrom<Request> for ReadRequest {
 
             Request::CommitBlock(_) | Request::CommitFinalizedBlock(_) => {
                 Err("ReadService does not write blocks")
+            }
+
+            Request::AwaitUtxo(_) => {
+                Err("ReadService does not track pending UTXOs. \
+                     Manually convert the request to ReadRequest::ChainUtxo, and handle pending UTXOs.")
             }
         }
     }

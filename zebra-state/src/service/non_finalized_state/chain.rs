@@ -651,6 +651,18 @@ impl Chain {
         unspent_utxos
     }
 
+    /// Returns the [`transparent::Utxo`] pointed to by the given
+    /// [`transparent::OutPoint`] if it was created by this chain.
+    ///
+    /// UTXOs are returned regardless of whether they have been spent.
+    pub fn created_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
+        if let Some(utxo) = self.created_utxos.get(outpoint) {
+            return Some(utxo.utxo.clone());
+        }
+
+        None
+    }
+
     // Address index queries
 
     /// Returns the transparent transfers for `addresses` in this non-finalized chain.
