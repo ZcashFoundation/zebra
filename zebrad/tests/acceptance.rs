@@ -511,6 +511,9 @@ fn config_tests() -> Result<()> {
     // Check what happens when Zebra parses an invalid config
     invalid_generated_config()?;
 
+    // Check that we have a current version of the config stored
+    last_config_is_stored()?;
+
     // Check that Zebra stored configuration works
     stored_configs_works()?;
 
@@ -597,6 +600,59 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
     );
 
     Ok(())
+}
+
+/// Check if the config produced by current zebrad is stored.
+fn last_config_is_stored() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let testdir = testdir()?;
+
+    // Add a config file name to tempdir path
+    let generated_config_path = testdir.path().join("zebrad.toml");
+
+    // Generate configuration in temp dir path
+    let child =
+        testdir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_success()?;
+
+    assert_with_context!(
+        generated_config_path.exists(),
+        &output,
+        "generated config file not found"
+    );
+
+    // Get the contents of the generated config file
+    let generated_content =
+        fs::read_to_string(generated_config_path).expect("Should have been able to read the file");
+
+    // We need to replace the cache dir path as stored configs has a dummy `cache_dir` string there.
+    let processed_generated_content = generated_content.replace(
+        zebra_state::Config::default()
+            .cache_dir
+            .to_str()
+            .expect("a valid cache dir"),
+        "cache_dir",
+    );
+
+    // Loop all the stored configs
+    for config_file in configs_dir()
+        .read_dir()
+        .expect("read_dir call failed")
+        .flatten()
+    {
+        // Read stored config
+        let stored_content = fs::read_to_string(config_file_full_path(config_file.path()))
+            .expect("Should have been able to read the file");
+
+        // If any stored config is equal to the generated then we are good.
+        if stored_content.eq(&processed_generated_content) {
+            return Ok(());
+        }
+    }
+    Err(eyre!("last config is not stored"))
 }
 
 /// Checks that Zebra prints an informative message when it cannot parse the
