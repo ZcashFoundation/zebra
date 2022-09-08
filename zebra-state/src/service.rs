@@ -503,34 +503,11 @@ impl StateService {
         self.mem.best_tip().or_else(|| self.disk.db().tip())
     }
 
-    /// Return the depth of block `hash` in the current best chain.
-    pub fn best_depth(&self, hash: block::Hash) -> Option<u32> {
-        let tip = self.best_tip()?.0;
-        let height = self
-            .mem
-            .best_height_by_hash(hash)
-            .or_else(|| self.disk.db().height(hash))?;
-
-        Some(tip.0 - height.0)
-    }
-
     /// Return the hash for the block at `height` in the current best chain.
     pub fn best_hash(&self, height: block::Height) -> Option<block::Hash> {
         self.mem
             .best_hash(height)
             .or_else(|| self.disk.db().hash(height))
-    }
-
-    /// Return true if `hash` is in the current best chain.
-    #[allow(dead_code)]
-    pub fn best_chain_contains(&self, hash: block::Hash) -> bool {
-        read::chain_contains_hash(self.mem.best_chain(), self.disk.db(), hash)
-    }
-
-    /// Return the height for the block at `hash`, if `hash` is in the best chain.
-    #[allow(dead_code)]
-    pub fn best_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
-        read::height_by_hash(self.mem.best_chain(), self.disk.db(), hash)
     }
 
     /// Return the height for the block at `hash` in any chain.
@@ -750,20 +727,8 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
-            // TODO: move these requests into the state block commit task:
-            //   - send the request to the block commit task channel
-            //   - run the response code in the block commit task (for example, self.best_depth())
-            //     - move all the response code to the inner service
-            //   - get the response back on a oneshot channel (like CommitFinalizedBlock)
-            //   - await the oneshot in the future
-            //   - feel free to delete the timers, we can add them back in later
-            //
-            // TODO: consider spawning small reads into blocking tasks,
-            //       because the database can do large cleanups during small reads.
-            //
-            // Depth only uses the best `Chain` and FinalizedState `ZebraDb`.
-            // (It could run concurrently, but it doesn't yet.)
-            Request::Depth(hash) => {
+            // Runs concurrently using the ReadStateService
+            Request::Depth(_) => {
                 metrics::counter!(
                     "state.requests",
                     1,
@@ -771,16 +736,20 @@ impl Service<Request> for StateService {
                     "type" => "depth",
                 );
 
-                let timer = CodeTimer::start();
+                // Redirect the request to the concurrent ReadStateService
+                let read_service = self.read_service.clone();
 
-                // TODO: move this work into the future, like Block and Transaction?
-                //       move disk reads to a blocking thread (#2188)
-                let rsp = Ok(Response::Depth(self.best_depth(hash)));
+                async move {
+                    let req = req
+                        .try_into()
+                        .expect("ReadRequest conversion should not fail");
 
-                // The work is all done, the future just returns the result.
-                timer.finish(module_path!(), line!(), "Depth");
+                    let rsp = read_service.oneshot(req).await?;
+                    let rsp = rsp.try_into().expect("Response conversion should not fail");
 
-                async move { rsp }.boxed()
+                    Ok(rsp)
+                }
+                .boxed()
             }
 
             // Runs concurrently using the ReadStateService
@@ -1038,6 +1007,36 @@ impl Service<ReadRequest> for ReadStateService {
                         timer.finish(module_path!(), line!(), "ReadRequest::Tip");
 
                         Ok(ReadResponse::Tip(tip))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
+                .boxed()
+            }
+
+            // Used by the StateService.
+            ReadRequest::Depth(hash) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "depth",
+                );
+
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let depth = state
+                            .best_chain_receiver
+                            .with_watch_data(|best_chain| read::depth(best_chain, &state.db, hash));
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::Depth");
+
+                        Ok(ReadResponse::Depth(depth))
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))

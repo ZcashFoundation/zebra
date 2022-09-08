@@ -57,6 +57,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::Tip`] with the current best chain tip.
     Tip(Option<(block::Height, block::Hash)>),
 
+    /// Response to [`ReadRequest::Depth`] with the depth of the specified block.
+    Depth(Option<u32>),
+
     /// Response to [`ReadRequest::Block`] with the specified block.
     Block(Option<Arc<Block>>),
 
@@ -89,6 +92,7 @@ impl TryFrom<ReadResponse> for Response {
     fn try_from(response: ReadResponse) -> Result<Response, Self::Error> {
         match response {
             ReadResponse::Tip(height_and_hash) => Ok(Response::Tip(height_and_hash)),
+            ReadResponse::Depth(depth) => Ok(Response::Depth(depth)),
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
             ReadResponse::Transaction(tx_and_height) => {

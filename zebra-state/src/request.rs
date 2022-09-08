@@ -512,6 +512,14 @@ pub enum ReadRequest {
     /// with the current best chain tip.
     Tip,
 
+    /// Computes the depth in the current best chain of the block identified by the given hash.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::Depth(Some(depth))`](ReadResponse::Depth) if the block is in the best chain;
+    /// * [`ReadResponse::Depth(None)`](ReadResponse::Depth) otherwise.
+    Depth(block::Hash),
+
     /// Looks up a block by hash or height in the current best chain.
     ///
     /// Returns
@@ -588,16 +596,15 @@ impl TryFrom<Request> for ReadRequest {
 
     fn try_from(request: Request) -> Result<ReadRequest, Self::Error> {
         match request {
-            Request::Depth(_) => unimplemented!(),
             Request::Tip => Ok(ReadRequest::Tip),
+            Request::Depth(hash) => Ok(ReadRequest::Depth(hash)),
 
-            Request::BlockLocator => unimplemented!(),
-
-            Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
             Request::Block(hash_or_height) => Ok(ReadRequest::Block(hash_or_height)),
+            Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
 
             Request::AwaitUtxo(_) => unimplemented!("use StoredUtxo here"),
 
+            Request::BlockLocator => unimplemented!(),
             Request::FindBlockHashes {
                 known_blocks: _,
                 stop: _,

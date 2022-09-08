@@ -41,7 +41,21 @@ where
     tip(chain, db).map(|(_height, hash)| hash)
 }
 
-/// Return the height for the block at `hash`, if `hash` is in the chain.
+/// Return the depth of block `hash` from the chain tip.
+/// Searches `chain` for `hash`, then searches `db`.
+pub fn depth<C>(chain: Option<C>, db: &ZebraDb, hash: block::Hash) -> Option<u32>
+where
+    C: AsRef<Chain>,
+{
+    let chain = chain.as_ref();
+
+    let tip = tip_height(chain, db)?;
+    let height = height_by_hash(chain, db, hash)?;
+
+    Some(tip.0 - height.0)
+}
+
+/// Return the height for the block at `hash`, if `hash` is in `chain` or `db`.
 pub fn height_by_hash<C>(chain: Option<C>, db: &ZebraDb, hash: block::Hash) -> Option<Height>
 where
     C: AsRef<Chain>,
@@ -51,7 +65,7 @@ where
         .or_else(|| db.height(hash))
 }
 
-/// Return the hash for the block at `height`, if `height` is in the chain.
+/// Return the hash for the block at `height`, if `height` is in `chain` or `db`.
 pub fn hash_by_height<C>(chain: Option<C>, db: &ZebraDb, height: Height) -> Option<block::Hash>
 where
     C: AsRef<Chain>,
@@ -61,7 +75,7 @@ where
         .or_else(|| db.hash(height))
 }
 
-/// Return true if `hash` is in the chain.
+/// Return true if `hash` is in `chain` or `db`.
 pub fn chain_contains_hash<C>(chain: Option<C>, db: &ZebraDb, hash: block::Hash) -> bool
 where
     C: AsRef<Chain>,
@@ -72,7 +86,7 @@ where
         || db.contains_hash(hash)
 }
 
-/// Find the first hash that's in the peer's `known_blocks` and the chain.
+/// Find the first hash that's in the peer's `known_blocks`, and in `chain` or `db`.
 ///
 /// Returns `None` if:
 ///   * there is no matching hash in the chain, or
@@ -201,7 +215,6 @@ where
 
 /// Returns a list of [`block::Hash`]es in the chain,
 /// following the `intersection` with the chain.
-///
 ///
 /// See [`find_chain_hashes()`] for details.
 fn collect_chain_hashes<C>(
