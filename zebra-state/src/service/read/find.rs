@@ -13,6 +13,9 @@ use crate::{
     service::{finalized_state::ZebraDb, non_finalized_state::Chain, read::block::block_header},
 };
 
+#[cfg(test)]
+mod tests;
+
 /// Returns the tip of `chain`.
 /// If there is no chain, returns the tip of `db`.
 pub fn tip<C>(chain: Option<C>, db: &ZebraDb) -> Option<(Height, block::Hash)>
