@@ -1,18 +1,19 @@
 name: Delete GCP resources
 
 on:
-  # Run right before Teor's week starts (0500 in UTC+10)
+  # Run daily, when most devs aren't working
+  # 0700 UTC is after AEST working hours but before ET working hours
   schedule:
-    - cron: "0 19 * * 0"
+    - cron: "0 7 * * *"
   workflow_dispatch:
 
 env:
   # Delete all resources created before $DELETE_AGE_DAYS days ago.
-  DELETE_AGE_DAYS: 7
+  # We keep this short to reduce storage costs.
+  DELETE_AGE_DAYS: 2
   # But keep the latest $KEEP_LATEST_IMAGE_COUNT images of each type.
-  #
-  # TODO: reduce this to 1 or 2 after "The resource is not ready" errors get fixed?
-  KEEP_LATEST_IMAGE_COUNT: 3
+  # We keep this small to reduce storage costs.
+  KEEP_LATEST_IMAGE_COUNT: 2
 
 jobs:
   delete-resources:
