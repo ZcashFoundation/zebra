@@ -550,6 +550,29 @@ pub enum ReadRequest {
     /// If the state is empty, the block locator is also empty.
     BlockLocator,
 
+    /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
+    /// Returns a list of hashes that follow that intersection, from the best chain.
+    ///
+    /// If there is no matching hash in the best chain, starts from the genesis hash.
+    ///
+    /// Stops the list of hashes after:
+    ///   * adding the best tip,
+    ///   * adding the `stop` hash to the list, if it is in the best chain, or
+    ///   * adding 500 hashes to the list.
+    ///
+    /// Returns an empty list if the state is empty.
+    ///
+    /// Returns
+    ///
+    /// [`ReadResponse::BlockHashes(Vec<block::Hash>)`](ReadResponse::BlockHashes).
+    /// See <https://en.bitcoin.it/wiki/Protocol_documentation#getblocks>
+    FindBlockHashes {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
+        /// Optionally, the last block hash to request.
+        stop: Option<block::Hash>,
+    },
+
     /// Looks up a Sapling note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -616,10 +639,9 @@ impl TryFrom<Request> for ReadRequest {
             Request::AwaitUtxo(_) => unimplemented!("use StoredUtxo here"),
 
             Request::BlockLocator => Ok(ReadRequest::BlockLocator),
-            Request::FindBlockHashes {
-                known_blocks: _,
-                stop: _,
-            } => unimplemented!(),
+            Request::FindBlockHashes { known_blocks, stop } => {
+                Ok(ReadRequest::FindBlockHashes { known_blocks, stop })
+            }
             Request::FindBlockHeaders {
                 known_blocks: _,
                 stop: _,

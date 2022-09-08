@@ -24,6 +24,9 @@ pub const DATABASE_FORMAT_VERSION: u32 = 25;
 /// before we assume we are on a pre-NU5 legacy chain.
 pub const MAX_LEGACY_CHAIN_BLOCKS: usize = 1000;
 
+/// The maximum number of block hashes that Zebra sends to peers in `getblocks` responses.
+pub const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;
+
 use lazy_static::lazy_static;
 use regex::Regex;
 

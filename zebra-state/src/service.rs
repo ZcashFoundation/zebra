@@ -40,6 +40,7 @@ use zebra_chain::{
 };
 
 use crate::{
+    constants::MAX_FIND_BLOCK_HASHES_RESULTS,
     service::{
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
         finalized_state::{FinalizedState, ZebraDb},
@@ -856,8 +857,8 @@ impl Service<Request> for StateService {
                 fut.instrument(span).boxed()
             }
 
-            // Runs concurrently using the best `Chain` and FinalizedState `ZebraDb`
-            Request::FindBlockHashes { known_blocks, stop } => {
+            // Runs concurrently using the ReadStateService
+            Request::FindBlockHashes { .. } => {
                 metrics::counter!(
                     "state.requests",
                     1,
@@ -865,35 +866,19 @@ impl Service<Request> for StateService {
                     "type" => "find_block_hashes",
                 );
 
-                const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;
+                // Redirect the request to the concurrent ReadStateService
+                let read_service = self.read_service.clone();
 
-                let timer = CodeTimer::start();
+                async move {
+                    let req = req
+                        .try_into()
+                        .expect("ReadRequest conversion should not fail");
 
-                // Prepare data for concurrent execution
-                let best_chain = self.mem.best_chain().cloned();
-                let db = self.disk.db().clone();
+                    let rsp = read_service.oneshot(req).await?;
+                    let rsp = rsp.try_into().expect("Response conversion should not fail");
 
-                // # Performance
-                //
-                // Allow other async tasks to make progress while the block is being read from disk.
-                let span = Span::current();
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let res = read::find_chain_hashes(
-                            best_chain,
-                            &db,
-                            known_blocks,
-                            stop,
-                            MAX_FIND_BLOCK_HASHES_RESULTS,
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "FindBlockHashes");
-
-                        Ok(Response::BlockHashes(res))
-                    })
-                })
-                .map(|join_result| join_result.expect("panic in Request::Block"))
+                    Ok(rsp)
+                }
                 .boxed()
             }
 
@@ -1105,11 +1090,48 @@ impl Service<ReadRequest> for ReadStateService {
                             });
 
                         // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::Depth");
+                        timer.finish(module_path!(), line!(), "ReadRequest::BlockLocator");
 
                         Ok(ReadResponse::BlockLocator(
                             block_locator.unwrap_or_default(),
                         ))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
+                .boxed()
+            }
+
+            // Used by the StateService.
+            ReadRequest::FindBlockHashes { known_blocks, stop } => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "block_locator",
+                );
+
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let block_hashes =
+                            state.best_chain_receiver.with_watch_data(|best_chain| {
+                                read::find_chain_hashes(
+                                    best_chain,
+                                    &state.db,
+                                    known_blocks,
+                                    stop,
+                                    MAX_FIND_BLOCK_HASHES_RESULTS,
+                                )
+                            });
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::FindBlockHashes");
+
+                        Ok(ReadResponse::BlockHashes(block_hashes))
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
