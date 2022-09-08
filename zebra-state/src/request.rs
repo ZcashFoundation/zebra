@@ -526,12 +526,6 @@ pub enum ReadRequest {
     /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
     Transaction(transaction::Hash),
 
-    /// Looks up the balance of a set of transparent addresses.
-    ///
-    /// Returns an [`Amount`](zebra_chain::amount::Amount) with the total
-    /// balance of the set of addresses.
-    AddressBalance(HashSet<transparent::Address>),
-
     /// Looks up a Sapling note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -549,6 +543,12 @@ pub enum ReadRequest {
     ///   if the corresponding block contains a Sapling note commitment tree.
     /// * [`ReadResponse::OrchardTree(None)`](crate::ReadResponse::OrchardTree) otherwise.
     OrchardTree(HashOrHeight),
+
+    /// Looks up the balance of a set of transparent addresses.
+    ///
+    /// Returns an [`Amount`](zebra_chain::amount::Amount) with the total
+    /// balance of the set of addresses.
+    AddressBalance(HashSet<transparent::Address>),
 
     /// Looks up transaction hashes that were sent or received from addresses,
     /// in an inclusive blockchain height range.

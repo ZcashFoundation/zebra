@@ -1153,6 +1153,39 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
+            // For the get_address_balance RPC.
+            ReadRequest::AddressBalance(addresses) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "address_balance",
+                );
+
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                // # Performance
+                //
+                // Allow other async tasks to make progress while concurrently reading balances from disk.
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let balance = state.best_chain_receiver.with_watch_data(|best_chain| {
+                            read::transparent_balance(best_chain, &state.db, addresses)
+                        })?;
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::AddressBalance");
+
+                        Ok(ReadResponse::AddressBalance(balance))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::AddressBalance"))
+                .boxed()
+            }
+
             // For the get_address_tx_ids RPC.
             ReadRequest::TransactionIdsByAddresses {
                 addresses,
@@ -1192,39 +1225,6 @@ impl Service<ReadRequest> for ReadStateService {
                 .map(|join_result| {
                     join_result.expect("panic in ReadRequest::TransactionIdsByAddresses")
                 })
-                .boxed()
-            }
-
-            // For the get_address_balance RPC.
-            ReadRequest::AddressBalance(addresses) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "address_balance",
-                );
-
-                let timer = CodeTimer::start();
-
-                let state = self.clone();
-
-                // # Performance
-                //
-                // Allow other async tasks to make progress while concurrently reading balances from disk.
-                let span = Span::current();
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let balance = state.best_chain_receiver.with_watch_data(|best_chain| {
-                            read::transparent_balance(best_chain, &state.db, addresses)
-                        })?;
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::AddressBalance");
-
-                        Ok(ReadResponse::AddressBalance(balance))
-                    })
-                })
-                .map(|join_result| join_result.expect("panic in ReadRequest::AddressBalance"))
                 .boxed()
             }
 
