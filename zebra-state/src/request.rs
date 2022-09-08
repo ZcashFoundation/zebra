@@ -22,7 +22,7 @@ use zebra_chain::{
 /// Allow *only* these unused imports, so that rustdoc link resolution
 /// will work with inline links.
 #[allow(unused_imports)]
-use crate::{ReadResponse, Response};
+use crate::{constants::MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA, ReadResponse, Response};
 
 /// Identify a block by hash or height.
 ///
@@ -488,7 +488,7 @@ pub enum Request {
     /// Stops the list of headers after:
     ///   * adding the best tip,
     ///   * adding the header matching the `stop` hash to the list, if it is in the best chain, or
-    ///   * adding 160 headers to the list.
+    ///   * adding [`MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA`] headers to the list.
     ///
     /// Returns an empty list if the state is empty.
     ///
@@ -573,6 +573,29 @@ pub enum ReadRequest {
         stop: Option<block::Hash>,
     },
 
+    /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
+    /// Returns a list of headers that follow that intersection, from the best chain.
+    ///
+    /// If there is no matching hash in the best chain, starts from the genesis header.
+    ///
+    /// Stops the list of headers after:
+    ///   * adding the best tip,
+    ///   * adding the header matching the `stop` hash to the list, if it is in the best chain, or
+    ///   * adding [`MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA`] headers to the list.
+    ///
+    /// Returns an empty list if the state is empty.
+    ///
+    /// Returns
+    ///
+    /// [`ReadResponse::BlockHeaders(Vec<block::Header>)`](ReadResponse::BlockHeaders).
+    /// See <https://en.bitcoin.it/wiki/Protocol_documentation#getheaders>
+    FindBlockHeaders {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
+        /// Optionally, the hash of the last header to request.
+        stop: Option<block::Hash>,
+    },
+
     /// Looks up a Sapling note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -642,10 +665,9 @@ impl TryFrom<Request> for ReadRequest {
             Request::FindBlockHashes { known_blocks, stop } => {
                 Ok(ReadRequest::FindBlockHashes { known_blocks, stop })
             }
-            Request::FindBlockHeaders {
-                known_blocks: _,
-                stop: _,
-            } => unimplemented!(),
+            Request::FindBlockHeaders { known_blocks, stop } => {
+                Ok(ReadRequest::FindBlockHeaders { known_blocks, stop })
+            }
 
             Request::CommitBlock(_) | Request::CommitFinalizedBlock(_) => {
                 Err("ReadService does not write blocks")

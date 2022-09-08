@@ -72,6 +72,9 @@ pub enum ReadResponse {
     /// The response to a `FindBlockHashes` request.
     BlockHashes(Vec<block::Hash>),
 
+    /// The response to a `FindBlockHeaders` request.
+    BlockHeaders(Vec<block::CountedHeader>),
+
     /// Response to [`ReadRequest::SaplingTree`] with the specified Sapling note commitment tree.
     SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),
 
@@ -107,6 +110,7 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::BlockLocator(hashes) => Ok(Response::BlockLocator(hashes)),
             ReadResponse::BlockHashes(hashes) => Ok(Response::BlockHashes(hashes)),
+            ReadResponse::BlockHeaders(headers) => Ok(Response::BlockHeaders(headers)),
 
             ReadResponse::SaplingTree(_) => unimplemented!(),
             ReadResponse::OrchardTree(_) => unimplemented!(),

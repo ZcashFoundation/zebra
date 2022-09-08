@@ -24,8 +24,24 @@ pub const DATABASE_FORMAT_VERSION: u32 = 25;
 /// before we assume we are on a pre-NU5 legacy chain.
 pub const MAX_LEGACY_CHAIN_BLOCKS: usize = 1000;
 
-/// The maximum number of block hashes that Zebra sends to peers in `getblocks` responses.
+/// The maximum number of block hashes allowed in `getblocks` responses in the Zcash network protocol.
 pub const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;
+
+/// The maximum number of block headers allowed in `getheaders` responses in the Zcash network protocol.
+const MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_PROTOCOL: u32 = 160;
+
+/// The maximum number of block headers sent by Zebra in `getheaders` responses.
+///
+/// Older versions of Zcashd will blindly request more block headers as long as it
+/// got 160 block headers in response to a previous query,
+/// _even if those headers are already known_.
+///
+/// To avoid this behavior, return slightly fewer than the maximum,
+/// so `zcashd` thinks it has reached our chain tip.
+///
+/// <https://github.com/bitcoin/bitcoin/pull/4468/files#r17026905>
+pub const MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA: u32 =
+    MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_PROTOCOL - 2;
 
 use lazy_static::lazy_static;
 use regex::Regex;

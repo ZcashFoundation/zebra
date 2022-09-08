@@ -40,7 +40,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::MAX_FIND_BLOCK_HASHES_RESULTS,
+    constants::{MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA},
     service::{
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
         finalized_state::{FinalizedState, ZebraDb},
@@ -882,8 +882,8 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
-            // Runs concurrently using the best `Chain` and FinalizedState `ZebraDb`
-            Request::FindBlockHeaders { known_blocks, stop } => {
+            // Runs concurrently using the ReadStateService
+            Request::FindBlockHeaders { .. } => {
                 metrics::counter!(
                     "state.requests",
                     1,
@@ -891,43 +891,19 @@ impl Service<Request> for StateService {
                     "type" => "find_block_headers",
                 );
 
-                // Before we spawn the future, get a consistent set of chain hashes from the state.
+                // Redirect the request to the concurrent ReadStateService
+                let read_service = self.read_service.clone();
 
-                const MAX_FIND_BLOCK_HEADERS_RESULTS: u32 = 160;
-                // Zcashd will blindly request more block headers as long as it
-                // got 160 block headers in response to a previous query, EVEN
-                // IF THOSE HEADERS ARE ALREADY KNOWN.  To dodge this behavior,
-                // return slightly fewer than the maximum, to get it to go away.
-                //
-                // https://github.com/bitcoin/bitcoin/pull/4468/files#r17026905
-                let max_len = MAX_FIND_BLOCK_HEADERS_RESULTS - 2;
+                async move {
+                    let req = req
+                        .try_into()
+                        .expect("ReadRequest conversion should not fail");
 
-                let timer = CodeTimer::start();
+                    let rsp = read_service.oneshot(req).await?;
+                    let rsp = rsp.try_into().expect("Response conversion should not fail");
 
-                // Prepare data for concurrent execution
-                let best_chain = self.mem.best_chain().cloned();
-                let db = self.disk.db().clone();
-
-                // # Performance
-                //
-                // Allow other async tasks to make progress while the block is being read from disk.
-                let span = Span::current();
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let res =
-                            read::find_chain_headers(best_chain, &db, known_blocks, stop, max_len);
-                        let res = res
-                            .into_iter()
-                            .map(|header| CountedHeader { header })
-                            .collect();
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "FindBlockHeaders");
-
-                        Ok(Response::BlockHeaders(res))
-                    })
-                })
-                .map(|join_result| join_result.expect("panic in Request::Block"))
+                    Ok(rsp)
+                }
                 .boxed()
             }
         }
@@ -1107,7 +1083,7 @@ impl Service<ReadRequest> for ReadStateService {
                     "state.requests",
                     1,
                     "service" => "read_state",
-                    "type" => "block_locator",
+                    "type" => "find_block_hashes",
                 );
 
                 let timer = CodeTimer::start();
@@ -1132,6 +1108,48 @@ impl Service<ReadRequest> for ReadStateService {
                         timer.finish(module_path!(), line!(), "ReadRequest::FindBlockHashes");
 
                         Ok(ReadResponse::BlockHashes(block_hashes))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
+                .boxed()
+            }
+
+            // Used by the StateService.
+            ReadRequest::FindBlockHeaders { known_blocks, stop } => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "find_block_headers",
+                );
+
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let block_headers =
+                            state.best_chain_receiver.with_watch_data(|best_chain| {
+                                read::find_chain_headers(
+                                    best_chain,
+                                    &state.db,
+                                    known_blocks,
+                                    stop,
+                                    MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA,
+                                )
+                            });
+
+                        let block_headers = block_headers
+                            .into_iter()
+                            .map(|header| CountedHeader { header })
+                            .collect();
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::FindBlockHeaders");
+
+                        Ok(ReadResponse::BlockHeaders(block_headers))
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
