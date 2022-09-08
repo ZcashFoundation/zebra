@@ -792,8 +792,6 @@ impl Service<Request> for StateService {
                     "type" => "tip",
                 );
 
-                let timer = CodeTimer::start();
-
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
@@ -804,9 +802,6 @@ impl Service<Request> for StateService {
 
                     let rsp = read_service.oneshot(req).await?;
                     let rsp = rsp.try_into().expect("Response conversion should not fail");
-
-                    // The work is done in the future.
-                    timer.finish(module_path!(), line!(), "Tip");
 
                     Ok(rsp)
                 }
@@ -846,8 +841,6 @@ impl Service<Request> for StateService {
                     "type" => "transaction",
                 );
 
-                let timer = CodeTimer::start();
-
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
@@ -858,9 +851,6 @@ impl Service<Request> for StateService {
 
                     let rsp = read_service.oneshot(req).await?;
                     let rsp = rsp.try_into().expect("Response conversion should not fail");
-
-                    // The work is done in the future.
-                    timer.finish(module_path!(), line!(), "Transaction");
 
                     Ok(rsp)
                 }
@@ -876,8 +866,6 @@ impl Service<Request> for StateService {
                     "type" => "block",
                 );
 
-                let timer = CodeTimer::start();
-
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
@@ -888,9 +876,6 @@ impl Service<Request> for StateService {
 
                     let rsp = read_service.oneshot(req).await?;
                     let rsp = rsp.try_into().expect("Response conversion should not fail");
-
-                    // The work is done in the future.
-                    timer.finish(module_path!(), line!(), "Block");
 
                     Ok(rsp)
                 }
