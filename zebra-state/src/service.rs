@@ -1303,7 +1303,7 @@ impl Service<ReadRequest> for ReadStateService {
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
                         let utxos = state.best_chain_receiver.with_watch_data(|best_chain| {
-                            read::transparent_utxos(state.network, best_chain, &state.db, addresses)
+                            read::address_utxos(state.network, best_chain, &state.db, addresses)
                         });
 
                         // The work is done in the future.

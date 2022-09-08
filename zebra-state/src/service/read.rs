@@ -21,7 +21,7 @@ mod tests;
 pub use address::{
     balance::transparent_balance,
     tx_id::transparent_tx_ids,
-    utxo::{transparent_utxos, AddressUtxos, ADDRESS_HEIGHTS_FULL_RANGE},
+    utxo::{address_utxos, AddressUtxos, ADDRESS_HEIGHTS_FULL_RANGE},
 };
 pub use block::{block, block_header, transaction};
 pub use find::{
