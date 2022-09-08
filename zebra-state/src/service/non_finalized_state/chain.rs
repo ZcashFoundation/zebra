@@ -646,7 +646,7 @@ impl Chain {
     /// and removed from the relevant chain(s).
     pub fn unspent_utxos(&self) -> HashMap<transparent::OutPoint, transparent::OrderedUtxo> {
         let mut unspent_utxos = self.created_utxos.clone();
-        unspent_utxos.retain(|out_point, _utxo| !self.spent_utxos.contains(out_point));
+        unspent_utxos.retain(|outpoint, _utxo| !self.spent_utxos.contains(outpoint));
 
         unspent_utxos
     }
