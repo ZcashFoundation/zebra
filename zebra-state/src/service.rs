@@ -704,7 +704,34 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
-            // TODO: add a name() method to Request, and combine all the read requests
+            // Uses pending_utxos and queued_blocks in the StateService.
+            // Accesses shared writeable state in the StateService.
+            // Runs a StoredUtxo request concurrently using the ReadStateService.
+            Request::AwaitUtxo(outpoint) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "await_utxo",
+                );
+
+                let timer = CodeTimer::start();
+                let span = Span::current();
+
+                let fut = self.pending_utxos.queue(outpoint);
+
+                // TODO: move disk reads (in `any_utxo()`) to a blocking thread (#2188)
+                if let Some(utxo) = self.any_utxo(&outpoint) {
+                    self.pending_utxos.respond(&outpoint, utxo);
+                }
+
+                // The future waits on a channel for a response.
+                timer.finish(module_path!(), line!(), "AwaitUtxo");
+
+                fut.instrument(span).boxed()
+            }
+
+            // TODO: add a name() method to Request, and combine all the generic read requests
             //
             // Runs concurrently using the ReadStateService
             Request::Depth(_) => {
@@ -829,32 +856,6 @@ impl Service<Request> for StateService {
                     Ok(rsp)
                 }
                 .boxed()
-            }
-
-            // Uses pending_utxos and queued_blocks in the StateService.
-            // Accesses shared writeable state in the StateService.
-            Request::AwaitUtxo(outpoint) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "state",
-                    "type" => "await_utxo",
-                );
-
-                let timer = CodeTimer::start();
-                let span = Span::current();
-
-                let fut = self.pending_utxos.queue(outpoint);
-
-                // TODO: move disk reads (in `any_utxo()`) to a blocking thread (#2188)
-                if let Some(utxo) = self.any_utxo(&outpoint) {
-                    self.pending_utxos.respond(&outpoint, utxo);
-                }
-
-                // The future waits on a channel for a response.
-                timer.finish(module_path!(), line!(), "AwaitUtxo");
-
-                fut.instrument(span).boxed()
             }
 
             // Runs concurrently using the ReadStateService
