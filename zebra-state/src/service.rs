@@ -150,6 +150,7 @@ pub(crate) struct StateService {
 /// ignoring any blocks queued by the read-write [`StateService`].
 ///
 /// This quick response behavior is better for most state users.
+/// It allows other async tasks to make progress while concurrently reading data from disk.
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct ReadStateService {
@@ -1033,9 +1034,6 @@ impl Service<ReadRequest> for ReadStateService {
 
                 let state = self.clone();
 
-                // # Performance
-                //
-                // Allow other async tasks to make progress while concurrently reading blocks from disk.
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
@@ -1066,9 +1064,6 @@ impl Service<ReadRequest> for ReadStateService {
 
                 let state = self.clone();
 
-                // # Performance
-                //
-                // Allow other async tasks to make progress while concurrently reading transactions from disk.
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
@@ -1099,9 +1094,6 @@ impl Service<ReadRequest> for ReadStateService {
 
                 let state = self.clone();
 
-                // # Performance
-                //
-                // Allow other async tasks to make progress while concurrently reading trees from disk.
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
@@ -1132,9 +1124,6 @@ impl Service<ReadRequest> for ReadStateService {
 
                 let state = self.clone();
 
-                // # Performance
-                //
-                // Allow other async tasks to make progress while concurrently reading trees from disk.
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
@@ -1166,9 +1155,6 @@ impl Service<ReadRequest> for ReadStateService {
 
                 let state = self.clone();
 
-                // # Performance
-                //
-                // Allow other async tasks to make progress while concurrently reading balances from disk.
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
@@ -1202,9 +1188,6 @@ impl Service<ReadRequest> for ReadStateService {
 
                 let state = self.clone();
 
-                // # Performance
-                //
-                // Allow other async tasks to make progress while concurrently reading transaction IDs from disk.
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
@@ -1241,9 +1224,6 @@ impl Service<ReadRequest> for ReadStateService {
 
                 let state = self.clone();
 
-                // # Performance
-                //
-                // Allow other async tasks to make progress while concurrently reading UTXOs from disk.
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
