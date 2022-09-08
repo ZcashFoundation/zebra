@@ -26,7 +26,7 @@ use std::{
 
 use futures::future::FutureExt;
 use tokio::sync::{oneshot, watch};
-use tower::{util::BoxService, Service};
+use tower::{util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Instrument, Span};
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -137,7 +137,7 @@ pub(crate) struct StateService {
     /// A cloneable [`ReadStateService`], used to answer concurrent read requests.
     ///
     /// TODO: move concurrent read requests to [`ReadRequest`], and remove `read_service`.
-    _read_service: ReadStateService,
+    read_service: ReadStateService,
 }
 
 /// A read-only service for accessing Zebra's cached blockchain state.
@@ -218,7 +218,7 @@ impl StateService {
             last_prune: Instant::now(),
             chain_tip_sender,
             best_chain_sender,
-            _read_service: read_service.clone(),
+            read_service: read_service.clone(),
         };
         timer.finish(module_path!(), line!(), "initializing state service");
 
@@ -828,8 +828,8 @@ impl Service<Request> for StateService {
                 async move { rsp }.boxed()
             }
 
-            // Runs concurrently using the best `Chain` and FinalizedState `ZebraDb`
-            Request::Transaction(hash) => {
+            // Runs concurrently using the ReadStateService
+            Request::Transaction(_) => {
                 metrics::counter!(
                     "state.requests",
                     1,
@@ -840,29 +840,26 @@ impl Service<Request> for StateService {
                 let timer = CodeTimer::start();
 
                 // Redirect the request to the concurrent ReadStateService
-                let best_chain = self.mem.best_chain().cloned();
-                let db = self.disk.db().clone();
+                let read_service = self.read_service.clone();
 
-                // # Performance
-                //
-                // Allow other async tasks to make progress while the transaction is being read from disk.
-                let span = Span::current();
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(|| {
-                        let rsp = read::transaction(best_chain, &db, hash);
+                async move {
+                    let req = req
+                        .try_into()
+                        .expect("ReadRequest conversion should not fail");
 
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "Transaction");
+                    let rsp = read_service.oneshot(req).await?;
+                    let rsp = rsp.try_into().expect("Response conversion should not fail");
 
-                        Ok(Response::Transaction(rsp.map(|(tx, _height)| tx)))
-                    })
-                })
-                .map(|join_result| join_result.expect("panic in Request::Transaction"))
+                    // The work is done in the future.
+                    timer.finish(module_path!(), line!(), "Transaction");
+
+                    Ok(rsp)
+                }
                 .boxed()
             }
 
-            // Runs concurrently using the best `Chain` and FinalizedState `ZebraDb`
-            Request::Block(hash_or_height) => {
+            // Runs concurrently using the ReadStateService
+            Request::Block(_) => {
                 metrics::counter!(
                     "state.requests",
                     1,
@@ -872,25 +869,22 @@ impl Service<Request> for StateService {
 
                 let timer = CodeTimer::start();
 
-                // Prepare data for concurrent execution
-                let best_chain = self.mem.best_chain().cloned();
-                let db = self.disk.db().clone();
+                // Redirect the request to the concurrent ReadStateService
+                let read_service = self.read_service.clone();
 
-                // # Performance
-                //
-                // Allow other async tasks to make progress while the block is being read from disk.
-                let span = Span::current();
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let rsp = read::block(best_chain, &db, hash_or_height);
+                async move {
+                    let req = req
+                        .try_into()
+                        .expect("ReadRequest conversion should not fail");
 
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "Block");
+                    let rsp = read_service.oneshot(req).await?;
+                    let rsp = rsp.try_into().expect("Response conversion should not fail");
 
-                        Ok(Response::Block(rsp))
-                    })
-                })
-                .map(|join_result| join_result.expect("panic in Request::Block"))
+                    // The work is done in the future.
+                    timer.finish(module_path!(), line!(), "Block");
+
+                    Ok(rsp)
+                }
                 .boxed()
             }
 

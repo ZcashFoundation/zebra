@@ -91,3 +91,27 @@ pub enum ReadResponse {
     /// with found utxos and transaction data.
     Utxos(AddressUtxos),
 }
+
+/// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.
+///
+/// Used to return read requests concurrently from the [`StateService`](crate::service::StateService).
+impl TryFrom<ReadResponse> for Response {
+    type Error = &'static str;
+
+    fn try_from(response: ReadResponse) -> Result<Response, Self::Error> {
+        match response {
+            ReadResponse::Block(block) => Ok(Response::Block(block)),
+            ReadResponse::Transaction(tx_and_height) => {
+                Ok(Response::Transaction(tx_and_height.map(|(tx, _height)| tx)))
+            }
+
+            ReadResponse::SaplingTree(_) => unimplemented!(),
+            ReadResponse::OrchardTree(_) => unimplemented!(),
+
+            ReadResponse::AddressBalance(_) => unimplemented!(),
+            ReadResponse::AddressesTransactionIds(_) => unimplemented!(),
+            // TODO: Rename to AddressUtxos
+            ReadResponse::Utxos(_) => unimplemented!(),
+        }
+    }
+}

@@ -574,3 +574,37 @@ pub enum ReadRequest {
     /// Returns a type with found utxos and transaction information.
     UtxosByAddresses(HashSet<transparent::Address>),
 }
+
+/// Conversion from read-write [`Request`]s to read-only [`ReadRequest`]s.
+///
+/// Used to dispatch read requests concurrently from the [`StateService`](crate::service::StateService).
+impl TryFrom<Request> for ReadRequest {
+    type Error = &'static str;
+
+    fn try_from(request: Request) -> Result<ReadRequest, Self::Error> {
+        match request {
+            Request::Depth(_) => unimplemented!(),
+            Request::Tip => unimplemented!(),
+
+            Request::BlockLocator => unimplemented!(),
+
+            Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
+            Request::Block(hash_or_height) => Ok(ReadRequest::Block(hash_or_height)),
+
+            Request::AwaitUtxo(_) => unimplemented!("use StoredUtxo here"),
+
+            Request::FindBlockHashes {
+                known_blocks: _,
+                stop: _,
+            } => unimplemented!(),
+            Request::FindBlockHeaders {
+                known_blocks: _,
+                stop: _,
+            } => unimplemented!(),
+
+            Request::CommitBlock(_) | Request::CommitFinalizedBlock(_) => {
+                Err("ReadService does not write blocks")
+            }
+        }
+    }
+}
