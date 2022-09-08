@@ -133,7 +133,9 @@ mod common;
 
 use common::{
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
-    config::{default_test_config, persistent_test_config, stored_config_path, testdir},
+    config::{
+        config_file_full_path, configs_dir, default_test_config, persistent_test_config, testdir,
+    },
     launch::{
         spawn_zebrad_for_rpc_without_initial_peers, ZebradTestDirExt, BETWEEN_NODES_DELAY,
         LAUNCH_DELAY,
@@ -503,14 +505,17 @@ fn version_args() -> Result<()> {
 /// they use the generated config. So parallel execution can cause port and
 /// cache conflicts.
 #[test]
-fn config_test() -> Result<()> {
+fn config_tests() -> Result<()> {
     valid_generated_config("start", "Starting zebrad")?;
 
     // Check what happens when Zebra parses an invalid config
     invalid_generated_config()?;
 
-    // Check that an older stored configuration we have for Zebra works
-    stored_config_works()?;
+    // Check that we have a current version of the config stored
+    last_config_is_stored()?;
+
+    // Check that Zebra stored configuration works
+    stored_configs_works()?;
 
     // Runs `zebrad` serially to avoid potential port conflicts
     app_no_args()?;
@@ -597,6 +602,63 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
     Ok(())
 }
 
+/// Check if the config produced by current zebrad is stored.
+fn last_config_is_stored() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let testdir = testdir()?;
+
+    // Add a config file name to tempdir path
+    let generated_config_path = testdir.path().join("zebrad.toml");
+
+    // Generate configuration in temp dir path
+    let child =
+        testdir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_success()?;
+
+    assert_with_context!(
+        generated_config_path.exists(),
+        &output,
+        "generated config file not found"
+    );
+
+    // Get the contents of the generated config file
+    let generated_content =
+        fs::read_to_string(generated_config_path).expect("Should have been able to read the file");
+
+    // We need to replace the cache dir path as stored configs has a dummy `cache_dir` string there.
+    let processed_generated_content = generated_content.replace(
+        zebra_state::Config::default()
+            .cache_dir
+            .to_str()
+            .expect("a valid cache dir"),
+        "cache_dir",
+    );
+
+    // Loop all the stored configs
+    for config_file in configs_dir()
+        .read_dir()
+        .expect("read_dir call failed")
+        .flatten()
+    {
+        // Read stored config
+        let stored_content = fs::read_to_string(config_file_full_path(config_file.path()))
+            .expect("Should have been able to read the file");
+
+        // If any stored config is equal to the generated then we are good.
+        if stored_content.eq(&processed_generated_content) {
+            return Ok(());
+        }
+    }
+    Err(eyre!(
+        "latest zebrad config is not being tested for compatibility.\n\
+        Run `zebrad generate -o zebrad/tests/common/configs/<next-release-tag>.toml`\n\
+        and commit the latest config to Zebra's git repository"
+    ))
+}
+
 /// Checks that Zebra prints an informative message when it cannot parse the
 /// config file.
 fn invalid_generated_config() -> Result<()> {
@@ -670,28 +732,36 @@ fn invalid_generated_config() -> Result<()> {
     Ok(())
 }
 
-/// Test that an older `zebrad.toml` can still be parsed by the latest `zebrad`.
-fn stored_config_works() -> Result<()> {
-    let stored_config_path = stored_config_path();
-    let run_dir = testdir()?;
+/// Test all versions of `zebrad.toml` we have stored can be parsed by the latest `zebrad`.
+fn stored_configs_works() -> Result<()> {
+    let old_configs_dir = configs_dir();
 
-    // run zebra with stored config
-    let mut child =
-        run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
+    for config_file in old_configs_dir
+        .read_dir()
+        .expect("read_dir call failed")
+        .flatten()
+    {
+        let run_dir = testdir()?;
+        let stored_config_path = config_file_full_path(config_file.path());
 
-    // zebra was able to start with the stored config
-    child.expect_stdout_line_matches("Starting zebrad".to_string())?;
+        // run zebra with stored config
+        let mut child =
+            run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
 
-    // finish
-    child.kill(false)?;
+        // zebra was able to start with the stored config
+        child.expect_stdout_line_matches("Starting zebrad".to_string())?;
 
-    let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
+        // finish
+        child.kill(false)?;
 
-    // [Note on port conflict](#Note on port conflict)
-    output
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        let output = child.wait_with_output()?;
+        let output = output.assert_failure()?;
+
+        // [Note on port conflict](#Note on port conflict)
+        output
+            .assert_was_killed()
+            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+    }
 
     Ok(())
 }
