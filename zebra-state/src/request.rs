@@ -19,10 +19,10 @@ use zebra_chain::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
-/// Allow *only* this unused import, so that rustdoc link resolution
+/// Allow *only* these unused imports, so that rustdoc link resolution
 /// will work with inline links.
 #[allow(unused_imports)]
-use crate::Response;
+use crate::{ReadResponse, Response};
 
 /// Identify a block by hash or height.
 ///
@@ -511,8 +511,8 @@ pub enum ReadRequest {
     ///
     /// Returns
     ///
-    /// * [`Response::Block(Some(Arc<Block>))`](Response::Block) if the block is in the best chain;
-    /// * [`Response::Block(None)`](Response::Block) otherwise.
+    /// * [`ReadResponse::Block(Some(Arc<Block>))`](ReadResponse::Block) if the block is in the best chain;
+    /// * [`ReadResponse::Block(None)`](ReadResponse::Block) otherwise.
     ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
@@ -522,8 +522,8 @@ pub enum ReadRequest {
     ///
     /// Returns
     ///
-    /// * [`Response::Transaction(Some(Arc<Transaction>))`](Response::Transaction) if the transaction is in the best chain;
-    /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
+    /// * [`ReadResponse::Transaction(Some(Arc<Transaction>))`](ReadResponse::Transaction) if the transaction is in the best chain;
+    /// * [`ReadResponse::Transaction(None)`](ReadResponse::Transaction) otherwise.
     Transaction(transaction::Hash),
 
     /// Looks up a Sapling note commitment tree either by a hash or height.
@@ -555,8 +555,8 @@ pub enum ReadRequest {
     ///
     /// Returns
     ///
-    /// * A set of transaction hashes.
-    /// * An empty vector if no transactions were found for the given arguments.
+    /// * An ordered, unique map of transaction locations and hashes.
+    /// * An empty map if no transactions were found for the given arguments.
     ///
     /// Returned txids are in the order they appear in blocks,
     /// which ensures that they are topologically sorted
