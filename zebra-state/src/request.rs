@@ -539,6 +539,17 @@ pub enum ReadRequest {
     /// * [`ReadResponse::Transaction(None)`](ReadResponse::Transaction) otherwise.
     Transaction(transaction::Hash),
 
+    /// Computes a block locator object based on the current best chain.
+    ///
+    /// Returns [`ReadResponse::BlockLocator`] with hashes starting
+    /// from the best chain tip, and following the chain of previous
+    /// hashes. The first hash is the best chain tip. The last hash is
+    /// the tip of the finalized portion of the state. Block locators
+    /// are not continuous - some intermediate hashes might be skipped.
+    ///
+    /// If the state is empty, the block locator is also empty.
+    BlockLocator,
+
     /// Looks up a Sapling note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -604,7 +615,7 @@ impl TryFrom<Request> for ReadRequest {
 
             Request::AwaitUtxo(_) => unimplemented!("use StoredUtxo here"),
 
-            Request::BlockLocator => unimplemented!(),
+            Request::BlockLocator => Ok(ReadRequest::BlockLocator),
             Request::FindBlockHashes {
                 known_blocks: _,
                 stop: _,

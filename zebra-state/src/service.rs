@@ -151,7 +151,6 @@ pub(crate) struct StateService {
 ///
 /// This quick response behavior is better for most state users.
 /// It allows other async tasks to make progress while concurrently reading data from disk.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct ReadStateService {
     // Configuration
@@ -482,32 +481,9 @@ impl StateService {
         Ok(())
     }
 
-    /// Create a block locator for the current best chain.
-    fn block_locator(&self) -> Option<Vec<block::Hash>> {
-        let tip_height = self.best_tip()?.0;
-
-        let heights = crate::util::block_locator_heights(tip_height);
-        let mut hashes = Vec::with_capacity(heights.len());
-
-        for height in heights {
-            if let Some(hash) = self.best_hash(height) {
-                hashes.push(hash);
-            }
-        }
-
-        Some(hashes)
-    }
-
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
         self.mem.best_tip().or_else(|| self.disk.db().tip())
-    }
-
-    /// Return the hash for the block at `height` in the current best chain.
-    pub fn best_hash(&self, height: block::Height) -> Option<block::Hash> {
-        self.mem
-            .best_hash(height)
-            .or_else(|| self.disk.db().hash(height))
     }
 
     /// Return the height for the block at `hash` in any chain.
@@ -727,6 +703,8 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            // TODO: add a name() method to Request, and combine all the read requests
+            //
             // Runs concurrently using the ReadStateService
             Request::Depth(_) => {
                 metrics::counter!(
@@ -777,8 +755,7 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
-            // Only uses the best `Chain` and FinalizedState `ZebraDb`.
-            // (It could run concurrently, but it doesn't yet.)
+            // Runs concurrently using the ReadStateService
             Request::BlockLocator => {
                 metrics::counter!(
                     "state.requests",
@@ -787,18 +764,20 @@ impl Service<Request> for StateService {
                     "type" => "block_locator",
                 );
 
-                let timer = CodeTimer::start();
+                // Redirect the request to the concurrent ReadStateService
+                let read_service = self.read_service.clone();
 
-                // TODO: move this work into the future, like Block and Transaction?
-                //       move disk reads to a blocking thread (#2188)
-                let rsp = Ok(Response::BlockLocator(
-                    self.block_locator().unwrap_or_default(),
-                ));
+                async move {
+                    let req = req
+                        .try_into()
+                        .expect("ReadRequest conversion should not fail");
 
-                // The work is all done, the future just returns the result.
-                timer.finish(module_path!(), line!(), "BlockLocator");
+                    let rsp = read_service.oneshot(req).await?;
+                    let rsp = rsp.try_into().expect("Response conversion should not fail");
 
-                async move { rsp }.boxed()
+                    Ok(rsp)
+                }
+                .boxed()
             }
 
             // Runs concurrently using the ReadStateService
@@ -1101,6 +1080,39 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::Transaction"))
+                .boxed()
+            }
+
+            // Used by the StateService.
+            ReadRequest::BlockLocator => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "block_locator",
+                );
+
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let block_locator =
+                            state.best_chain_receiver.with_watch_data(|best_chain| {
+                                read::block_locator(best_chain, &state.db)
+                            });
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::Depth");
+
+                        Ok(ReadResponse::BlockLocator(
+                            block_locator.unwrap_or_default(),
+                        ))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
                 .boxed()
             }
 

@@ -66,6 +66,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
     Transaction(Option<(Arc<Transaction>, block::Height)>),
 
+    /// Response to [`ReadRequest::BlockLocator`] with a block locator object.
+    BlockLocator(Vec<block::Hash>),
+
     /// Response to [`ReadRequest::SaplingTree`] with the specified Sapling note commitment tree.
     SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),
 
@@ -98,6 +101,8 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::Transaction(tx_and_height) => {
                 Ok(Response::Transaction(tx_and_height.map(|(tx, _height)| tx)))
             }
+
+            ReadResponse::BlockLocator(hashes) => Ok(Response::BlockLocator(hashes)),
 
             ReadResponse::SaplingTree(_) => unimplemented!(),
             ReadResponse::OrchardTree(_) => unimplemented!(),

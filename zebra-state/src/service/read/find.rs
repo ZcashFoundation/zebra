@@ -1,14 +1,16 @@
 //! Finding and reading block hashes and headers, in response to peer requests.
 
 use std::{
+    iter,
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
 
 use zebra_chain::block::{self, Height};
 
-use crate::service::{
-    finalized_state::ZebraDb, non_finalized_state::Chain, read::block::block_header,
+use crate::{
+    constants,
+    service::{finalized_state::ZebraDb, non_finalized_state::Chain, read::block::block_header},
 };
 
 /// Returns the tip of `chain`.
@@ -84,6 +86,51 @@ where
         .map(|chain| chain.as_ref().height_by_hash.contains_key(&hash))
         .unwrap_or(false)
         || db.contains_hash(hash)
+}
+
+/// Create a block locator from `chain` and `db`.
+pub fn block_locator<C>(chain: Option<C>, db: &ZebraDb) -> Option<Vec<block::Hash>>
+where
+    C: AsRef<Chain>,
+{
+    let chain = chain.as_ref();
+
+    let tip_height = tip_height(chain, db)?;
+
+    let heights = block_locator_heights(tip_height);
+    let mut hashes = Vec::with_capacity(heights.len());
+
+    for height in heights {
+        if let Some(hash) = hash_by_height(chain, db, height) {
+            hashes.push(hash);
+        }
+    }
+
+    Some(hashes)
+}
+
+/// Get the heights of the blocks for constructing a block_locator list.
+pub fn block_locator_heights(tip_height: block::Height) -> Vec<block::Height> {
+    // Stop at the reorg limit, or the genesis block.
+    let min_locator_height = tip_height
+        .0
+        .saturating_sub(constants::MAX_BLOCK_REORG_HEIGHT);
+    let locators = iter::successors(Some(1u32), |h| h.checked_mul(2))
+        .flat_map(move |step| tip_height.0.checked_sub(step));
+    let locators = iter::once(tip_height.0)
+        .chain(locators)
+        .take_while(move |&height| height > min_locator_height)
+        .chain(iter::once(min_locator_height))
+        .map(block::Height);
+
+    let locators = locators.collect();
+    tracing::debug!(
+        ?tip_height,
+        ?min_locator_height,
+        ?locators,
+        "created block locator"
+    );
+    locators
 }
 
 /// Find the first hash that's in the peer's `known_blocks`, and in `chain` or `db`.
