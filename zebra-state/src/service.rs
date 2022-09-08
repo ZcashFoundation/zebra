@@ -783,8 +783,7 @@ impl Service<Request> for StateService {
                 async move { rsp }.boxed()
             }
 
-            // Only uses the best `Chain` and FinalizedState `ZebraDb`.
-            // (It could run concurrently, but it doesn't yet.)
+            // Runs concurrently using the ReadStateService
             Request::Tip => {
                 metrics::counter!(
                     "state.requests",
@@ -795,14 +794,23 @@ impl Service<Request> for StateService {
 
                 let timer = CodeTimer::start();
 
-                // TODO: move this work into the future, like Block and Transaction?
-                //       move disk reads to a blocking thread (#2188)
-                let rsp = Ok(Response::Tip(self.best_tip()));
+                // Redirect the request to the concurrent ReadStateService
+                let read_service = self.read_service.clone();
 
-                // The work is all done, the future just returns the result.
-                timer.finish(module_path!(), line!(), "Tip");
+                async move {
+                    let req = req
+                        .try_into()
+                        .expect("ReadRequest conversion should not fail");
 
-                async move { rsp }.boxed()
+                    let rsp = read_service.oneshot(req).await?;
+                    let rsp = rsp.try_into().expect("Response conversion should not fail");
+
+                    // The work is done in the future.
+                    timer.finish(module_path!(), line!(), "Tip");
+
+                    Ok(rsp)
+                }
+                .boxed()
             }
 
             // Only uses the best `Chain` and FinalizedState `ZebraDb`.
@@ -1021,6 +1029,36 @@ impl Service<ReadRequest> for ReadStateService {
     #[instrument(name = "read_state", skip(self))]
     fn call(&mut self, req: ReadRequest) -> Self::Future {
         match req {
+            // Used by the StateService.
+            ReadRequest::Tip => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "tip",
+                );
+
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let tip = state
+                            .best_chain_receiver
+                            .with_watch_data(|best_chain| read::tip(best_chain, &state.db));
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::Tip");
+
+                        Ok(ReadResponse::Tip(tip))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
+                .boxed()
+            }
+
             // Used by get_block RPC.
             ReadRequest::Block(hash_or_height) => {
                 metrics::counter!(

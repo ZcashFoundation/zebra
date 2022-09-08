@@ -26,6 +26,6 @@ pub use address::{
 pub use block::{block, block_header, transaction};
 pub use find::{
     chain_contains_hash, find_chain_hashes, find_chain_headers, hash_by_height, height_by_hash,
-    tip_height,
+    tip, tip_height,
 };
 pub use tree::{orchard_tree, sapling_tree};

@@ -13,13 +13,32 @@ use crate::service::{
 
 /// Returns the tip of `chain`.
 /// If there is no chain, returns the tip of `db`.
-pub fn tip_height<C>(chain: Option<C>, db: &ZebraDb) -> Option<Height>
+pub fn tip<C>(chain: Option<C>, db: &ZebraDb) -> Option<(Height, block::Hash)>
 where
     C: AsRef<Chain>,
 {
     chain
-        .map(|chain| chain.as_ref().non_finalized_tip_height())
-        .or_else(|| db.finalized_tip_height())
+        .map(|chain| chain.as_ref().non_finalized_tip())
+        .or_else(|| db.tip())
+}
+
+/// Returns the tip [`Height`] of `chain`.
+/// If there is no chain, returns the tip of `db`.
+pub fn tip_height<C>(chain: Option<C>, db: &ZebraDb) -> Option<Height>
+where
+    C: AsRef<Chain>,
+{
+    tip(chain, db).map(|(height, _hash)| height)
+}
+
+/// Returns the tip [`block::Hash`] of `chain`.
+/// If there is no chain, returns the tip of `db`.
+#[allow(dead_code)]
+pub fn tip_hash<C>(chain: Option<C>, db: &ZebraDb) -> Option<block::Hash>
+where
+    C: AsRef<Chain>,
+{
+    tip(chain, db).map(|(_height, hash)| hash)
 }
 
 /// Return the height for the block at `hash`, if `hash` is in the chain.

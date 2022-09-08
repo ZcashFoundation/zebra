@@ -408,7 +408,8 @@ pub enum Request {
     /// * [`Response::Depth(None)`](Response::Depth) otherwise.
     Depth(block::Hash),
 
-    /// Returns [`Response::Tip`] with the current best chain tip.
+    /// Returns [`Response::Tip(Option<(Height, block::Hash)>)`](Response::Tip)
+    /// with the current best chain tip.
     Tip,
 
     /// Computes a block locator object based on the current best chain.
@@ -507,6 +508,10 @@ pub enum Request {
 /// A read-only query about the chain state, via the
 /// [`ReadStateService`](crate::service::ReadStateService).
 pub enum ReadRequest {
+    /// Returns [`ReadResponse::Tip(Option<(Height, block::Hash)>)`](ReadResponse::Tip)
+    /// with the current best chain tip.
+    Tip,
+
     /// Looks up a block by hash or height in the current best chain.
     ///
     /// Returns
@@ -584,7 +589,7 @@ impl TryFrom<Request> for ReadRequest {
     fn try_from(request: Request) -> Result<ReadRequest, Self::Error> {
         match request {
             Request::Depth(_) => unimplemented!(),
-            Request::Tip => unimplemented!(),
+            Request::Tip => Ok(ReadRequest::Tip),
 
             Request::BlockLocator => unimplemented!(),
 
