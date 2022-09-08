@@ -622,6 +622,8 @@ impl Service<Request> for StateService {
     #[instrument(name = "state", skip(self, req))]
     fn call(&mut self, req: Request) -> Self::Future {
         match req {
+            // Uses queued_blocks and pending_utxos in the StateService
+            // Accesses shared writeable state in the StateService, NonFinalizedState, and ZebraDb.
             Request::CommitBlock(prepared) => {
                 metrics::counter!(
                     "state.requests",
@@ -671,6 +673,9 @@ impl Service<Request> for StateService {
                 .instrument(span)
                 .boxed()
             }
+
+            // Uses queued_by_prev_hash in the FinalizedState and pending_utxos in the StateService.
+            // Accesses shared writeable state in the StateService, FinalizedState, and ZebraDb.
             Request::CommitFinalizedBlock(finalized) => {
                 metrics::counter!(
                     "state.requests",
@@ -731,6 +736,12 @@ impl Service<Request> for StateService {
             //   - get the response back on a oneshot channel (like CommitFinalizedBlock)
             //   - await the oneshot in the future
             //   - feel free to delete the timers, we can add them back in later
+            //
+            // TODO: consider spawning small reads into blocking tasks,
+            //       because the database can do large cleanups during small reads.
+            //
+            // Depth only uses the best `Chain` and FinalizedState `ZebraDb`.
+            // (It could run concurrently, but it doesn't yet.)
             Request::Depth(hash) => {
                 metrics::counter!(
                     "state.requests",
@@ -750,8 +761,9 @@ impl Service<Request> for StateService {
 
                 async move { rsp }.boxed()
             }
-            // TODO: consider spawning small reads into blocking tasks,
-            //       because the database can do large cleanups during small reads.
+
+            // Only uses the best `Chain` and FinalizedState `ZebraDb`.
+            // (It could run concurrently, but it doesn't yet.)
             Request::Tip => {
                 metrics::counter!(
                     "state.requests",
@@ -771,6 +783,9 @@ impl Service<Request> for StateService {
 
                 async move { rsp }.boxed()
             }
+
+            // Only uses the best `Chain` and FinalizedState `ZebraDb`.
+            // (It could run concurrently, but it doesn't yet.)
             Request::BlockLocator => {
                 metrics::counter!(
                     "state.requests",
@@ -792,6 +807,8 @@ impl Service<Request> for StateService {
 
                 async move { rsp }.boxed()
             }
+
+            // Runs concurrently using the best `Chain` and FinalizedState `ZebraDb`
             Request::Transaction(hash) => {
                 metrics::counter!(
                     "state.requests",
@@ -823,6 +840,8 @@ impl Service<Request> for StateService {
                 .map(|join_result| join_result.expect("panic in Request::Transaction"))
                 .boxed()
             }
+
+            // Runs concurrently using the best `Chain` and FinalizedState `ZebraDb`
             Request::Block(hash_or_height) => {
                 metrics::counter!(
                     "state.requests",
@@ -854,6 +873,9 @@ impl Service<Request> for StateService {
                 .map(|join_result| join_result.expect("panic in Request::Block"))
                 .boxed()
             }
+
+            // Uses pending_utxos and queued_blocks in the StateService.
+            // Accesses shared writeable state in the StateService.
             Request::AwaitUtxo(outpoint) => {
                 metrics::counter!(
                     "state.requests",
@@ -877,6 +899,8 @@ impl Service<Request> for StateService {
 
                 fut.instrument(span).boxed()
             }
+
+            // Runs concurrently using the best `Chain` and FinalizedState `ZebraDb`
             Request::FindBlockHashes { known_blocks, stop } => {
                 metrics::counter!(
                     "state.requests",
@@ -916,6 +940,8 @@ impl Service<Request> for StateService {
                 .map(|join_result| join_result.expect("panic in Request::Block"))
                 .boxed()
             }
+
+            // Runs concurrently using the best `Chain` and FinalizedState `ZebraDb`
             Request::FindBlockHeaders { known_blocks, stop } => {
                 metrics::counter!(
                     "state.requests",
