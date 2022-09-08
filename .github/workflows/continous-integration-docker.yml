@@ -273,6 +273,7 @@ jobs:
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || github.event.inputs.regenerate-disks == 'true' }}
     with:
+      app_name: zebrad
       test_id: sync-to-checkpoint
       test_description: Test sync up to mandatory checkpoint
       test_variables: '-e TEST_DISK_REBUILD=1 -e ZEBRA_FORCE_USE_COLOR=1'
@@ -291,6 +292,7 @@ jobs:
     uses: ./.github/workflows/deploy-gcp-tests.yml
     if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
     with:
+      app_name: zebrad
       test_id: sync-past-checkpoint
       test_description: Test full validation sync from a cached state
       test_variables: '-e TEST_CHECKPOINT_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1'
@@ -318,6 +320,7 @@ jobs:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
     if: ${{ (github.event_name == 'push' && github.ref_name == 'main') || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || github.event.inputs.run-full-sync == 'true' }}
     with:
+      app_name: zebrad
       test_id: full-sync-to-tip
       test_description: Test a full sync up to the tip
       test_variables: '-e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600'
@@ -417,8 +420,8 @@ jobs:
       test_variables: '-e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
       needs_zebra_state: true
       needs_lwd_state: true
-      # update the disk on every PR, to increase CI speed
-      saves_to_disk: true
+      # since we do a full sync in every PR, the new cached state will only be a few minutes newer than the original one
+      saves_to_disk: false
       disk_prefix: lwd-cache
       disk_suffix: tip
       root_state_path: '/var/cache'
