@@ -73,13 +73,15 @@ jobs:
 
       # Deletes cache images older than $DELETE_AGE_DAYS days.
       #
-      # Keeps the latest $KEEP_LATEST_IMAGE_COUNT images of each type:
+      # Keeps an extra $KEEP_LATEST_IMAGE_COUNT images of each type:
       # - zebrad checkpoint cache
       # - zebrad tip cache
       # - lightwalletd + zebrad tip cache
       #
-      # TODO: when we add testnet to the workflows, keep the latest $KEEP_LATEST_IMAGE_COUNT testnet images, 
-      #       and the latest $KEEP_LATEST_IMAGE_COUNT mainnet images.
+      # TODO:
+      # - keep the latest $KEEP_LATEST_IMAGE_COUNT, if there are that many recent images, delete all the outdated images
+      # - when we add testnet to the workflows, keep the latest $KEEP_LATEST_IMAGE_COUNT testnet images, 
+      #   and the latest $KEEP_LATEST_IMAGE_COUNT mainnet images.
       - name: Delete old cache disks
         run: |
           DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
