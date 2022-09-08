@@ -652,7 +652,11 @@ fn last_config_is_stored() -> Result<()> {
             return Ok(());
         }
     }
-    Err(eyre!("last config is not stored"))
+    Err(eyre!(
+        "latest zebrad config is not being tested for compatibility.\n\
+        Run `zebrad generate -o zebrad/tests/common/configs/<next-release-tag>.toml`\n\
+        and commit the latest config to Zebra's git repository"
+    ))
 }
 
 /// Checks that Zebra prints an informative message when it cannot parse the
