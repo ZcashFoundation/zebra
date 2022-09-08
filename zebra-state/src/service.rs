@@ -137,7 +137,7 @@ pub(crate) struct StateService {
 
     /// A cloneable [`ReadStateService`], used to answer concurrent read requests.
     ///
-    /// TODO: move concurrent read requests to [`ReadRequest`], and remove `read_service`.
+    /// TODO: move users of read [`Request`]s to [`ReadStateService`], and remove `read_service`.
     read_service: ReadStateService,
 }
 

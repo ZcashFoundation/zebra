@@ -39,7 +39,7 @@ pub enum Response {
     /// Response to [`Request::Block`] with the specified block.
     Block(Option<Arc<Block>>),
 
-    /// The response to a `AwaitUtxo` request, from the non-finalized chain, finalized chain,
+    /// The response to a `AwaitUtxo` request, from any non-finalized chains, finalized chain,
     /// pending unverified blocks, or blocks received after the request was sent.
     Utxo(transparent::Utxo),
 

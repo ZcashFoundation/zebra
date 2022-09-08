@@ -448,7 +448,7 @@ pub enum Request {
     /// Request a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
     /// waiting until it becomes available if it is unknown.
     ///
-    /// Checks the finalized chain, non-finalized chain, queued unverified blocks,
+    /// Checks the finalized chain, all non-finalized chains, queued unverified blocks,
     /// and any blocks that arrive at the state after the request future has been created.
     ///
     /// This request is purely informational, and there are no guarantees about
