@@ -9,9 +9,13 @@ use crate::{
     ValidateContextError,
 };
 
+// Tidy up some doc links
+#[allow(unused_imports)]
+use crate::service;
+
 /// Reject double-spends of nullifers:
 /// - one from this [`PreparedBlock`], and the other already committed to the
-///   [`FinalizedState`](super::super::FinalizedState).
+///   [`FinalizedState`](service::FinalizedState).
 ///
 /// (Duplicate non-finalized nullifiers are rejected during the chain update,
 /// see [`add_to_non_finalized_chain_unique`] for details.)
@@ -80,7 +84,7 @@ pub(crate) fn no_duplicates_in_finalized_chain(
 /// [2]: zebra_chain::sapling::Spend
 /// [3]: zebra_chain::orchard::Action
 /// [4]: zebra_chain::block::Block
-/// [5]: super::super::Chain
+/// [5]: service::non_finalized_state::Chain
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn add_to_non_finalized_chain_unique<'block, NullifierT>(
     chain_nullifiers: &mut HashSet<NullifierT>,
@@ -124,7 +128,7 @@ where
 /// [`add_to_non_finalized_chain_unique`], so this shielded data should be the
 /// only shielded data that added this nullifier to this [`Chain`][1].
 ///
-/// [1]: super::super::Chain
+/// [1]: service::non_finalized_state::Chain
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn remove_from_non_finalized_chain<'block, NullifierT>(
     chain_nullifiers: &mut HashSet<NullifierT>,

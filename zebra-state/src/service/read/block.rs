@@ -9,7 +9,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::{finalized_state::ZebraDb, non_finalized_state::Chain},
+    service::{
+        finalized_state::ZebraDb,
+        non_finalized_state::{Chain, NonFinalizedState},
+    },
     HashOrHeight,
 };
 
@@ -109,5 +112,28 @@ where
     // memory, but `db` stores transactions on disk, with a memory cache.)
     chain
         .and_then(|chain| chain.as_ref().created_utxo(&outpoint))
+        .or_else(|| db.utxo(&outpoint).map(|utxo| utxo.utxo))
+}
+
+/// Returns the [`Utxo`] for [`transparent::OutPoint`], if it exists in the
+/// `non_finalized_state` or finalized `db`.
+///
+/// UTXOs may be returned regardless of whether they have been spent.
+pub fn any_utxo(
+    non_finalized_state: NonFinalizedState,
+    db: &ZebraDb,
+    outpoint: transparent::OutPoint,
+) -> Option<Utxo> {
+    // # Correctness
+    //
+    // The StateService commits blocks to the finalized state before updating
+    // the latest chain, and it can commit additional blocks after we've cloned
+    // the `non_finalized_state`.
+    //
+    // Since UTXOs are the same in the finalized and non-finalized state,
+    // we check the most efficient alternative first. (`non_finalized_state` is always in
+    // memory, but `db` stores transactions on disk, with a memory cache.)
+    non_finalized_state
+        .any_utxo(&outpoint)
         .or_else(|| db.utxo(&outpoint).map(|utxo| utxo.utxo))
 }
