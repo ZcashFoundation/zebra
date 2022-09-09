@@ -315,6 +315,9 @@ impl StateService {
             rsp_rx
         };
 
+        // TODO: avoid a temporary verification failure that can happen
+        //       if the first non-finalized block arrives before the last finalized block is committed
+        //       (#5125)
         if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
             return rsp_rx;
