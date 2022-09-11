@@ -68,10 +68,6 @@ mod tests;
 
 pub use finalized_state::{OutputIndex, OutputLocation, TransactionLocation};
 
-pub type QueuedBlock = (
-    PreparedBlock,
-    oneshot::Sender<Result<block::Hash, BoxError>>,
-);
 pub type QueuedFinalized = (
     FinalizedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
@@ -110,9 +106,10 @@ pub(crate) struct StateService {
     /// The non-finalized chain state, including its in-memory chain forks.
     mem: NonFinalizedState,
 
-    // Queued Non-Finalized Blocks
+    // Queued Blocks
     //
-    /// Blocks awaiting their parent blocks for contextual verification.
+    /// Blocks for the [`NonFinalizedState`], which are awaiting their parent blocks
+    /// before they can do contextual verification.
     queued_blocks: QueuedBlocks,
 
     // Pending UTXO Request Tracking
