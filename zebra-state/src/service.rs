@@ -1,13 +1,12 @@
 //! [`tower::Service`]s for Zebra's cached chain state.
 //!
 //! Zebra provides cached state access via two main services:
-//! - [`StateService`]: a read-write service that waits for queued blocks.
+//! - [`StateService`]: a read-write service that writes blocks to the state,
+//!   and redirects most read requests to the [`ReadStateService`].
 //! - [`ReadStateService`]: a read-only service that answers from the most
 //!   recent committed block.
 //!
-//! Most users should prefer [`ReadStateService`], unless they need to wait for
-//! verified blocks to be committed. (For example, the syncer and mempool
-//! tasks.)
+//! Most users should prefer [`ReadStateService`], unless they need to write blocks to the state.
 //!
 //! Zebra also provides access to the best chain tip via:
 //! - [`LatestChainTip`]: a read-only channel that contains the latest committed
