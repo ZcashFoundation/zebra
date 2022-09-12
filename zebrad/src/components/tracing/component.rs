@@ -44,7 +44,7 @@ pub struct Tracing {
 impl Tracing {
     /// Try to create a new [`Tracing`] component with the given `filter`.
     pub fn new(config: TracingSection) -> Result<Self, FrameworkError> {
-        let filter = config.filter.unwrap_or_else(|| "".to_string());
+        let filter = config.filter.unwrap_or_default();
         let flame_root = &config.flamegraph;
 
         // Builds a lossy NonBlocking logger with a default line limit of 128_000 or an explicit buffer_limit.
