@@ -39,7 +39,7 @@ skip = [
     # wait for metrics-util and hashlink to upgrade
     { name = "hashbrown", version = "=0.11.2" },
 
-    # wait for num-format to upgrade itoa
+    # wait for num-format to upgrade itoa (used by inferno)
     { name = "itoa", version = "=0.4.8" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
