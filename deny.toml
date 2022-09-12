@@ -35,15 +35,18 @@ skip = [
 
     # wait for zcash_address to upgrade
     { name = "bech32", version = "=0.8.1"},
+
+    # wait for metrics-util and hashlink to upgrade
+    { name = "hashbrown", version = "=0.11.2" },
+
+    # wait for num-format to upgrade itoa (used by inferno)
+    { name = "itoa", version = "=0.4.8" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # wait for criterion to upgrade cast, itoa, strsim transitive dependencies
-    { name = "criterion", version = "=0.3.6" },
-
     # ticket #3000: upgrade tower-fallback dependencies
     { name = "pin-project", version = "=0.4.30" },
 
