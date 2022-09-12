@@ -1,4 +1,14 @@
 //! Finding and reading block hashes and headers, in response to peer requests.
+//!
+//! In the functions in this module:
+//!
+//! The StateService commits blocks to the finalized state before updating
+//! `chain` from the latest chain. Then it can commit additional blocks to
+//! the finalized state after we've cloned the `chain`.
+//!
+//! This means that some blocks can be in both:
+//! - the cached [`Chain`], and
+//! - the shared finalized [`ZebraDb`] reference.
 
 use std::{
     iter,
@@ -23,10 +33,6 @@ where
     C: AsRef<Chain>,
 {
     // # Correctness
-    //
-    // The StateService commits blocks to the finalized state before updating
-    // the latest chain, and it can commit additional blocks after we've cloned
-    // this `chain` variable.
     //
     // If there is an overlap between the non-finalized and finalized states,
     // where the finalized tip is above the non-finalized tip,
@@ -66,10 +72,6 @@ where
 
     // # Correctness
     //
-    // The StateService commits blocks to the finalized state before updating
-    // the latest chain, and it can commit additional blocks after we've cloned
-    // this `chain` variable.
-    //
     // It is ok to do this lookup in two different calls. Finalized state updates
     // can only add overlapping blocks, and hashes are unique.
 
@@ -86,10 +88,6 @@ where
 {
     // # Correctness
     //
-    // The StateService commits blocks to the finalized state before updating
-    // the latest chain, and it can commit additional blocks after we've cloned
-    // this `chain` variable.
-    //
     // Finalized state updates can only add overlapping blocks, and hashes are unique.
 
     chain
@@ -103,10 +101,6 @@ where
     C: AsRef<Chain>,
 {
     // # Correctness
-    //
-    // The StateService commits blocks to the finalized state before updating
-    // the latest chain, and it can commit additional blocks after we've cloned
-    // this `chain` variable.
     //
     // Finalized state updates can only add overlapping blocks, and heights are unique
     // in the current `chain`.
@@ -127,10 +121,6 @@ where
     C: AsRef<Chain>,
 {
     // # Correctness
-    //
-    // The StateService commits blocks to the finalized state before updating
-    // the latest chain, and it can commit additional blocks after we've cloned
-    // this `chain` variable.
     //
     // Finalized state updates can only add overlapping blocks, and hashes are unique.
     //
@@ -157,10 +147,6 @@ where
     let chain = chain.as_ref();
 
     // # Correctness
-    //
-    // The StateService commits blocks to the finalized state before updating
-    // the latest chain, and it can commit additional blocks after we've cloned
-    // this `chain` variable.
     //
     // It is ok to do these lookups using multiple database calls. Finalized state updates
     // can only add overlapping blocks, and hashes are unique.

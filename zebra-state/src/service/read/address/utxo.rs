@@ -1,4 +1,14 @@
 //! Transparent address index UTXO queries.
+//!
+//! In the functions in this module:
+//!
+//! The StateService commits blocks to the finalized state before updating
+//! `chain` from the latest chain. Then it can commit additional blocks to
+//! the finalized state after we've cloned the `chain`.
+//!
+//! This means that some blocks can be in both:
+//! - the cached [`Chain`], and
+//! - the shared finalized [`ZebraDb`] reference.
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
@@ -234,10 +244,7 @@ where
 
     // # Correctness
     //
-    // The StateService commits blocks to the finalized state before updating the latest chain,
-    // and it can commit additional blocks after we've cloned this `chain` variable.
-    //
-    // But we can compensate for deleted UTXOs by applying the overlapping non-finalized UTXO changes.
+    // We can compensate for deleted UTXOs by applying the overlapping non-finalized UTXO changes.
 
     // Check if the finalized and non-finalized states match or overlap
     let required_min_non_finalized_root = finalized_tip_range.start().0 + 1;

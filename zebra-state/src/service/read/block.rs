@@ -1,4 +1,15 @@
 //! Shared block, header, and transaction reading code.
+//!
+//! In the functions in this module:
+//!
+//! The StateService commits blocks to the finalized state before updating
+//! `chain` or `non_finalized_state` from the latest chains. Then it can
+//! commit additional blocks to the finalized state after we've cloned the
+//! `chain` or `non_finalized_state`.
+//!
+//! This means that some blocks can be in both:
+//! - the cached [`Chain`] or [`NonFinalizedState`], and
+//! - the shared finalized [`ZebraDb`] reference.
 
 use std::sync::Arc;
 
@@ -24,10 +35,6 @@ where
 {
     // # Correctness
     //
-    // The StateService commits blocks to the finalized state before updating
-    // the latest chain, and it can commit additional blocks after we've cloned
-    // this `chain` variable.
-    //
     // Since blocks are the same in the finalized and non-finalized state, we
     // check the most efficient alternative first. (`chain` is always in memory,
     // but `db` stores blocks on disk, with a memory cache.)
@@ -50,10 +57,6 @@ where
 {
     // # Correctness
     //
-    // The StateService commits blocks to the finalized state before updating
-    // the latest chain, and it can commit additional blocks after we've cloned
-    // this `chain` variable.
-    //
     // Since blocks are the same in the finalized and non-finalized state, we
     // check the most efficient alternative first. (`chain` is always in memory,
     // but `db` stores blocks on disk, with a memory cache.)
@@ -75,10 +78,6 @@ where
     C: AsRef<Chain>,
 {
     // # Correctness
-    //
-    // The StateService commits blocks to the finalized state before updating
-    // the latest chain, and it can commit additional blocks after we've cloned
-    // this `chain` variable.
     //
     // Since transactions are the same in the finalized and non-finalized state,
     // we check the most efficient alternative first. (`chain` is always in
@@ -108,10 +107,6 @@ where
 {
     // # Correctness
     //
-    // The StateService commits blocks to the finalized state before updating
-    // the latest chain, and it can commit additional blocks after we've cloned
-    // this `chain` variable.
-    //
     // Since UTXOs are the same in the finalized and non-finalized state,
     // we check the most efficient alternative first. (`chain` is always in
     // memory, but `db` stores transactions on disk, with a memory cache.)
@@ -138,10 +133,6 @@ pub fn any_utxo(
     outpoint: transparent::OutPoint,
 ) -> Option<Utxo> {
     // # Correctness
-    //
-    // The StateService commits blocks to the finalized state before updating
-    // the latest chain, and it can commit additional blocks after we've cloned
-    // the `non_finalized_state`.
     //
     // Since UTXOs are the same in the finalized and non-finalized state,
     // we check the most efficient alternative first. (`non_finalized_state` is always in
