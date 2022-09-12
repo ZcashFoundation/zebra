@@ -198,10 +198,12 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
     state.commit_block(block2.clone().prepare(), &finalized_state)?;
     state.commit_block(child.prepare(), &finalized_state)?;
 
-    let finalized = state.finalize();
+    let finalized_with_trees = state.finalize();
+    let finalized = finalized_with_trees.finalized;
     assert_eq!(block1, finalized.block);
 
-    let finalized = state.finalize();
+    let finalized_with_trees = state.finalize();
+    let finalized = finalized_with_trees.finalized;
     assert_eq!(block2, finalized.block);
 
     assert!(state.best_chain().is_none());

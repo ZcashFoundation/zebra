@@ -242,6 +242,7 @@ impl ZebraDb {
         &mut self,
         finalized: FinalizedBlock,
         history_tree: Arc<HistoryTree>,
+        note_commitment_trees: NoteCommitmentTrees,
         network: Network,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
@@ -329,8 +330,8 @@ impl ZebraDb {
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
             address_balances,
-            self.note_commitment_trees(),
             history_tree,
+            note_commitment_trees,
             self.finalized_value_pool(),
         )?;
 
@@ -382,8 +383,8 @@ impl DiskWriteBatch {
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
-        mut note_commitment_trees: NoteCommitmentTrees,
         history_tree: Arc<HistoryTree>,
+        note_commitment_trees: NoteCommitmentTrees,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
         let FinalizedBlock {
@@ -419,7 +420,7 @@ impl DiskWriteBatch {
             &spent_utxos_by_out_loc,
             address_balances,
         )?;
-        self.prepare_shielded_transaction_batch(db, &finalized, &mut note_commitment_trees)?;
+        self.prepare_shielded_transaction_batch(db, &finalized)?;
 
         self.prepare_note_commitment_batch(db, &finalized, note_commitment_trees, history_tree)?;
 

@@ -296,9 +296,9 @@ impl StateService {
 
         while self.mem.best_chain_len() > crate::constants::MAX_BLOCK_REORG_HEIGHT {
             tracing::trace!("finalizing block past the reorg limit");
-            let finalized = self.mem.finalize();
+            let finalized_with_trees = self.mem.finalize();
             self.disk
-                .commit_finalized_direct(finalized, "best non-finalized chain root")
+                .commit_finalized_direct(finalized_with_trees, "best non-finalized chain root")
                 .expect(
                     "expected that errors would not occur when writing to disk or updating note commitment and history trees",
                 );
@@ -669,6 +669,14 @@ impl Service<Request> for StateService {
 
                 let timer = CodeTimer::start();
 
+                // # Consensus
+                //
+                // A non-finalized block verification could have called AwaitUtxo
+                // before this finalized block arrived in the state.
+                // So we need to check for pending UTXOs here for non-finalized blocks,
+                // even though it is redundant for most finalized blocks.
+                // (Finalized blocks are verified using block hash checkpoints
+                // and transaction merkle tree block header commitments.)
                 self.pending_utxos.check_against(&finalized.new_outputs);
 
                 // # Performance

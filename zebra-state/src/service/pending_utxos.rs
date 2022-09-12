@@ -38,6 +38,7 @@ impl PendingUtxos {
     /// Notify all requests waiting for the [`transparent::Utxo`] pointed to by
     /// the given [`transparent::OutPoint`] that the [`transparent::Utxo`] has
     /// arrived.
+    #[inline]
     pub fn respond(&mut self, outpoint: &transparent::OutPoint, utxo: transparent::Utxo) {
         if let Some(sender) = self.0.remove(outpoint) {
             // Adding the outpoint as a field lets us cross-reference
@@ -59,6 +60,7 @@ impl PendingUtxos {
     }
 
     /// Check the list of pending UTXO requests against the supplied [`transparent::Utxo`] index.
+    #[inline]
     pub fn check_against(&mut self, utxos: &HashMap<transparent::OutPoint, transparent::Utxo>) {
         for (outpoint, utxo) in utxos.iter() {
             self.respond(outpoint, utxo.clone())

@@ -180,7 +180,6 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
-        note_commitment_trees: &mut NoteCommitmentTrees,
     ) -> Result<(), BoxError> {
         let FinalizedBlock { block, .. } = finalized;
 
@@ -188,8 +187,6 @@ impl DiskWriteBatch {
         for transaction in &block.transactions {
             self.prepare_nullifier_batch(db, transaction)?;
         }
-
-        note_commitment_trees.update_trees_parallel(block)?;
 
         Ok(())
     }
@@ -290,7 +287,7 @@ impl DiskWriteBatch {
             note_commitment_trees.orchard,
         );
 
-        self.prepare_history_batch(db, finalized, sapling_root, orchard_root, history_tree)
+        self.prepare_history_batch(db, finalized, history_tree)
     }
 
     /// Prepare a database batch containing the initial note commitment trees,

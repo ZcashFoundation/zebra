@@ -41,10 +41,11 @@ proptest! {
             let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                Mainnet,
+                false,
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
-                Mainnet,
             );
             let hash = SentTransactionHash(transaction.hash());
 
@@ -93,10 +94,11 @@ proptest! {
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                Mainnet,
+                false,
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
-                Mainnet,
             );
 
             let transaction_bytes = transaction
@@ -150,10 +152,11 @@ proptest! {
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                Mainnet,
+                false,
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
-                Mainnet,
             );
 
             let transaction_bytes = transaction
@@ -215,10 +218,11 @@ proptest! {
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                Mainnet,
+                false,
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
-                Mainnet,
             );
 
             let send_task = tokio::spawn(rpc.send_raw_transaction(non_hex_string));
@@ -269,10 +273,11 @@ proptest! {
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                Mainnet,
+                false,
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
-                Mainnet,
             );
 
             let send_task = tokio::spawn(rpc.send_raw_transaction(hex::encode(random_bytes)));
@@ -321,10 +326,11 @@ proptest! {
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                Mainnet,
+                false,
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
-                Mainnet,
             );
 
             let call_task = tokio::spawn(rpc.get_raw_mempool());
@@ -376,10 +382,11 @@ proptest! {
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                Mainnet,
+                false,
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
-                Mainnet,
             );
 
             let send_task = tokio::spawn(rpc.get_raw_transaction(non_hex_string, 0));
@@ -432,10 +439,11 @@ proptest! {
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                Mainnet,
+                false,
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
-                Mainnet,
             );
 
             let send_task = tokio::spawn(rpc.get_raw_transaction(hex::encode(random_bytes), 0));
@@ -477,10 +485,11 @@ proptest! {
         // look for an error with a `NoChainTip`
         let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
             "RPC test",
+            network,
+            false,
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
             NoChainTip,
-            network,
         );
 
         let response = rpc.get_blockchain_info();
@@ -525,10 +534,11 @@ proptest! {
         // Start RPC with the mocked `ChainTip`
         let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
             "RPC test",
+            network,
+            false,
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
             chain_tip,
-            network,
         );
         let response = rpc.get_blockchain_info();
 
@@ -609,10 +619,11 @@ proptest! {
         runtime.block_on(async move {
             let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                network,
+                false,
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 chain_tip,
-                network,
             );
 
             // Build the future to call the RPC
@@ -670,10 +681,11 @@ proptest! {
         runtime.block_on(async move {
             let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                network,
+                false,
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 chain_tip,
-                network,
             );
 
             let address_strings = AddressStrings {
@@ -719,10 +731,11 @@ proptest! {
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                Mainnet,
+                false,
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
-                Mainnet,
             );
 
             // send a transaction
@@ -806,10 +819,11 @@ proptest! {
 
             let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
                 "RPC test",
+                Mainnet,
+                false,
                 Buffer::new(mempool.clone(), 1),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
-                Mainnet,
             );
 
             let mut transactions_hash_set = HashSet::new();
