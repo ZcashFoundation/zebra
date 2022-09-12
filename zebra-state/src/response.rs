@@ -76,12 +76,12 @@ pub enum ReadResponse {
     /// The response to a `FindBlockHeaders` request.
     BlockHeaders(Vec<block::CountedHeader>),
 
-    /// The response to a `ChainUtxo` request, from verified blocks in the
+    /// The response to a `BestChainUtxo` request, from verified blocks in the
     /// non-finalized chain or finalized chain.
     ///
     /// This response is purely informational, there is no guarantee that
     /// the UTXO remains unspent in the best chain.
-    ChainUtxo(Option<transparent::Utxo>),
+    BestChainUtxo(Option<transparent::Utxo>),
 
     /// Response to [`ReadRequest::SaplingTree`] with the specified Sapling note commitment tree.
     SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),

@@ -1072,7 +1072,7 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // Currently unused.
-            ReadRequest::ChainUtxo(outpoint) => {
+            ReadRequest::BestChainUtxo(outpoint) => {
                 metrics::counter!(
                     "state.requests",
                     1,
@@ -1094,12 +1094,12 @@ impl Service<ReadRequest> for ReadStateService {
                         );
 
                         // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::ChainUtxo");
+                        timer.finish(module_path!(), line!(), "ReadRequest::BestChainUtxo");
 
-                        Ok(ReadResponse::ChainUtxo(utxo))
+                        Ok(ReadResponse::BestChainUtxo(utxo))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::ChainUtxo"))
+                .map(|join_result| join_result.expect("panic in ReadRequest::BestChainUtxo"))
                 .boxed()
             }
 

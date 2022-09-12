@@ -553,7 +553,7 @@ pub enum ReadRequest {
     ///
     /// This request is purely informational, there is no guarantee that
     /// the UTXO remains unspent in the best chain.
-    ChainUtxo(transparent::OutPoint),
+    BestChainUtxo(transparent::OutPoint),
 
     /// Computes a block locator object based on the current best chain.
     ///
