@@ -26,3 +26,5 @@ jobs:
       rust_backtrace: '1'
       zebra_skip_ipv6_tests: '1'
       rust_log: info
+    # This step needs access to Docker Hub secrets to run succesfully
+    secrets: inherit
