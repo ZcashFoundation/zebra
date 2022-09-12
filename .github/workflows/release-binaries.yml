@@ -1,0 +1,29 @@
+# This workflow is meant to trigger a build of Docker binaries when a tag
+# is created, it uses the existing `build-docker-image.yml` workflow
+#
+# We use a separate action as we might want to trigger this with different under
+# different circumstances than a Continous Deployment, for example.
+name: Release binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # Each time this workflow is executed, a build will be triggered to create a new image
+  # with the corresponding tags using information from git
+  #
+  # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
+  build:
+    uses: ./.github/workflows/build-docker-image.yml
+    with:
+      dockerfile_path: ./docker/Dockerfile
+      dockerfile_target: runtime
+      image_name: zebrad
+      network: Mainnet
+      # TODO: validate this are the values we want on a public image
+      checkpoint_sync: true
+      rust_backtrace: '1'
+      zebra_skip_ipv6_tests: '1'
+      rust_log: info
