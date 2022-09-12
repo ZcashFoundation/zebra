@@ -691,7 +691,7 @@ impl Service<Request> for StateService {
 
                 let timer = CodeTimer::start();
 
-                // Prepare the AwaitUtxo future.
+                // Prepare the AwaitUtxo future from PendingUxtos.
                 let response_fut = self.pending_utxos.queue(outpoint);
                 let span = Span::current();
                 let response_fut = response_fut.instrument(span).boxed();
@@ -1077,7 +1077,7 @@ impl Service<ReadRequest> for ReadStateService {
                     "state.requests",
                     1,
                     "service" => "read_state",
-                    "type" => "chain_utxo",
+                    "type" => "best_chain_utxo",
                 );
 
                 let timer = CodeTimer::start();
@@ -1100,6 +1100,38 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::BestChainUtxo"))
+                .boxed()
+            }
+
+            // Manually used by the StateService to implement part of AwaitUtxo.
+            ReadRequest::AnyChainUtxo(outpoint) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "any_chain_utxo",
+                );
+
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let utxo = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::any_utxo(non_finalized_state, &state.db, outpoint)
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::AnyChainUtxo");
+
+                        Ok(ReadResponse::AnyChainUtxo(utxo))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::AnyChainUtxo"))
                 .boxed()
             }
 

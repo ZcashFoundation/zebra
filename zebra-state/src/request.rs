@@ -549,11 +549,20 @@ pub enum ReadRequest {
     /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
     /// returning `None` immediately if it is unknown.
     ///
-    /// Checks verified blocks in the finalized chain and non-finalized chain.
+    /// Checks verified blocks in the finalized chain and the _best_ non-finalized chain.
     ///
     /// This request is purely informational, there is no guarantee that
     /// the UTXO remains unspent in the best chain.
     BestChainUtxo(transparent::OutPoint),
+
+    /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
+    /// returning `None` immediately if it is unknown.
+    ///
+    /// Checks verified blocks in the finalized chain and _all_ non-finalized chains.
+    ///
+    /// This request is purely informational, there is no guarantee that
+    /// the UTXO remains unspent in the best chain.
+    AnyChainUtxo(transparent::OutPoint),
 
     /// Computes a block locator object based on the current best chain.
     ///
@@ -687,10 +696,9 @@ impl TryFrom<Request> for ReadRequest {
                 Err("ReadService does not write blocks")
             }
 
-            Request::AwaitUtxo(_) => {
-                Err("ReadService does not track pending UTXOs. \
-                     Manually convert the request to ReadRequest::ChainUtxo, and handle pending UTXOs.")
-            }
+            Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
+                     Manually convert the request to ReadRequest::AnyChainUtxo, \
+                     and handle pending UTXOs"),
         }
     }
 }

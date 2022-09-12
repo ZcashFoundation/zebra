@@ -77,11 +77,18 @@ pub enum ReadResponse {
     BlockHeaders(Vec<block::CountedHeader>),
 
     /// The response to a `BestChainUtxo` request, from verified blocks in the
-    /// non-finalized chain or finalized chain.
+    /// _best_ non-finalized chain, or the finalized chain.
     ///
     /// This response is purely informational, there is no guarantee that
     /// the UTXO remains unspent in the best chain.
     BestChainUtxo(Option<transparent::Utxo>),
+
+    /// The response to an `AnyChainUtxo` request, from verified blocks in
+    /// _any_ non-finalized chain, or the finalized chain.
+    ///
+    /// This response is purely informational, there is no guarantee that
+    /// the UTXO remains unspent in the best chain.
+    AnyChainUtxo(Option<transparent::Utxo>),
 
     /// Response to [`ReadRequest::SaplingTree`] with the specified Sapling note commitment tree.
     SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),
@@ -116,14 +123,15 @@ impl TryFrom<ReadResponse> for Response {
                 Ok(Response::Transaction(tx_and_height.map(|(tx, _height)| tx)))
             }
 
-            ReadResponse::ChainUtxo(_) => Err("ReadService does not track pending UTXOs. \
-                                               Manually unwrap the response, and handle pending UTXOs."),
+            ReadResponse::AnyChainUtxo(_) => Err("ReadService does not track pending UTXOs. \
+                                                  Manually unwrap the response, and handle pending UTXOs."),
 
             ReadResponse::BlockLocator(hashes) => Ok(Response::BlockLocator(hashes)),
             ReadResponse::BlockHashes(hashes) => Ok(Response::BlockHashes(hashes)),
             ReadResponse::BlockHeaders(headers) => Ok(Response::BlockHeaders(headers)),
 
-            ReadResponse::SaplingTree(_)
+            ReadResponse::BestChainUtxo(_)
+            | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
             | ReadResponse::AddressBalance(_)
             | ReadResponse::AddressesTransactionIds(_)
