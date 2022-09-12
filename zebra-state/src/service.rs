@@ -19,6 +19,7 @@ use std::{
     convert,
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -65,6 +66,7 @@ mod non_finalized_state;
 mod pending_utxos;
 mod queued_blocks;
 pub(crate) mod read;
+mod write;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
@@ -125,6 +127,27 @@ pub(crate) struct StateService {
     // TODO: get rid of this struct member, and just let the ReadStateService
     //       and block write task share ownership of the database.
     pub(crate) disk: FinalizedState,
+
+    /// A channel to send blocks to the `block_write_task`,
+    /// so they can be written to the [`NonFinalizedState`].
+    //
+    // TODO: actually send blocks on this channel
+    _non_finalized_block_write_sender: tokio::sync::mpsc::UnboundedSender<PreparedBlock>,
+
+    /// A channel to send blocks to the `block_write_task`,
+    /// so they can be written to the [`FinalizedState`].
+    //
+    // TODO: actually send blocks on this channel
+    _finalized_block_write_sender: tokio::sync::mpsc::UnboundedSender<FinalizedBlock>,
+
+    /// A shared handle to a task that writes blocks to the [`NonFinalizedState`] or [`FinalizedState`],
+    /// once the queues have received all their parent blocks.
+    ///
+    /// Used to check for panics when writing blocks.
+    //
+    // TODO: actually check for panics
+    //       work out if we need to shut it down when the service is shutting down
+    _block_write_task: Arc<std::thread::JoinHandle<()>>,
 
     // Pending UTXO Request Tracking
     //
@@ -191,6 +214,14 @@ pub struct ReadStateService {
     /// This chain is updated concurrently with requests,
     /// so it might include some block data that is also in `best_mem`.
     db: ZebraDb,
+
+    /// A shared handle to a task that writes blocks to the [`NonFinalizedState`] or [`FinalizedState`],
+    /// once the queues have received all their parent blocks.
+    ///
+    /// Used to check for panics when writing blocks.
+    //
+    // TODO: actually check for panics
+    _block_write_task: Arc<std::thread::JoinHandle<()>>,
 }
 
 impl StateService {
@@ -205,11 +236,11 @@ impl StateService {
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         let timer = CodeTimer::start();
 
-        let disk = FinalizedState::new(&config, network);
+        let finalized_state = FinalizedState::new(&config, network);
         timer.finish(module_path!(), line!(), "opening finalized state database");
 
         let timer = CodeTimer::start();
-        let initial_tip = disk
+        let initial_tip = finalized_state
             .db()
             .tip_block()
             .map(FinalizedBlock::from)
@@ -220,9 +251,27 @@ impl StateService {
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
 
-        let mem = NonFinalizedState::new(network);
+        let non_finalized_state = NonFinalizedState::new(network);
 
-        let (read_service, non_finalized_state_sender) = ReadStateService::new(&disk);
+        // Security: The number of blocks in these channels is limited by
+        //           the syncer and inbound lookahead limits.
+        let (non_finalized_block_write_sender, non_finalized_block_write_receiver) =
+            tokio::sync::mpsc::unbounded_channel();
+        let (finalized_block_write_sender, finalized_block_write_receiver) =
+            tokio::sync::mpsc::unbounded_channel();
+
+        let block_write_finalized_state = finalized_state.clone();
+        let block_write_task = std::thread::spawn(move || {
+            write::write_blocks_from_channels(
+                finalized_block_write_receiver,
+                non_finalized_block_write_receiver,
+                block_write_finalized_state,
+            )
+        });
+        let block_write_task = Arc::new(block_write_task);
+
+        let (read_service, non_finalized_state_sender) =
+            ReadStateService::new(&finalized_state, block_write_task.clone());
 
         let queued_non_finalized_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
@@ -231,8 +280,11 @@ impl StateService {
             network,
             queued_non_finalized_blocks,
             queued_finalized_blocks: HashMap::new(),
-            mem,
-            disk,
+            mem: non_finalized_state,
+            disk: finalized_state,
+            _non_finalized_block_write_sender: non_finalized_block_write_sender,
+            _finalized_block_write_sender: finalized_block_write_sender,
+            _block_write_task: block_write_task,
             pending_utxos,
             last_prune: Instant::now(),
             chain_tip_sender,
@@ -593,18 +645,23 @@ impl StateService {
 }
 
 impl ReadStateService {
-    /// Creates a new read-only state service, using the provided finalized state.
+    /// Creates a new read-only state service, using the provided finalized state and
+    /// block write task handle.
     ///
     /// Returns the newly created service,
     /// and a watch channel for updating the shared recent non-finalized chain.
-    pub(crate) fn new(disk: &FinalizedState) -> (Self, watch::Sender<NonFinalizedState>) {
+    pub(crate) fn new(
+        finalized_state: &FinalizedState,
+        block_write_task: Arc<std::thread::JoinHandle<()>>,
+    ) -> (Self, watch::Sender<NonFinalizedState>) {
         let (non_finalized_state_sender, non_finalized_state_receiver) =
-            watch::channel(NonFinalizedState::new(disk.network()));
+            watch::channel(NonFinalizedState::new(finalized_state.network()));
 
         let read_service = Self {
-            network: disk.network(),
-            db: disk.db().clone(),
+            network: finalized_state.network(),
+            db: finalized_state.db().clone(),
             non_finalized_state_receiver: WatchReceiver::new(non_finalized_state_receiver),
+            _block_write_task: block_write_task,
         };
 
         tracing::info!("created new read-only state service");
