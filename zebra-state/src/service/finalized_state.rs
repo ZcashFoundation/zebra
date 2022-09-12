@@ -16,7 +16,6 @@
 //! be incremented each time the database format (column, serialization, etc) changes.
 
 use std::{
-    collections::HashMap,
     io::{stderr, stdout, Write},
     path::Path,
     sync::Arc,
@@ -47,37 +46,39 @@ pub(super) use zebra_db::ZebraDb;
 /// The finalized part of the chain state, stored in the db.
 #[derive(Debug)]
 pub struct FinalizedState {
-    /// The underlying database.
-    db: ZebraDb,
-
-    /// Queued blocks that arrived out of order, indexed by their parent block hash.
-    queued_by_prev_hash: HashMap<block::Hash, QueuedFinalized>,
-
-    /// A metric tracking the maximum height that's currently in `queued_by_prev_hash`
-    ///
-    /// Set to `f64::NAN` if `queued_by_prev_hash` is empty, because grafana shows NaNs
-    /// as a break in the graph.
-    max_queued_height: f64,
+    // Configuration
+    //
+    /// The configured network.
+    network: Network,
 
     /// The configured stop height.
     ///
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
     debug_stop_at_height: Option<block::Height>,
 
-    /// The configured network.
-    network: Network,
+    // Owned State
+    //
+    /// The underlying database.
+    ///
+    /// `rocksdb` allows reads and writes via a shared reference,
+    /// so this database object can be freely cloned.
+    /// The last instance that is dropped will close the underlying database.
+    //
+    // TODO: get rid of this struct member, and just let the [`ReadStateService`]
+    //       and block write task share ownership of the database.
+    db: ZebraDb,
 }
 
 impl FinalizedState {
+    /// Returns an on-disk database instance for `config` and `network`.
+    /// If there is no existing database, creates a new database on disk.
     pub fn new(config: &Config, network: Network) -> Self {
         let db = ZebraDb::new(config, network);
 
         let new_state = Self {
-            queued_by_prev_hash: HashMap::new(),
-            max_queued_height: f64::NAN,
-            db,
-            debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
             network,
+            debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
+            db,
         };
 
         // TODO: move debug_stop_at_height into a task in the start command (#3442)
@@ -137,63 +138,14 @@ impl FinalizedState {
         &self.db
     }
 
-    /// Queue a finalized block to be committed to the state.
-    ///
-    /// After queueing a finalized block, this method checks whether the newly
-    /// queued block (and any of its descendants) can be committed to the state.
-    ///
-    /// Returns the highest finalized tip block committed from the queue,
-    /// or `None` if no blocks were committed in this call.
-    /// (Use `tip_block` to get the finalized tip, regardless of when it was committed.)
-    pub fn queue_and_commit_finalized(
-        &mut self,
-        queued: QueuedFinalized,
-    ) -> Option<FinalizedBlock> {
-        let mut highest_queue_commit = None;
-
-        let prev_hash = queued.0.block.header.previous_block_hash;
-        let height = queued.0.height;
-        self.queued_by_prev_hash.insert(prev_hash, queued);
-
-        while let Some(queued_block) = self
-            .queued_by_prev_hash
-            .remove(&self.db.finalized_tip_hash())
-        {
-            if let Ok(finalized) = self.commit_finalized(queued_block) {
-                highest_queue_commit = Some(finalized);
-            } else {
-                // the last block in the queue failed, so we can't commit the next block
-                break;
-            }
-        }
-
-        if self.queued_by_prev_hash.is_empty() {
-            self.max_queued_height = f64::NAN;
-        } else if self.max_queued_height.is_nan() || self.max_queued_height < height.0 as f64 {
-            // if there are still blocks in the queue, then either:
-            //   - the new block was lower than the old maximum, and there was a gap before it,
-            //     so the maximum is still the same (and we skip this code), or
-            //   - the new block is higher than the old maximum, and there is at least one gap
-            //     between the finalized tip and the new maximum
-            self.max_queued_height = height.0 as f64;
-        }
-
-        metrics::gauge!("state.checkpoint.queued.max.height", self.max_queued_height);
-        metrics::gauge!(
-            "state.checkpoint.queued.block.count",
-            self.queued_by_prev_hash.len() as f64,
-        );
-
-        highest_queue_commit
-    }
-
     /// Commit a finalized block to the state.
     ///
     /// It's the caller's responsibility to ensure that blocks are committed in
-    /// order. This function is called by [`Self::queue_and_commit_finalized`],
-    /// which ensures order. It is intentionally not exposed as part of the
-    /// public API of the [`FinalizedState`].
-    fn commit_finalized(&mut self, queued_block: QueuedFinalized) -> Result<FinalizedBlock, ()> {
+    /// order.
+    pub fn commit_finalized(
+        &mut self,
+        queued_block: QueuedFinalized,
+    ) -> Result<FinalizedBlock, ()> {
         let (finalized, rsp_tx) = queued_block;
         let result =
             self.commit_finalized_direct(finalized.clone().into(), "CommitFinalized request");
