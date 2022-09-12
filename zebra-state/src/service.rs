@@ -40,6 +40,7 @@ use zebra_chain::{
 };
 
 use crate::{
+    constants::MAX_LEGACY_CHAIN_BLOCKS,
     service::{
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
         finalized_state::{FinalizedState, ZebraDb},
@@ -214,6 +215,7 @@ impl StateService {
                 nu5_activation_height,
                 state.any_ancestor_blocks(tip.1),
                 state.network,
+                MAX_LEGACY_CHAIN_BLOCKS,
             ) {
                 let legacy_db_path = state.disk.path().to_path_buf();
                 panic!(
