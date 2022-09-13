@@ -366,6 +366,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the hash for a given `block::Height` if it is present in the best chain.
+    #[allow(dead_code)]
     pub fn best_hash(&self, height: block::Height) -> Option<block::Hash> {
         self.best_chain()?
             .blocks
@@ -391,6 +392,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the height of `hash` in the best chain.
+    #[allow(dead_code)]
     pub fn best_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         let best_chain = self.best_chain()?;
         let height = *best_chain.height_by_hash.get(&hash)?;

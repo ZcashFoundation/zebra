@@ -483,12 +483,11 @@ impl Chain {
         self.height_by_hash.get(&hash).cloned()
     }
 
-    /// Returns the non-finalized tip block hash and height.
-    #[allow(dead_code)]
-    pub fn non_finalized_tip(&self) -> (block::Hash, block::Height) {
+    /// Returns the non-finalized tip block height and hash.
+    pub fn non_finalized_tip(&self) -> (Height, block::Hash) {
         (
-            self.non_finalized_tip_hash(),
             self.non_finalized_tip_height(),
+            self.non_finalized_tip_hash(),
         )
     }
 

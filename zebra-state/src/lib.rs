@@ -23,7 +23,6 @@ mod error;
 mod request;
 mod response;
 mod service;
-mod util;
 
 #[cfg(test)]
 mod tests;
