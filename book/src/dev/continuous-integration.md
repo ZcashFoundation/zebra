@@ -47,7 +47,7 @@ Please shut down large instances when they are not being used.
 ### Automated Deletion
 
 The [Delete GCP Resources](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/delete-gcp-resources.yml)
-workflow automatically deletes instance templates, disks, and images older than 1 week.
+workflow automatically deletes instance templates, disks, and images older than a few days.
 
 Running instances and their disks are protected from deletion.
 
@@ -91,7 +91,7 @@ https://github.com/ZcashFoundation/zebra/runs/8181760421?check_suite_focus=true#
 The earlier failure can also be in another job, check out the whole workflow run for details.
 (Use the "Summary" button on the top left of the job details, and zoom in.)
 
-### Resolving CI Sync Timeouts
+### Fixing CI Sync Timeouts
 
 CI sync jobs near the tip will take different amounts of time as:
 - the blockchain grows, and
@@ -111,11 +111,11 @@ To fix a CI sync timeout, follow these steps until the timeouts are fixed:
 
 5. If a Rust test fails with "command did not log any matches for the given regex, within the ... timeout":
 
-    a. If it's the full sync test, [increase the full sync timeout](https://github.com/ZcashFoundation/zebra/commit/9fb87425b76ba3747985ea2f22043ff0276a03bd#diff-8fbc73b0a92a4f48656ffe7d85d55c612c755202dcb7284d8f6742a38a6e9614R367)
+    a. If it's the full sync test, [increase the full sync timeout](https://github.com/ZcashFoundation/zebra/pull/5129/files)
 
     b. If it's an update sync test, [increase the update sync timeouts](https://github.com/ZcashFoundation/zebra/commit/9fb87425b76ba3747985ea2f22043ff0276a03bd#diff-92f93c26e696014d82c3dc1dbf385c669aa61aa292f44848f52167ab747cb6f6R51)
 
-### Resolving Duplicate Dependencies in `Check deny.toml bans`
+### Fixing Duplicate Dependencies in `Check deny.toml bans`
 
 Zebra's CI checks for duplicate crate dependencies: multiple dependencies on different versions of the same crate.
 If a developer or dependabot adds a duplicate dependency, the `Check deny.toml bans` CI job will fail.
@@ -149,7 +149,7 @@ To fix duplicate dependencies, follow these steps until the duplicate dependenci
 
 4. Repeat step 3 until the dependency warnings are fixed. Adding a single exception can resolve multiple warnings.
 
-### Resolving Disk Full Errors
+### Fixing Disk Full Errors
 
 If the Docker cached state disks are full, increase the disk sizes in:
 - [deploy-gcp-tests.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/deploy-gcp-tests.yml)
