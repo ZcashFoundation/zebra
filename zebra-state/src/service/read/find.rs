@@ -118,14 +118,13 @@ where
 
 /// Get the heights of the blocks for constructing a block_locator list.
 ///
-/// Zebra uses an exponentially decreasing list of block heights, starting at the tip.
+/// Zebra uses a decreasing list of block heights, starting at the tip, and skipping some heights.
 /// See [`block_locator()`] for details.
 pub fn block_locator_heights(tip_height: block::Height) -> Vec<block::Height> {
     // The initial height in the returned `vec` is the tip height,
     // and the final height is `MAX_BLOCK_REORG_HEIGHT` below the tip.
     //
-    // The initial distance between heights is 1. This distance increases
-    // exponentially with base 2 between each subsequent height.
+    // The initial distance between heights is 1, and it doubles between each subsequent height.
     // So the number of returned heights is approximately `log_2(MAX_BLOCK_REORG_HEIGHT)`.
 
     // Limit the maximum locator depth.
