@@ -383,8 +383,9 @@ impl StateService {
             .queued_finalized_blocks
             .remove(&self.last_block_hash_sent)
         {
+            self.last_block_hash_sent = queued_block.0.hash;
+
             if let Ok(finalized) = self.disk.commit_finalized(queued_block) {
-                self.last_block_hash_sent = finalized.hash;
                 highest_queue_commit = Some(finalized);
             } else {
                 // the last block in the queue failed, so we can't commit the next block
