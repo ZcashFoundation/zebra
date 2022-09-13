@@ -34,6 +34,10 @@ pub type DB = rocksdb::DBWithThreadMode<DBThreadMode>;
 
 /// Wrapper struct to ensure low-level database access goes through the correct API.
 ///
+/// `rocksdb` allows concurrent writes through a shared reference,
+/// so database instances are cloneable. When the final clone is dropped,
+/// the database is closed.
+///
 /// # Correctness
 ///
 /// Reading transactions from the database using RocksDB iterators causes hangs.
@@ -48,6 +52,20 @@ pub type DB = rocksdb::DBWithThreadMode<DBThreadMode>;
 /// (Or it might be fixed by future RocksDB upgrades.)
 #[derive(Clone, Debug)]
 pub struct DiskDb {
+    // Configuration
+    //
+    // This configuration cannot be modified after the database is initialized,
+    // because some clones would have different values.
+    //
+    /// The configured temporary database setting.
+    ///
+    /// If true, the database files are deleted on drop.
+    ephemeral: bool,
+
+    // Owned State
+    //
+    // Everything contained in this state must be shared by all clones, or read-only.
+    //
     /// The shared inner RocksDB database.
     ///
     /// RocksDB allows reads and writes via a shared reference.
@@ -58,11 +76,6 @@ pub struct DiskDb {
     /// In [`MultiThreaded`](rocksdb::MultiThreaded) mode,
     /// only [`Drop`] requires exclusive access.
     db: Arc<DB>,
-
-    /// The configured temporary database setting.
-    ///
-    /// If true, the database files are deleted on drop.
-    ephemeral: bool,
 }
 
 /// Wrapper struct to ensure low-level database writes go through the correct API.
@@ -434,8 +447,8 @@ impl DiskDb {
                 info!("Opened Zebra state cache at {}", path.display());
 
                 let db = DiskDb {
-                    db: Arc::new(db),
                     ephemeral: config.ephemeral,
+                    db: Arc::new(db),
                 };
 
                 db.assert_default_cf_is_empty();

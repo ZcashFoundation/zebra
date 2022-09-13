@@ -113,9 +113,14 @@ pub(crate) struct StateService {
     // Exclusively Writeable State
     //
     /// The non-finalized chain state, including its in-memory chain forks.
+    //
+    // TODO: get rid of this struct member, and just let the block write task own the NonFinalizedState.
     mem: NonFinalizedState,
 
     /// The finalized chain state, including its on-disk database.
+    //
+    // TODO: get rid of this struct member, and just let the ReadStateService
+    //       and block write task share ownership of the database.
     pub(crate) disk: FinalizedState,
 
     // Pending UTXO Request Tracking
