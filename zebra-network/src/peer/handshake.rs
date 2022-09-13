@@ -463,7 +463,7 @@ where
             tx
         });
         let nonces = Arc::new(futures::lock::Mutex::new(HashSet::new()));
-        let user_agent = self.user_agent.unwrap_or_else(|| "".to_string());
+        let user_agent = self.user_agent.unwrap_or_default();
         let our_services = self.our_services.unwrap_or_else(PeerServices::empty);
         let relay = self.relay.unwrap_or(false);
         let network = config.network;
