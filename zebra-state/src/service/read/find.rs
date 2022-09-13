@@ -92,6 +92,10 @@ where
 }
 
 /// Create a block locator from `chain` and `db`.
+///
+/// A block locator is used to efficiently find an intersection of two node's chains.
+/// It contains a list of block hashes at decreasing heights, skipping some blocks,
+/// so that any intersection can be located, no matter how long or different the chains are.
 pub fn block_locator<C>(chain: Option<C>, db: &ZebraDb) -> Option<Vec<block::Hash>>
 where
     C: AsRef<Chain>,
@@ -113,26 +117,41 @@ where
 }
 
 /// Get the heights of the blocks for constructing a block_locator list.
+///
+/// Zebra uses an exponentially decreasing list of block heights, starting at the tip.
+/// See [`block_locator()`] for details.
 pub fn block_locator_heights(tip_height: block::Height) -> Vec<block::Height> {
-    // Stop at the reorg limit, or the genesis block.
+    // The initial height in the returned `vec` is the tip height,
+    // and the final height is `MAX_BLOCK_REORG_HEIGHT` below the tip.
+    //
+    // The initial distance between heights is 1. This distance increases
+    // exponentially with base 2 between each subsequent height.
+    // So the number of returned heights is approximately `log_2(MAX_BLOCK_REORG_HEIGHT)`.
+
+    // Limit the maximum locator depth.
     let min_locator_height = tip_height
         .0
         .saturating_sub(constants::MAX_BLOCK_REORG_HEIGHT);
-    let locators = iter::successors(Some(1u32), |h| h.checked_mul(2))
+
+    // Create an exponentially decreasing set of heights.
+    let exponential_locators = iter::successors(Some(1u32), |h| h.checked_mul(2))
         .flat_map(move |step| tip_height.0.checked_sub(step));
+
+    // Start at the tip, add decreasing heights, and end MAX_BLOCK_REORG_HEIGHT below the tip.
     let locators = iter::once(tip_height.0)
-        .chain(locators)
+        .chain(exponential_locators)
         .take_while(move |&height| height > min_locator_height)
         .chain(iter::once(min_locator_height))
-        .map(block::Height);
+        .map(block::Height)
+        .collect();
 
-    let locators = locators.collect();
     tracing::debug!(
         ?tip_height,
         ?min_locator_height,
         ?locators,
         "created block locator"
     );
+
     locators
 }
 
@@ -387,7 +406,7 @@ where
 /// Stops the list of hashes after:
 ///   * adding the tip,
 ///   * adding the `stop` hash to the list, if it is in the chain, or
-///   * adding 500 hashes to the list.
+///   * adding `max_len` hashes to the list.
 ///
 /// Returns an empty list if the state is empty,
 /// and a partial or empty list if the found heights are concurrently modified.
