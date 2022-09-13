@@ -177,7 +177,7 @@ pub use crate::{
     },
 };
 
-/// Types used in the definition of [`Request`], [`Response`], and [`Message::Version`] messages.
+/// Types used in the definition of [`Request`], [`Response`], and [`VersionMessage`].
 pub mod types {
     pub use crate::{
         meta_addr::MetaAddr,

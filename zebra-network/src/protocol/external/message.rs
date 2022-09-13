@@ -300,7 +300,7 @@ pub enum Message {
 /// is distinct from a simple version number.
 ///
 /// This struct provides a type that is guaranteed to be a `version` message,
-/// and allows [`Message::Version`] fields to be accessed directly.
+/// and allows [`Message::Version`](Message) fields to be accessed directly.
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#version)
 #[derive(Clone, Eq, PartialEq, Debug)]

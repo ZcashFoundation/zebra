@@ -127,7 +127,7 @@ pub struct ConnectionInfo {
     /// which will appear as the connected address to the OS and Zebra.
     pub connected_addr: ConnectedAddr,
 
-    /// The network protocol [`Message::Version`](crate::Message) sent by the remote peer.
+    /// The network protocol [`VersionMessage`](crate::VersionMessage) sent by the remote peer.
     pub remote: VersionMessage,
 
     /// The network protocol version negotiated with the remote peer.
@@ -566,7 +566,7 @@ where
 /// We split `Handshake` into its components before calling this function,
 /// to avoid infectious `Sync` bounds on the returned future.
 ///
-/// Returns the [`Message::Version`](crate::Message) sent by the remote peer.
+/// Returns the [`VersionMessage`](crate::VersionMessage) sent by the remote peer.
 #[allow(clippy::too_many_arguments)]
 pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
