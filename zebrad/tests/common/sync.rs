@@ -74,6 +74,10 @@ pub const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
 /// cause the test to fail.
 pub const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(11 * 60 * 60);
 
+/// The maximum time to wait for Zebrad to synchronize up to the chain tip starting from the
+/// genesis block.
+pub const FINISH_FULL_SYNC_TIMEOUT: Duration = Duration::from_secs(28 * 60 * 60);
+
 /// The test sync height where we switch to using the default lookahead limit.
 ///
 /// Most tests only download a few blocks. So tests default to the minimum lookahead limit,
@@ -366,9 +370,6 @@ pub fn create_cached_database_height(
 ) -> Result<()> {
     eprintln!("creating cached database");
 
-    // 24 hours
-    let timeout = Duration::from_secs(24 * 60 * 60);
-
     // Use a persistent state, so we can handle large syncs
     let mut config = cached_mandatory_checkpoint_test_config()?;
     // TODO: add convenience methods?
@@ -381,7 +382,7 @@ pub fn create_cached_database_height(
     let mut child = dir
         .with_exact_config(&config)?
         .spawn_child(args!["start"])?
-        .with_timeout(timeout)
+        .with_timeout(FINISH_FULL_SYNC_TIMEOUT)
         .bypass_test_capture(true);
 
     let network = format!("network: {},", network);
