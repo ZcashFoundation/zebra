@@ -187,7 +187,9 @@ pub(crate) struct StateService {
     ///
     /// Set to `f64::NAN` if `queued_finalized_blocks` is empty, because grafana shows NaNs
     /// as a break in the graph.
-    max_queued_height: f64,
+    //
+    // TODO: add a similar metric for `queued_non_finalized_blocks`
+    max_queued_finalized_height: f64,
 }
 
 /// A read-only service for accessing Zebra's cached blockchain state.
@@ -303,7 +305,7 @@ impl StateService {
             chain_tip_sender,
             non_finalized_state_sender,
             read_service: read_service.clone(),
-            max_queued_height: f64::NAN,
+            max_queued_finalized_height: f64::NAN,
         };
         timer.finish(module_path!(), line!(), "initializing state service");
 
@@ -394,17 +396,22 @@ impl StateService {
         }
 
         if self.queued_finalized_blocks.is_empty() {
-            self.max_queued_height = f64::NAN;
-        } else if self.max_queued_height.is_nan() || self.max_queued_height < height.0 as f64 {
+            self.max_queued_finalized_height = f64::NAN;
+        } else if self.max_queued_finalized_height.is_nan()
+            || self.max_queued_finalized_height < height.0 as f64
+        {
             // if there are still blocks in the queue, then either:
             //   - the new block was lower than the old maximum, and there was a gap before it,
             //     so the maximum is still the same (and we skip this code), or
             //   - the new block is higher than the old maximum, and there is at least one gap
             //     between the finalized tip and the new maximum
-            self.max_queued_height = height.0 as f64;
+            self.max_queued_finalized_height = height.0 as f64;
         }
 
-        metrics::gauge!("state.checkpoint.queued.max.height", self.max_queued_height);
+        metrics::gauge!(
+            "state.checkpoint.queued.max.height",
+            self.max_queued_finalized_height
+        );
         metrics::gauge!(
             "state.checkpoint.queued.block.count",
             self.queued_finalized_blocks.len() as f64,
