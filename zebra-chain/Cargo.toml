@@ -61,7 +61,7 @@ tracing = "0.1.31"
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
 serde = { version = "1.0.144", features = ["serde_derive", "rc"] }
-serde_with = "2.0.0"
+serde_with = "2.0.1"
 serde-big-array = "0.4.1"
 
 # Processing
@@ -86,7 +86,7 @@ zebra-test = { path = "../zebra-test/", optional = true }
 
 [dev-dependencies]
 # Benchmarks
-criterion = { version = "0.3.6", features = ["html_reports"] }
+criterion = { version = "0.4.0", features = ["html_reports"] }
 
 # Error Handling & Formatting
 color-eyre = "0.6.1"
