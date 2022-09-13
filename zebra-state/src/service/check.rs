@@ -292,7 +292,7 @@ fn difficulty_threshold_is_valid(
 ///
 /// `nu5_activation_height` should be `NetworkUpgrade::Nu5.activation_height(network)`, and
 /// `max_legacy_chain_blocks` should be [`MAX_LEGACY_CHAIN_BLOCKS`](crate::constants::MAX_LEGACY_CHAIN_BLOCKS).
-/// They are only used for testing.
+/// They are only changed from the defaults for testing.
 pub(crate) fn legacy_chain<I>(
     nu5_activation_height: block::Height,
     ancestors: I,
