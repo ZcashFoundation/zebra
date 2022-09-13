@@ -22,7 +22,10 @@ use zebra_chain::{
 /// Allow *only* these unused imports, so that rustdoc link resolution
 /// will work with inline links.
 #[allow(unused_imports)]
-use crate::{constants::MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA, ReadResponse, Response};
+use crate::{
+    constants::{MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA},
+    ReadResponse, Response,
+};
 
 /// Identify a block by hash or height.
 ///
