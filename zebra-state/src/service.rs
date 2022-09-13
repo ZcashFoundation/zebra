@@ -137,6 +137,14 @@ pub(crate) struct StateService {
     // TODO: actually send blocks on this channel
     _finalized_block_write_sender: tokio::sync::mpsc::UnboundedSender<FinalizedBlock>,
 
+    /// The [`block::Hash`] of the most recent block sent on
+    /// `finalized_block_write_sender` or `non_finalized_block_write_sender`.
+    ///
+    /// On startup, this is:
+    /// - the finalized tip, if there are stored blocks, or
+    /// - the genesis block's parent hash, if the database is empty.
+    last_block_hash_sent: block::Hash,
+
     /// A shared handle to a task that writes blocks to the [`NonFinalizedState`] or [`FinalizedState`],
     /// once the queues have received all their parent blocks.
     ///
@@ -154,7 +162,7 @@ pub(crate) struct StateService {
     /// Instant tracking the last time `pending_utxos` was pruned.
     last_prune: Instant,
 
-    // Concurrently Readable State
+    // Updating Concurrently Readable State
     //
     /// A sender channel used to update the current best chain tip for
     /// [`LatestChainTip`] and [`ChainTipChange`].
@@ -163,6 +171,8 @@ pub(crate) struct StateService {
     /// A sender channel used to update the recent non-finalized state for the [`ReadStateService`].
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
 
+    // Concurrently Readable State
+    //
     /// A cloneable [`ReadStateService`], used to answer concurrent read requests.
     ///
     /// TODO: move users of read [`Request`]s to [`ReadStateService`], and remove `read_service`.
@@ -273,6 +283,8 @@ impl StateService {
         let queued_non_finalized_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
+        let last_block_hash_sent = finalized_state.db().finalized_tip_hash();
+
         let state = Self {
             network,
             queued_non_finalized_blocks,
@@ -281,6 +293,7 @@ impl StateService {
             disk: finalized_state,
             _non_finalized_block_write_sender: non_finalized_block_write_sender,
             _finalized_block_write_sender: finalized_block_write_sender,
+            last_block_hash_sent,
             _block_write_task: block_write_task,
             pending_utxos,
             last_prune: Instant::now(),
@@ -364,9 +377,10 @@ impl StateService {
 
         while let Some(queued_block) = self
             .queued_finalized_blocks
-            .remove(&self.disk.db().finalized_tip_hash())
+            .remove(&self.last_block_hash_sent)
         {
             if let Ok(finalized) = self.disk.commit_finalized(queued_block) {
+                self.last_block_hash_sent = finalized.hash;
                 highest_queue_commit = Some(finalized);
             } else {
                 // the last block in the queue failed, so we can't commit the next block
