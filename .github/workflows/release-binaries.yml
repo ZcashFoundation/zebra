@@ -3,16 +3,22 @@
 #
 # We use a separate action as we might want to trigger this under
 # different circumstances than a Continuous Deployment, for example.
+#
+# This workflow is triggered if:
+# - A release is published
+# - A pre-release is changed to a release
 name: Release binaries
 
 on:
-  create:
+  release:
+    types:
+      - released
 
 jobs:
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from git
   #
-  # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
+  # The image will be named `zebrad:<semver>`
   build:
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     uses: ./.github/workflows/build-docker-image.yml
@@ -21,7 +27,6 @@ jobs:
       dockerfile_target: runtime
       image_name: zebrad
       network: Mainnet
-      # TODO: validate this are the values we want on a public image
       checkpoint_sync: true
       rust_backtrace: '1'
       zebra_skip_ipv6_tests: '1'
