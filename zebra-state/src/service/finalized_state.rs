@@ -150,13 +150,13 @@ impl FinalizedState {
     /// order.
     pub fn commit_finalized(
         &mut self,
-        queued_block: QueuedFinalized,
-    ) -> Result<FinalizedBlock, ()> {
-        let (finalized, rsp_tx) = queued_block;
+        ordered_block: QueuedFinalized,
+    ) -> Result<FinalizedBlock, BoxError> {
+        let (finalized, rsp_tx) = ordered_block;
         let result =
             self.commit_finalized_direct(finalized.clone().into(), "CommitFinalized request");
 
-        let block_result = if result.is_ok() {
+        if result.is_ok() {
             metrics::counter!("state.checkpoint.finalized.block.count", 1);
             metrics::gauge!(
                 "state.checkpoint.finalized.block.height",
@@ -171,21 +171,23 @@ impl FinalizedState {
                 finalized.height.0 as f64,
             );
             metrics::counter!("zcash.chain.verified.block.total", 1);
-
-            Ok(finalized)
         } else {
             metrics::counter!("state.checkpoint.error.block.count", 1);
             metrics::gauge!(
                 "state.checkpoint.error.block.height",
                 finalized.height.0 as f64,
             );
-
-            Err(())
         };
 
-        let _ = rsp_tx.send(result.map_err(Into::into));
+        // Some io errors can't be cloned, so we format them instead.
+        let owned_result = result
+            .as_ref()
+            .map(|_hash| finalized)
+            .map_err(|error| format!("{:?}", error).into());
 
-        block_result
+        let _ = rsp_tx.send(result);
+
+        owned_result
     }
 
     /// Immediately commit a `finalized` block to the finalized state.
