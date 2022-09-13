@@ -1,8 +1,8 @@
 # This workflow is meant to trigger a build of Docker binaries when a tag
 # is created, it uses the existing `build-docker-image.yml` workflow
 #
-# We use a separate action as we might want to trigger this with different under
-# different circumstances than a Continous Deployment, for example.
+# We use a separate action as we might want to trigger this under
+# different circumstances than a Continuous Deployment, for example.
 name: Release binaries
 
 on:
@@ -26,5 +26,5 @@ jobs:
       rust_backtrace: '1'
       zebra_skip_ipv6_tests: '1'
       rust_log: info
-    # This step needs access to Docker Hub secrets to run succesfully
+    # This step needs access to Docker Hub secrets to run successfully
     secrets: inherit
