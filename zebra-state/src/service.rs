@@ -90,11 +90,11 @@ pub type QueuedFinalized = (
 ///                        Zebra stores the single best chain in the finalized state,
 ///                        and re-loads it from disk when restarted.
 ///
-/// Read requests to this service are processed concurrently.
-/// Block write requests are queued, then processed by a separate task.
+/// Read requests to this service are buffered, then processed concurrently.
+/// Block write requests are buffered, then queued, then processed in order by a separate task.
 ///
 /// Most state users can get faster read responses using the [`ReadStateService`],
-/// because its requests do not share a [`tower::Service`] queue with block write requests.
+/// because its requests do not share a [`tower::buffer::Buffer`] with block write requests.
 ///
 /// To quickly get the latest block, use [`LatestChainTip`] or [`ChainTipChange`].
 /// They can read the latest block directly, without queueing any requests.
