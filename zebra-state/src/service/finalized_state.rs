@@ -44,9 +44,16 @@ pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation};
 pub(super) use zebra_db::ZebraDb;
 
 /// The finalized part of the chain state, stored in the db.
-#[derive(Debug)]
+///
+/// `rocksdb` allows concurrent writes through a shared reference,
+/// so finalized state instances are cloneable. When the final clone is dropped,
+/// the database is closed.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FinalizedState {
     // Configuration
+    //
+    // This configuration cannot be modified after the database is initialized,
+    // because some clones would have different values.
     //
     /// The configured network.
     network: Network,
@@ -58,14 +65,13 @@ pub struct FinalizedState {
 
     // Owned State
     //
+    // Everything contained in this state must be shared by all clones, or read-only.
+    //
     /// The underlying database.
     ///
     /// `rocksdb` allows reads and writes via a shared reference,
     /// so this database object can be freely cloned.
     /// The last instance that is dropped will close the underlying database.
-    //
-    // TODO: get rid of this struct member, and just let the [`ReadStateService`]
-    //       and block write task share ownership of the database.
     db: ZebraDb,
 }
 
