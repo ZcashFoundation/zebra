@@ -42,8 +42,9 @@ use crate::{
     service::{
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
         finalized_state::{FinalizedState, ZebraDb},
-        non_finalized_state::{NonFinalizedState, QueuedBlocks},
+        non_finalized_state::NonFinalizedState,
         pending_utxos::PendingUtxos,
+        queued_blocks::QueuedBlocks,
         watch_receiver::WatchReceiver,
     },
     BoxError, CloneError, CommitBlockError, Config, FinalizedBlock, PreparedBlock, ReadRequest,
@@ -59,6 +60,7 @@ pub(crate) mod check;
 mod finalized_state;
 mod non_finalized_state;
 mod pending_utxos;
+mod queued_blocks;
 pub(crate) mod read;
 
 #[cfg(any(test, feature = "proptest-impl"))]

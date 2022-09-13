@@ -23,12 +23,9 @@ use crate::{
 };
 
 mod chain;
-mod queued_blocks;
 
 #[cfg(test)]
 mod tests;
-
-pub use queued_blocks::QueuedBlocks;
 
 pub(crate) use chain::Chain;
 
