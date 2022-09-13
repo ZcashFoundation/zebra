@@ -17,31 +17,26 @@ multiple-versions = "deny"
 # * all - Both lowest-version and simplest-path are used
 highlight = "all"
 
+# We don't use this for Zebra.
+#
 # List of crates that are allowed. Use with care!
-allow = [
-    #{ name = "ansi_term", version = "=0.11.0" },
-]
+#allow = [
+#]
 
+# We only use this for some `librustzcash` and `orchard` crates.
+# If we add a crate here, duplicate dependencies of that crate are still shown.
+#
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
+    # ECC crates only
+
     # wait for zcash_proofs to be published
     { name = "equihash", version = "=0.2.0"},
     { name = "zcash_encoding", version = "=0.1.0"},
     { name = "zcash_note_encryption", version = "=0.1.0"},
     { name = "zcash_primitives", version = "=0.7.0"},
-
-    # wait for proc-macro2 and syn to upgrade
-    { name = "unicode-xid", version = "=0.1.0"},
-
-    # wait for zcash_address to upgrade
-    { name = "bech32", version = "=0.8.1"},
-
-    # wait for metrics-util and hashlink to upgrade
-    { name = "hashbrown", version = "=0.11.2" },
-
-    # wait for num-format to upgrade itoa (used by inferno)
-    { name = "itoa", version = "=0.4.8" },
 ]
+
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
 # dependencies starting at the specified crate, up to a certain depth, which is
@@ -53,30 +48,8 @@ skip-tree = [
     # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
 
-    # wait for structopt upgrade (or upgrade to clap 3)
-    { name = "heck", version = "=0.3.3" },
-
-    # wait for zcash_primitives to remove duplicated dependencies
-    { name = "block-buffer", version = "=0.7.3" },
-    { name = "block-buffer", version = "=0.9.0" },
-
-    # wait for insta to remove duplicated dependencies
-    { name = "sha-1", version = "=0.8.2" },
-
     # wait for curve25519-dalek to upgrade
     { name = "digest", version = "=0.9.0" },
-
-    # wait for inferno -> num-format to upgrade (optional dependency)
-    { name = "arrayvec", version = "=0.4.12" },
-
-    # wait for tokio-test -> tokio-stream to upgrade
-    { name = "tokio-util", version = "=0.6.9" },
-
-    # upgrade abscissa and arti (optional dependency)
-    { name = "darling", version = "=0.10.2" },
-    { name = "darling", version = "=0.12.4" },
-    { name = "semver", version = "=0.9.0" },
-    { name = "tracing-subscriber", version = "=0.1.6" },
 
     # wait for primitive-types to upgrade
     { name = "proc-macro-crate", version = "=0.1.5" },
@@ -84,6 +57,46 @@ skip-tree = [
     # wait for zcash_script to upgrade bindgen
     # https://github.com/ZcashFoundation/zcash_script/issues/40
     { name = "bindgen", version = "=0.59.2" },
+
+    # ECC crates
+
+    # wait for zcash_primitives to remove duplicated dependencies
+    { name = "block-buffer", version = "=0.7.3" },
+    { name = "block-buffer", version = "=0.9.0" },
+
+    # wait for zcash_address to upgrade
+    { name = "bech32", version = "=0.8.1"},
+
+    # zebra-utils dependencies
+
+    # wait for structopt upgrade (or upgrade to clap 3)
+    { name = "heck", version = "=0.3.3" },
+
+    # Test-only dependencies
+
+    # wait for tokio-test -> tokio-stream to upgrade
+    { name = "tokio-util", version = "=0.6.9" },
+
+    # wait for proptest-derive to upgrade proc-macro2 and syn
+    { name = "unicode-xid", version = "=0.1.0"},
+
+    # wait for insta to remove duplicated dependencies
+    { name = "sha-1", version = "=0.8.2" },
+
+    # Optional dependencies
+
+    # wait for inferno -> num-format to upgrade
+    { name = "arrayvec", version = "=0.4.12" },
+    { name = "itoa", version = "=0.4.8" },
+
+    # upgrade abscissa (required dependency) and arti (optional dependency)
+    { name = "darling", version = "=0.10.2" },
+    { name = "darling", version = "=0.12.4" },
+    { name = "semver", version = "=0.9.0" },
+    { name = "tracing-subscriber", version = "=0.1.6" },
+
+    # upgrade metrics-util (required dependency) and arti (optional dependency)
+    { name = "hashbrown", version = "=0.11.2" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
