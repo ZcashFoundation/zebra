@@ -10,10 +10,16 @@ use tracing::instrument;
 
 use zebra_chain::{block, transparent};
 
-use crate::{BoxError, PreparedBlock};
+use crate::{BoxError, FinalizedBlock, PreparedBlock};
+
+/// A queued finalized block, and its corresponding [`Result`] channel.
+pub type QueuedFinalized = (
+    FinalizedBlock,
+    oneshot::Sender<Result<block::Hash, BoxError>>,
+);
 
 /// A queued non-finalized block, and its corresponding [`Result`] channel.
-pub type QueuedBlock = (
+pub type QueuedNonFinalized = (
     PreparedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
 );
@@ -22,7 +28,7 @@ pub type QueuedBlock = (
 #[derive(Debug, Default)]
 pub struct QueuedBlocks {
     /// Blocks awaiting their parent blocks for contextual verification.
-    blocks: HashMap<block::Hash, QueuedBlock>,
+    blocks: HashMap<block::Hash, QueuedNonFinalized>,
     /// Hashes from `queued_blocks`, indexed by parent hash.
     by_parent: HashMap<block::Hash, HashSet<block::Hash>>,
     /// Hashes from `queued_blocks`, indexed by block height.
@@ -38,7 +44,7 @@ impl QueuedBlocks {
     ///
     /// - if a block with the same `block::Hash` has already been queued.
     #[instrument(skip(self), fields(height = ?new.0.height, hash = %new.0.hash))]
-    pub fn queue(&mut self, new: QueuedBlock) {
+    pub fn queue(&mut self, new: QueuedNonFinalized) {
         let new_hash = new.0.hash;
         let new_height = new.0.height;
         let parent_hash = new.0.block.header.previous_block_hash;
@@ -71,7 +77,7 @@ impl QueuedBlocks {
     /// Dequeue and return all blocks that were waiting for the arrival of
     /// `parent`.
     #[instrument(skip(self), fields(%parent_hash))]
-    pub fn dequeue_children(&mut self, parent_hash: block::Hash) -> Vec<QueuedBlock> {
+    pub fn dequeue_children(&mut self, parent_hash: block::Hash) -> Vec<QueuedNonFinalized> {
         let queued_children = self
             .by_parent
             .remove(&parent_hash)
@@ -161,7 +167,7 @@ impl QueuedBlocks {
     }
 
     /// Return the queued block if it has already been registered
-    pub fn get_mut(&mut self, hash: &block::Hash) -> Option<&mut QueuedBlock> {
+    pub fn get_mut(&mut self, hash: &block::Hash) -> Option<&mut QueuedNonFinalized> {
         self.blocks.get_mut(hash)
     }
 
@@ -198,11 +204,11 @@ mod tests {
 
     // Quick helper trait for making queued blocks with throw away channels
     trait IntoQueued {
-        fn into_queued(self) -> QueuedBlock;
+        fn into_queued(self) -> QueuedNonFinalized;
     }
 
     impl IntoQueued for Arc<Block> {
-        fn into_queued(self) -> QueuedBlock {
+        fn into_queued(self) -> QueuedNonFinalized {
             let (rsp_tx, _) = oneshot::channel();
             (self.prepare(), rsp_tx)
         }

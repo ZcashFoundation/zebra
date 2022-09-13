@@ -71,10 +71,7 @@ mod tests;
 
 pub use finalized_state::{OutputIndex, OutputLocation, TransactionLocation};
 
-pub type QueuedFinalized = (
-    FinalizedBlock,
-    oneshot::Sender<Result<block::Hash, BoxError>>,
-);
+use self::queued_blocks::QueuedFinalized;
 
 /// A read-write service for Zebra's cached blockchain state.
 ///
@@ -698,8 +695,8 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
-            // Uses queued_finalized_blocks in the FinalizedState and pending_utxos in the StateService.
-            // Accesses shared writeable state in the StateService, FinalizedState, and ZebraDb.
+            // Uses queued_finalized_blocks and pending_utxos in the StateService.
+            // Accesses shared writeable state in the StateService and ZebraDb.
             Request::CommitFinalizedBlock(finalized) => {
                 metrics::counter!(
                     "state.requests",
