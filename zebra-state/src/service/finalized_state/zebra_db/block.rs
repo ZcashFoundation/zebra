@@ -59,7 +59,8 @@ impl ZebraDb {
 
     /// Returns the tip height and hash, if there is one.
     //
-    // TODO: move this method to the tip section
+    // TODO: rename to finalized_tip()
+    //       move this method to the tip section
     #[allow(clippy::unwrap_in_result)]
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
