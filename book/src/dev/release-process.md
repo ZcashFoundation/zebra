@@ -63,10 +63,8 @@ We let you preview what's coming by providing Release Candidate \(`rc`\) pre-rel
 
 | Pre-release type  | Details |
 |:---               |:---     |
-| Next              | The release that is under active development and testing. The next release is indicated by a release tag appended with the `-next` identifier, such as  `8.1.0-next.0`.      |
+| Beta              | The release that is under active development and testing. The beta release is indicated by a release tag appended with the `-beta` identifier, such as  `8.1.0-beta.0`.      |
 | Release candidate | A release that is feature complete and in final testing. A release candidate is indicated by a release tag appended with the `-rc` identifier, such as version `8.1.0-rc.0`. |
-
-The latest `next` or `rc` pre-release version of the documentation is available at [next.Zebra.io](https://next.Zebra.io).
 
 <a id="frequency"></a>
 
@@ -93,6 +91,7 @@ This cadence of releases gives eager developers access to new features as soon a
 ## Deprecation practices
 
 Sometimes "breaking changes", such as the removal of support for RPCs, APIs, and features, are necessary to:
+
 * add new Zebra features,
 * improve Zebra performance or reliability,
 * stay current with changing dependencies, or
@@ -115,73 +114,4 @@ To help ensure that you have sufficient time and a clear path to update, this is
 
 ## Release candidate & release process
 
-Identify the commit from which the release stabilization branch will be made.
-Release stabilization branches are used so that development can proceed
-unblocked on the `master` branch during the release candidate testing and
-bug-fixing process. By convention, release stabilization branches are named
-`version-X.Y.0` where `X` and `Y` are the major and minor versions for the
-release.
-
-### Create the release stabilization branch
-
-**\<TBD\>**
-
-### Create the release candidate branch
-
-**\<TBD\>**
-
-### Make a tag for the tip of the release candidate branch
-
-**\<TBD\>**
-
-## Make and deploy deterministic builds
-
-**\<TBD\>**
-
-## Add release notes to GitHub
-
-## Go/No-Go Status: ⚠️
-
-* `zebrad` Functionality
-  * `zebrad` can sync to mainnet tip
-    * ⚠️ under excellent network conditions (within 2 - 5 hours)
-    * _reasonable and sub-optimal network conditions are not yet supported_
-  * `zebrad` can stay within a few blocks of the mainnet tip after the initial sync
-    * ⚠️ under excellent network conditions
-    * _reasonable and sub-optimal network conditions are not yet supported_
-  * ✅ `zebrad` can validate proof of work
-  * ✅ `zebrad` can validate the transaction merkle tree
-  * ⚠️ `zebrad` can serve blocks to peers
-  * ✅ The hard-coded [checkpoint lists](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint) are up-to-date
-* `zebrad` Performance
-  * ✅ `zebrad` functionality works on platforms that meet its system requirements
-* Testing
-  * ⚠️ CI Passes
-    * ✅  Unit tests pass reliably
-    * ✅  Property tests pass reliably
-    * ⚠️ Acceptance tests pass reliably
-  * ✅ Each Zebra crate [builds individually](https://github.com/ZcashFoundation/zebra/issues/1364)
-* Implementation and Launch
-  * ✅ All [release blocker bugs](https://github.com/ZcashFoundation/zebra/issues?q=is%3Aopen+is%3Aissue+milestone%3A%22First+Alpha+Release%22+label%3AC-bug) have been fixed
-  * ✅ The list of [known serious issues](https://github.com/ZcashFoundation/zebra#known-issues) is up to date
-  * ✅ The Zebra crate versions are up to date
-  * ⚠️ Users can access [the documentation to deploy `zebrad` nodes](https://github.com/ZcashFoundation/zebra#getting-started)
-* User Experience
-  * ✅ Build completes within 40 minutes in Zebra's CI
-    * ✅ Unused dependencies have been removed (use `cargo-udeps`)
-  * ✅ `zebrad` executes normally
-    * ✅ `zebrad`'s default logging works reasonably well in a terminal
-    * ✅ panics, error logs, and warning logs are rare on mainnet
-    * ✅ known panics, errors and warnings have open tickets
-
-## Post Release Task List
-
-### Merge the release stabilization branch
-
-<!-- links -->
-
-<!-- external links -->
-
-<!-- end links -->
-
-@reviewed **\<add-date-here\>**
+Our release checklist is available as a template, which defines each step our team needs to follow to create a new pre-release or release, and to also build and push the binaries to the official channels [Release Checklist Template](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist.md).
