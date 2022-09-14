@@ -1,5 +1,5 @@
-# This workflow is meant to trigger a build of Docker binaries when a tag
-# is created, it uses the existing `build-docker-image.yml` workflow
+# This workflow is meant to trigger a build of Docker binaries when a release
+# is published, it uses the existing `build-docker-image.yml` workflow
 #
 # We use a separate action as we might want to trigger this under
 # different circumstances than a Continuous Deployment, for example.
@@ -20,7 +20,6 @@ jobs:
   #
   # The image will be named `zebrad:<semver>`
   build:
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
