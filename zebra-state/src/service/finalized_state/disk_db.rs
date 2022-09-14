@@ -653,13 +653,22 @@ impl DiskDb {
         // but if the race happens, it will only cause database errors during shutdown.
         let clone_prevention_guard = Arc::get_mut(&mut self.db);
 
-        if clone_prevention_guard.is_none() && !force {
-            debug!(
-                "dropping cloned DiskDb, \
-                 but keeping shared database until the last reference is dropped",
-            );
+        if clone_prevention_guard.is_none() {
+            let path = self.path();
 
-            return;
+            if force {
+                info!(
+                    ?path,
+                    "forcing a shutdown of DiskDb with multiple active instances",
+                );
+            } else {
+                debug!(
+                    ?path,
+                    "dropping cloned DiskDb, \
+                     but keeping shared database until the last reference is dropped",
+                );
+                return;
+            }
         }
 
         self.assert_default_cf_is_empty();
@@ -670,7 +679,8 @@ impl DiskDb {
         // - the database flushes regularly anyway
         // - Zebra commits each block in a database transaction, any incomplete blocks get rolled back
         // - ephemeral files are placed in the os temp dir and should be cleaned up automatically eventually
-        info!("flushing database to disk");
+        let path = self.path();
+        info!(?path, "flushing database to disk");
         self.db.flush().expect("flush is successful");
 
         // But we should call `cancel_all_background_work` before Zebra exits.
@@ -681,6 +691,8 @@ impl DiskDb {
         // terminate called without an active exception
         // pthread destroy mutex: Device or resource busy
         // Aborted (core dumped)
+        // signal: 6, SIGABRT: process abort signal
+        // signal: 11, SIGSEGV: invalid memory reference
         // ```
         //
         // The RocksDB wiki says:
@@ -690,7 +702,7 @@ impl DiskDb {
         // > You can speed up the waiting by calling CancelAllBackgroundWork().
         //
         // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
-        info!("stopping background database tasks");
+        info!(?path, "stopping background database tasks");
         self.db.cancel_all_background_work(true);
 
         // We'd like to drop the database before deleting its files,
@@ -728,16 +740,24 @@ impl DiskDb {
         let clone_prevention_guard = Arc::get_mut(&mut self.db);
 
         if clone_prevention_guard.is_none() && !force {
-            debug!(
-                "dropping cloned DiskDb, \
-                 but keeping shared database files until the last reference is dropped",
-            );
-
-            return;
+            let path = self.path();
+            if force {
+                info!(
+                    ?path,
+                    "force deleting an ephemeral DiskDb with multiple active instances",
+                );
+            } else {
+                debug!(
+                    ?path,
+                    "dropping cloned DiskDb, \
+                     but keeping ephemeral database files until the last reference is dropped",
+                );
+                return;
+            }
         }
 
         let path = self.path();
-        info!(cache_path = ?path, "removing temporary database files");
+        info!(?path, "removing temporary database files");
 
         // We'd like to use `rocksdb::Env::mem_env` for ephemeral databases,
         // but the Zcash blockchain might not fit in memory. So we just
@@ -751,11 +771,21 @@ impl DiskDb {
         // delete them using standard filesystem APIs. Deleting open files
         // might cause errors on non-Unix platforms, so we ignore the result.
         // (The OS will delete them eventually anyway.)
-        let res = std::fs::remove_dir_all(path);
+        let result = std::fs::remove_dir_all(path);
 
-        // TODO: downgrade to debug once bugs like #2905 are fixed
-        //       but leave any errors at "info" level
-        info!(?res, "removed temporary database files");
+        if result.is_err() {
+            info!(
+                ?result,
+                ?path,
+                "removing temporary database files caused an error",
+            );
+        } else {
+            debug!(
+                ?result,
+                ?path,
+                "successfully removed temporary database files",
+            );
+        }
     }
 
     /// Check that the "default" column family is empty.
@@ -775,6 +805,9 @@ impl DiskDb {
 
 impl Drop for DiskDb {
     fn drop(&mut self) {
+        let path = self.path();
+        info!(?path, "dropping DiskDb instance");
+
         self.shutdown(false);
     }
 }
