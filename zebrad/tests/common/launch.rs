@@ -14,6 +14,7 @@ use std::{
 
 use color_eyre::eyre::Result;
 use indexmap::IndexSet;
+use tempfile::TempDir;
 
 use zebra_chain::parameters::Network;
 use zebra_test::{
@@ -237,6 +238,56 @@ pub fn spawn_zebrad_for_rpc<P: ZebradTestDirExt + std::fmt::Debug>(
     zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
 
     Ok((zebrad, rpc_address))
+}
+
+/// Wait for lightwalletd to sync to Zebra's tip.
+///
+/// "Adding block" and "Waiting for block" logs stop when `lightwalletd` reaches the tip.
+/// But if the logs just stop, we can't tell the difference between a hang and fully synced.
+/// So we assume `lightwalletd` will sync and log large groups of blocks,
+/// and check for logs with heights near the mainnet tip height.
+#[tracing::instrument]
+pub fn wait_for_zebrad_and_lightwalletd_tip<
+    P: ZebradTestDirExt + std::fmt::Debug + std::marker::Send + 'static,
+>(
+    mut lightwalletd: TestChild<TempDir>,
+    mut zebrad: TestChild<P>,
+    test_type: LightwalletdTestType,
+) -> Result<(TestChild<TempDir>, TestChild<P>)> {
+    let lightwalletd_thread = std::thread::spawn(move || -> Result<_> {
+        tracing::info!(?test_type, "waiting for lightwalletd to sync to the tip");
+
+        lightwalletd
+            .expect_stdout_line_matches(crate::common::sync::LIGHTWALLETD_SYNC_FINISHED_REGEX)?;
+
+        Ok(lightwalletd)
+    });
+
+    // `lightwalletd` syncs can take a long time,
+    // so we need to check that `zebrad` has synced to the tip in parallel.
+    let lightwalletd_thread_and_zebrad = std::thread::spawn(move || -> Result<_> {
+        tracing::info!(?test_type, "waiting for zebrad to sync to the tip");
+
+        while !lightwalletd_thread.is_finished() {
+            zebrad.expect_stdout_line_matches(crate::common::sync::SYNC_FINISHED_REGEX)?;
+        }
+
+        Ok((lightwalletd_thread, zebrad))
+    });
+
+    // Retrieve the child process handles from the threads
+    let (lightwalletd_thread, mut zebrad) = lightwalletd_thread_and_zebrad
+        .join()
+        .unwrap_or_else(|panic_object| std::panic::resume_unwind(panic_object))?;
+
+    let lightwalletd = lightwalletd_thread
+        .join()
+        .unwrap_or_else(|panic_object| std::panic::resume_unwind(panic_object))?;
+
+    // If we are in sync mempool should activate
+    zebrad.expect_stdout_line_matches("activating mempool")?;
+
+    Ok((lightwalletd, zebrad))
 }
 
 /// Panics if `$pred` is false, with an error report containing:

@@ -46,12 +46,12 @@ use zebra_chain::{
 use zebra_network::constants::USER_AGENT;
 
 use crate::common::{
-    launch::spawn_zebrad_for_rpc,
+    launch::{spawn_zebrad_for_rpc, wait_for_zebrad_and_lightwalletd_tip},
     lightwalletd::{
         wallet_grpc::{
-            connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server,
-            wait_for_zebrad_and_lightwalletd_tip, Address, AddressList, BlockId, BlockRange,
-            ChainSpec, Empty, GetAddressUtxosArg, TransparentAddressBlockFilter, TxFilter,
+            connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Address, AddressList,
+            BlockId, BlockRange, ChainSpec, Empty, GetAddressUtxosArg,
+            TransparentAddressBlockFilter, TxFilter,
         },
         zebra_skip_lightwalletd_tests,
         LightwalletdTestType::UpdateCachedState,

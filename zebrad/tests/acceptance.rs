@@ -136,7 +136,10 @@ use common::{
     config::{
         config_file_full_path, configs_dir, default_test_config, persistent_test_config, testdir,
     },
-    launch::{spawn_zebrad_for_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY},
+    launch::{
+        spawn_zebrad_for_rpc, wait_for_zebrad_and_lightwalletd_tip, ZebradTestDirExt,
+        BETWEEN_NODES_DELAY, LAUNCH_DELAY,
+    },
     lightwalletd::{
         random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
         LightwalletdTestType::{self, *},
