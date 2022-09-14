@@ -71,7 +71,7 @@ jobs:
           # list of Docker images to use as base name for tags
           images: |
             us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}
-            zfnd/${{ inputs.image_name }},enable=${{ !github.event.release.prerelease }}
+            zfnd/zebra,enable=${{ !github.event.release.prerelease }}
           # generate Docker tags based on the following events/attributes
           tags: |
             type=schedule
