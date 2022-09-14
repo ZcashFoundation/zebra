@@ -299,7 +299,7 @@ where
     let poll_result = peer_set.ready().now_or_never();
     let all_peers_are_outdated = harnesses
         .iter()
-        .all(|harness| harness.version() < minimum_version);
+        .all(|harness| harness.remote_version() < minimum_version);
 
     if all_peers_are_outdated {
         prop_assert!(matches!(poll_result, None));
@@ -309,7 +309,7 @@ where
 
     let mut number_of_connected_peers = 0;
     for harness in harnesses {
-        let is_outdated = harness.version() < minimum_version;
+        let is_outdated = harness.remote_version() < minimum_version;
         let is_connected = harness.wants_connection_heartbeats();
 
         prop_assert!(

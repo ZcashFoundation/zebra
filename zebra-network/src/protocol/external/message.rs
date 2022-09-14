@@ -9,7 +9,7 @@ use zebra_chain::{
     transaction::UnminedTx,
 };
 
-use crate::meta_addr::MetaAddr;
+use crate::{meta_addr::MetaAddr, BoxError};
 
 use super::{addr::AddrInVersion, inv::InventoryHash, types::*};
 
@@ -45,54 +45,7 @@ pub enum Message {
     /// is distinct from a simple version number.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#version)
-    Version {
-        /// The network version number supported by the sender.
-        version: Version,
-
-        /// The network services advertised by the sender.
-        services: PeerServices,
-
-        /// The time when the version message was sent.
-        ///
-        /// This is a 64-bit field. Zebra rejects out-of-range times as invalid.
-        #[cfg_attr(
-            any(test, feature = "proptest-impl"),
-            proptest(strategy = "datetime_full()")
-        )]
-        timestamp: DateTime<Utc>,
-
-        /// The network address of the node receiving this message, and its
-        /// advertised network services.
-        ///
-        /// Q: how does the handshake know the remote peer's services already?
-        address_recv: AddrInVersion,
-
-        /// The network address of the node sending this message, and its
-        /// advertised network services.
-        address_from: AddrInVersion,
-
-        /// Node random nonce, randomly generated every time a version
-        /// packet is sent. This nonce is used to detect connections
-        /// to self.
-        nonce: Nonce,
-
-        /// The Zcash user agent advertised by the sender.
-        user_agent: String,
-
-        /// The last block received by the emitting node.
-        start_height: block::Height,
-
-        /// Whether the remote peer should announce relayed
-        /// transactions or not, see [BIP 0037].
-        ///
-        /// Zebra does not implement the bloom filters in [BIP 0037].
-        /// Instead, it only relays:
-        /// - newly verified best chain block hashes and mempool transaction IDs,
-        /// - after it reaches the chain tip.
-        ///
-        /// [BIP 0037]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
-        relay: bool,
-    },
+    Version(VersionMessage),
 
     /// A `verack` message.
     ///
@@ -340,6 +293,69 @@ pub enum Message {
     FilterClear,
 }
 
+/// A `version` message.
+///
+/// Note that although this is called `version` in Bitcoin, its role is really
+/// analogous to a `ClientHello` message in TLS, used to begin a handshake, and
+/// is distinct from a simple version number.
+///
+/// This struct provides a type that is guaranteed to be a `version` message,
+/// and allows [`Message::Version`](Message) fields to be accessed directly.
+///
+/// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#version)
+#[derive(Clone, Eq, PartialEq, Debug)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+pub struct VersionMessage {
+    /// The network version number supported by the sender.
+    pub version: Version,
+
+    /// The network services advertised by the sender.
+    pub services: PeerServices,
+
+    /// The time when the version message was sent.
+    ///
+    /// This is a 64-bit field. Zebra rejects out-of-range times as invalid.
+    ///
+    /// TODO: replace with a custom DateTime64 type (#2171)
+    #[cfg_attr(
+        any(test, feature = "proptest-impl"),
+        proptest(strategy = "datetime_full()")
+    )]
+    pub timestamp: DateTime<Utc>,
+
+    /// The network address of the node receiving this message, and its
+    /// advertised network services.
+    ///
+    /// Q: how does the handshake know the remote peer's services already?
+    pub address_recv: AddrInVersion,
+
+    /// The network address of the node sending this message, and its
+    /// advertised network services.
+    pub address_from: AddrInVersion,
+
+    /// Node random nonce, randomly generated every time a version
+    /// packet is sent. This nonce is used to detect connections
+    /// to self.
+    pub nonce: Nonce,
+
+    /// The Zcash user agent advertised by the sender.
+    pub user_agent: String,
+
+    /// The last block received by the emitting node.
+    pub start_height: block::Height,
+
+    /// Whether the remote peer should announce relayed
+    /// transactions or not, see [BIP 0037].
+    ///
+    /// Zebra does not implement the bloom filters in [BIP 0037].
+    /// Instead, it only relays:
+    /// - newly verified best chain block hashes and mempool transaction IDs,
+    /// - after it reaches the chain tip.
+    ///
+    /// [BIP 0037]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
+    pub relay: bool,
+}
+
 /// The maximum size of the rejection message.
 ///
 /// This is equivalent to `COMMAND_SIZE` in zcashd.
@@ -349,6 +365,27 @@ const MAX_REJECT_MESSAGE_LENGTH: usize = 12;
 ///
 /// This is equivalent to `MAX_REJECT_MESSAGE_LENGTH` in zcashd.
 const MAX_REJECT_REASON_LENGTH: usize = 111;
+
+impl From<VersionMessage> for Message {
+    fn from(version_message: VersionMessage) -> Self {
+        Message::Version(version_message)
+    }
+}
+
+impl TryFrom<Message> for VersionMessage {
+    type Error = BoxError;
+
+    fn try_from(message: Message) -> Result<Self, Self::Error> {
+        match message {
+            Message::Version(version_message) => Ok(version_message),
+            _ => Err(format!(
+                "{} message is not a version message: {message:?}",
+                message.command()
+            )
+            .into()),
+        }
+    }
+}
 
 // TODO: add tests for Error conversion and Reject message serialization (#4633)
 // (Zebra does not currently send reject messages, and it ignores received reject messages.)
@@ -408,13 +445,13 @@ pub enum RejectReason {
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(&match self {
-            Message::Version {
+            Message::Version(VersionMessage {
                 version,
                 address_recv,
                 address_from,
                 user_agent,
                 ..
-            } => format!(
+            }) => format!(
                 "version {{ network: {}, recv: {},_from: {}, user_agent: {:?} }}",
                 version,
                 address_recv.addr(),
@@ -481,7 +518,7 @@ impl Message {
     /// Returns the Zcash protocol message command as a string.
     pub fn command(&self) -> &'static str {
         match self {
-            Message::Version { .. } => "version",
+            Message::Version(_) => "version",
             Message::Verack => "verack",
             Message::Ping(_) => "ping",
             Message::Pong(_) => "pong",

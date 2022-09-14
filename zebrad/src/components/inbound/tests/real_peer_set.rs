@@ -607,10 +607,7 @@ async fn setup(
 ) -> (
     // real services
     // connected peer which responds with isolated_peer_response
-    Buffer<
-        BoxService<zebra_network::Request, zebra_network::Response, BoxError>,
-        zebra_network::Request,
-    >,
+    Buffer<zebra_network::Client, zebra_network::Request>,
     // inbound service
     BoxCloneService<zebra_network::Request, zebra_network::Response, BoxError>,
     // outbound peer set (only has the connected peer)
