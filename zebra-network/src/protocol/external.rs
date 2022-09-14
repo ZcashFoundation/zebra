@@ -19,5 +19,7 @@ mod tests;
 pub use addr::{canonical_socket_addr, AddrInVersion};
 pub use codec::Codec;
 pub use inv::InventoryHash;
-pub use message::Message;
+pub use message::{Message, VersionMessage};
+pub use types::{Nonce, Version};
+
 pub use zebra_chain::serialization::MAX_PROTOCOL_MESSAGE_LEN;
