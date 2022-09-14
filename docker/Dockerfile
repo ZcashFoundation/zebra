@@ -139,6 +139,9 @@ RUN apt-get update && \
 ARG CHECKPOINT_SYNC=true
 ARG NETWORK=Mainnet
 
+ARG ZEBRA_CONF_PATH=/etc/zebrad/zebrad.toml
+ENV ZEBRA_CONF_PATH ${ZEBRA_CONF_PATH}
+
 # Build the `zebrad.toml` before starting the container, using the arguments from build
 # time, or using the default values set just above.
 RUN set -ex; \
@@ -153,7 +156,7 @@ RUN set -ex; \
     echo "cache_dir = '/zebrad-cache'"; \
     echo "[tracing]"; \
     echo "endpoint_addr = '0.0.0.0:3000'"; \
-  } > "zebrad.toml"
+  } > "${ZEBRA_CONF_PATH}"
 
 EXPOSE 3000 8233 18233
 
@@ -163,4 +166,4 @@ ENV SHORT_SHA $SHORT_SHA
 ARG SENTRY_DSN
 ENV SENTRY_DSN ${SENTRY_DSN}
 
-CMD [ "zebrad", "-c", "zebrad.toml", "start" ]
+CMD [ "zebrad", "-c", "${ZEBRA_CONF_PATH}", "start" ]
