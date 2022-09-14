@@ -684,6 +684,12 @@ impl DiskDb {
         self.db.flush().expect("flush is successful");
 
         // But we should call `cancel_all_background_work` before Zebra exits.
+        //
+        // In some tests, we need to drop() the state service before the test function returns,
+        // and sleep() until all the other threads exit.
+        // (This seems to be a bug in RocksDB: cancel_all_background_work() should wait until
+        // all the threads have cleaned up.)
+        //
         // If we don't, we see these kinds of errors:
         // ```
         // pthread lock: Invalid argument
