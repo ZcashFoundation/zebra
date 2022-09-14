@@ -71,15 +71,16 @@ jobs:
           # list of Docker images to use as base name for tags
           images: |
             us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}
+            zfnd/${{ inputs.image_name }},enable=${{ !github.event.release.prerelease }}
           # generate Docker tags based on the following events/attributes
           tags: |
             type=schedule
-            type=sha
-            type=ref,event=branch
-            type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern=v{{major}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha
 
       # Setup Docker Buildx to allow use of docker cache layers from GH
       - name: Set up Docker Buildx
@@ -109,7 +110,7 @@ jobs:
       - name: Login to DockerHub
         # We only publish images to DockerHub if a release is not a pre-release
         # Ref: https://github.com/orgs/community/discussions/26281#discussioncomment-3251177
-        if: "!github.event.release.prerelease"
+        if: ${{ !github.event.release.prerelease }}
         uses: docker/login-action@v2.0.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
