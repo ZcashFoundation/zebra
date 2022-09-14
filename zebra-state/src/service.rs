@@ -166,9 +166,8 @@ pub(crate) struct StateService {
     ///
     /// Used to check for panics when writing blocks.
     //
-    // TODO: actually check for panics
-    //       work out if we need to shut it down when the service is shutting down
-    _block_write_task: Arc<std::thread::JoinHandle<()>>,
+    // TODO: check for panics in ReadStateService
+    block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
 
     // Pending UTXO Request Tracking
     //
@@ -246,9 +245,7 @@ pub struct ReadStateService {
     /// once the queues have received all their parent blocks.
     ///
     /// Used to check for panics when writing blocks.
-    //
-    // TODO: actually check for panics
-    _block_write_task: Arc<std::thread::JoinHandle<()>>,
+    block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
 }
 
 impl StateService {
@@ -321,7 +318,7 @@ impl StateService {
             finalized_block_write_sender,
             last_block_hash_sent,
             invalid_block_reset_receiver,
-            _block_write_task: block_write_task,
+            block_write_task: Some(block_write_task),
             pending_utxos,
             last_prune: Instant::now(),
             chain_tip_sender,
@@ -714,7 +711,7 @@ impl ReadStateService {
             network: finalized_state.network(),
             db: finalized_state.db().clone(),
             non_finalized_state_receiver: WatchReceiver::new(non_finalized_state_receiver),
-            _block_write_task: block_write_task,
+            block_write_task: Some(block_write_task),
         };
 
         tracing::info!("created new read-only state service");
@@ -730,6 +727,30 @@ impl Service<Request> for StateService {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Check for panics in the block write task
+        //
+        // TODO: turn this into a shared function for the StateService and ReadStateService
+        let block_write_task = self.block_write_task.take();
+
+        if let Some(block_write_task) = block_write_task {
+            if block_write_task.is_finished() {
+                match Arc::try_unwrap(block_write_task) {
+                    // We are the last state with a reference to this task, so we can propagate any panics
+                    Ok(block_write_task_handle) => {
+                        if let Err(thread_panic) = block_write_task_handle.join() {
+                            std::panic::resume_unwind(thread_panic);
+                        }
+                    }
+                    // We're not the last state, so we need to put it back
+                    Err(arc_block_write_task) => self.block_write_task = Some(arc_block_write_task),
+                }
+            } else {
+                // It hasn't finished, so we need to put it back
+                self.block_write_task = Some(block_write_task);
+            }
+        }
+
+        // Prune outdated UTXO requests
         let now = Instant::now();
 
         if self.last_prune + Self::PRUNE_INTERVAL < now {
@@ -789,6 +810,10 @@ impl Service<Request> for StateService {
                     span.in_scope(|| self.queue_and_commit_non_finalized(prepared))
                 });
 
+                // TODO:
+                //   - check for panics in the block write task here,
+                //     as well as in poll_ready()
+
                 // The work is all done, the future just waits on a channel for the result
                 timer.finish(module_path!(), line!(), "CommitBlock");
 
@@ -834,6 +859,10 @@ impl Service<Request> for StateService {
                 let rsp_rx = tokio::task::block_in_place(move || {
                     span.in_scope(|| self.queue_and_commit_finalized(finalized))
                 });
+
+                // TODO:
+                //   - check for panics in the block write task here,
+                //     as well as in poll_ready()
 
                 // The work is all done, the future just waits on a channel for the result
                 timer.finish(module_path!(), line!(), "CommitFinalizedBlock");
@@ -957,6 +986,29 @@ impl Service<ReadRequest> for ReadStateService {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Check for panics in the block write task
+        //
+        // TODO: turn this into a shared function for the StateService and ReadStateService
+        let block_write_task = self.block_write_task.take();
+
+        if let Some(block_write_task) = block_write_task {
+            if block_write_task.is_finished() {
+                match Arc::try_unwrap(block_write_task) {
+                    // We are the last state with a reference to this task, so we can propagate any panics
+                    Ok(block_write_task_handle) => {
+                        if let Err(thread_panic) = block_write_task_handle.join() {
+                            std::panic::resume_unwind(thread_panic);
+                        }
+                    }
+                    // We're not the last state, so we need to put it back
+                    Err(arc_block_write_task) => self.block_write_task = Some(arc_block_write_task),
+                }
+            } else {
+                // It hasn't finished, so we need to put it back
+                self.block_write_task = Some(block_write_task);
+            }
+        }
+
         Poll::Ready(Ok(()))
     }
 
