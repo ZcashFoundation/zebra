@@ -651,13 +651,6 @@ impl Service<Request> for StateService {
             // Uses queued_non_finalized_blocks and pending_utxos in the StateService
             // Accesses shared writeable state in the StateService, NonFinalizedState, and ZebraDb.
             Request::CommitBlock(prepared) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "state",
-                    "type" => "commit_block",
-                );
-
                 let timer = CodeTimer::start();
 
                 self.assert_block_can_be_validated(&prepared);
@@ -703,13 +696,6 @@ impl Service<Request> for StateService {
             // Uses queued_finalized_blocks and pending_utxos in the StateService.
             // Accesses shared writeable state in the StateService and ZebraDb.
             Request::CommitFinalizedBlock(finalized) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "state",
-                    "type" => "commit_finalized_block",
-                );
-
                 let timer = CodeTimer::start();
 
                 // # Consensus
@@ -758,13 +744,6 @@ impl Service<Request> for StateService {
             // Uses pending_utxos and queued_non_finalized_blocks in the StateService.
             // If the UTXO isn't in the queued blocks, runs concurrently using the ReadStateService.
             Request::AwaitUtxo(outpoint) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "state",
-                    "type" => "await_utxo",
-                );
-
                 let timer = CodeTimer::start();
 
                 // Prepare the AwaitUtxo future from PendingUxtos.
@@ -828,167 +807,14 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
-            // TODO: add a name() method to Request, and combine all the generic read requests
-            //
             // Runs concurrently using the ReadStateService
-            Request::Depth(_) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "state",
-                    "type" => "depth",
-                );
-
-                // Redirect the request to the concurrent ReadStateService
-                let read_service = self.read_service.clone();
-
-                async move {
-                    let req = req
-                        .try_into()
-                        .expect("ReadRequest conversion should not fail");
-
-                    let rsp = read_service.oneshot(req).await?;
-                    let rsp = rsp.try_into().expect("Response conversion should not fail");
-
-                    Ok(rsp)
-                }
-                .boxed()
-            }
-
-            // Runs concurrently using the ReadStateService
-            Request::Tip => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "state",
-                    "type" => "tip",
-                );
-
-                // Redirect the request to the concurrent ReadStateService
-                let read_service = self.read_service.clone();
-
-                async move {
-                    let req = req
-                        .try_into()
-                        .expect("ReadRequest conversion should not fail");
-
-                    let rsp = read_service.oneshot(req).await?;
-                    let rsp = rsp.try_into().expect("Response conversion should not fail");
-
-                    Ok(rsp)
-                }
-                .boxed()
-            }
-
-            // Runs concurrently using the ReadStateService
-            Request::BlockLocator => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "state",
-                    "type" => "block_locator",
-                );
-
-                // Redirect the request to the concurrent ReadStateService
-                let read_service = self.read_service.clone();
-
-                async move {
-                    let req = req
-                        .try_into()
-                        .expect("ReadRequest conversion should not fail");
-
-                    let rsp = read_service.oneshot(req).await?;
-                    let rsp = rsp.try_into().expect("Response conversion should not fail");
-
-                    Ok(rsp)
-                }
-                .boxed()
-            }
-
-            // Runs concurrently using the ReadStateService
-            Request::Transaction(_) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "state",
-                    "type" => "transaction",
-                );
-
-                // Redirect the request to the concurrent ReadStateService
-                let read_service = self.read_service.clone();
-
-                async move {
-                    let req = req
-                        .try_into()
-                        .expect("ReadRequest conversion should not fail");
-
-                    let rsp = read_service.oneshot(req).await?;
-                    let rsp = rsp.try_into().expect("Response conversion should not fail");
-
-                    Ok(rsp)
-                }
-                .boxed()
-            }
-
-            // Runs concurrently using the ReadStateService
-            Request::Block(_) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "state",
-                    "type" => "block",
-                );
-
-                // Redirect the request to the concurrent ReadStateService
-                let read_service = self.read_service.clone();
-
-                async move {
-                    let req = req
-                        .try_into()
-                        .expect("ReadRequest conversion should not fail");
-
-                    let rsp = read_service.oneshot(req).await?;
-                    let rsp = rsp.try_into().expect("Response conversion should not fail");
-
-                    Ok(rsp)
-                }
-                .boxed()
-            }
-
-            // Runs concurrently using the ReadStateService
-            Request::FindBlockHashes { .. } => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "state",
-                    "type" => "find_block_hashes",
-                );
-
-                // Redirect the request to the concurrent ReadStateService
-                let read_service = self.read_service.clone();
-
-                async move {
-                    let req = req
-                        .try_into()
-                        .expect("ReadRequest conversion should not fail");
-
-                    let rsp = read_service.oneshot(req).await?;
-                    let rsp = rsp.try_into().expect("Response conversion should not fail");
-
-                    Ok(rsp)
-                }
-                .boxed()
-            }
-
-            // Runs concurrently using the ReadStateService
-            Request::FindBlockHeaders { .. } => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "state",
-                    "type" => "find_block_headers",
-                );
-
+            Request::Depth(_)
+            | Request::Tip
+            | Request::BlockLocator
+            | Request::Transaction(_)
+            | Request::Block(_)
+            | Request::FindBlockHashes { .. }
+            | Request::FindBlockHeaders { .. } => {
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
@@ -1020,16 +846,11 @@ impl Service<ReadRequest> for ReadStateService {
 
     #[instrument(name = "read_state", skip(self))]
     fn call(&mut self, req: ReadRequest) -> Self::Future {
+        req.count_metric();
+
         match req {
             // Used by the StateService.
             ReadRequest::Tip => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "tip",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1055,13 +876,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by the StateService.
             ReadRequest::Depth(hash) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "depth",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1087,13 +901,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by get_block RPC and the StateService.
             ReadRequest::Block(hash_or_height) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "block",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1123,13 +930,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // For the get_raw_transaction RPC and the StateService.
             ReadRequest::Transaction(hash) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "transaction",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1155,13 +955,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Currently unused.
             ReadRequest::BestChainUtxo(outpoint) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "best_chain_utxo",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1187,13 +980,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Manually used by the StateService to implement part of AwaitUtxo.
             ReadRequest::AnyChainUtxo(outpoint) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "any_chain_utxo",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1219,13 +1005,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by the StateService.
             ReadRequest::BlockLocator => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "block_locator",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1253,13 +1032,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by the StateService.
             ReadRequest::FindBlockHashes { known_blocks, stop } => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "find_block_hashes",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1291,13 +1063,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by the StateService.
             ReadRequest::FindBlockHeaders { known_blocks, stop } => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "find_block_headers",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1333,13 +1098,6 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             ReadRequest::SaplingTree(hash_or_height) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "sapling_tree",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1368,13 +1126,6 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             ReadRequest::OrchardTree(hash_or_height) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "orchard_tree",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1404,13 +1155,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // For the get_address_balance RPC.
             ReadRequest::AddressBalance(addresses) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "address_balance",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1443,13 +1187,6 @@ impl Service<ReadRequest> for ReadStateService {
                 addresses,
                 height_range,
             } => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "transaction_ids_by_addresses",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1486,13 +1223,6 @@ impl Service<ReadRequest> for ReadStateService {
 
             // For the get_address_utxos RPC.
             ReadRequest::UtxosByAddresses(addresses) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "utxos_by_addresses",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
