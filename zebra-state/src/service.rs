@@ -255,12 +255,13 @@ impl Drop for StateService {
         std::mem::drop(self.finalized_block_write_sender.take());
         std::mem::drop(self.non_finalized_block_write_sender.take());
 
-        // Shut down the database (blocking):
-        // - stops the block write task if it is busy writing to the database
-        // - stops concurrent reads from the database
-        self.read_service.db.shutdown(true);
+        //// Shut down the database (blocking):
+        //// - stops the block write task if it is busy writing to the database
+        //// - stops concurrent reads from the database
+        //self.read_service.db.shutdown(true);
 
-        // Then drop self.read_service, which checks the block write task for panics.
+        // Then drop self.read_service, which checks the block write task for panics,
+        // and tries to shut down the database.
     }
 }
 
@@ -269,14 +270,14 @@ impl Drop for ReadStateService {
         // The read state service shares the state,
         // so dropping it should check if we can shut down.
 
-        // TODO: rename this to try_shutdown()?
-        self.db.shutdown(false);
-
         // Wait until the block write task finishes, then check for panics (blocking).
         //
         // TODO: move this into a function
         if let Some(block_write_task) = self.block_write_task.take() {
             if let Ok(block_write_task_handle) = Arc::try_unwrap(block_write_task) {
+                // We're the last database user, so we can tell it to shut down.
+                self.db.shutdown(true);
+
                 // We are the last state with a reference to this thread,
                 // so we can propagate any panics.
                 // (We'd also like to abort the thread, but std::thread::JoinHandle can't do that.)
@@ -287,6 +288,11 @@ impl Drop for ReadStateService {
                     info!("shutting down the state without waiting for the block write task");
                 }
             }
+        } else {
+            // Even if we're not the last database user, try shutting it down.
+            //
+            // TODO: rename this to try_shutdown()?
+            self.db.shutdown(false);
         }
     }
 }
@@ -308,7 +314,7 @@ impl StateService {
 
         let timer = CodeTimer::start();
         let initial_tip = finalized_state
-            .db()
+            .db
             .tip_block()
             .map(FinalizedBlock::from)
             .map(ChainTipBlock::from);
@@ -349,7 +355,7 @@ impl StateService {
         let queued_non_finalized_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
-        let last_block_hash_sent = finalized_state.db().finalized_tip_hash();
+        let last_block_hash_sent = finalized_state.db.finalized_tip_hash();
 
         let state = Self {
             network,
@@ -656,10 +662,10 @@ impl StateService {
         self.check_contextual_validity(&prepared)?;
         let parent_hash = prepared.block.header.previous_block_hash;
 
-        if self.disk.db().finalized_tip_hash() == parent_hash {
-            self.mem.commit_new_chain(prepared, self.disk.db())?;
+        if self.disk.db.finalized_tip_hash() == parent_hash {
+            self.mem.commit_new_chain(prepared, &self.disk.db)?;
         } else {
-            self.mem.commit_block(prepared, self.disk.db())?;
+            self.mem.commit_block(prepared, &self.disk.db)?;
         }
 
         Ok(())
@@ -732,11 +738,11 @@ impl StateService {
         check::block_is_valid_for_recent_chain(
             prepared,
             self.network,
-            self.disk.db().finalized_tip_height(),
+            self.disk.db.finalized_tip_height(),
             relevant_chain,
         )?;
 
-        check::nullifier::no_duplicates_in_finalized_chain(prepared, self.disk.db())?;
+        check::nullifier::no_duplicates_in_finalized_chain(prepared, &self.disk.db)?;
 
         Ok(())
     }
@@ -792,7 +798,7 @@ impl ReadStateService {
 
         let read_service = Self {
             network: finalized_state.network(),
-            db: finalized_state.db().clone(),
+            db: finalized_state.db.clone(),
             non_finalized_state_receiver: WatchReceiver::new(non_finalized_state_receiver),
             block_write_task: Some(block_write_task),
         };
