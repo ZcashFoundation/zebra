@@ -39,7 +39,7 @@ pub fn write_blocks_from_channels(
 
         // Discard any children of invalid blocks in the channel
         let next_valid_height = finalized_state
-            .db()
+            .db
             .finalized_tip_height()
             .map(|height| (height + 1).expect("committed heights are valid"))
             .unwrap_or(Height(0));
@@ -69,7 +69,7 @@ pub fn write_blocks_from_channels(
                     .set_finalized_tip(tip_block);
             }
             Err(error) => {
-                let finalized_tip = finalized_state.db().tip();
+                let finalized_tip = finalized_state.db.tip();
 
                 // The last block in the queue failed, so we can't commit the next block.
                 // Instead, we need to reset the state queue,
@@ -82,7 +82,7 @@ pub fn write_blocks_from_channels(
                 );
 
                 let send_result =
-                    invalid_block_reset_sender.send(finalized_state.db().finalized_tip_hash());
+                    invalid_block_reset_sender.send(finalized_state.db.finalized_tip_hash());
 
                 if send_result.is_err() {
                     info!("StateService closed the block reset channel. Is Zebra shutting down?");
@@ -118,9 +118,13 @@ pub fn write_blocks_from_channels(
 
     // We're finished receiving non-finalized blocks from the state.
     //
-    // TODO: does the drop order matter here?
+    // TODO:
+    // - make the task an object, and do this in the drop impl?
+    // - does the drop order matter here?
     non_finalized_block_write_receiver.close();
     std::mem::drop(non_finalized_block_write_receiver);
 
+    // We're done writing to the finalized state, so we can force it to shut down.
+    finalized_state.db.shutdown(true);
     std::mem::drop(finalized_state);
 }

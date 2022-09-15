@@ -14,7 +14,7 @@ impl Deref for FinalizedState {
     type Target = ZebraDb;
 
     fn deref(&self) -> &Self::Target {
-        self.db()
+        &self.db
     }
 }
 

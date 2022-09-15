@@ -17,7 +17,6 @@
 
 use std::{
     io::{stderr, stdout, Write},
-    path::Path,
     sync::Arc,
 };
 
@@ -72,7 +71,7 @@ pub struct FinalizedState {
     /// `rocksdb` allows reads and writes via a shared reference,
     /// so this database object can be freely cloned.
     /// The last instance that is dropped will close the underlying database.
-    db: ZebraDb,
+    pub db: ZebraDb,
 }
 
 impl FinalizedState {
@@ -132,17 +131,6 @@ impl FinalizedState {
     /// Returns the configured network for this database.
     pub fn network(&self) -> Network {
         self.network
-    }
-
-    /// Returns the `Path` where the files used by this database are located.
-    #[allow(dead_code)]
-    pub fn path(&self) -> &Path {
-        self.db.path()
-    }
-
-    /// Returns a reference to the inner database instance.
-    pub(crate) fn db(&self) -> &ZebraDb {
-        &self.db
     }
 
     /// Commit a finalized block to the state.
