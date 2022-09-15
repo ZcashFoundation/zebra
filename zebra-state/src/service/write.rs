@@ -91,8 +91,8 @@ pub fn write_blocks_from_channels(
         // TODO:
         // - read from the channel
         // - commit blocks to the non-finalized state
-        // - commit blocks to the finalized state
-        // - handle errors
+        // - if there are any ready, commit blocks to the finalized state
+        // - handle errors by sending a reset with all the block hashes in the non-finalized state, and the finalized tip
         // - update the chain tip sender and cached non-finalized state
         error!("handle non-finalized block writes here");
     }
