@@ -133,7 +133,10 @@ pub(crate) struct StateService {
 
     /// A channel to send blocks to the `block_write_task`,
     /// so they can be written to the [`FinalizedState`].
-    finalized_block_write_sender: tokio::sync::mpsc::UnboundedSender<QueuedFinalized>,
+    ///
+    /// This sender is dropped after the state has finished sending all the checkpointed blocks,
+    /// and the lowest non-finalized block arrives.
+    finalized_block_write_sender: Option<tokio::sync::mpsc::UnboundedSender<QueuedFinalized>>,
 
     /// The [`block::Hash`] of the most recent block sent on
     /// `finalized_block_write_sender` or `non_finalized_block_write_sender`.
@@ -312,7 +315,7 @@ impl StateService {
             mem: non_finalized_state,
             disk: finalized_state,
             _non_finalized_block_write_sender: non_finalized_block_write_sender,
-            finalized_block_write_sender,
+            finalized_block_write_sender: Some(finalized_block_write_sender),
             last_block_hash_sent,
             invalid_block_reset_receiver,
             block_write_task: Some(block_write_task),
@@ -367,11 +370,26 @@ impl StateService {
         let queued_height = finalized.height;
 
         let (rsp_tx, rsp_rx) = oneshot::channel();
-        let queued = (finalized, rsp_tx);
-        self.queued_finalized_blocks
-            .insert(queued_prev_hash, queued);
 
-        self.drain_queue_and_commit_finalized();
+        if self.finalized_block_write_sender.is_some() {
+            // We're still committing finalized blocks
+            let queued = (finalized, rsp_tx);
+            self.queued_finalized_blocks
+                .insert(queued_prev_hash, queued);
+
+            self.drain_queue_and_commit_finalized();
+        } else {
+            // We've finished committing finalized blocks, so drop any repeated queued blocks,
+            // and return an error.
+            self.queued_finalized_blocks.clear();
+
+            // We don't care if this error ever gets received.
+            let _ = rsp_tx.send(Err(
+                "already finished committing finalized blocks: dropped duplicate block, \
+                 block is already committed to the state"
+                    .into(),
+            ));
+        }
 
         if self.queued_finalized_blocks.is_empty() {
             self.max_queued_finalized_height = f64::NAN;
@@ -425,16 +443,20 @@ impl StateService {
         {
             self.last_block_hash_sent = queued_block.0.hash;
 
-            let send_result = self.finalized_block_write_sender.send(queued_block);
+            // If we've finished sending finalized blocks, ignore any repeated blocks.
+            // (Blocks can be repeated after a syncer reset.)
+            if let Some(finalized_block_write_sender) = &self.finalized_block_write_sender {
+                let send_result = finalized_block_write_sender.send(queued_block);
 
-            // If the receiver is closed, we can't send any more blocks.
-            // TODO: also immediately fail the block that we just queued?
-            if let Err(SendError((_finalized, block_result_sender))) = send_result {
-                // If Zebra is shutting down, ignore dropped block result receivers
-                let _ = block_result_sender.send(Err(
-                    "block commit task exited. Is Zebra shutting down?".into(),
-                ));
-            };
+                // If the receiver is closed, we can't send any more blocks.
+                // TODO: also immediately fail the block that we just queued?
+                if let Err(SendError((_finalized, block_result_sender))) = send_result {
+                    // If Zebra is shutting down, ignore dropped block result receivers
+                    let _ = block_result_sender.send(Err(
+                        "block commit task exited. Is Zebra shutting down?".into(),
+                    ));
+                };
+            }
         }
     }
 
@@ -477,6 +499,28 @@ impl StateService {
             self.queued_non_finalized_blocks.queue((prepared, rsp_tx));
             rsp_rx
         };
+
+        // We've finished sending finalized blocks when:
+        // - we've sent the finalized block for the last checkpoint, and
+        // - it has been successfully written to disk.
+        //
+        // We detect the last checkpoint by looking for non-finalized blocks
+        // that are a child of the last block we sent.
+        //
+        // TODO: configure the state with the last checkpoint hash instead?
+        if self.finalized_block_write_sender.is_some()
+            && self
+                .queued_non_finalized_blocks
+                .has_queued_children(self.last_block_hash_sent)
+            && self.disk.db().finalized_tip_hash() == self.last_block_hash_sent
+        {
+            // Tell the block write task to stop committing finalized blocks,
+            // and move on to committing non-finalized blocks.
+            std::mem::drop(self.finalized_block_write_sender.take());
+
+            // We've finished committing finalized blocks, so drop any repeated queued blocks.
+            self.queued_finalized_blocks.clear();
+        }
 
         // TODO: avoid a temporary verification failure that can happen
         //       if the first non-finalized block arrives before the last finalized block is committed

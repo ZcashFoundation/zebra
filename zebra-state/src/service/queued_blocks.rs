@@ -77,6 +77,12 @@ impl QueuedBlocks {
         self.update_metrics();
     }
 
+    /// Returns `true` if there are any queued children of `parent_hash`.
+    #[instrument(skip(self), fields(%parent_hash))]
+    pub fn has_queued_children(&self, parent_hash: block::Hash) -> bool {
+        self.by_parent.contains_key(&parent_hash)
+    }
+
     /// Dequeue and return all blocks that were waiting for the arrival of
     /// `parent`.
     #[instrument(skip(self), fields(%parent_hash))]
