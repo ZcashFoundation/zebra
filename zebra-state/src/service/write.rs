@@ -44,17 +44,11 @@ pub fn write_blocks_from_channels(
                 ?next_valid_height,
                 invalid_height = ?ordered_block.0.height,
                 invalid_hash = ?ordered_block.0.hash,
-                "got a block that was too high, assuming that a parent block failed, \
-                 and clearing child blocks in the channel",
+                "got a block that was too high. \
+                 Assuming a parent block failed, and dropping this block",
             );
 
-            let send_result =
-                invalid_block_reset_sender.send(finalized_state.db().finalized_tip_hash());
-
-            if send_result.is_err() {
-                info!("StateService closed the block reset channel. Is Zebra shutting down?");
-                return;
-            }
+            // We don't want to send a reset here, because it could overwrite a valid sent hash
         }
 
         // Try committing the block
