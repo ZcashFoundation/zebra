@@ -139,11 +139,14 @@ RUN apt-get update && \
 ARG CHECKPOINT_SYNC=true
 ARG NETWORK=Mainnet
 
+# Use a configurable path for the zebrad configuration file
 ARG ZEBRA_CONF_PATH=/etc/zebra/zebrad.toml
 ENV ZEBRA_CONF_PATH ${ZEBRA_CONF_PATH}
 
 # Build the `zebrad.toml` before starting the container, using the arguments from build
-# time, or using the default values set just above.
+# time, or using the default values set just above. And create the file path if it does
+# not exist
+RUN mkdir -p ${ZEBRA_CONF_PATH}
 RUN set -ex; \
   { \
     echo "[consensus]"; \
