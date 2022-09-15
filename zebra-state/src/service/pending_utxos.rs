@@ -1,5 +1,6 @@
-use std::collections::HashMap;
-use std::future::Future;
+//! Pending UTXO tracker for [`AwaitUtxo` requests](crate::Request::AwaitUtxo).
+
+use std::{collections::HashMap, future::Future};
 
 use tokio::sync::broadcast;
 
