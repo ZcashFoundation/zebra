@@ -139,7 +139,7 @@ RUN apt-get update && \
 ARG CHECKPOINT_SYNC=true
 ARG NETWORK=Mainnet
 
-ARG ZEBRA_CONF_PATH=/etc/zebrad/zebrad.toml
+ARG ZEBRA_CONF_PATH=/etc/zebra/zebrad.toml
 ENV ZEBRA_CONF_PATH ${ZEBRA_CONF_PATH}
 
 # Build the `zebrad.toml` before starting the container, using the arguments from build
