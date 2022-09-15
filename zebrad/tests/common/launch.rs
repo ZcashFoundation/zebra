@@ -198,7 +198,7 @@ where
 
 /// Spawns a zebrad instance to interact with lightwalletd.
 ///
-/// If `internet_connection` is not true then spawn but without any peers.
+/// If `internet_connection` is `false` then spawn, but without any peers.
 /// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
 /// providing an initial state to the zebrad instance.
 #[tracing::instrument]
@@ -216,8 +216,8 @@ pub fn spawn_zebrad_for_rpc<P: ZebradTestDirExt + std::fmt::Debug>(
     config.state.ephemeral = false;
     if !internet_connection {
         config.network.initial_mainnet_peers = IndexSet::new();
+        config.network.initial_testnet_peers = IndexSet::new();
     }
-    config.network.initial_testnet_peers = IndexSet::new();
     config.network.network = network;
     if !internet_connection {
         config.mempool.debug_enable_at_height = Some(0);
@@ -247,12 +247,13 @@ pub fn spawn_zebrad_for_rpc<P: ZebradTestDirExt + std::fmt::Debug>(
 /// So we assume `lightwalletd` will sync and log large groups of blocks,
 /// and check for logs with heights near the mainnet tip height.
 #[tracing::instrument]
-pub fn wait_for_zebrad_and_lightwalletd_tip<
+pub fn wait_for_zebrad_and_lightwalletd_sync<
     P: ZebradTestDirExt + std::fmt::Debug + std::marker::Send + 'static,
 >(
     mut lightwalletd: TestChild<TempDir>,
     mut zebrad: TestChild<P>,
     test_type: LightwalletdTestType,
+    wait_for_zebrad_tip: bool,
 ) -> Result<(TestChild<TempDir>, TestChild<P>)> {
     let lightwalletd_thread = std::thread::spawn(move || -> Result<_> {
         tracing::info!(?test_type, "waiting for lightwalletd to sync to the tip");
