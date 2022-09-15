@@ -32,6 +32,11 @@ pub fn write_blocks_from_channels(
     while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
         // TODO: split these checks into separate functions
 
+        if invalid_block_reset_sender.is_closed() {
+            info!("StateService closed the block reset channel. Is Zebra shutting down?");
+            return;
+        }
+
         // Discard any children of invalid blocks in the channel
         let next_valid_height = finalized_state
             .db()
@@ -87,7 +92,21 @@ pub fn write_blocks_from_channels(
         }
     }
 
+    // We're finished receiving finalized blocks from the state.
+    finalized_block_write_receiver.close();
+    std::mem::drop(finalized_block_write_receiver);
+
+    if invalid_block_reset_sender.is_closed() {
+        info!("StateService closed the block reset channel. Is Zebra shutting down?");
+        return;
+    }
+
     while let Some(_block) = non_finalized_block_write_receiver.blocking_recv() {
+        if invalid_block_reset_sender.is_closed() {
+            info!("StateService closed the block reset channel. Is Zebra shutting down?");
+            return;
+        }
+
         // TODO:
         // - read from the channel
         // - commit blocks to the non-finalized state
@@ -96,4 +115,12 @@ pub fn write_blocks_from_channels(
         // - update the chain tip sender and cached non-finalized state
         error!("handle non-finalized block writes here");
     }
+
+    // We're finished receiving non-finalized blocks from the state.
+    //
+    // TODO: does the drop order matter here?
+    non_finalized_block_write_receiver.close();
+    std::mem::drop(non_finalized_block_write_receiver);
+
+    std::mem::drop(finalized_state);
 }
