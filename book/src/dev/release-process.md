@@ -27,7 +27,7 @@ The pre-release version is denoted by appending a hyphen and a series of dot sep
 | Level of change | Details |
 |:---             |:---     |
 | Major release   | Contains significant new features, and commonly correspond to network upgrades; some technical assistance may be needed during the update. When updating to a major release, you may need to follow the specific upgrade instructions provided in the release notes. |
-| Minor release   | Contains new smaller features. Minor releases are should be fully backward-compatible. No technical assistance is expected during update. |
+| Minor release   | Contains new smaller features. Minor releases are should be fully backward-compatible. No technical assistance is expected during update.  If you want to use the new features in a minor release, you might need to follow the instructions in the release notes. |
 | Patch release   | Low risk, bug fix release. No technical assistance is expected during update. |
 
 <a id="supported-releases"></a>
@@ -64,7 +64,7 @@ We let you preview what's coming by providing Release Candidate \(`rc`\) pre-rel
 | Pre-release type  | Details |
 |:---               |:---     |
 | Beta              | The release that is under active development and testing. The beta release is indicated by a release tag appended with the `-beta` identifier, such as  `8.1.0-beta.0`.      |
-| Release candidate | A release that is feature complete and in final testing. A release candidate is indicated by a release tag appended with the `-rc` identifier, such as version `8.1.0-rc.0`. |
+| Release candidate | A release for final testing of new features. A release candidate is indicated by a release tag appended with the `-rc` identifier, such as version `8.1.0-rc.0`. |
 
 <a id="frequency"></a>
 
@@ -101,6 +101,7 @@ To make these transitions as straightforward as possible, we make these commitme
 
 * We work hard to minimize the number of breaking changes and to provide migration tools, when possible
 * We follow the deprecation policy described here, so you have time to update your applications to the latest Zebra binaries, RPCs and APIs
+* If a feature has critical security or reliability issues, and we need to remove it as soon as possible, we will explain why at the top of the release notes
 
 To help ensure that you have sufficient time and a clear path to update, this is our deprecation policy:
 
@@ -108,7 +109,7 @@ To help ensure that you have sufficient time and a clear path to update, this is
 |:---                |:---     |
 | Announcement       | We announce deprecated RPCs and features in the [change log](https://github.com/ZcashFoundation/zebra/blob/main/CHANGELOG.md "Zebra change log"). When we announce a deprecation, we also announce a recommended update path. |
 | Deprecation period | When a RPC or a feature is deprecated, it is still present until the next major release. A deprecation can be announced in any release, but the removal of a deprecated RPC or feature happens only in major release. Until a deprecated RPC or feature is removed, it is maintained according to the Tier 1 support policy, meaning that only critical and security issues are fixed. |
-| Rust APIs | The Rust APIs of the Zebra crates are unstable and unsupported. Use the `zebrad` commands or JSON-RPCs to interact with Zebra. |
+| Rust APIs | The Rust APIs of the Zebra crates are currently unstable and unsupported. Use the `zebrad` commands or JSON-RPCs to interact with Zebra. |
 
 <a id="process"></a>
 
