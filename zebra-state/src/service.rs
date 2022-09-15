@@ -129,7 +129,8 @@ pub(crate) struct StateService {
     /// so they can be written to the [`NonFinalizedState`].
     //
     // TODO: actually send blocks on this channel
-    _non_finalized_block_write_sender: tokio::sync::mpsc::UnboundedSender<QueuedNonFinalized>,
+    non_finalized_block_write_sender:
+        Option<tokio::sync::mpsc::UnboundedSender<QueuedNonFinalized>>,
 
     /// A channel to send blocks to the `block_write_task`,
     /// so they can be written to the [`FinalizedState`].
@@ -248,6 +249,53 @@ pub struct ReadStateService {
     block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
 }
 
+impl Drop for StateService {
+    fn drop(&mut self) {
+        // The state service owns the state, tasks, and channels,
+        // so dropping it should shut down everything.
+
+        // Close the channels (non-blocking)
+        self.invalid_block_reset_receiver.close();
+
+        std::mem::drop(self.finalized_block_write_sender.take());
+        std::mem::drop(self.non_finalized_block_write_sender.take());
+
+        // Shut down the database (blocking):
+        // - stops the block write task if it is busy writing to the database
+        // - stops concurrent reads from the database
+        self.disk.db().clone().shutdown(true);
+
+        // Then drop self.read_service, which checks the block write task for panics.
+    }
+}
+
+impl Drop for ReadStateService {
+    fn drop(&mut self) {
+        // The read state service shares the state,
+        // so dropping it should check if we can shut down.
+
+        // TODO: rename this to try_shutdown()?
+        self.db.shutdown(false);
+
+        // Wait until the block write task finishes, then check for panics (blocking).
+        //
+        // TODO: move this into a function
+        if let Some(block_write_task) = self.block_write_task.take() {
+            if let Ok(block_write_task_handle) = Arc::try_unwrap(block_write_task) {
+                // We are the last state with a reference to this thread,
+                // so we can propagate any panics.
+                // (We'd also like to abort the thread, but std::thread::JoinHandle can't do that.)
+                info!("waiting for the block write task to finish");
+                if let Err(thread_panic) = block_write_task_handle.join() {
+                    std::panic::resume_unwind(thread_panic);
+                } else {
+                    info!("shutting down the state without waiting for the block write task");
+                }
+            }
+        }
+    }
+}
+
 impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -314,7 +362,7 @@ impl StateService {
             queued_finalized_blocks: HashMap::new(),
             mem: non_finalized_state,
             disk: finalized_state,
-            _non_finalized_block_write_sender: non_finalized_block_write_sender,
+            non_finalized_block_write_sender: Some(non_finalized_block_write_sender),
             finalized_block_write_sender: Some(finalized_block_write_sender),
             last_block_hash_sent,
             invalid_block_reset_receiver,
