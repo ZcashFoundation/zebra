@@ -139,14 +139,21 @@ RUN apt-get update && \
 ARG CHECKPOINT_SYNC=true
 ARG NETWORK=Mainnet
 
-# Use a configurable path for the zebrad configuration file
-ARG ZEBRA_CONF_PATH=/etc/zebra/zebrad.toml
+# Use a configurable dir and file for the zebrad configuration file
+ARG ZEBRA_CONF_PATH=/etc/zebra
 ENV ZEBRA_CONF_PATH ${ZEBRA_CONF_PATH}
 
+ARG ZEBRA_CONF_FILE=zebrad.toml
+ENV ZEBRA_CONF_FILE ${ZEBRA_CONF_FILE}
+
 # Build the `zebrad.toml` before starting the container, using the arguments from build
-# time, or using the default values set just above. And create the file path if it does
-# not exist
-RUN mkdir -p ${ZEBRA_CONF_PATH}
+# time, or using the default values set just above. And create the conf path and file if
+# it does not exist
+#
+# TODO: move this file creation to an entrypoint as we can use default values at runtime,
+# and modify those as needed when starting the container (at runtime and not at build time)
+RUN mkdir -p ${ZEBRA_CONF_PATH} \
+    && touch ${ZEBRA_CONF_PATH}/${ZEBRA_CONF_FILE}
 RUN set -ex; \
   { \
     echo "[consensus]"; \
@@ -159,7 +166,7 @@ RUN set -ex; \
     echo "cache_dir = '/zebrad-cache'"; \
     echo "[tracing]"; \
     echo "endpoint_addr = '0.0.0.0:3000'"; \
-  } > "${ZEBRA_CONF_PATH}"
+  } > "${ZEBRA_CONF_PATH}/${ZEBRA_CONF_FILE}"
 
 EXPOSE 3000 8233 18233
 
@@ -169,4 +176,5 @@ ENV SHORT_SHA $SHORT_SHA
 ARG SENTRY_DSN
 ENV SENTRY_DSN ${SENTRY_DSN}
 
-CMD [ "zebrad", "-c", "${ZEBRA_CONF_PATH}", "start" ]
+# TODO: remove the specified config file location and use the default expected by zebrad
+CMD [ "zebrad", "-c", "${ZEBRA_CONF_FILE}/${ZEBRA_CONF_FILE}", "start" ]
