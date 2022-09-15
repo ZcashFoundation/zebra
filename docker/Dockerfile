@@ -177,4 +177,4 @@ ARG SENTRY_DSN
 ENV SENTRY_DSN ${SENTRY_DSN}
 
 # TODO: remove the specified config file location and use the default expected by zebrad
-CMD [ "zebrad", "-c", "${ZEBRA_CONF_FILE}/${ZEBRA_CONF_FILE}", "start" ]
+CMD [ "zebrad", "-c", "${ZEBRA_CONF_PATH}/${ZEBRA_CONF_FILE}", "start" ]
