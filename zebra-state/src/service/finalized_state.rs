@@ -135,6 +135,7 @@ impl FinalizedState {
     }
 
     /// Returns the `Path` where the files used by this database are located.
+    #[allow(dead_code)]
     pub fn path(&self) -> &Path {
         self.db.path()
     }

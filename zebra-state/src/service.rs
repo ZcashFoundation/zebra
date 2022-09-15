@@ -165,14 +165,6 @@ pub(crate) struct StateService {
     // TODO: add tests for finalized and non-finalized resets (#2654)
     invalid_block_reset_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
 
-    /// A shared handle to a task that writes blocks to the [`NonFinalizedState`] or [`FinalizedState`],
-    /// once the queues have received all their parent blocks.
-    ///
-    /// Used to check for panics when writing blocks.
-    //
-    // TODO: check for panics in ReadStateService
-    block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
-
     // Pending UTXO Request Tracking
     //
     /// The set of outpoints with pending requests for their associated transparent::Output.
@@ -266,7 +258,7 @@ impl Drop for StateService {
         // Shut down the database (blocking):
         // - stops the block write task if it is busy writing to the database
         // - stops concurrent reads from the database
-        self.disk.db().clone().shutdown(true);
+        self.read_service.db.shutdown(true);
 
         // Then drop self.read_service, which checks the block write task for panics.
     }
@@ -352,7 +344,7 @@ impl StateService {
         let block_write_task = Arc::new(block_write_task);
 
         let (read_service, non_finalized_state_sender) =
-            ReadStateService::new(&finalized_state, block_write_task.clone());
+            ReadStateService::new(&finalized_state, block_write_task);
 
         let queued_non_finalized_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
@@ -369,7 +361,6 @@ impl StateService {
             finalized_block_write_sender: Some(finalized_block_write_sender),
             last_block_hash_sent,
             invalid_block_reset_receiver,
-            block_write_task: Some(block_write_task),
             pending_utxos,
             last_prune: Instant::now(),
             chain_tip_sender,
@@ -393,7 +384,7 @@ impl StateService {
                 state.network,
                 MAX_LEGACY_CHAIN_BLOCKS,
             ) {
-                let legacy_db_path = state.disk.path().to_path_buf();
+                let legacy_db_path = state.read_service.db.path().to_path_buf();
                 panic!(
                     "Cached state contains a legacy chain.\n\
                      An outdated Zebra version did not know about a recent network upgrade,\n\
@@ -528,7 +519,7 @@ impl StateService {
         let parent_hash = prepared.block.header.previous_block_hash;
 
         if self.mem.any_chain_contains(&prepared.hash)
-            || self.disk.db().hash(prepared.height).is_some()
+            || self.read_service.db.hash(prepared.height).is_some()
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Err("block is already committed to the state".into()));
@@ -564,7 +555,7 @@ impl StateService {
             && self
                 .queued_non_finalized_blocks
                 .has_queued_children(self.last_block_hash_sent)
-            && self.disk.db().finalized_tip_hash() == self.last_block_hash_sent
+            && self.read_service.db.finalized_tip_hash() == self.last_block_hash_sent
         {
             // Tell the block write task to stop committing finalized blocks,
             // and move on to committing non-finalized blocks.
@@ -599,7 +590,7 @@ impl StateService {
                 );
         }
 
-        let finalized_tip_height = self.disk.db().finalized_tip_height().expect(
+        let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
             "Finalized state must have at least one block before committing non-finalized state",
         );
         self.queued_non_finalized_blocks
@@ -676,7 +667,7 @@ impl StateService {
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.mem.any_chain_contains(hash) || &self.disk.db().finalized_tip_hash() == hash
+        self.mem.any_chain_contains(hash) || &self.read_service.db.finalized_tip_hash() == hash
     }
 
     /// Attempt to validate and commit all queued blocks whose parents have
@@ -752,14 +743,14 @@ impl StateService {
 
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
-        self.mem.best_tip().or_else(|| self.disk.db().tip())
+        self.mem.best_tip().or_else(|| self.read_service.db.tip())
     }
 
     /// Return the height for the block at `hash` in any chain.
     pub fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         self.mem
             .any_height_by_hash(hash)
-            .or_else(|| self.disk.db().height(hash))
+            .or_else(|| self.read_service.db.height(hash))
     }
 
     /// Return an iterator over the relevant chain of the block identified by
@@ -821,8 +812,8 @@ impl Service<Request> for StateService {
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check for panics in the block write task
         //
-        // TODO: turn this into a shared function for the StateService and ReadStateService
-        let block_write_task = self.block_write_task.take();
+        // TODO: turn this into a method on the ReadStateService
+        let block_write_task = self.read_service.block_write_task.take();
 
         if let Some(block_write_task) = block_write_task {
             if block_write_task.is_finished() {
@@ -834,11 +825,13 @@ impl Service<Request> for StateService {
                         }
                     }
                     // We're not the last state, so we need to put it back
-                    Err(arc_block_write_task) => self.block_write_task = Some(arc_block_write_task),
+                    Err(arc_block_write_task) => {
+                        self.read_service.block_write_task = Some(arc_block_write_task)
+                    }
                 }
             } else {
                 // It hasn't finished, so we need to put it back
-                self.block_write_task = Some(block_write_task);
+                self.read_service.block_write_task = Some(block_write_task);
             }
         }
 
