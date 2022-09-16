@@ -10,10 +10,19 @@ use tracing::instrument;
 
 use zebra_chain::{block, transparent};
 
-use crate::{BoxError, PreparedBlock};
+use crate::{BoxError, FinalizedBlock, PreparedBlock};
+
+#[cfg(test)]
+mod tests;
+
+/// A queued finalized block, and its corresponding [`Result`] channel.
+pub type QueuedFinalized = (
+    FinalizedBlock,
+    oneshot::Sender<Result<block::Hash, BoxError>>,
+);
 
 /// A queued non-finalized block, and its corresponding [`Result`] channel.
-pub type QueuedBlock = (
+pub type QueuedNonFinalized = (
     PreparedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
 );
@@ -22,7 +31,7 @@ pub type QueuedBlock = (
 #[derive(Debug, Default)]
 pub struct QueuedBlocks {
     /// Blocks awaiting their parent blocks for contextual verification.
-    blocks: HashMap<block::Hash, QueuedBlock>,
+    blocks: HashMap<block::Hash, QueuedNonFinalized>,
     /// Hashes from `queued_blocks`, indexed by parent hash.
     by_parent: HashMap<block::Hash, HashSet<block::Hash>>,
     /// Hashes from `queued_blocks`, indexed by block height.
@@ -38,7 +47,7 @@ impl QueuedBlocks {
     ///
     /// - if a block with the same `block::Hash` has already been queued.
     #[instrument(skip(self), fields(height = ?new.0.height, hash = %new.0.hash))]
-    pub fn queue(&mut self, new: QueuedBlock) {
+    pub fn queue(&mut self, new: QueuedNonFinalized) {
         let new_hash = new.0.hash;
         let new_height = new.0.height;
         let parent_hash = new.0.block.header.previous_block_hash;
@@ -71,7 +80,7 @@ impl QueuedBlocks {
     /// Dequeue and return all blocks that were waiting for the arrival of
     /// `parent`.
     #[instrument(skip(self), fields(%parent_hash))]
-    pub fn dequeue_children(&mut self, parent_hash: block::Hash) -> Vec<QueuedBlock> {
+    pub fn dequeue_children(&mut self, parent_hash: block::Hash) -> Vec<QueuedNonFinalized> {
         let queued_children = self
             .by_parent
             .remove(&parent_hash)
@@ -161,7 +170,7 @@ impl QueuedBlocks {
     }
 
     /// Return the queued block if it has already been registered
-    pub fn get_mut(&mut self, hash: &block::Hash) -> Option<&mut QueuedBlock> {
+    pub fn get_mut(&mut self, hash: &block::Hash) -> Option<&mut QueuedNonFinalized> {
         self.blocks.get_mut(hash)
     }
 
@@ -180,144 +189,5 @@ impl QueuedBlocks {
     #[instrument(skip(self))]
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         self.known_utxos.get(outpoint).cloned()
-    }
-}
-
-// TODO: move these tests into their own `tests/vectors.rs` module
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use tokio::sync::oneshot;
-    use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
-    use zebra_test::prelude::*;
-
-    use crate::{arbitrary::Prepare, tests::FakeChainHelper};
-
-    use super::*;
-
-    // Quick helper trait for making queued blocks with throw away channels
-    trait IntoQueued {
-        fn into_queued(self) -> QueuedBlock;
-    }
-
-    impl IntoQueued for Arc<Block> {
-        fn into_queued(self) -> QueuedBlock {
-            let (rsp_tx, _) = oneshot::channel();
-            (self.prepare(), rsp_tx)
-        }
-    }
-
-    #[test]
-    fn dequeue_gives_right_children() -> Result<()> {
-        let _init_guard = zebra_test::init();
-
-        let block1: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
-        let child1: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
-        let child2 = block1.make_fake_child();
-
-        let parent = block1.header.previous_block_hash;
-
-        let mut queue = QueuedBlocks::default();
-        // Empty to start
-        assert_eq!(0, queue.blocks.len());
-        assert_eq!(0, queue.by_parent.len());
-        assert_eq!(0, queue.by_height.len());
-        assert_eq!(0, queue.known_utxos.len());
-
-        // Inserting the first block gives us 1 in each table, and some UTXOs
-        queue.queue(block1.clone().into_queued());
-        assert_eq!(1, queue.blocks.len());
-        assert_eq!(1, queue.by_parent.len());
-        assert_eq!(1, queue.by_height.len());
-        assert_eq!(2, queue.known_utxos.len());
-
-        // The second gives us another in each table because its a child of the first,
-        // and a lot of UTXOs
-        queue.queue(child1.clone().into_queued());
-        assert_eq!(2, queue.blocks.len());
-        assert_eq!(2, queue.by_parent.len());
-        assert_eq!(2, queue.by_height.len());
-        assert_eq!(632, queue.known_utxos.len());
-
-        // The 3rd only increments blocks, because it is also a child of the
-        // first block, so for the second and third tables it gets added to the
-        // existing HashSet value
-        queue.queue(child2.clone().into_queued());
-        assert_eq!(3, queue.blocks.len());
-        assert_eq!(2, queue.by_parent.len());
-        assert_eq!(2, queue.by_height.len());
-        assert_eq!(634, queue.known_utxos.len());
-
-        // Dequeueing the first block removes 1 block from each list
-        let children = queue.dequeue_children(parent);
-        assert_eq!(1, children.len());
-        assert_eq!(block1, children[0].0.block);
-        assert_eq!(2, queue.blocks.len());
-        assert_eq!(1, queue.by_parent.len());
-        assert_eq!(1, queue.by_height.len());
-        assert_eq!(632, queue.known_utxos.len());
-
-        // Dequeueing the children of the first block removes both of the other
-        // blocks, and empties all lists
-        let parent = children[0].0.block.hash();
-        let children = queue.dequeue_children(parent);
-        assert_eq!(2, children.len());
-        assert!(children
-            .iter()
-            .any(|(block, _)| block.hash == child1.hash()));
-        assert!(children
-            .iter()
-            .any(|(block, _)| block.hash == child2.hash()));
-        assert_eq!(0, queue.blocks.len());
-        assert_eq!(0, queue.by_parent.len());
-        assert_eq!(0, queue.by_height.len());
-        assert_eq!(0, queue.known_utxos.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn prune_removes_right_children() -> Result<()> {
-        let _init_guard = zebra_test::init();
-
-        let block1: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
-        let child1: Arc<Block> =
-            zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
-        let child2 = block1.make_fake_child();
-
-        let mut queue = QueuedBlocks::default();
-        queue.queue(block1.clone().into_queued());
-        queue.queue(child1.clone().into_queued());
-        queue.queue(child2.clone().into_queued());
-        assert_eq!(3, queue.blocks.len());
-        assert_eq!(2, queue.by_parent.len());
-        assert_eq!(2, queue.by_height.len());
-        assert_eq!(634, queue.known_utxos.len());
-
-        // Pruning the first height removes only block1
-        queue.prune_by_height(block1.coinbase_height().unwrap());
-        assert_eq!(2, queue.blocks.len());
-        assert_eq!(1, queue.by_parent.len());
-        assert_eq!(1, queue.by_height.len());
-        assert!(queue.get_mut(&block1.hash()).is_none());
-        assert!(queue.get_mut(&child1.hash()).is_some());
-        assert!(queue.get_mut(&child2.hash()).is_some());
-        assert_eq!(632, queue.known_utxos.len());
-
-        // Pruning the children of the first block removes both of the other
-        // blocks, and empties all lists
-        queue.prune_by_height(child1.coinbase_height().unwrap());
-        assert_eq!(0, queue.blocks.len());
-        assert_eq!(0, queue.by_parent.len());
-        assert_eq!(0, queue.by_height.len());
-        assert!(queue.get_mut(&child1.hash()).is_none());
-        assert!(queue.get_mut(&child2.hash()).is_none());
-        assert_eq!(0, queue.known_utxos.len());
-
-        Ok(())
     }
 }
