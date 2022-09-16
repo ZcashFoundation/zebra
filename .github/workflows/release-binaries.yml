@@ -1,0 +1,34 @@
+# This workflow is meant to trigger a build of Docker binaries when a release
+# is published, it uses the existing `build-docker-image.yml` workflow
+#
+# We use a separate action as we might want to trigger this under
+# different circumstances than a Continuous Deployment, for example.
+#
+# This workflow is triggered if:
+# - A release is published
+# - A pre-release is changed to a release
+name: Release binaries
+
+on:
+  release:
+    types:
+      - released
+
+jobs:
+  # Each time this workflow is executed, a build will be triggered to create a new image
+  # with the corresponding tags using information from git
+  #
+  # The image will be named `zebrad:<semver>`
+  build:
+    uses: ./.github/workflows/build-docker-image.yml
+    with:
+      dockerfile_path: ./docker/Dockerfile
+      dockerfile_target: runtime
+      image_name: zebrad
+      network: Mainnet
+      checkpoint_sync: true
+      rust_backtrace: '1'
+      zebra_skip_ipv6_tests: '1'
+      rust_log: info
+    # This step needs access to Docker Hub secrets to run successfully
+    secrets: inherit
