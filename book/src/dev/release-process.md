@@ -1,6 +1,6 @@
 # Zebra versioning and releases
 
-This document contains the practices that we follow to provide you with a leading-edge application, balanced and with stability.
+This document contains the practices that we follow to provide you with a leading-edge application, balanced with stability.
 We strive to ensure that future changes are always introduced in a predictable way.
 We want everyone who depends on Zebra to know when and how new features are added, and to be well-prepared when obsolete ones are removed.
 
@@ -27,7 +27,7 @@ The pre-release version is denoted by appending a hyphen and a series of dot sep
 | Level of change | Details |
 |:---             |:---     |
 | Major release   | Contains significant new features, and commonly correspond to network upgrades; some technical assistance may be needed during the update. When updating to a major release, you may need to follow the specific upgrade instructions provided in the release notes. |
-| Minor release   | Contains new smaller features. Minor releases are should be fully backward-compatible. No technical assistance is expected during update.  If you want to use the new features in a minor release, you might need to follow the instructions in the release notes. |
+| Minor release   | Contains new smaller features. Minor releases should be fully backward-compatible. No technical assistance is expected during update.  If you want to use the new features in a minor release, you might need to follow the instructions in the release notes. |
 | Patch release   | Low risk, bug fix release. No technical assistance is expected during update. |
 
 <a id="supported-releases"></a>
