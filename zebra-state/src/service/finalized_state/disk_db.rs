@@ -681,16 +681,19 @@ impl DiskDb {
         // - ephemeral files are placed in the os temp dir and should be cleaned up automatically eventually
         let path = self.path();
         info!(?path, "flushing database to disk");
-        self.db.flush().expect("flush is successful");
+        self.db
+            .flush()
+            .expect("unexpected failure flushing SST data to disk");
+        self.db
+            .flush_wal(true)
+            .expect("unexpected failure flushing WAL data to disk");
 
-        // But we should call `cancel_all_background_work` before Zebra exits.
-        //
-        // In some tests, we need to drop() the state service before the test function returns,
-        // and sleep() until all the other threads exit.
+        // We'd like to call `cancel_all_background_work()` before Zebra exits,
+        // but when we call it, we get memory, thread, or C++ errors when the process exits.
         // (This seems to be a bug in RocksDB: cancel_all_background_work() should wait until
         // all the threads have cleaned up.)
         //
-        // If we don't, we see these kinds of errors:
+        // We see these kinds of errors:
         // ```
         // pthread lock: Invalid argument
         // pure virtual method called
@@ -708,8 +711,8 @@ impl DiskDb {
         // > You can speed up the waiting by calling CancelAllBackgroundWork().
         //
         // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
-        info!(?path, "stopping background database tasks");
-        self.db.cancel_all_background_work(true);
+        //info!(?path, "stopping background database tasks");
+        //self.db.cancel_all_background_work(true);
 
         // We'd like to drop the database before deleting its files,
         // because that closes the column families and the database correctly.
@@ -723,8 +726,8 @@ impl DiskDb {
         //
         // https://github.com/facebook/rocksdb/wiki/Known-Issues
         //
-        // But our current code doesn't seem to cause any issues.
-        // We might want to explicitly drop the database as part of graceful shutdown (#1678).
+        // But this implementation doesn't seem to cause any issues,
+        // and the RocksDB Drop implementation handles any cleanup.
         self.delete_ephemeral(force);
     }
 
@@ -812,7 +815,7 @@ impl DiskDb {
 impl Drop for DiskDb {
     fn drop(&mut self) {
         let path = self.path();
-        info!(?path, "dropping DiskDb instance");
+        debug!(?path, "dropping DiskDb instance");
 
         self.shutdown(false);
     }
