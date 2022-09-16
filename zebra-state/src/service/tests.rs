@@ -468,10 +468,6 @@ proptest! {
                 expected_transparent_pool
             );
         }
-
-        // Work around a RocksDB shutdown bug, see DiskDb::shutdown() for details.
-        std::mem::drop(state_service);
-        std::thread::sleep(Duration::from_secs(1));
     }
 }
 
@@ -546,10 +542,6 @@ proptest! {
             prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
             prop_assert_eq!(chain_tip_change.last_tip_change(), Some(expected_action));
         }
-
-        // Work around a RocksDB shutdown bug, see DiskDb::shutdown() for details.
-        std::mem::drop(state_service);
-        std::thread::sleep(Duration::from_secs(1));
     }
 }
 
