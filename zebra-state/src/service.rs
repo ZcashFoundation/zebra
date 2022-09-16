@@ -252,11 +252,6 @@ impl Drop for StateService {
         std::mem::drop(self.finalized_block_write_sender.take());
         std::mem::drop(self.non_finalized_block_write_sender.take());
 
-        //// Shut down the database (blocking):
-        //// - stops the block write task if it is busy writing to the database
-        //// - stops concurrent reads from the database
-        //self.read_service.db.shutdown(true);
-
         // Then drop self.read_service, which checks the block write task for panics,
         // and tries to shut down the database.
     }
@@ -267,16 +262,15 @@ impl Drop for ReadStateService {
         // The read state service shares the state,
         // so dropping it should check if we can shut down.
 
-        // Wait until the block write task finishes, then check for panics (blocking).
-        //
-        // TODO: move this into a function
         if let Some(block_write_task) = self.block_write_task.take() {
             if let Ok(block_write_task_handle) = Arc::try_unwrap(block_write_task) {
-                // We're the last database user, so we can tell it to shut down.
+                // We're the last database user, so we can tell it to shut down (blocking):
+                // - flushes the database to disk, and
+                // - drops the database, which cleans up any database tasks correctly.
                 self.db.shutdown(true);
 
-                // We are the last state with a reference to this thread,
-                // so we can propagate any panics.
+                // We are the last state with a reference to this thread, so we can
+                // wait until the block write task finishes, then check for panics (blocking).
                 // (We'd also like to abort the thread, but std::thread::JoinHandle can't do that.)
                 info!("waiting for the block write task to finish");
                 if let Err(thread_panic) = block_write_task_handle.join() {
