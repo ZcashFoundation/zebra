@@ -511,6 +511,33 @@ pub enum Request {
     },
 }
 
+impl Request {
+    fn variant_name(&self) -> &'static str {
+        match self {
+            Request::CommitBlock(_) => "commit_block",
+            Request::CommitFinalizedBlock(_) => "commit_finalized_block",
+            Request::AwaitUtxo(_) => "await_utxo",
+            Request::Depth(_) => "depth",
+            Request::Tip => "tip",
+            Request::BlockLocator => "block_locator",
+            Request::Transaction(_) => "transaction",
+            Request::Block(_) => "block",
+            Request::FindBlockHashes { .. } => "find_block_hashes",
+            Request::FindBlockHeaders { .. } => "find_block_headers",
+        }
+    }
+
+    /// Counts metric for StateService call
+    pub fn count_metric(&self) {
+        metrics::counter!(
+            "state.requests",
+            1,
+            "service" => "state",
+            "type" => self.variant_name()
+        );
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A read-only query about the chain state, via the
 /// [`ReadStateService`](crate::service::ReadStateService).
@@ -668,6 +695,37 @@ pub enum ReadRequest {
     ///
     /// Returns a type with found utxos and transaction information.
     UtxosByAddresses(HashSet<transparent::Address>),
+}
+
+impl ReadRequest {
+    fn variant_name(&self) -> &'static str {
+        match self {
+            ReadRequest::Tip => "tip",
+            ReadRequest::Depth(_) => "depth",
+            ReadRequest::Block(_) => "block",
+            ReadRequest::Transaction(_) => "transaction",
+            ReadRequest::BestChainUtxo { .. } => "best_chain_utxo",
+            ReadRequest::AnyChainUtxo { .. } => "any_chain_utxo",
+            ReadRequest::BlockLocator => "block_locator",
+            ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
+            ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
+            ReadRequest::SaplingTree { .. } => "sapling_tree",
+            ReadRequest::OrchardTree { .. } => "orchard_tree",
+            ReadRequest::AddressBalance { .. } => "address_balance",
+            ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addesses",
+            ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
+        }
+    }
+
+    /// Counts metric for ReadStateService call
+    pub fn count_metric(&self) {
+        metrics::counter!(
+            "state.requests",
+            1,
+            "service" => "read_state",
+            "type" => self.variant_name()
+        );
+    }
 }
 
 /// Conversion from read-write [`Request`]s to read-only [`ReadRequest`]s.
