@@ -340,14 +340,13 @@ impl NonFinalizedState {
 
     /// Returns the [`transparent::Utxo`] pointed to by the given
     /// [`transparent::OutPoint`] if it is present in any chain.
+    ///
+    /// UTXOs are returned regardless of whether they have been spent.
     pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        for chain in self.chain_set.iter().rev() {
-            if let Some(utxo) = chain.created_utxos.get(outpoint) {
-                return Some(utxo.utxo.clone());
-            }
-        }
-
-        None
+        self.chain_set
+            .iter()
+            .rev()
+            .find_map(|chain| chain.created_utxo(outpoint))
     }
 
     /// Returns the `block` with the given hash in any chain.

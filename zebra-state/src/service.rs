@@ -1,13 +1,12 @@
 //! [`tower::Service`]s for Zebra's cached chain state.
 //!
 //! Zebra provides cached state access via two main services:
-//! - [`StateService`]: a read-write service that waits for queued blocks.
+//! - [`StateService`]: a read-write service that writes blocks to the state,
+//!   and redirects most read requests to the [`ReadStateService`].
 //! - [`ReadStateService`]: a read-only service that answers from the most
 //!   recent committed block.
 //!
-//! Most users should prefer [`ReadStateService`], unless they need to wait for
-//! verified blocks to be committed. (For example, the syncer and mempool
-//! tasks.)
+//! Most users should prefer [`ReadStateService`], unless they need to write blocks to the state.
 //!
 //! Zebra also provides access to the best chain tip via:
 //! - [`LatestChainTip`]: a read-only channel that contains the latest committed
@@ -19,7 +18,6 @@ use std::{
     convert,
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -36,7 +34,6 @@ use zebra_chain::{
     block::{self, CountedHeader},
     diagnostic::CodeTimer,
     parameters::{Network, NetworkUpgrade},
-    transparent,
 };
 
 use crate::{
@@ -44,7 +41,7 @@ use crate::{
     service::{
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
         finalized_state::{FinalizedState, ZebraDb},
-        non_finalized_state::{Chain, NonFinalizedState, QueuedBlocks},
+        non_finalized_state::{NonFinalizedState, QueuedBlocks},
         pending_utxos::PendingUtxos,
         watch_receiver::WatchReceiver,
     },
@@ -71,10 +68,6 @@ mod tests;
 
 pub use finalized_state::{OutputIndex, OutputLocation, TransactionLocation};
 
-pub type QueuedBlock = (
-    PreparedBlock,
-    oneshot::Sender<Result<block::Hash, BoxError>>,
-);
 pub type QueuedFinalized = (
     FinalizedBlock,
     oneshot::Sender<Result<block::Hash, BoxError>>,
@@ -113,9 +106,10 @@ pub(crate) struct StateService {
     /// The non-finalized chain state, including its in-memory chain forks.
     mem: NonFinalizedState,
 
-    // Queued Non-Finalized Blocks
+    // Queued Blocks
     //
-    /// Blocks awaiting their parent blocks for contextual verification.
+    /// Blocks for the [`NonFinalizedState`], which are awaiting their parent blocks
+    /// before they can do contextual verification.
     queued_blocks: QueuedBlocks,
 
     // Pending UTXO Request Tracking
@@ -132,12 +126,12 @@ pub(crate) struct StateService {
     /// [`LatestChainTip`] and [`ChainTipChange`].
     chain_tip_sender: ChainTipSender,
 
-    /// A sender channel used to update the current best non-finalized chain for [`ReadStateService`].
-    best_chain_sender: watch::Sender<Option<Arc<Chain>>>,
+    /// A sender channel used to update the recent non-finalized state for the [`ReadStateService`].
+    non_finalized_state_sender: watch::Sender<NonFinalizedState>,
 
     /// A cloneable [`ReadStateService`], used to answer concurrent read requests.
     ///
-    /// TODO: move concurrent read requests to [`ReadRequest`], and remove `read_service`.
+    /// TODO: move users of read [`Request`]s to [`ReadStateService`], and remove `read_service`.
     read_service: ReadStateService,
 }
 
@@ -170,11 +164,11 @@ pub struct ReadStateService {
     /// so it might include some block data that is also in `best_mem`.
     db: ZebraDb,
 
-    /// A watch channel for the current best in-memory chain.
+    /// A watch channel for a recent [`NonFinalizedState`].
     ///
-    /// This chain is only updated between requests,
+    /// This state is only updated between requests,
     /// so it might include some block data that is also on `disk`.
-    best_chain_receiver: WatchReceiver<Option<Arc<Chain>>>,
+    non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
 }
 
 impl StateService {
@@ -205,7 +199,7 @@ impl StateService {
 
         let mem = NonFinalizedState::new(network);
 
-        let (read_service, best_chain_sender) = ReadStateService::new(&disk);
+        let (read_service, non_finalized_state_sender) = ReadStateService::new(&disk);
 
         let queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
@@ -218,7 +212,7 @@ impl StateService {
             pending_utxos,
             last_prune: Instant::now(),
             chain_tip_sender,
-            best_chain_sender,
+            non_finalized_state_sender,
             read_service: read_service.clone(),
         };
         timer.finish(module_path!(), line!(), "initializing state service");
@@ -315,6 +309,9 @@ impl StateService {
             rsp_rx
         };
 
+        // TODO: avoid a temporary verification failure that can happen
+        //       if the first non-finalized block arrives before the last finalized block is committed
+        //       (#5125)
         if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
             return rsp_rx;
@@ -364,7 +361,7 @@ impl StateService {
         rsp_rx
     }
 
-    /// Update the [`LatestChainTip`], [`ChainTipChange`], and `best_chain_sender`
+    /// Update the [`LatestChainTip`], [`ChainTipChange`], and `non_finalized_state_sender`
     /// channels with the latest non-finalized [`ChainTipBlock`] and
     /// [`Chain`][1].
     ///
@@ -381,11 +378,8 @@ impl StateService {
             .map(ChainTipBlock::from);
         let tip_block_height = tip_block.as_ref().map(|block| block.height);
 
-        // The RPC service uses the ReadStateService, but it is not turned on by default.
-        if self.best_chain_sender.receiver_count() > 0 {
-            // If the final receiver was just dropped, ignore the error.
-            let _ = self.best_chain_sender.send(best_chain.cloned());
-        }
+        // If the final receiver was just dropped, ignore the error.
+        let _ = self.non_finalized_state_sender.send(self.mem.clone());
 
         self.chain_tip_sender.set_best_non_finalized_tip(tip_block);
 
@@ -462,7 +456,7 @@ impl StateService {
     /// network, based on the committed finalized and non-finalized state.
     ///
     /// Note: some additional contextual validity checks are performed by the
-    /// non-finalized [`Chain`].
+    /// non-finalized [`Chain`](non_finalized_state::Chain).
     fn check_contextual_validity(
         &mut self,
         prepared: &PreparedBlock,
@@ -494,26 +488,6 @@ impl StateService {
             .or_else(|| self.disk.db().height(hash))
     }
 
-    /// Return the [`transparent::Utxo`] pointed to by `outpoint`, if it exists
-    /// in any chain, or in any pending block.
-    ///
-    /// Some of the returned UTXOs may be invalid, because:
-    /// - they are not in the best chain, or
-    /// - their block fails contextual validation.
-    pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        // We ignore any UTXOs in FinalizedState.queued_by_prev_hash,
-        // because it is only used during checkpoint verification.
-        self.mem
-            .any_utxo(outpoint)
-            .or_else(|| self.queued_blocks.utxo(outpoint))
-            .or_else(|| {
-                self.disk
-                    .db()
-                    .utxo(outpoint)
-                    .map(|ordered_utxo| ordered_utxo.utxo)
-            })
-    }
-
     /// Return an iterator over the relevant chain of the block identified by
     /// `hash`, in order from the largest height to the genesis block.
     ///
@@ -542,19 +516,20 @@ impl ReadStateService {
     /// Creates a new read-only state service, using the provided finalized state.
     ///
     /// Returns the newly created service,
-    /// and a watch channel for updating its best non-finalized chain.
-    pub(crate) fn new(disk: &FinalizedState) -> (Self, watch::Sender<Option<Arc<Chain>>>) {
-        let (best_chain_sender, best_chain_receiver) = watch::channel(None);
+    /// and a watch channel for updating the shared recent non-finalized chain.
+    pub(crate) fn new(disk: &FinalizedState) -> (Self, watch::Sender<NonFinalizedState>) {
+        let (non_finalized_state_sender, non_finalized_state_receiver) =
+            watch::channel(NonFinalizedState::new(disk.network()));
 
         let read_service = Self {
             network: disk.network(),
             db: disk.db().clone(),
-            best_chain_receiver: WatchReceiver::new(best_chain_receiver),
+            non_finalized_state_receiver: WatchReceiver::new(non_finalized_state_receiver),
         };
 
         tracing::info!("created new read-only state service");
 
-        (read_service, best_chain_sender)
+        (read_service, non_finalized_state_sender)
     }
 }
 
@@ -704,7 +679,80 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
-            // TODO: add a name() method to Request, and combine all the read requests
+            // Uses pending_utxos and queued_blocks in the StateService.
+            // If the UTXO isn't in the queued blocks, runs concurrently using the ReadStateService.
+            Request::AwaitUtxo(outpoint) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "state",
+                    "type" => "await_utxo",
+                );
+
+                let timer = CodeTimer::start();
+
+                // Prepare the AwaitUtxo future from PendingUxtos.
+                let response_fut = self.pending_utxos.queue(outpoint);
+                // Only instrument `response_fut`, the ReadStateService already
+                // instruments its requests with the same span.
+                let span = Span::current();
+                let response_fut = response_fut.instrument(span).boxed();
+
+                // Check the non-finalized block queue outside the returned future,
+                // so we can access mutable state fields.
+                if let Some(utxo) = self.queued_blocks.utxo(&outpoint) {
+                    self.pending_utxos.respond(&outpoint, utxo);
+
+                    // We're finished, the returned future gets the UTXO from the respond() channel.
+                    timer.finish(module_path!(), line!(), "AwaitUtxo/queued-non-finalized");
+
+                    return response_fut;
+                }
+
+                // We ignore any UTXOs in FinalizedState.queued_by_prev_hash,
+                // because it is only used during checkpoint verification.
+                //
+                // This creates a rare race condition, but it doesn't seem to happen much in practice.
+                // See #5126 for details.
+
+                // Manually send a request to the ReadStateService,
+                // to get UTXOs from any non-finalized chain or the finalized chain.
+                let read_service = self.read_service.clone();
+
+                // Run the request in an async block, so we can await the response.
+                async move {
+                    let req = ReadRequest::AnyChainUtxo(outpoint);
+
+                    let rsp = read_service.oneshot(req).await?;
+
+                    // Optional TODO:
+                    //  - make pending_utxos.respond() async using a channel,
+                    //    so we can respond to all waiting requests here
+                    //
+                    // This change is not required for correctness, because:
+                    // - any waiting requests should have returned when the block was sent to the state
+                    // - otherwise, the request returns immediately if:
+                    //   - the block is in the non-finalized queue, or
+                    //   - the block is in any non-finalized chain or the finalized state
+                    //
+                    // And if the block is in the finalized queue,
+                    // that's rare enough that a retry is ok.
+                    if let ReadResponse::AnyChainUtxo(Some(utxo)) = rsp {
+                        // We got a UTXO, so we replace the response future with the result own.
+                        timer.finish(module_path!(), line!(), "AwaitUtxo/any-chain");
+
+                        return Ok(Response::Utxo(utxo));
+                    }
+
+                    // We're finished, but the returned future is waiting on the respond() channel.
+                    timer.finish(module_path!(), line!(), "AwaitUtxo/waiting");
+
+                    response_fut.await
+                }
+                .boxed()
+            }
+
+            // TODO: add a name() method to Request, and combine all the generic read requests
             //
             // Runs concurrently using the ReadStateService
             Request::Depth(_) => {
@@ -831,32 +879,6 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
-            // Uses pending_utxos and queued_blocks in the StateService.
-            // Accesses shared writeable state in the StateService.
-            Request::AwaitUtxo(outpoint) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "state",
-                    "type" => "await_utxo",
-                );
-
-                let timer = CodeTimer::start();
-                let span = Span::current();
-
-                let fut = self.pending_utxos.queue(outpoint);
-
-                // TODO: move disk reads (in `any_utxo()`) to a blocking thread (#2188)
-                if let Some(utxo) = self.any_utxo(&outpoint) {
-                    self.pending_utxos.respond(&outpoint, utxo);
-                }
-
-                // The future waits on a channel for a response.
-                timer.finish(module_path!(), line!(), "AwaitUtxo");
-
-                fut.instrument(span).boxed()
-            }
-
             // Runs concurrently using the ReadStateService
             Request::FindBlockHashes { .. } => {
                 metrics::counter!(
@@ -939,9 +961,11 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let tip = state
-                            .best_chain_receiver
-                            .with_watch_data(|best_chain| read::tip(best_chain, &state.db));
+                        let tip = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::tip(non_finalized_state.best_chain(), &state.db)
+                            },
+                        );
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Tip");
@@ -969,9 +993,11 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let depth = state
-                            .best_chain_receiver
-                            .with_watch_data(|best_chain| read::depth(best_chain, &state.db, hash));
+                        let depth = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::depth(non_finalized_state.best_chain(), &state.db, hash)
+                            },
+                        );
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Depth");
@@ -983,7 +1009,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
-            // Used by get_block RPC.
+            // Used by get_block RPC and the StateService.
             ReadRequest::Block(hash_or_height) => {
                 metrics::counter!(
                     "state.requests",
@@ -999,9 +1025,15 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let block = state.best_chain_receiver.with_watch_data(|best_chain| {
-                            read::block(best_chain, &state.db, hash_or_height)
-                        });
+                        let block = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::block(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Block");
@@ -1013,7 +1045,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
-            // For the get_raw_transaction RPC.
+            // For the get_raw_transaction RPC and the StateService.
             ReadRequest::Transaction(hash) => {
                 metrics::counter!(
                     "state.requests",
@@ -1029,9 +1061,10 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let transaction_and_height =
-                            state.best_chain_receiver.with_watch_data(|best_chain| {
-                                read::transaction(best_chain, &state.db, hash)
+                        let transaction_and_height = state
+                            .non_finalized_state_receiver
+                            .with_watch_data(|non_finalized_state| {
+                                read::transaction(non_finalized_state.best_chain(), &state.db, hash)
                             });
 
                         // The work is done in the future.
@@ -1041,6 +1074,70 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::Transaction"))
+                .boxed()
+            }
+
+            // Currently unused.
+            ReadRequest::BestChainUtxo(outpoint) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "best_chain_utxo",
+                );
+
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let utxo = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::utxo(non_finalized_state.best_chain(), &state.db, outpoint)
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::BestChainUtxo");
+
+                        Ok(ReadResponse::BestChainUtxo(utxo))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::BestChainUtxo"))
+                .boxed()
+            }
+
+            // Manually used by the StateService to implement part of AwaitUtxo.
+            ReadRequest::AnyChainUtxo(outpoint) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "any_chain_utxo",
+                );
+
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let utxo = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::any_utxo(non_finalized_state, &state.db, outpoint)
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::AnyChainUtxo");
+
+                        Ok(ReadResponse::AnyChainUtxo(utxo))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::AnyChainUtxo"))
                 .boxed()
             }
 
@@ -1060,10 +1157,11 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let block_locator =
-                            state.best_chain_receiver.with_watch_data(|best_chain| {
-                                read::block_locator(best_chain, &state.db)
-                            });
+                        let block_locator = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::block_locator(non_finalized_state.best_chain(), &state.db)
+                            },
+                        );
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::BlockLocator");
@@ -1093,16 +1191,17 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let block_hashes =
-                            state.best_chain_receiver.with_watch_data(|best_chain| {
+                        let block_hashes = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
                                 read::find_chain_hashes(
-                                    best_chain,
+                                    non_finalized_state.best_chain(),
                                     &state.db,
                                     known_blocks,
                                     stop,
                                     MAX_FIND_BLOCK_HASHES_RESULTS,
                                 )
-                            });
+                            },
+                        );
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::FindBlockHashes");
@@ -1130,16 +1229,17 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let block_headers =
-                            state.best_chain_receiver.with_watch_data(|best_chain| {
+                        let block_headers = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
                                 read::find_chain_headers(
-                                    best_chain,
+                                    non_finalized_state.best_chain(),
                                     &state.db,
                                     known_blocks,
                                     stop,
                                     MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA,
                                 )
-                            });
+                            },
+                        );
 
                         let block_headers = block_headers
                             .into_iter()
@@ -1171,10 +1271,15 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let sapling_tree =
-                            state.best_chain_receiver.with_watch_data(|best_chain| {
-                                read::sapling_tree(best_chain, &state.db, hash_or_height)
-                            });
+                        let sapling_tree = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::sapling_tree(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::SaplingTree");
@@ -1201,10 +1306,15 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let orchard_tree =
-                            state.best_chain_receiver.with_watch_data(|best_chain| {
-                                read::orchard_tree(best_chain, &state.db, hash_or_height)
-                            });
+                        let orchard_tree = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::orchard_tree(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::OrchardTree");
@@ -1232,9 +1342,15 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let balance = state.best_chain_receiver.with_watch_data(|best_chain| {
-                            read::transparent_balance(best_chain, &state.db, addresses)
-                        })?;
+                        let balance = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::transparent_balance(
+                                    non_finalized_state.best_chain().cloned(),
+                                    &state.db,
+                                    addresses,
+                                )
+                            },
+                        )?;
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::AddressBalance");
@@ -1265,9 +1381,16 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let tx_ids = state.best_chain_receiver.with_watch_data(|best_chain| {
-                            read::transparent_tx_ids(best_chain, &state.db, addresses, height_range)
-                        });
+                        let tx_ids = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::transparent_tx_ids(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    addresses,
+                                    height_range,
+                                )
+                            },
+                        );
 
                         // The work is done in the future.
                         timer.finish(
@@ -1301,14 +1424,21 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let utxos = state.best_chain_receiver.with_watch_data(|best_chain| {
-                            read::transparent_utxos(state.network, best_chain, &state.db, addresses)
-                        });
+                        let utxos = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::address_utxos(
+                                    state.network,
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    addresses,
+                                )
+                            },
+                        );
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::UtxosByAddresses");
 
-                        utxos.map(ReadResponse::Utxos)
+                        utxos.map(ReadResponse::AddressUtxos)
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::UtxosByAddresses"))
