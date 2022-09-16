@@ -809,31 +809,9 @@ impl Service<Request> for StateService {
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check for panics in the block write task
-        //
-        // TODO: turn this into a method on the ReadStateService
-        let block_write_task = self.read_service.block_write_task.take();
-
-        if let Some(block_write_task) = block_write_task {
-            if block_write_task.is_finished() {
-                match Arc::try_unwrap(block_write_task) {
-                    // We are the last state with a reference to this task, so we can propagate any panics
-                    Ok(block_write_task_handle) => {
-                        if let Err(thread_panic) = block_write_task_handle.join() {
-                            std::panic::resume_unwind(thread_panic);
-                        }
-                    }
-                    // We're not the last state, so we need to put it back
-                    Err(arc_block_write_task) => {
-                        self.read_service.block_write_task = Some(arc_block_write_task)
-                    }
-                }
-            } else {
-                // It hasn't finished, so we need to put it back
-                self.read_service.block_write_task = Some(block_write_task);
-            }
-        }
+        let poll = self.read_service.poll_ready(cx);
 
         // Prune outdated UTXO requests
         let now = Instant::now();
@@ -862,7 +840,7 @@ impl Service<Request> for StateService {
             }
         }
 
-        Poll::Ready(Ok(()))
+        poll
     }
 
     #[instrument(name = "state", skip(self, req))]
@@ -1072,8 +1050,6 @@ impl Service<ReadRequest> for ReadStateService {
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check for panics in the block write task
-        //
-        // TODO: turn this into a shared function for the StateService and ReadStateService
         let block_write_task = self.block_write_task.take();
 
         if let Some(block_write_task) = block_write_task {
