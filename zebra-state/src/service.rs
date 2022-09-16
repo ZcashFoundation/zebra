@@ -219,7 +219,7 @@ pub struct ReadStateService {
 
     // Shared Concurrently Readable State
     //
-    /// A watch channel for a recent [`NonFinalizedState`].
+    /// A watch channel with a cached copy of the [`NonFinalizedState`].
     ///
     /// This state is only updated between requests,
     /// so it might include some block data that is also on `disk`.
