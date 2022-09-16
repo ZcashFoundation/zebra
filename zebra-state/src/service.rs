@@ -647,6 +647,8 @@ impl Service<Request> for StateService {
 
     #[instrument(name = "state", skip(self, req))]
     fn call(&mut self, req: Request) -> Self::Future {
+        req.count_metric();
+
         match req {
             // Uses queued_non_finalized_blocks and pending_utxos in the StateService
             // Accesses shared writeable state in the StateService, NonFinalizedState, and ZebraDb.
@@ -744,13 +746,6 @@ impl Service<Request> for StateService {
             // Uses pending_utxos and queued_non_finalized_blocks in the StateService.
             // If the UTXO isn't in the queued blocks, runs concurrently using the ReadStateService.
             Request::AwaitUtxo(outpoint) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "state",
-                    "type" => "await_utxo",
-                );
-
                 let timer = CodeTimer::start();
 
                 // Prepare the AwaitUtxo future from PendingUxtos.
