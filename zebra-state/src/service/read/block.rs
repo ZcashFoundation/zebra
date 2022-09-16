@@ -2,8 +2,9 @@
 //!
 //! In the functions in this module:
 //!
-//! The StateService commits blocks to the finalized state before updating
-//! `chain` or `non_finalized_state` from the latest chains. Then it can
+//! The block write task commits blocks to the finalized state before updating
+//! `chain` or `non_finalized_state` with a cached copy of the non-finalized chains
+//! in `NonFinalizedState.chain_set`. Then the block commit task can
 //! commit additional blocks to the finalized state after we've cloned the
 //! `chain` or `non_finalized_state`.
 //!
