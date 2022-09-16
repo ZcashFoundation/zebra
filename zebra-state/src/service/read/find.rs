@@ -1,4 +1,14 @@
 //! Finding and reading block hashes and headers, in response to peer requests.
+//!
+//! In the functions in this module:
+//!
+//! The StateService commits blocks to the finalized state before updating
+//! `chain` from the latest chain. Then it can commit additional blocks to
+//! the finalized state after we've cloned the `chain`.
+//!
+//! This means that some blocks can be in both:
+//! - the cached [`Chain`], and
+//! - the shared finalized [`ZebraDb`] reference.
 
 use std::{
     iter,
@@ -22,6 +32,12 @@ pub fn tip<C>(chain: Option<C>, db: &ZebraDb) -> Option<(Height, block::Hash)>
 where
     C: AsRef<Chain>,
 {
+    // # Correctness
+    //
+    // If there is an overlap between the non-finalized and finalized states,
+    // where the finalized tip is above the non-finalized tip,
+    // Zebra is receiving a lot of blocks, or this request has been delayed for a long time,
+    // so it is acceptable to return either tip.
     chain
         .map(|chain| chain.as_ref().non_finalized_tip())
         .or_else(|| db.tip())
@@ -54,6 +70,11 @@ where
 {
     let chain = chain.as_ref();
 
+    // # Correctness
+    //
+    // It is ok to do this lookup in two different calls. Finalized state updates
+    // can only add overlapping blocks, and hashes are unique.
+
     let tip = tip_height(chain, db)?;
     let height = height_by_hash(chain, db, hash)?;
 
@@ -65,6 +86,10 @@ pub fn height_by_hash<C>(chain: Option<C>, db: &ZebraDb, hash: block::Hash) -> O
 where
     C: AsRef<Chain>,
 {
+    // # Correctness
+    //
+    // Finalized state updates can only add overlapping blocks, and hashes are unique.
+
     chain
         .and_then(|chain| chain.as_ref().height_by_hash(hash))
         .or_else(|| db.height(hash))
@@ -75,6 +100,16 @@ pub fn hash_by_height<C>(chain: Option<C>, db: &ZebraDb, height: Height) -> Opti
 where
     C: AsRef<Chain>,
 {
+    // # Correctness
+    //
+    // Finalized state updates can only add overlapping blocks, and heights are unique
+    // in the current `chain`.
+    //
+    // If there is an overlap between the non-finalized and finalized states,
+    // where the finalized tip is above the non-finalized tip,
+    // Zebra is receiving a lot of blocks, or this request has been delayed for a long time,
+    // so it is acceptable to return hashes from either chain.
+
     chain
         .and_then(|chain| chain.as_ref().hash_by_height(height))
         .or_else(|| db.hash(height))
@@ -85,6 +120,15 @@ pub fn chain_contains_hash<C>(chain: Option<C>, db: &ZebraDb, hash: block::Hash)
 where
     C: AsRef<Chain>,
 {
+    // # Correctness
+    //
+    // Finalized state updates can only add overlapping blocks, and hashes are unique.
+    //
+    // If there is an overlap between the non-finalized and finalized states,
+    // where the finalized tip is above the non-finalized tip,
+    // Zebra is receiving a lot of blocks, or this request has been delayed for a long time,
+    // so it is acceptable to return hashes from either chain.
+
     chain
         .map(|chain| chain.as_ref().height_by_hash.contains_key(&hash))
         .unwrap_or(false)
@@ -102,6 +146,19 @@ where
 {
     let chain = chain.as_ref();
 
+    // # Correctness
+    //
+    // It is ok to do these lookups using multiple database calls. Finalized state updates
+    // can only add overlapping blocks, and hashes are unique.
+    //
+    // If there is an overlap between the non-finalized and finalized states,
+    // where the finalized tip is above the non-finalized tip,
+    // Zebra is receiving a lot of blocks, or this request has been delayed for a long time,
+    // so it is acceptable to return a set of hashes from multiple chains.
+    //
+    // Multiple heights can not map to the same hash, even in different chains,
+    // because the block height is covered by the block hash,
+    // via the transaction merkle tree commitments.
     let tip_height = tip_height(chain, db)?;
 
     let heights = block_locator_heights(tip_height);
@@ -419,6 +476,10 @@ pub fn find_chain_hashes<C>(
 where
     C: AsRef<Chain>,
 {
+    // # Correctness
+    //
+    // See the note in `block_locator()`.
+
     let chain = chain.as_ref();
     let intersection = find_chain_intersection(chain, db, known_blocks);
 
@@ -439,6 +500,14 @@ pub fn find_chain_headers<C>(
 where
     C: AsRef<Chain>,
 {
+    // # Correctness
+    //
+    // Headers are looked up by their hashes using a unique mapping,
+    // so it is not possible for multiple hashes to look up the same header,
+    // even across different chains.
+    //
+    // See also the note in `block_locator()`.
+
     let chain = chain.as_ref();
     let intersection = find_chain_intersection(chain, db, known_blocks);
 

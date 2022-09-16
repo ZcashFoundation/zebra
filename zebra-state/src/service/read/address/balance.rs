@@ -1,4 +1,14 @@
 //! Reading address balances.
+//!
+//! In the functions in this module:
+//!
+//! The StateService commits blocks to the finalized state before updating
+//! `chain` from the latest chain. Then it can commit additional blocks to
+//! the finalized state after we've cloned the `chain`.
+//!
+//! This means that some blocks can be in both:
+//! - the cached [`Chain`], and
+//! - the shared finalized [`ZebraDb`] reference.
 
 use std::{collections::HashSet, sync::Arc};
 
@@ -91,8 +101,7 @@ fn chain_transparent_balance_change(
 ) -> Amount<NegativeAllowed> {
     // # Correctness
     //
-    // The StateService commits blocks to the finalized state before updating the latest chain,
-    // and it can commit additional blocks after we've cloned this `chain` variable.
+    // Find the balance adjustment that corrects for overlapping finalized and non-finalized blocks.
 
     // Check if the finalized and non-finalized states match
     let required_chain_root = finalized_tip

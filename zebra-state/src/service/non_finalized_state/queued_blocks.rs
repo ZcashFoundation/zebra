@@ -1,12 +1,22 @@
+//! Queued blocks that are awaiting their parent block for verification.
+
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     mem,
 };
 
+use tokio::sync::oneshot;
 use tracing::instrument;
+
 use zebra_chain::{block, transparent};
 
-use crate::service::QueuedBlock;
+use crate::{BoxError, PreparedBlock};
+
+/// A queued non-finalized block, and its corresponding [`Result`] channel.
+pub type QueuedBlock = (
+    PreparedBlock,
+    oneshot::Sender<Result<block::Hash, BoxError>>,
+);
 
 /// A queue of blocks, awaiting the arrival of parent blocks.
 #[derive(Debug, Default)]
@@ -27,6 +37,7 @@ impl QueuedBlocks {
     /// # Panics
     ///
     /// - if a block with the same `block::Hash` has already been queued.
+    #[instrument(skip(self), fields(height = ?new.0.height, hash = %new.0.hash))]
     pub fn queue(&mut self, new: QueuedBlock) {
         let new_hash = new.0.hash;
         let new_height = new.0.height;
@@ -94,6 +105,7 @@ impl QueuedBlocks {
 
     /// Remove all queued blocks whose height is less than or equal to the given
     /// `finalized_tip_height`.
+    #[instrument(skip(self))]
     pub fn prune_by_height(&mut self, finalized_tip_height: block::Height) {
         // split_off returns the values _greater than or equal to_ the key. What
         // we need is the keys that are less than or equal to
@@ -165,11 +177,13 @@ impl QueuedBlocks {
     }
 
     /// Try to look up this UTXO in any queued block.
+    #[instrument(skip(self))]
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         self.known_utxos.get(outpoint).cloned()
     }
 }
 
+// TODO: move these tests into their own `tests/vectors.rs` module
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

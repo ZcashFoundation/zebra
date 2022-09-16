@@ -39,7 +39,8 @@ pub enum Response {
     /// Response to [`Request::Block`] with the specified block.
     Block(Option<Arc<Block>>),
 
-    /// The response to a `AwaitUtxo` request.
+    /// The response to a `AwaitUtxo` request, from any non-finalized chains, finalized chain,
+    /// pending unverified blocks, or blocks received after the request was sent.
     Utxo(transparent::Utxo),
 
     /// The response to a `FindBlockHashes` request.
@@ -75,6 +76,20 @@ pub enum ReadResponse {
     /// The response to a `FindBlockHeaders` request.
     BlockHeaders(Vec<block::CountedHeader>),
 
+    /// The response to a `BestChainUtxo` request, from verified blocks in the
+    /// _best_ non-finalized chain, or the finalized chain.
+    ///
+    /// This response is purely informational, there is no guarantee that
+    /// the UTXO remains unspent in the best chain.
+    BestChainUtxo(Option<transparent::Utxo>),
+
+    /// The response to an `AnyChainUtxo` request, from verified blocks in
+    /// _any_ non-finalized chain, or the finalized chain.
+    ///
+    /// This response is purely informational, there is no guarantee that
+    /// the UTXO remains unspent in the best chain.
+    AnyChainUtxo(Option<transparent::Utxo>),
+
     /// Response to [`ReadRequest::SaplingTree`] with the specified Sapling note commitment tree.
     SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),
 
@@ -89,7 +104,7 @@ pub enum ReadResponse {
     AddressesTransactionIds(BTreeMap<TransactionLocation, transaction::Hash>),
 
     /// Response to [`ReadRequest::UtxosByAddresses`] with found utxos and transaction data.
-    Utxos(AddressUtxos),
+    AddressUtxos(AddressUtxos),
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.
@@ -108,17 +123,21 @@ impl TryFrom<ReadResponse> for Response {
                 Ok(Response::Transaction(tx_and_height.map(|(tx, _height)| tx)))
             }
 
+            ReadResponse::AnyChainUtxo(_) => Err("ReadService does not track pending UTXOs. \
+                                                  Manually unwrap the response, and handle pending UTXOs."),
+
             ReadResponse::BlockLocator(hashes) => Ok(Response::BlockLocator(hashes)),
             ReadResponse::BlockHashes(hashes) => Ok(Response::BlockHashes(hashes)),
             ReadResponse::BlockHeaders(headers) => Ok(Response::BlockHeaders(headers)),
 
-            ReadResponse::SaplingTree(_) => unimplemented!(),
-            ReadResponse::OrchardTree(_) => unimplemented!(),
-
-            ReadResponse::AddressBalance(_) => unimplemented!(),
-            ReadResponse::AddressesTransactionIds(_) => unimplemented!(),
-            // TODO: Rename to AddressUtxos
-            ReadResponse::Utxos(_) => unimplemented!(),
+            ReadResponse::BestChainUtxo(_)
+            | ReadResponse::SaplingTree(_)
+            | ReadResponse::OrchardTree(_)
+            | ReadResponse::AddressBalance(_)
+            | ReadResponse::AddressesTransactionIds(_)
+            | ReadResponse::AddressUtxos(_) => {
+                Err("there is no corresponding Response for this ReadResponse")
+            }
         }
     }
 }

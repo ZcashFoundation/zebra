@@ -916,7 +916,7 @@ where
                     data: None,
                 })?;
             let utxos = match response {
-                zebra_state::ReadResponse::Utxos(utxos) => utxos,
+                zebra_state::ReadResponse::AddressUtxos(utxos) => utxos,
                 _ => unreachable!("unmatched response to a UtxosByAddresses request"),
             };
 
