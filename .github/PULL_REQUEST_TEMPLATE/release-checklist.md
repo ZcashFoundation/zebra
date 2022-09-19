@@ -7,6 +7,12 @@ assignees: ''
 
 ---
 
+## Using this Template
+
+Go to the [release template URL](https://github.com/ZcashFoundation/zebra/compare/main...select-the-release-branch?quick_pull=1&template=release-checklist.md), and select the release branch.
+
+For details, see [the GitHub reference](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/using-query-parameters-to-create-a-pull-request)
+
 ## Versioning
 
 ### Which Crates to Increment
@@ -33,31 +39,6 @@ Once you know which crates have changed:
 Zebra follows [semantic versioning](https://semver.org).
 
 Semantic versions look like: MAJOR`.`MINOR`.`PATCH[`-`TAG`.`PRE-RELEASE]
-   
-<details>
-
-#### Pre-Release Crates
-
-Pre-Release versions have a `TAG` like "alpha" or "beta". For example: `1.0.0-alpha.0`
-
-1. Increment the `PRE-RELEASE` version for the crate.
-
-#### Unstable Crates
-
-Unstable versions have a `MAJOR` version of zero. For example: `0.1.0`
-
-1. Follow stable crate versioning, but increment the `MINOR` version for breaking changes
-
-#### Stable Crates
-
-For example: `1.0.0`
-
-Increment the first version component in this list, and reset the other components to zero:
-1. MAJOR versions for breaking public API changes and removals
-    * check for types from dependencies that appear in the public API
-2. MINOR versions for new features
-3. PATCH versions for bug fixes
-    * includes dependency updates that don't impact the public API
 
 ### Reviewing Version Bumps
 
@@ -67,8 +48,6 @@ Where `<commit-hash>` is the hash of the last commit in the version bump PR.
 
 If any Zebra or Tower crates have commit messages that are **not** a version bump, we have missed an update.
 Also check for crates that depend on crates that have changed. They should get a version bump as well.
-
-</details>
    
 ### Version Locations
 
