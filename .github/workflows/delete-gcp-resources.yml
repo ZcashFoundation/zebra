@@ -47,11 +47,14 @@ jobs:
       - name: Delete old instances
         run: |
           DELETE_BEFORE_DATE=$(date --date="$DELETE_INSTANCE_DAYS days ago" '+%Y%m%d')
-          INSTANCES=$(gcloud compute instances list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          IFS=$'\n'
+
+          INSTANCES=$(gcloud compute instances list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME,ZONE)' | \
+                      sed 's/\(.*\)\t\(.*\)/\1 --zone=\2/')
 
           for INSTANCE in $INSTANCES
           do
-            gcloud compute instances delete --verbosity=info "${INSTANCE}" --delete-disks=all || continue
+            gcloud compute instances delete --verbosity=info ${INSTANCE} --delete-disks=all || continue
           done
 
       # Deletes all the instance templates older than $DELETE_AGE_DAYS days.
@@ -71,9 +74,11 @@ jobs:
       - name: Delete old disks
         run: |
           DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
+          IFS=$'\n'
 
           # Disks created by PR jobs, and other jobs that use a commit hash
-          COMMIT_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          COMMIT_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME,LOCATION,LOCATION_SCOPE)' | \
+                         sed 's/\(.*\)\t\(.*\)\t\(.*\)/\1 --\3=\2/')
 
           for DISK in $COMMIT_DISKS
           do
