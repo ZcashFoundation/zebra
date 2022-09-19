@@ -139,9 +139,10 @@ jobs:
           # To improve build speeds, for each branch we push an additional image to the registry,
           # to be used as the caching layer, using the `max` caching mode.
           #
-          # We use multiple cache sources to confirm a cache hit, starting from the `main` branch cache,
-          # and if there's no hit, then continue with a cache scoped per branch.
+          # We use multiple cache sources to confirm a cache hit, starting from a per-branch cache,
+          # and if there's no hit, then continue with the `main` branch. Changes within a PR are usually
+          # small, so this provides the best performance.
           cache-from: |
-            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:main-cache
             type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:main-cache
           cache-to: type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
