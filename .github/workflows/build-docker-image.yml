@@ -142,7 +142,9 @@ jobs:
           # We use multiple cache sources to confirm a cache hit, starting from a per-branch cache,
           # and if there's no hit, then continue with the `main` branch. Changes within a PR are usually
           # small, so this provides the best performance.
+          #
+          # The last cache in the list is tried first.
           cache-from: |
-            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
             type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:main-cache
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
           cache-to: type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
