@@ -130,7 +130,12 @@ Wait until lightwalletd is in sync before connecting any wallet into it. You wil
 ## Run tests
 [#run-tests]: (#run-tests)
 
-The Zebra team created tests for the interaction of zebra and lightwalletd. 
+The Zebra team created tests for the interaction of `zebrad` and `lightwalletd`. 
+
+To run all the Zebra `lightwalletd` tests:
+1. install `lightwalletd`
+2. install `protoc`
+3. build Zebra with `--features=lightwalletd-grpc-tests`
 
 Please refer to [acceptance](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/acceptance.rs) tests documentation in the `Lightwalletd tests` section.
 
