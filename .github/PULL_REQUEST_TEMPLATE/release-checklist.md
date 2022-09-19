@@ -7,12 +7,6 @@ assignees: ''
 
 ---
 
-## Using this Template
-
-Go to the [release template URL](https://github.com/ZcashFoundation/zebra/compare/main...select-the-release-branch?quick_pull=1&template=release-checklist.md), and select the release branch.
-
-For details, see [the GitHub reference](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/using-query-parameters-to-create-a-pull-request)
-
 ## Versioning
 
 ### Which Crates to Increment
