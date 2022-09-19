@@ -47,13 +47,14 @@ jobs:
       - name: Delete old instances
         run: |
           DELETE_BEFORE_DATE=$(date --date="$DELETE_INSTANCE_DAYS days ago" '+%Y%m%d')
-          IFS=$'\n'
 
+          IFS=$'\n'
           INSTANCES=$(gcloud compute instances list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME,ZONE)' | \
                       sed 's/\(.*\)\t\(.*\)/\1 --zone=\2/')
 
           for INSTANCE_AND_ZONE in $INSTANCES
           do
+            IFS=$' '
             gcloud compute instances delete --verbosity=info ${INSTANCE_AND_ZONE} --delete-disks=all || continue
           done
 
@@ -74,23 +75,27 @@ jobs:
       - name: Delete old disks
         run: |
           DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
-          IFS=$'\n'
 
+          IFS=$'\n'
           # Disks created by PR jobs, and other jobs that use a commit hash
           COMMIT_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME,LOCATION,LOCATION_SCOPE)' | \
                          sed 's/\(.*\)\t\(.*\)\t\(.*\)/\1 --\3=\2/')
 
           for DISK_AND_LOCATION in $COMMIT_DISKS
           do
+            IFS=$' '
             gcloud compute disks delete --verbosity=info ${DISK_AND_LOCATION} || continue
           done
           
+          IFS=$'\n'
           # Disks created by managed instance groups, and other jobs that start with "zebrad-"
-          ZEBRAD_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp --filter="name~^zebrad- AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          ZEBRAD_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp --filter="name~^zebrad- AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME,LOCATION,LOCATION_SCOPE)' | \
+                         sed 's/\(.*\)\t\(.*\)\t\(.*\)/\1 --\3=\2/')
 
-          for DISK in $ZEBRAD_DISKS
+          for DISK_AND_LOCATION in $ZEBRAD_DISKS
           do
-            gcloud compute disks delete --verbosity=info "${DISK}" || continue
+            IFS=$' '
+            gcloud compute disks delete --verbosity=info ${DISK_AND_LOCATION} || continue
           done
 
       # Deletes cache images older than $DELETE_AGE_DAYS days.
