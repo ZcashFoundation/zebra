@@ -51,7 +51,7 @@ jobs:
 
           for INSTANCE in $INSTANCES
           do
-            gcloud compute instance delete ${INSTANCE} --delete-disks=all || continue
+            gcloud compute instances delete --verbosity=info "${INSTANCE}" --delete-disks=all || continue
           done
 
       # Deletes all the instance templates older than $DELETE_AGE_DAYS days.
@@ -62,7 +62,7 @@ jobs:
 
           for TEMPLATE in $TEMPLATES
           do
-            gcloud compute instance-templates delete ${TEMPLATE} || continue
+            gcloud compute instance-templates delete "${TEMPLATE}" || continue
           done
 
       # Deletes all the disks older than $DELETE_AGE_DAYS days.
@@ -77,7 +77,7 @@ jobs:
 
           for DISK in $COMMIT_DISKS
           do
-            gcloud compute disks delete --verbosity=info ${DISK} || continue
+            gcloud compute disks delete --verbosity=info "${DISK}" || continue
           done
           
           # Disks created by managed instance groups, and other jobs that start with "zebrad-"
@@ -85,7 +85,7 @@ jobs:
 
           for DISK in $ZEBRAD_DISKS
           do
-            gcloud compute disks delete --verbosity=info ${DISK} || continue
+            gcloud compute disks delete --verbosity=info "${DISK}" || continue
           done
 
       # Deletes cache images older than $DELETE_AGE_DAYS days.
@@ -115,7 +115,7 @@ jobs:
               continue
             fi
             
-            gcloud compute images delete ${IMAGE} || continue
+            gcloud compute images delete "${IMAGE}" || continue
           done
 
           ZEBRAD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*net-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
@@ -129,7 +129,7 @@ jobs:
               continue
             fi
             
-            gcloud compute images delete ${IMAGE} || continue
+            gcloud compute images delete "${IMAGE}" || continue
           done
           
           LWD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^lwd-cache-.*net-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
@@ -143,5 +143,5 @@ jobs:
               continue
             fi
             
-            gcloud compute images delete ${IMAGE} || continue
+            gcloud compute images delete "${IMAGE}" || continue
           done
