@@ -24,7 +24,7 @@ use std::collections::HashMap;
 pub enum NonFinalizedWriteCmd {
     ProcessQueued {
         parent_hash: block::Hash,
-        queued_blocks: Vec<QueuedNonFinalized>,
+        queued_child: QueuedNonFinalized,
     },
     FinishedProcessQueued,
 }
@@ -35,7 +35,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 /// non-finalized state if it is contextually valid.
 #[tracing::instrument(level = "debug", skip(prepared))]
 pub(crate) fn validate_and_commit_non_finalized(
-    finalized_state: &mut FinalizedState,
+    finalized_state: &FinalizedState,
     non_finalized_state: &mut NonFinalizedState,
     network: Network,
     prepared: PreparedBlock,
@@ -60,9 +60,6 @@ pub(crate) fn validate_and_commit_non_finalized(
 /// non-finalized state is empty.
 ///
 /// [1]: non_finalized_state::Chain
-//
-// TODO: remove this clippy allow when we remove self.chain_tip_sender
-#[allow(clippy::unwrap_in_result)]
 #[instrument(level = "debug", skip(chain_tip_sender))]
 fn update_latest_chain_channels(
     finalized_state: &FinalizedState,
@@ -179,58 +176,56 @@ pub fn write_blocks_from_channels(
         return;
     }
 
+    // Save any errors to propagate down to queued child blocks
     let mut parent_error_map: HashMap<block::Hash, CloneError> = HashMap::new();
 
     while let Some(non_finalized_write_cmd) = non_finalized_block_write_receiver.blocking_recv() {
         match non_finalized_write_cmd {
             NonFinalizedWriteCmd::ProcessQueued {
                 parent_hash,
-                queued_blocks,
+                queued_child: (child, rsp_tx),
             } => {
-                let parent_error = parent_error_map.remove(&parent_hash);
+                let parent_error = parent_error_map.get(&parent_hash);
 
-                for (child, rsp_tx) in queued_blocks {
-                    let child_hash = child.hash;
-                    let result;
+                let child_hash = child.hash;
+                let result;
 
-                    // If the block is invalid, reject any descendant blocks.
-                    //
-                    // At this point, we know that the block and all its descendants
-                    // are invalid, because we checked all the consensus rules before
-                    // committing the block to the non-finalized state.
-                    // (These checks also bind the transaction data to the block
-                    // header, using the transaction merkle tree and authorizing data
-                    // commitment.)
-                    if let Some(ref parent_error) = parent_error {
-                        tracing::trace!(
-                            ?child_hash,
-                            ?parent_error,
-                            "rejecting queued child due to parent error"
-                        );
-                        result = Err(parent_error.clone());
-                    } else {
-                        tracing::trace!(?child_hash, "validating queued child");
-                        result = validate_and_commit_non_finalized(
-                            &mut finalized_state,
-                            &mut non_finalized_state,
-                            network,
-                            child,
-                        )
-                        .map_err(CloneError::from);
+                // If the block is invalid, reject any descendant blocks.
+                //
+                // At this point, we know that the block and all its descendants
+                // are invalid, because we checked all the consensus rules before
+                // committing the block to the non-finalized state.
+                // (These checks also bind the transaction data to the block
+                // header, using the transaction merkle tree and authorizing data
+                // commitment.)
+                if let Some(parent_error) = parent_error {
+                    tracing::trace!(
+                        ?child_hash,
+                        ?parent_error,
+                        "rejecting queued child due to parent error"
+                    );
+                    result = Err(parent_error.clone());
+                } else {
+                    tracing::trace!(?child_hash, "validating queued child");
+                    result = validate_and_commit_non_finalized(
+                        &finalized_state,
+                        &mut non_finalized_state,
+                        network,
+                        child,
+                    )
+                    .map_err(CloneError::from);
 
-                        if result.is_ok() {
-                            // Update the metrics if semantic and contextual validation passes
-                            metrics::counter!("state.full_verifier.committed.block.count", 1);
-                            metrics::counter!("zcash.chain.verified.block.total", 1);
-                        }
+                    if result.is_ok() {
+                        // Update the metrics if semantic and contextual validation passes
+                        metrics::counter!("state.full_verifier.committed.block.count", 1);
+                        metrics::counter!("zcash.chain.verified.block.total", 1);
                     }
+                }
 
-                    let _ =
-                        rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
+                let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
 
-                    if let Err(ref error) = result {
-                        parent_error_map.insert(parent_hash, error.clone());
-                    }
+                if let Err(ref error) = result {
+                    parent_error_map.insert(parent_hash, error.clone());
                 }
             }
 

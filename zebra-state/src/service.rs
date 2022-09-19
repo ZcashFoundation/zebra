@@ -591,26 +591,40 @@ impl StateService {
     /// recently arrived starting from `new_parent`, in breadth-first ordering.
     #[tracing::instrument(level = "debug", skip(self, new_parent))]
     fn process_queued(&mut self, new_parent: block::Hash) {
+        use tokio::sync::mpsc::error::SendError;
         if let Some(non_finalized_block_write_sender) = &self.non_finalized_block_write_sender {
             let mut new_parents: Vec<block::Hash> = vec![new_parent];
 
             while let Some(parent_hash) = new_parents.pop() {
-                let queued_blocks = self
+                let queued_children = self
                     .queued_non_finalized_blocks
-                    .dequeue_children(parent_hash)
-                    .into_iter()
-                    .inspect(|queued_block| new_parents.push(queued_block.0.hash))
-                    .collect();
+                    .dequeue_children(parent_hash);
 
-                // TODO: Check for SendError
-                let _ =
-                    non_finalized_block_write_sender.send(NonFinalizedWriteCmd::ProcessQueued {
-                        parent_hash,
-                        queued_blocks,
-                    });
+                for queued_child in queued_children {
+                    let child_hash = queued_child.0.hash;
+
+                    let send_result = non_finalized_block_write_sender.send(
+                        NonFinalizedWriteCmd::ProcessQueued {
+                            parent_hash,
+                            queued_child,
+                        },
+                    );
+
+                    if let Err(SendError(NonFinalizedWriteCmd::ProcessQueued {
+                        parent_hash: _,
+                        queued_child: (_, rsp_tx),
+                    })) = send_result
+                    {
+                        // If Zebra is shutting down, ignore dropped block result receivers
+                        let _ = rsp_tx.send(Err(
+                            "block commit task exited. Is Zebra shutting down?".into(),
+                        ));
+                    };
+
+                    new_parents.push(child_hash);
+                }
             }
 
-            // TODO: Check for SendError
             let _ =
                 non_finalized_block_write_sender.send(NonFinalizedWriteCmd::FinishedProcessQueued);
         };
