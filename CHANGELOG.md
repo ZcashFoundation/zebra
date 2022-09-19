@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-beta.15](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.15) - 2022-09-20
 
-This release improves Zebra's sync and RPC performance, improves test coverate and reliability, and starts creating Docker Hub binaries for releases.
+This release improves Zebra's sync and RPC performance, improves test coverage and reliability, and starts creating Docker Hub binaries for releases.
 
 It also changes some of `zebra-network`'s unstable Rust APIs to provide more peer metadata.
 
