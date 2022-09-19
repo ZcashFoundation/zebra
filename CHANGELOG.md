@@ -4,7 +4,146 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.0.0-beta.14](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.13) - 2022-08-30
+## [Zebra 1.0.0-beta.15](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.15) - 2022-09-20
+
+This release improves Zebra's sync and RPC performance, improves test coverate and reliability, and starts creating Docker Hub binaries for releases.
+
+It also changes some of `zebra-network`'s unstable Rust APIs to provide more peer metadata.
+
+### Breaking Changes
+
+This release has the following breaking changes:
+- Zebra's JSON-RPC server has an isolated thread pool, which is single threaded by default (#4806).
+  Multi-threaded RPCs disable port conflict detection, allowing multiple Zebra instances to share
+  the same RPC port (#5013).
+  To activate multi-threaded RPC server requests, add this config to your `zebrad.toml`:
+
+```toml
+[rpc]
+parallel_cpu_threads = 0
+```
+
+- Docker users can now specify a custom `zebrad` config file path (#5163, #5177).
+  As part of this feature, the default config path in the Docker image was changed.
+
+- `zebrad` now uses a non-blocking tracing logger (#5032).
+  If the log buffer fills up, Zebra will discard any additional logs.
+  Moving logging to a separate thread also changes the timing of some logs,
+  this is unlikely to affect most users.
+
+- Zebra's gRPC tests need `protoc` installed (#5009).
+  If you are running Zebra's `lightwalletd` gRPC test suite, [see the `tonic` README for details.](https://github.com/hyperium/tonic#dependencies)
+
+### Added
+
+#### Releasing Zebra
+
+- Create Docker hub binaries when tagging releases (#5138)
+- Document how Zebra is versioned and released (#4917, #5026)
+- Allow manual Release Drafter workflow runs (#5165)
+
+#### Network Peer Rust APIs
+
+Note: Zebra's Rust APIs are unstable, they are not covered by semantic versioning.
+
+- Return peer metadata from `connect_isolated` functions (#4870)
+
+#### Testing
+
+- Check that the latest Zebra version can parse previous configs (#5112)
+- Test disabled `lightwalletd` mempool gRPCs via zebrad logs (#5016)
+
+#### Documentation
+
+- Document why Zebra does a UTXO check that looks redundant (#5106)
+- Document how Zebra CI works (#5038, #5080, #5100, #5105, #5017)
+
+### Changed
+
+#### Zebra JSON-RPCs
+
+- Breaking: Add a config for multi-threaded RPC server requests (#5013)
+- Isolate RPC queries from the rest of Zebra, to improve performance (#4806)
+
+#### Zebra State
+
+- Send treestates from non-finalized state to finalized state, rather than re-calculating them (#4721)
+- Run StateService read requests without shared mutable chain state (#5132, #5107)
+- Move the finalized block queue to the StateService (#5152)
+- Simplify StateService request processing and metrics tracking (#5137)
+
+#### Block Checkpoints
+
+- Update Zebra checkpoints (#5130)
+
+#### Docker Images
+
+- Breaking: Allow Docker users to specify a custom `zebrad` config file path (#5163, #5177)
+
+#### Continuous Integration and Deployment
+
+- Wait 1 day before creating cached state image updates  (#5088)
+- Delete cached state images older than 2 days, but keep a few recent images
+  (#5113, #5124, #5082, #5079)
+- Simplify GitHub actions caches (#5104)
+- Use 200GB disks for managed instances (#5084)
+- Improve test reliability and test output readability (#5014)
+
+#### Zebra Dependencies
+
+- Breaking: Update prost, tonic, tonic-build and console-subscriber to the latest versions (#5009)
+- change(deps): upgrade `zcash\_script` and other shared zcash dependencies (#4926)
+- Update deny.toml developer docs and file comments (#5151, #5070)
+- Update other Zebra Rust dependencies to the latest versions
+  (#5150, #5160, #5176, #5149, #5136, #5135, #5118, #5009, #5074, #5071, #5037, #5020, #4914,
+  #5057, #5058, #5047, #4984, #5021, #4998, #4916, #5022, #4912, #5018, #5019)
+
+#### CI Dependencies
+
+- Update Zebra CI dependencies to the latest versions (#5159, #5148, #5117, #5073, #5029)
+
+### Removed
+
+#### Continuous Integration
+
+- Disable beta Rust tests (#5090, #5024)
+
+### Fixed
+
+#### Logging
+
+- Breaking: Switch `zebrad` to a non-blocking tracing logger (#5032)
+
+#### Testing
+
+- Increase full sync timeout to 32 hours (#5172, #5129)
+- Disable unreliable RPC port conflict tests on Windows and macOS (#5072)
+- Increase slow code log thresholds to reduce verbose logs and warnings (#4997)
+
+#### Continuous Integration
+
+- Fix full sync CI failures by adding an extra GitHub job (#5166)
+- Make checkpoint disk image names short enough for Google Cloud (#5128)
+- Label lightwalletd cached state images with their sync height (#5086)
+
+#### Lints
+
+- Fix various Rust clippy lints (#5131, #5045)
+- Fix a failure in `tj-actions/changed-files` on push (#5097)
+
+#### Documentation
+
+- Enable all cargo features in Zebra's deployed documentation (#5156)
+
+### Security
+
+#### JSON-RPC Server
+
+- Isolate RPC queries from the rest of Zebra,
+  so that `lightwalletd` clients are more isolated from each other (#4806)
+
+
+## [Zebra 1.0.0-beta.14](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.14) - 2022-08-30
 
 This release contains a variety of CI fixes, test fixes and dependency updates.
 It contains two breaking changes:
@@ -229,7 +368,7 @@ This release also contains some breaking changes which:
 
 #### Chain Sync
 
-- Update mainnet and testnet checkpoint hashes (#4708) 
+- Update mainnet and testnet checkpoint hashes (#4708)
 
 #### Diagnostics
 
