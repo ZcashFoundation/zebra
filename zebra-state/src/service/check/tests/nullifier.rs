@@ -19,6 +19,7 @@ use zebra_chain::{
 
 use crate::{
     arbitrary::Prepare,
+    service::write::validate_and_commit_non_finalized,
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
     FinalizedBlock,
     ValidateContextError::{
@@ -100,7 +101,11 @@ proptest! {
                 .contains_sprout_nullifier(&expected_nullifiers[1]));
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result = state.validate_and_commit(block1.clone());
+            let commit_result = validate_and_commit_non_finalized(
+                &mut state.disk,
+                &mut state.mem,
+                state.network, block1.clone()
+            );
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
@@ -152,7 +157,9 @@ proptest! {
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result = state.validate_and_commit(block1);
+        let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block1);
 
         // if the random proptest data produces other errors,
         // we might need to just check `is_err()` here
@@ -209,7 +216,9 @@ proptest! {
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result = state.validate_and_commit(block1);
+        let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block1);
 
         prop_assert_eq!(
             commit_result,
@@ -266,7 +275,9 @@ proptest! {
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result = state.validate_and_commit(block1);
+        let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block1);
 
         prop_assert_eq!(
             commit_result,
@@ -347,7 +358,9 @@ proptest! {
             block1_hash = block1.hash;
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result = state.validate_and_commit(block1.clone());
+            let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
@@ -364,7 +377,9 @@ proptest! {
         }
 
         let block2 = Arc::new(block2).prepare();
-        let commit_result = state.validate_and_commit(block2);
+        let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block2);
 
         prop_assert_eq!(
             commit_result,
@@ -424,7 +439,9 @@ proptest! {
             prop_assert!(state.disk.contains_sapling_nullifier(&expected_nullifier));
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result = state.validate_and_commit(block1.clone());
+            let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
@@ -470,7 +487,9 @@ proptest! {
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result = state.validate_and_commit(block1);
+        let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block1);
 
         prop_assert_eq!(
             commit_result,
@@ -522,7 +541,9 @@ proptest! {
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result = state.validate_and_commit(block1);
+        let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block1);
 
         prop_assert_eq!(
             commit_result,
@@ -592,7 +613,9 @@ proptest! {
             block1_hash = block1.hash;
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result = state.validate_and_commit(block1.clone());
+            let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
@@ -606,7 +629,9 @@ proptest! {
         }
 
         let block2 = Arc::new(block2).prepare();
-        let commit_result = state.validate_and_commit(block2);
+        let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block2);
 
         prop_assert_eq!(
             commit_result,
@@ -668,7 +693,9 @@ proptest! {
             prop_assert!(state.disk.contains_orchard_nullifier(&expected_nullifier));
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result = state.validate_and_commit(block1.clone());
+            let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
@@ -714,7 +741,9 @@ proptest! {
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result = state.validate_and_commit(block1);
+        let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block1);
 
         prop_assert_eq!(
             commit_result,
@@ -770,7 +799,9 @@ proptest! {
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result = state.validate_and_commit(block1);
+        let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block1);
 
         prop_assert_eq!(
             commit_result,
@@ -844,7 +875,9 @@ proptest! {
             block1_hash = block1.hash;
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result = state.validate_and_commit(block1.clone());
+            let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
@@ -858,7 +891,9 @@ proptest! {
         }
 
         let block2 = Arc::new(block2).prepare();
-        let commit_result = state.validate_and_commit(block2);
+        let commit_result = validate_and_commit_non_finalized(
+            &mut state.disk,
+            &mut state.mem, state.network, block2);
 
         prop_assert_eq!(
             commit_result,
