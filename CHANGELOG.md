@@ -92,7 +92,7 @@ Note: Zebra's Rust APIs are unstable, they are not covered by semantic versionin
 #### Zebra Dependencies
 
 - Breaking: Update prost, tonic, tonic-build and console-subscriber to the latest versions (#5009)
-- change(deps): upgrade `zcash\_script` and other shared zcash dependencies (#4926)
+- Upgrade `zcash\_script` and other shared zcash dependencies (#4926)
 - Update deny.toml developer docs and file comments (#5151, #5070)
 - Update other Zebra Rust dependencies to the latest versions
   (#5150, #5160, #5176, #5149, #5136, #5135, #5118, #5009, #5074, #5071, #5037, #5020, #4914,
