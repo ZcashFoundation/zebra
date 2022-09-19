@@ -320,7 +320,7 @@ where
         }
 
         // If we are past our NU5 activation height, but there are no V5 transactions in recent blocks,
-        // the Zebra instance that verified those blocks had no NU5 activation height.
+        // the last Zebra instance that updated this cached state had no NU5 activation height.
         if index >= max_legacy_chain_blocks {
             return Err(format!(
                 "could not find any transactions in recent blocks: \
