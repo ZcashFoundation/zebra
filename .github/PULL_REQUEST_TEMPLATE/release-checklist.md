@@ -11,9 +11,16 @@ assignees: ''
 
 ### Which Crates to Increment
 
-To check if any of the top-level crates need version increments:
+Check the [draft `zebrad` changelog](https://github.com/ZcashFoundation/zebra/releases) for the automatic version bump.
+This version is based on [the labels on the PRs in the release](https://github.com/ZcashFoundation/zebra/blob/main/.github/release-drafter.yml).
+
+To check if `zebrad` needs a version increment:
+1. If we're releasing a mainnet network upgrade, increment the `major` version of all Zebra crates
+2. Check for features, deprecations, and removals in the release. If it has any, it is a `minor` release
+
+To check if the other crates need version increments:
 1. Go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra
-2. Check if the last commit was a Zebra version bump, or something else
+2. Check if the last commit to each crate was a Zebra version bump, or something else
 
 <details>
    
