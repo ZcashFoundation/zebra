@@ -643,29 +643,46 @@ impl DiskDb {
     /// It should only be used in debugging or test code, immediately before a manual shutdown.
     ///
     /// TODO: make private after the stop height check has moved to the syncer (#3442)
-    ///       move shutting down the database to a blocking thread (#2188),
-    ///            and remove `force` and the manual flush
+    ///       move shutting down the database to a blocking thread (#2188)
     pub(crate) fn shutdown(&mut self, force: bool) {
-        // Prevent a race condition where another thread clones the Arc,
-        // right after we've checked we're the only holder of the Arc.
+        // # Correctness
         //
-        // There is still a small race window after the guard is dropped,
-        // but if the race happens, it will only cause database errors during shutdown.
-        let clone_prevention_guard = Arc::get_mut(&mut self.db);
+        // If we're the only owner of the shared database instance,
+        // then there are no other threads that can increase the strong or weak count.
+        //
+        // ## Implementation Requirements
+        //
+        // This function and all functions that it calls should avoid cloning the shared database
+        // instance. If they do, they must drop it before:
+        // - shutting down database threads, or
+        // - deleting database files.
+        let shared_database_owners = Arc::strong_count(&self.db) + Arc::weak_count(&self.db);
 
-        if clone_prevention_guard.is_none() {
+        if shared_database_owners > 1 {
             let path = self.path();
 
+            let mut ephemeral_note = "";
+
             if force {
+                if self.ephemeral {
+                    ephemeral_note = " and removing ephemeral files";
+                }
+
                 info!(
                     ?path,
-                    "forcing a shutdown of DiskDb with multiple active instances",
+                    "forcing shutdown{} of a state database with multiple active instances",
+                    ephemeral_note,
                 );
             } else {
+                if self.ephemeral {
+                    ephemeral_note = " and files";
+                }
+
                 debug!(
                     ?path,
-                    "dropping cloned DiskDb, \
-                     but keeping shared database until the last reference is dropped",
+                    "dropping DiskDb clone, \
+                     but keeping shared database instance{} until the last reference is dropped",
+                    ephemeral_note,
                 );
                 return;
             }
@@ -728,41 +745,18 @@ impl DiskDb {
         //
         // But this implementation doesn't seem to cause any issues,
         // and the RocksDB Drop implementation handles any cleanup.
-        self.delete_ephemeral(force);
+        self.delete_ephemeral();
     }
 
-    /// If the database is `ephemeral`, delete it.
-    ///
-    /// If `force` is true, clean up regardless of any shared references.
-    /// `force` can cause errors accessing the database from other shared references.
-    /// It should only be used in debugging or test code, immediately before a manual shutdown.
-    fn delete_ephemeral(&mut self, force: bool) {
+    /// If the database is `ephemeral`, delete its files.
+    fn delete_ephemeral(&mut self) {
+        // # Correctness
+        //
+        // This function and all functions that it calls should avoid cloning the shared database
+        // instance. See `shutdown()` for details.
+
         if !self.ephemeral {
             return;
-        }
-
-        // Prevent a race condition where another thread clones the Arc,
-        // right after we've checked we're the only holder of the Arc.
-        //
-        // There is still a small race window after the guard is dropped,
-        // but if the race happens, it will only cause database errors during shutdown.
-        let clone_prevention_guard = Arc::get_mut(&mut self.db);
-
-        if clone_prevention_guard.is_none() {
-            let path = self.path();
-            if force {
-                info!(
-                    ?path,
-                    "force deleting an ephemeral DiskDb with multiple active instances",
-                );
-            } else {
-                debug!(
-                    ?path,
-                    "dropping cloned DiskDb, \
-                     but keeping ephemeral database files until the last reference is dropped",
-                );
-                return;
-            }
         }
 
         let path = self.path();
@@ -772,14 +766,14 @@ impl DiskDb {
         // but the Zcash blockchain might not fit in memory. So we just
         // delete the database files instead.
         //
-        // We'd like to call `DB::destroy` here, but calling destroy on a
+        // We'd also like to call `DB::destroy` here, but calling destroy on a
         // live DB is undefined behaviour:
         // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#basic-readwrite
         //
         // So we assume that all the database files are under `path`, and
         // delete them using standard filesystem APIs. Deleting open files
         // might cause errors on non-Unix platforms, so we ignore the result.
-        // (The OS will delete them eventually anyway.)
+        // (The OS will delete them eventually anyway, if they are in a temporary directory.)
         let result = std::fs::remove_dir_all(path);
 
         if result.is_err() {
@@ -803,6 +797,11 @@ impl DiskDb {
     ///
     /// If Zebra has a bug where it is storing data in the wrong column family.
     fn assert_default_cf_is_empty(&self) {
+        // # Correctness
+        //
+        // This function and all functions that it calls should avoid cloning the shared database
+        // instance. See `shutdown()` for details.
+
         if let Some(default_cf) = self.cf_handle("default") {
             assert!(
                 self.zs_is_empty(&default_cf),
