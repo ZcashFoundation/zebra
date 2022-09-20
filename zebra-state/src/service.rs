@@ -38,7 +38,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::{MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA, MAX_LEGACY_CHAIN_BLOCKS},
+    constants::{
+        MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA,
+        MAX_LEGACY_CHAIN_BLOCKS,
+    },
     service::{
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
         finalized_state::{FinalizedState, ZebraDb},
