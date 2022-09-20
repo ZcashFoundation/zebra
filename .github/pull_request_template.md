@@ -38,7 +38,7 @@ If you want a specific reviewer for this PR, tag them here.
 ### Reviewer Checklist
 
   - [ ] Will the PR name make sense to users?
-    - [ ] Does it need a CHANGELOG intro? (new features, breaking changes, large changes)
+    - [ ] Does it need extra CHANGELOG info? (new features, breaking changes, large changes)
   - [ ] Are the PR labels correct?
   - [ ] Does the code do what the ticket and PR says?
   - [ ] How do you know it works? Does it have tests?
