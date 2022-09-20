@@ -748,7 +748,7 @@ impl DiskDb {
         // but if the race happens, it will only cause database errors during shutdown.
         let clone_prevention_guard = Arc::get_mut(&mut self.db);
 
-        if clone_prevention_guard.is_none() && !force {
+        if clone_prevention_guard.is_none() {
             let path = self.path();
             if force {
                 info!(
