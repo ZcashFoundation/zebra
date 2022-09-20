@@ -409,6 +409,11 @@ impl StateService {
         &mut self,
         finalized: FinalizedBlock,
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
+        // # Correctness & Performance
+        //
+        // This method must not block, access the database, or perform CPU-intensive tasks,
+        // because it is called directly from the tokio executor's Future threads.
+
         let queued_prev_hash = finalized.block.header.previous_block_hash;
         let queued_height = finalized.height;
 
@@ -468,6 +473,11 @@ impl StateService {
     /// Returns an error if the block commit channel has been closed.
     pub fn drain_queue_and_commit_finalized(&mut self) {
         use tokio::sync::mpsc::error::{SendError, TryRecvError};
+
+        // # Correctness & Performance
+        //
+        // This method must not block, access the database, or perform CPU-intensive tasks,
+        // because it is called directly from the tokio executor's Future threads.
 
         // If a block failed, we need to start again from a valid tip.
         match self.invalid_block_reset_receiver.try_recv() {
@@ -898,7 +908,7 @@ impl Service<Request> for StateService {
             }
 
             // Uses queued_finalized_blocks and pending_utxos in the StateService.
-            // Accesses shared writeable state in the StateService and ZebraDb.
+            // Accesses shared writeable state in the StateService.
             Request::CommitFinalizedBlock(finalized) => {
                 let timer = CodeTimer::start();
 
@@ -914,14 +924,9 @@ impl Service<Request> for StateService {
 
                 // # Performance
                 //
-                // Allow other async tasks to make progress while blocks are being verified
-                // and written to disk.
-                //
-                // See the note in `CommitBlock` for more details.
-                let span = Span::current();
-                let rsp_rx = tokio::task::block_in_place(move || {
-                    span.in_scope(|| self.queue_and_commit_finalized(finalized))
-                });
+                // This method doesn't block, access the database, or perform CPU-intensive tasks,
+                // so we can run it directly in the tokio executor's Future threads.
+                let rsp_rx = self.queue_and_commit_finalized(finalized);
 
                 // TODO:
                 //   - check for panics in the block write task here,
