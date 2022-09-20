@@ -286,7 +286,7 @@ impl Application for ZebradApp {
 
         builder = builder
             .theme(theme)
-            .panic_section(metadata_section)
+            .panic_section(metadata_section.clone())
             .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
             .issue_filter(|kind| match kind {
                 color_eyre::ErrorKind::NonRecoverable(error) => {
@@ -397,6 +397,11 @@ impl Application for ZebradApp {
             tracing_config.flamegraph = None;
         }
         components.push(Box::new(Tracing::new(tracing_config)?));
+
+        // Log git metadata and platform info when zebrad starts up
+        if is_server {
+            tracing::info!("Diagnostic {}", metadata_section);
+        }
 
         // Activate the global span, so it's visible when we load the other
         // components. Space is at a premium here, so we use an empty message,
