@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "1.0.0-beta.14"
+version = "1.0.0-beta.15"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -45,7 +45,7 @@ zebra-node-services = { path = "../zebra-node-services" }
 zebra-state = { path = "../zebra-state" }
 
 [dev-dependencies]
-insta = { version = "1.19.1", features = ["redactions", "json"] }
+insta = { version = "1.20.0", features = ["redactions", "json"] }
 proptest = "0.10.1"
 proptest-derive = "0.3.0"
 serde_json = "1.0.85"
