@@ -1,7 +1,5 @@
 //! Writing blocks to the finalized and non-finalized states.
 
-use std::sync::{Arc, Mutex};
-
 use tokio::sync::watch;
 use zebra_chain::{
     block::{self, Height},
@@ -64,7 +62,7 @@ pub(crate) fn validate_and_commit_non_finalized(
 fn update_latest_chain_channels(
     finalized_state: &FinalizedState,
     non_finalized_state: &NonFinalizedState,
-    chain_tip_sender: Arc<Mutex<ChainTipSender>>,
+    chain_tip_sender: &mut ChainTipSender,
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
 ) -> Option<block::Height> {
     let best_chain = non_finalized_state.best_chain();
@@ -78,10 +76,7 @@ fn update_latest_chain_channels(
     // If the final receiver was just dropped, ignore the error.
     let _ = non_finalized_state_sender.send(non_finalized_state.clone());
 
-    chain_tip_sender
-        .lock()
-        .expect("unexpected panic in block commit task or state")
-        .set_best_non_finalized_tip(tip_block);
+    chain_tip_sender.set_best_non_finalized_tip(tip_block);
 
     tip_block_height
 }
@@ -101,7 +96,7 @@ pub fn write_blocks_from_channels(
     mut non_finalized_state: NonFinalizedState,
     network: Network,
     invalid_block_reset_sender: UnboundedSender<block::Hash>,
-    chain_tip_sender: Arc<Mutex<ChainTipSender>>,
+    mut chain_tip_sender: ChainTipSender,
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
 ) {
     while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
@@ -136,12 +131,7 @@ pub fn write_blocks_from_channels(
             Ok(finalized) => {
                 let tip_block = ChainTipBlock::from(finalized);
 
-                // TODO: update the chain tip sender with non-finalized blocks in this function,
-                //       and get rid of the mutex
-                chain_tip_sender
-                    .lock()
-                    .expect("unexpected panic in block commit task or state")
-                    .set_finalized_tip(tip_block);
+                chain_tip_sender.set_finalized_tip(tip_block);
             }
             Err(error) => {
                 let finalized_tip = finalized_state.db.tip();
@@ -248,7 +238,7 @@ pub fn write_blocks_from_channels(
                 let tip_block_height = update_latest_chain_channels(
                     &finalized_state,
                     &non_finalized_state,
-                    Arc::clone(&chain_tip_sender),
+                    &mut chain_tip_sender,
                     &non_finalized_state_sender,
                 );
 

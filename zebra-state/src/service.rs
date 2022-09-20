@@ -19,7 +19,7 @@ use std::{
     convert,
     future::Future,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -305,7 +305,6 @@ impl StateService {
         let timer = CodeTimer::start();
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
-        let chain_tip_sender = Arc::new(Mutex::new(chain_tip_sender));
 
         let non_finalized_state = NonFinalizedState::new(network);
 
