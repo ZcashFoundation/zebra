@@ -197,7 +197,7 @@ pub async fn populated_state(
         .into_iter()
         .map(|block| Request::CommitFinalizedBlock(block.into()));
 
-    let (state, read_state, latest_chain_tip, chain_tip_change) =
+    let (state, read_state, latest_chain_tip, mut chain_tip_change) =
         StateService::new(Config::ephemeral(), network);
     let mut state = Buffer::new(BoxService::new(state), 1);
 
@@ -209,7 +209,13 @@ pub async fn populated_state(
     }
 
     while let Some(rsp) = responses.next().await {
-        rsp.expect("blocks should commit just fine");
+        // Wait for the block result and the chain tip update,
+        // which both happen in a separate thread from this one.
+        rsp.expect("unexpected block commit failure");
+        chain_tip_change
+            .wait_for_tip_change()
+            .await
+            .expect("unexpected chain tip update failure");
     }
 
     (state, read_state, latest_chain_tip, chain_tip_change)
