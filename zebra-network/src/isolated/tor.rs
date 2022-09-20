@@ -4,11 +4,14 @@ use std::sync::{Arc, Mutex};
 
 use arti_client::{DataStream, TorAddr, TorClient, TorClientConfig};
 use tor_rtcompat::tokio::TokioRuntimeHandle;
-use tower::{util::BoxService, Service};
+use tower::Service;
 
 use zebra_chain::parameters::Network;
 
-use crate::{connect_isolated, connect_isolated_with_inbound, BoxError, Request, Response};
+use crate::{
+    connect_isolated, connect_isolated_with_inbound, peer::Client as ZebraClient, BoxError,
+    Request, Response,
+};
 
 #[cfg(test)]
 mod tests;
@@ -44,7 +47,7 @@ pub async fn connect_isolated_tor(
     network: Network,
     hostname: String,
     user_agent: String,
-) -> Result<BoxService<Request, Response, BoxError>, BoxError> {
+) -> Result<ZebraClient, BoxError> {
     let tor_stream = new_tor_stream(hostname).await?;
 
     // Calling connect_isolated_tor_with_inbound causes lifetime issues.
@@ -68,7 +71,7 @@ pub async fn connect_isolated_tor_with_inbound<InboundService>(
     hostname: String,
     user_agent: String,
     inbound_service: InboundService,
-) -> Result<BoxService<Request, Response, BoxError>, BoxError>
+) -> Result<ZebraClient, BoxError>
 where
     InboundService:
         Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,

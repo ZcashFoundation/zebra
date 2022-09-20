@@ -45,7 +45,7 @@ use crate::{
         internal::{Request, Response},
     },
     types::MetaAddr,
-    BoxError, Config,
+    BoxError, Config, VersionMessage,
 };
 
 /// A [`Service`] that handshakes with a remote peer and constructs a
@@ -76,6 +76,25 @@ where
     parent_span: Span,
 }
 
+impl<S, C> fmt::Debug for Handshake<S, C>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send,
+    C: ChainTip + Clone + Send + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // skip the channels, they don't tell us anything useful
+        f.debug_struct(std::any::type_name::<Handshake<S, C>>())
+            .field("config", &self.config)
+            .field("user_agent", &self.user_agent)
+            .field("our_services", &self.our_services)
+            .field("relay", &self.relay)
+            .field("minimum_peer_version", &self.minimum_peer_version)
+            .field("parent_span", &self.parent_span)
+            .finish()
+    }
+}
+
 impl<S, C> Clone for Handshake<S, C>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
@@ -98,6 +117,26 @@ where
     }
 }
 
+/// The metadata for a peer connection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConnectionInfo {
+    /// The connected peer address, if known.
+    /// This address might not be valid for outbound connections.
+    ///
+    /// Peers can be connected via a transient inbound or proxy address,
+    /// which will appear as the connected address to the OS and Zebra.
+    pub connected_addr: ConnectedAddr,
+
+    /// The network protocol [`VersionMessage`](crate::VersionMessage) sent by the remote peer.
+    pub remote: VersionMessage,
+
+    /// The network protocol version negotiated with the remote peer.
+    ///
+    /// Derived from `remote.version` and the
+    /// [current `zebra_network` protocol version](constants::CURRENT_NETWORK_PROTOCOL_VERSION).
+    pub negotiated_version: Version,
+}
+
 /// The peer address that we are handshaking with.
 ///
 /// Typically, we can rely on outbound addresses, but inbound addresses don't
@@ -108,7 +147,10 @@ pub enum ConnectedAddr {
     ///
     /// In an honest network, a Zcash peer is listening on this exact address
     /// and port.
-    OutboundDirect { addr: SocketAddr },
+    OutboundDirect {
+        /// The connected outbound remote address and port.
+        addr: SocketAddr,
+    },
 
     /// The address we received from the OS, when a remote peer directly
     /// connected to our Zcash listener port.
@@ -117,7 +159,10 @@ pub enum ConnectedAddr {
     /// if its outbound address is the same as its listener address. But the port
     /// is an ephemeral outbound TCP port, not a listener port.
     InboundDirect {
+        /// The connected inbound remote address.
         maybe_ip: IpAddr,
+
+        /// The connected inbound transient remote port.
         transient_port: u16,
     },
 
@@ -127,7 +172,10 @@ pub enum ConnectedAddr {
     /// outbound address and port can be used as an identifier for the duration
     /// of this connection.
     OutboundProxy {
+        /// The remote address and port of the proxy.
         proxy_addr: SocketAddr,
+
+        /// The local address and transient port we used to connect to the proxy.
         transient_local_addr: SocketAddr,
     },
 
@@ -136,7 +184,10 @@ pub enum ConnectedAddr {
     ///
     /// The proxy's ephemeral outbound address can be used as an identifier for
     /// the duration of this connection.
-    InboundProxy { transient_addr: SocketAddr },
+    InboundProxy {
+        /// The local address and transient port we used to connect to the proxy.
+        transient_addr: SocketAddr,
+    },
 
     /// An isolated connection, where we deliberately don't have any connection metadata.
     Isolated,
@@ -208,6 +259,8 @@ impl ConnectedAddr {
     /// This address must not depend on the canonical address from the `Version`
     /// message. Otherwise, malicious peers could interfere with other peers
     /// `AddressBook` state.
+    ///
+    /// TODO: remove the `get_` from these methods (Rust style avoids `get` prefixes)
     pub fn get_address_book_addr(&self) -> Option<SocketAddr> {
         match self {
             OutboundDirect { addr } => Some(*addr),
@@ -512,6 +565,8 @@ where
 ///
 /// We split `Handshake` into its components before calling this function,
 /// to avoid infectious `Sync` bounds on the returned future.
+///
+/// Returns the [`VersionMessage`](crate::VersionMessage) sent by the remote peer.
 #[allow(clippy::too_many_arguments)]
 pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
@@ -522,7 +577,7 @@ pub async fn negotiate_version<PeerTransport>(
     our_services: PeerServices,
     relay: bool,
     mut minimum_peer_version: MinimumPeerVersion<impl ChainTip>,
-) -> Result<(Version, PeerServices, SocketAddr), HandshakeError>
+) -> Result<VersionMessage, HandshakeError>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -570,7 +625,7 @@ where
         }
     };
 
-    let our_version = Message::Version {
+    let our_version = VersionMessage {
         version: constants::CURRENT_NETWORK_PROTOCOL_VERSION,
         services: our_services,
         timestamp,
@@ -581,7 +636,8 @@ where
         user_agent: user_agent.clone(),
         start_height: minimum_peer_version.chain_tip_height(),
         relay,
-    };
+    }
+    .into();
 
     debug!(?our_version, "sending initial version message");
     peer_conn.send(our_version).await?;
@@ -592,11 +648,11 @@ where
         .ok_or(HandshakeError::ConnectionClosed)??;
 
     // Wait for next message if the one we got is not Version
-    loop {
+    let remote: VersionMessage = loop {
         match remote_msg {
-            Message::Version { .. } => {
-                debug!(?remote_msg, "got version message from remote peer");
-                break;
+            Message::Version(version_message) => {
+                debug!(?version_message, "got version message from remote peer");
+                break version_message;
             }
             _ => {
                 remote_msg = peer_conn
@@ -606,33 +662,17 @@ where
                 debug!(?remote_msg, "ignoring non-version message from remote peer");
             }
         }
+    };
+
+    let remote_address_services = remote.address_from.untrusted_services();
+    if remote_address_services != remote.services {
+        info!(
+            ?remote.services,
+            ?remote_address_services,
+            ?remote.user_agent,
+            "peer with inconsistent version services and version address services",
+        );
     }
-
-    // If we got a Version message, destructure its fields into the local scope.
-    let (remote_nonce, remote_services, remote_version, remote_canonical_addr, user_agent) =
-        if let Message::Version {
-            version,
-            services,
-            address_from,
-            nonce,
-            user_agent,
-            ..
-        } = remote_msg
-        {
-            let canonical_addr = address_from.addr();
-            let address_services = address_from.untrusted_services();
-            if address_services != services {
-                info!(
-                    ?services,
-                    ?address_services,
-                    "peer with inconsistent version services and version address services"
-                );
-            }
-
-            (nonce, services, version, canonical_addr, user_agent)
-        } else {
-            Err(HandshakeError::UnexpectedMessage(Box::new(remote_msg)))?
-        };
 
     // Check for nonce reuse, indicating self-connection
     //
@@ -643,7 +683,7 @@ where
     // released.
     let nonce_reuse = {
         let mut locked_nonces = nonces.lock().await;
-        let nonce_reuse = locked_nonces.contains(&remote_nonce);
+        let nonce_reuse = locked_nonces.contains(&remote.nonce);
         // Regardless of whether we observed nonce reuse, clean up the nonce set.
         locked_nonces.remove(&local_nonce);
         nonce_reuse
@@ -655,12 +695,13 @@ where
     // SECURITY: Reject connections to peers on old versions, because they might not know about all
     // network upgrades and could lead to chain forks or slower block propagation.
     let min_version = minimum_peer_version.current();
-    if remote_version < min_version {
+    if remote.version < min_version {
         debug!(
             remote_ip = ?their_addr,
-            ?remote_version,
+            ?remote.version,
             ?min_version,
-            "disconnecting from peer with obsolete network protocol version"
+            ?remote.user_agent,
+            "disconnecting from peer with obsolete network protocol version",
         );
 
         // the value is the number of rejected handshakes, by peer IP and protocol version
@@ -668,29 +709,30 @@ where
             "zcash.net.peers.obsolete",
             1,
             "remote_ip" => their_addr.to_string(),
-            "remote_version" => remote_version.to_string(),
+            "remote_version" => remote.version.to_string(),
             "min_version" => min_version.to_string(),
-            "user_agent" => user_agent,
+            "user_agent" => remote.user_agent.clone(),
         );
 
         // the value is the remote version of the most recent rejected handshake from each peer
         metrics::gauge!(
             "zcash.net.peers.version.obsolete",
-            remote_version.0 as f64,
+            remote.version.0 as f64,
             "remote_ip" => their_addr.to_string(),
         );
 
         // Disconnect if peer is using an obsolete version.
-        Err(HandshakeError::ObsoleteVersion(remote_version))?;
+        Err(HandshakeError::ObsoleteVersion(remote.version))?;
     } else {
-        let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote_version);
+        let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
 
         debug!(
             remote_ip = ?their_addr,
-            ?remote_version,
+            ?remote.version,
             ?negotiated_version,
             ?min_version,
-            "negotiated network protocol version with peer"
+            ?remote.user_agent,
+            "negotiated network protocol version with peer",
         );
 
         // the value is the number of connected handshakes, by peer IP and protocol version
@@ -698,16 +740,16 @@ where
             "zcash.net.peers.connected",
             1,
             "remote_ip" => their_addr.to_string(),
-            "remote_version" => remote_version.to_string(),
+            "remote_version" => remote.version.to_string(),
             "negotiated_version" => negotiated_version.to_string(),
             "min_version" => min_version.to_string(),
-            "user_agent" => user_agent,
+            "user_agent" => remote.user_agent.clone(),
         );
 
         // the value is the remote version of the most recent connected handshake from each peer
         metrics::gauge!(
             "zcash.net.peers.version.connected",
-            remote_version.0 as f64,
+            remote.version.0 as f64,
             "remote_ip" => their_addr.to_string(),
         );
     }
@@ -736,7 +778,7 @@ where
         }
     }
 
-    Ok((remote_version, remote_services, remote_canonical_addr))
+    Ok(remote)
 }
 
 /// A handshake request.
@@ -813,8 +855,7 @@ where
                     .finish(),
             );
 
-            // Wrap the entire initial connection setup in a timeout.
-            let (remote_version, remote_services, remote_canonical_addr) = negotiate_version(
+            let remote = negotiate_version(
                 &mut peer_conn,
                 &connected_addr,
                 config,
@@ -825,6 +866,9 @@ where
                 minimum_peer_version,
             )
             .await?;
+
+            let remote_canonical_addr = remote.address_from.addr();
+            let remote_services = remote.services;
 
             // If we've learned potential peer addresses from an inbound
             // connection or handshake, add those addresses to our address book.
@@ -853,7 +897,14 @@ where
 
             // Set the connection's version to the minimum of the received version or our own.
             let negotiated_version =
-                std::cmp::min(remote_version, constants::CURRENT_NETWORK_PROTOCOL_VERSION);
+                std::cmp::min(remote.version, constants::CURRENT_NETWORK_PROTOCOL_VERSION);
+
+            // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
+            let connection_info = Arc::new(ConnectionInfo {
+                connected_addr,
+                remote,
+                negotiated_version,
+            });
 
             // Reconfigure the codec to use the negotiated version.
             //
@@ -970,7 +1021,7 @@ where
                 error_slot.clone(),
                 peer_tx,
                 connection_tracker,
-                connected_addr,
+                connection_info.clone(),
             );
 
             let connection_task = tokio::spawn(
@@ -993,12 +1044,11 @@ where
             );
 
             let client = Client {
+                connection_info,
                 shutdown_tx: Some(shutdown_tx),
                 server_tx,
                 inv_collector,
-                transient_addr: connected_addr.get_transient_addr(),
                 error_slot,
-                version: remote_version,
                 connection_task,
                 heartbeat_task,
             };

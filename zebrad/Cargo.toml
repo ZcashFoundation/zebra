@@ -2,7 +2,7 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-beta.14"
+version = "1.0.0-beta.15"
 edition = "2021"
 # Zebra is only supported on the latest stable Rust version. Some earlier versions might work.
 # Zebra uses features introduced in Rust 1.58.
@@ -87,7 +87,7 @@ toml = "0.5.9"
 
 futures = "0.3.24"
 rayon = "1.5.3"
-tokio = { version = "1.21.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { version = "1.21.1", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.0.12"
 
@@ -96,7 +96,7 @@ color-eyre = { version = "0.6.1", default_features = false, features = ["issue-u
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
-thiserror = "1.0.34"
+thiserror = "1.0.35"
 
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 tracing-appender = "0.2.2"
@@ -153,7 +153,7 @@ abscissa_core = { version = "0.5", features = ["testing"] }
 hex = "0.4.3"
 once_cell = "1.14.0"
 regex = "1.6.0"
-semver = "1.0.13"
+semver = "1.0.14"
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { version = "1.0.85", features = ["preserve_order"] }
@@ -162,8 +162,8 @@ tempfile = "3.3.0"
 hyper = { version = "0.14.20", features = ["http1", "http2", "server"]}
 reqwest = "0.11.11"
 
-tokio = { version = "1.21.0", features = ["full", "tracing", "test-util"] }
-tokio-stream = "0.1.9"
+tokio = { version = "1.21.1", features = ["full", "tracing", "test-util"] }
+tokio-stream = "0.1.10"
 
 # test feature lightwalletd-grpc-tests
 prost = "0.11.0"

@@ -168,15 +168,24 @@ pub use crate::{
     config::Config,
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::PeerAddrState,
-    peer::{HandshakeError, PeerError, SharedPeerError},
+    peer::{Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, SharedPeerError},
     peer_set::init,
     policies::RetryLimit,
-    protocol::internal::{InventoryResponse, Request, Response},
+    protocol::{
+        external::{Version, VersionMessage},
+        internal::{InventoryResponse, Request, Response},
+    },
 };
 
-/// Types used in the definition of [`Request`] and [`Response`] messages.
+/// Types used in the definition of [`Request`], [`Response`], and [`VersionMessage`].
 pub mod types {
-    pub use crate::{meta_addr::MetaAddr, protocol::types::PeerServices};
+    pub use crate::{
+        meta_addr::MetaAddr,
+        protocol::{
+            external::{AddrInVersion, Nonce},
+            types::PeerServices,
+        },
+    };
 
     #[cfg(any(test, feature = "proptest-impl"))]
     pub use crate::protocol::external::InventoryHash;

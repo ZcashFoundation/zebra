@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "1.0.0-beta.14"
+version = "1.0.0-beta.15"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -28,8 +28,8 @@ serde = { version = "1.0.144", features = ["serde_derive"] }
 futures = "0.3.24"
 futures-util = "0.3.24"
 metrics = "0.18.1"
-thiserror = "1.0.34"
-tokio = { version = "1.21.0", features = ["time", "sync", "tracing", "rt-multi-thread"] }
+thiserror = "1.0.35"
+tokio = { version = "1.21.1", features = ["time", "sync", "tracing", "rt-multi-thread"] }
 tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.31"
 tracing-futures = "0.2.5"
@@ -60,7 +60,7 @@ proptest-derive = "0.3.0"
 rand07 = { package = "rand", version = "0.7" }
 spandoc = "0.2.2"
 
-tokio = { version = "1.21.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.21.1", features = ["full", "tracing", "test-util"] }
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.11"
 

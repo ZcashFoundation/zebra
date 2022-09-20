@@ -23,12 +23,9 @@ use crate::{
 };
 
 mod chain;
-mod queued_blocks;
 
 #[cfg(test)]
 mod tests;
-
-pub use queued_blocks::QueuedBlocks;
 
 pub(crate) use chain::Chain;
 
@@ -340,14 +337,13 @@ impl NonFinalizedState {
 
     /// Returns the [`transparent::Utxo`] pointed to by the given
     /// [`transparent::OutPoint`] if it is present in any chain.
+    ///
+    /// UTXOs are returned regardless of whether they have been spent.
     pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        for chain in self.chain_set.iter().rev() {
-            if let Some(utxo) = chain.created_utxos.get(outpoint) {
-                return Some(utxo.utxo.clone());
-            }
-        }
-
-        None
+        self.chain_set
+            .iter()
+            .rev()
+            .find_map(|chain| chain.created_utxo(outpoint))
     }
 
     /// Returns the `block` with the given hash in any chain.
@@ -366,6 +362,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the hash for a given `block::Height` if it is present in the best chain.
+    #[allow(dead_code)]
     pub fn best_hash(&self, height: block::Height) -> Option<block::Hash> {
         self.best_chain()?
             .blocks
@@ -391,6 +388,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the height of `hash` in the best chain.
+    #[allow(dead_code)]
     pub fn best_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         let best_chain = self.best_chain()?;
         let height = *best_chain.height_by_hash.get(&hash)?;

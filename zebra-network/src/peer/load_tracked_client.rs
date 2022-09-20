@@ -1,7 +1,10 @@
 //! A peer connection service wrapper type to handle load tracking and provide access to the
 //! reported protocol version.
 
-use std::task::{Context, Poll};
+use std::{
+    sync::Arc,
+    task::{Context, Poll},
+};
 
 use tower::{
     load::{Load, PeakEwma},
@@ -10,7 +13,7 @@ use tower::{
 
 use crate::{
     constants::{EWMA_DECAY_TIME_NANOS, EWMA_DEFAULT_RTT},
-    peer::Client,
+    peer::{Client, ConnectionInfo},
     protocol::external::types::Version,
 };
 
@@ -18,14 +21,17 @@ use crate::{
 ///
 /// It also keeps track of the peer's reported protocol version.
 pub struct LoadTrackedClient {
+    /// A service representing a connected peer, wrapped in a load tracker.
     service: PeakEwma<Client>,
-    version: Version,
+
+    /// The metadata for the connected peer `service`.
+    connection_info: Arc<ConnectionInfo>,
 }
 
 /// Create a new [`LoadTrackedClient`] wrapping the provided `client` service.
 impl From<Client> for LoadTrackedClient {
     fn from(client: Client) -> Self {
-        let version = client.version;
+        let connection_info = client.connection_info.clone();
 
         let service = PeakEwma::new(
             client,
@@ -34,14 +40,17 @@ impl From<Client> for LoadTrackedClient {
             tower::load::CompleteOnResponse::default(),
         );
 
-        LoadTrackedClient { service, version }
+        LoadTrackedClient {
+            service,
+            connection_info,
+        }
     }
 }
 
 impl LoadTrackedClient {
     /// Retrieve the peer's reported protocol version.
-    pub fn version(&self) -> Version {
-        self.version
+    pub fn remote_version(&self) -> Version {
+        self.connection_info.remote.version
     }
 }
 

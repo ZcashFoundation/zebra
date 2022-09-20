@@ -483,12 +483,11 @@ impl Chain {
         self.height_by_hash.get(&hash).cloned()
     }
 
-    /// Returns the non-finalized tip block hash and height.
-    #[allow(dead_code)]
-    pub fn non_finalized_tip(&self) -> (block::Hash, block::Height) {
+    /// Returns the non-finalized tip block height and hash.
+    pub fn non_finalized_tip(&self) -> (Height, block::Hash) {
         (
-            self.non_finalized_tip_hash(),
             self.non_finalized_tip_height(),
+            self.non_finalized_tip_hash(),
         )
     }
 
@@ -647,9 +646,21 @@ impl Chain {
     /// and removed from the relevant chain(s).
     pub fn unspent_utxos(&self) -> HashMap<transparent::OutPoint, transparent::OrderedUtxo> {
         let mut unspent_utxos = self.created_utxos.clone();
-        unspent_utxos.retain(|out_point, _utxo| !self.spent_utxos.contains(out_point));
+        unspent_utxos.retain(|outpoint, _utxo| !self.spent_utxos.contains(outpoint));
 
         unspent_utxos
+    }
+
+    /// Returns the [`transparent::Utxo`] pointed to by the given
+    /// [`transparent::OutPoint`] if it was created by this chain.
+    ///
+    /// UTXOs are returned regardless of whether they have been spent.
+    pub fn created_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
+        if let Some(utxo) = self.created_utxos.get(outpoint) {
+            return Some(utxo.utxo.clone());
+        }
+
+        None
     }
 
     // Address index queries

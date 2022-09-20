@@ -71,7 +71,7 @@ jobs:
           mdbook build book/
 
       - name: Deploy Zebra book to firebase
-        uses: w9jds/firebase-action@v11.5.0
+        uses: w9jds/firebase-action@v11.9.0
         with:
           args: deploy
         env:
@@ -82,12 +82,12 @@ jobs:
       - name: Build external docs
         run: |
           # Exclude zebra-utils, it is not for library or app users
-          cargo doc --no-deps --workspace --exclude zebra-utils
+          cargo doc --no-deps --workspace --all-features --exclude zebra-utils
         env:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
       - name: Deploy external docs to firebase
-        uses: w9jds/firebase-action@v11.5.0
+        uses: w9jds/firebase-action@v11.9.0
         with:
           args: deploy
         env:
@@ -96,12 +96,12 @@ jobs:
 
       - name: Build internal docs
         run: |
-          cargo doc --no-deps --document-private-items
+          cargo doc --no-deps --workspace --all-features --document-private-items
         env:
           RUSTDOCFLAGS: '--html-in-header katex-header.html'
 
       - name: Deploy internal docs to firebase
-        uses: w9jds/firebase-action@v11.5.0
+        uses: w9jds/firebase-action@v11.9.0
         with:
           args: deploy
         env:

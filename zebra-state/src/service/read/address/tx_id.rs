@@ -1,4 +1,14 @@
 //! Reading address transaction IDs.
+//!
+//! In the functions in this module:
+//!
+//! The StateService commits blocks to the finalized state before updating
+//! `chain` from the latest chain. Then it can commit additional blocks to
+//! the finalized state after we've cloned the `chain`.
+//!
+//! This means that some blocks can be in both:
+//! - the cached [`Chain`], and
+//! - the shared finalized [`ZebraDb`] reference.
 
 use std::{
     collections::{BTreeMap, HashSet},
@@ -134,10 +144,7 @@ where
 
     // # Correctness
     //
-    // The StateService commits blocks to the finalized state before updating the latest chain,
-    // and it can commit additional blocks after we've cloned this `chain` variable.
-    //
-    // But we can compensate for addresses with mismatching blocks,
+    // We can compensate for addresses with mismatching blocks,
     // by adding the overlapping non-finalized transaction IDs.
     //
     // If there is only one address, mismatches aren't possible,
