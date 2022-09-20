@@ -1,6 +1,6 @@
 //! Arbitrary data generation and test setup for Zebra's state.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use proptest::{
@@ -9,11 +9,12 @@ use proptest::{
     strategy::{NewTree, ValueTree},
     test_runner::TestRunner,
 };
+use tokio::time::timeout;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
     block::Block,
-    fmt::SummaryDebug,
+    fmt::{humantime_seconds, SummaryDebug},
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade},
     LedgerState,
@@ -26,6 +27,9 @@ use crate::{
 };
 
 pub use zebra_chain::block::arbitrary::MAX_PARTIAL_CHAIN_BLOCKS;
+
+/// How long we wait for chain tip updates before skipping them.
+pub const CHAIN_TIP_UPDATE_WAIT_LIMIT: Duration = Duration::from_secs(2);
 
 #[derive(Debug)]
 pub struct PreparedChainTree {
@@ -212,10 +216,21 @@ pub async fn populated_state(
         // Wait for the block result and the chain tip update,
         // which both happen in a separate thread from this one.
         rsp.expect("unexpected block commit failure");
-        chain_tip_change
-            .wait_for_tip_change()
-            .await
-            .expect("unexpected chain tip update failure");
+
+        // Allow the chain tip update
+        if let Err(timeout_error) = timeout(
+            CHAIN_TIP_UPDATE_WAIT_LIMIT,
+            chain_tip_change.wait_for_tip_change(),
+        )
+        .await
+        .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+        {
+            info!(
+                timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
+                ?timeout_error,
+                "timeout waiting for chain tip change after committing block"
+            );
+        }
     }
 
     (state, read_state, latest_chain_tip, chain_tip_change)
