@@ -30,7 +30,7 @@ group = "0.12.0"
 incrementalmerkletree = "0.3.0"
 jubjub = "0.9.0"
 lazy_static = "1.4.0"
-primitive-types = "0.11.1"
+primitive-types = "0.12.0"
 rand_core = "0.6.3"
 ripemd = "0.1.1"
 # Matches version used by hdwallet
