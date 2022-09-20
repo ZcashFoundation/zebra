@@ -143,9 +143,9 @@ sort-direction: ascending
 # Characters escaped when converting PR titles to CHANGELOG entries.
 # Add ` to disable code blocks.
 change-title-escapes: '\<*_&#@'
-# Strip conventional commit prefixes from PR titles.
+# Strip PR series numbers, leading spaces, and conventional commit prefixes from PR titles.
 replacers:
-  - search: '/- ([a-zA-Z0-9\(\)]+:)/'
+  - search: '/- [0-9\. ]*([a-zA-Z0-9\(\)]+:)?/'
     replace: '- '
 
 # The list of contributors to each release.
