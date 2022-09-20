@@ -1,5 +1,8 @@
 # Creates a draft release with all the PR names since the last release.
 # https://github.com/ZcashFoundation/zebra/releases
+#
+# Workflow is based on:
+# https://github.com/marketplace/actions/release-drafter#usage
 name: Release Drafter
 
 on:
