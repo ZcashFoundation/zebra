@@ -29,6 +29,8 @@ pub fn write_blocks_from_channels(
     invalid_block_reset_sender: tokio::sync::mpsc::UnboundedSender<block::Hash>,
     chain_tip_sender: Arc<Mutex<ChainTipSender>>,
 ) {
+    // Write all the finalized blocks sent by the state,
+    // until the state closes the finalized block channel's sender.
     while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
         // TODO: split these checks into separate functions
 
@@ -92,15 +94,14 @@ pub fn write_blocks_from_channels(
         }
     }
 
-    // We're finished receiving finalized blocks from the state.
-    finalized_block_write_receiver.close();
-    std::mem::drop(finalized_block_write_receiver);
-
+    // Do this check even if the channel got closed before any finalized blocks were sent.
+    // This can happen if we're past the finalized tip.
     if invalid_block_reset_sender.is_closed() {
         info!("StateService closed the block reset channel. Is Zebra shutting down?");
         return;
     }
 
+    // Write all the finalized blocks sent by the state, until Zebra shuts down.
     while let Some(_block) = non_finalized_block_write_receiver.blocking_recv() {
         if invalid_block_reset_sender.is_closed() {
             info!("StateService closed the block reset channel. Is Zebra shutting down?");
