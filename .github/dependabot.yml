@@ -7,8 +7,9 @@ updates:
       timezone: America/New_York
     open-pull-requests-limit: 10
     labels:
-      - 'A-dependencies'
+      - 'C-trivial' # TODO: fix trivial label name
       - 'A-rust'
+      - 'A-dependencies'
       - 'P-Low :snowflake:'
   - package-ecosystem: github-actions
     directory: '/'
@@ -17,6 +18,7 @@ updates:
       timezone: America/New_York
     open-pull-requests-limit: 10
     labels:
+      - 'C-trivial' # TODO: fix trivial label name
       - 'A-infrastructure'
       - 'A-dependencies'
       - 'P-Low :snowflake:'
