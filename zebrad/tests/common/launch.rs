@@ -25,7 +25,8 @@ use zebra_test::{
 use zebrad::config::ZebradConfig;
 
 use crate::common::{
-    lightwalletd::{random_known_rpc_port_config, LightwalletdTestType},
+    config::testdir,
+    lightwalletd::{zebra_skip_lightwalletd_tests, LightwalletdTestType},
     sync::FINISH_PARTIAL_SYNC_TIMEOUT,
 };
 
@@ -196,37 +197,49 @@ where
     }
 }
 
-/// Spawns a zebrad instance to interact with lightwalletd.
+/// Spawns a zebrad instance on `network` to test lightwalletd with `test_type`.
 ///
-/// If `internet_connection` is `false` then spawn, but without any peers.
-/// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
-/// providing an initial state to the zebrad instance.
+/// If `use_internet_connection` is `false` then spawn, but without any peers.
+/// This prevents it from downloading blocks. Instead, use the `ZEBRA_CACHED_STATE_DIR`
+/// environmental variable to provide an initial state to the zebrad instance.
+///
+/// Returns:
+/// - `Ok(Some(zebrad, zebra_rpc_address))` on success,
+/// - `Ok(None)` if the test doesn't have the required network or cached state, and
+/// - `Err(_)` if spawning zebrad fails.
 #[tracing::instrument]
-pub fn spawn_zebrad_for_rpc<P: ZebradTestDirExt + std::fmt::Debug>(
+pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     network: Network,
-    zebra_directory: P,
+    test_name: S,
     test_type: LightwalletdTestType,
-    debug_skip_parameter_preload: bool,
-    internet_connection: bool,
-) -> Result<(TestChild<P>, SocketAddr)> {
-    // This is what we recommend our users configure.
-    let mut config = random_known_rpc_port_config(true)
-        .expect("Failed to create a config file with a known RPC listener port");
+    use_internet_connection: bool,
+) -> Result<Option<(TestChild<TempDir>, SocketAddr)>> {
+    let test_name = test_name.as_ref();
 
-    config.state.ephemeral = false;
-    if !internet_connection {
+    // Skip the test unless the user specifically asked for it
+    if !can_spawn_zebrad_for_rpc(test_name, test_type) {
+        return Ok(None);
+    }
+
+    // Get the zebrad config
+    let mut config = test_type
+        .zebrad_config(test_name)
+        .expect("already checked config")?;
+
+    // TODO: move this into zebrad_config()
+    config.network.network = network;
+    if !use_internet_connection {
         config.network.initial_mainnet_peers = IndexSet::new();
         config.network.initial_testnet_peers = IndexSet::new();
-    }
-    config.network.network = network;
-    if !internet_connection {
+
         config.mempool.debug_enable_at_height = Some(0);
     }
-    config.consensus.debug_skip_parameter_preload = debug_skip_parameter_preload;
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 
-    let mut zebrad = zebra_directory
+    // Writes a configuration that has RPC listen_addr set (if needed).
+    // If the state path env var is set, uses it in the config.
+    let zebrad = testdir()?
         .with_config(&mut config)?
         .spawn_child(args!["start"])?
         .bypass_test_capture(true)
@@ -235,60 +248,28 @@ pub fn spawn_zebrad_for_rpc<P: ZebradTestDirExt + std::fmt::Debug>(
 
     let rpc_address = config.rpc.listen_addr.unwrap();
 
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
-
-    Ok((zebrad, rpc_address))
+    Ok(Some((zebrad, rpc_address)))
 }
 
-/// Wait for lightwalletd to sync to Zebra's tip.
-///
-/// "Adding block" and "Waiting for block" logs stop when `lightwalletd` reaches the tip.
-/// But if the logs just stop, we can't tell the difference between a hang and fully synced.
-/// So we assume `lightwalletd` will sync and log large groups of blocks,
-/// and check for logs with heights near the mainnet tip height.
+/// Returns `true` if a zebrad test for `test_type` has everything it needs to run.
 #[tracing::instrument]
-pub fn wait_for_zebrad_and_lightwalletd_sync<
-    P: ZebradTestDirExt + std::fmt::Debug + std::marker::Send + 'static,
->(
-    mut lightwalletd: TestChild<TempDir>,
-    mut zebrad: TestChild<P>,
+pub fn can_spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
+    test_name: S,
     test_type: LightwalletdTestType,
-    wait_for_zebrad_tip: bool,
-) -> Result<(TestChild<TempDir>, TestChild<P>)> {
-    let lightwalletd_thread = std::thread::spawn(move || -> Result<_> {
-        tracing::info!(?test_type, "waiting for lightwalletd to sync to the tip");
+) -> bool {
+    if zebra_test::net::zebra_skip_network_tests() {
+        return false;
+    }
 
-        lightwalletd
-            .expect_stdout_line_matches(crate::common::sync::LIGHTWALLETD_SYNC_FINISHED_REGEX)?;
+    // Skip the test unless the user specifically asked for it
+    //
+    // TODO: pass test_type to zebra_skip_lightwalletd_tests() and check for lightwalletd launch in there
+    if test_type.launches_lightwalletd() && zebra_skip_lightwalletd_tests() {
+        return false;
+    }
 
-        Ok(lightwalletd)
-    });
-
-    // `lightwalletd` syncs can take a long time,
-    // so we need to check that `zebrad` has synced to the tip in parallel.
-    let lightwalletd_thread_and_zebrad = std::thread::spawn(move || -> Result<_> {
-        tracing::info!(?test_type, "waiting for zebrad to sync to the tip");
-
-        while !lightwalletd_thread.is_finished() {
-            zebrad.expect_stdout_line_matches(crate::common::sync::SYNC_FINISHED_REGEX)?;
-        }
-
-        Ok((lightwalletd_thread, zebrad))
-    });
-
-    // Retrieve the child process handles from the threads
-    let (lightwalletd_thread, mut zebrad) = lightwalletd_thread_and_zebrad
-        .join()
-        .unwrap_or_else(|panic_object| std::panic::resume_unwind(panic_object))?;
-
-    let lightwalletd = lightwalletd_thread
-        .join()
-        .unwrap_or_else(|panic_object| std::panic::resume_unwind(panic_object))?;
-
-    // If we are in sync mempool should activate
-    zebrad.expect_stdout_line_matches("activating mempool")?;
-
-    Ok((lightwalletd, zebrad))
+    // Check if we have any necessary cached states for the zebrad config
+    test_type.zebrad_config(test_name).is_some()
 }
 
 /// Panics if `$pred` is false, with an error report containing:

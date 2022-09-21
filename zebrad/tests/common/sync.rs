@@ -45,14 +45,6 @@ pub const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 pub const SYNC_FINISHED_REGEX: &str =
     r"finished initial sync to chain tip, using gossiped blocks .*sync_percent.*=.*100\.";
 
-/// The text that should be logged when `lightwalletd`'s initial sync is near the chain tip.
-///
-/// We can't guarantee a "Waiting for block" log, so we just check for a block near the tip height.
-///
-/// TODO: update the regex to `1[8-9][0-9]{5}` when mainnet reaches block 1_800_000
-pub const LIGHTWALLETD_SYNC_FINISHED_REGEX: &str =
-    r"([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block: 1[7-9][0-9]{5})";
-
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///
 /// This should only take a second, but sometimes CI VMs or RocksDB can be slow.
