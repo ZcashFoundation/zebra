@@ -36,7 +36,7 @@ use zebrad::components::mempool::downloads::MAX_INBOUND_CONCURRENCY;
 
 use crate::common::{
     cached_state::{load_tip_height_from_state_directory, start_state_service_with_cache_dir},
-    launch::spawn_zebrad_for_rpc_without_initial_peers,
+    launch::spawn_zebrad_for_rpc,
     lightwalletd::{
         wallet_grpc::{
             self, connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Empty, Exclude,
@@ -109,13 +109,10 @@ pub async fn run() -> Result<()> {
         "got transactions to send",
     );
 
-    // TODO: change debug_skip_parameter_preload to true if we do the mempool test in the wallet gRPC test
-    let (mut zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
-        Network::Mainnet,
-        zebrad_state_path,
-        test_type,
-        false,
-    )?;
+    // Start zebrad with no peers, we want to send transactions without blocks coming in. If `wallet_grpc_test`
+    // runs before this test (as it does in `lightwalletd_test_suite`), then we are the most up to date with tip we can.
+    let (mut zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc(network, zebrad_state_path, test_type, false, false)?;
 
     tracing::info!(
         ?zebra_rpc_address,
@@ -136,16 +133,35 @@ pub async fn run() -> Result<()> {
 
     zebrad.expect_stdout_line_matches("activating mempool")?;
 
-    // TODO: check that lightwalletd is at the tip using gRPC (#4894)
-    //
-    // If this takes a long time, we might need to check zebrad logs for failures in a separate thread.
-
     tracing::info!(
         ?lightwalletd_rpc_port,
         "connecting gRPC client to lightwalletd...",
     );
 
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
+
+    // Check if zebrad and lightwalletd are both in the same height.
+
+    // Get the block tip from lightwalletd
+    let block_tip = rpc_client
+        .get_latest_block(wallet_grpc::ChainSpec {})
+        .await?
+        .into_inner();
+
+    // Get the block tip from zebrad
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("http://{}", &zebra_rpc_address.to_string()))
+        .body(r#"{"jsonrpc": "2.0", "method": "getblockchaininfo", "params": [], "id":123 }"#)
+        .header("Content-Type", "application/json")
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    // Make sure tip from lightwalletd is the same as zebrad
+    let parsed: serde_json::Value = serde_json::from_str(&res)?;
+    assert_eq!(block_tip.height, parsed["result"]["blocks"]);
 
     // To avoid filling the mempool queue, limit the transactions to be sent to the RPC and mempool queue limits
     transactions.truncate(max_sent_transactions());

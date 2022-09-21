@@ -195,26 +195,32 @@ where
     }
 }
 
-/// Spawns a zebrad instance to interact with lightwalletd, but without an internet connection.
+/// Spawns a zebrad instance to interact with lightwalletd.
 ///
+/// If `internet_connection` is not true then spawn but without any peers.
 /// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
 /// providing an initial state to the zebrad instance.
 #[tracing::instrument]
-pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt + std::fmt::Debug>(
+pub fn spawn_zebrad_for_rpc<P: ZebradTestDirExt + std::fmt::Debug>(
     network: Network,
     zebra_directory: P,
     test_type: LightwalletdTestType,
     debug_skip_parameter_preload: bool,
+    internet_connection: bool,
 ) -> Result<(TestChild<P>, SocketAddr)> {
     // This is what we recommend our users configure.
     let mut config = random_known_rpc_port_config(true)
         .expect("Failed to create a config file with a known RPC listener port");
 
     config.state.ephemeral = false;
-    config.network.initial_mainnet_peers = IndexSet::new();
+    if !internet_connection {
+        config.network.initial_mainnet_peers = IndexSet::new();
+    }
     config.network.initial_testnet_peers = IndexSet::new();
     config.network.network = network;
-    config.mempool.debug_enable_at_height = Some(0);
+    if !internet_connection {
+        config.mempool.debug_enable_at_height = Some(0);
+    }
     config.consensus.debug_skip_parameter_preload = debug_skip_parameter_preload;
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
@@ -228,7 +234,6 @@ pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt + std::fmt
 
     let rpc_address = config.rpc.listen_addr.unwrap();
 
-    zebrad.expect_stdout_line_matches("activating mempool")?;
     zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
 
     Ok((zebrad, rpc_address))

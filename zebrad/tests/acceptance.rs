@@ -136,19 +136,16 @@ use common::{
     config::{
         config_file_full_path, configs_dir, default_test_config, persistent_test_config, testdir,
     },
-    launch::{
-        spawn_zebrad_for_rpc_without_initial_peers, ZebradTestDirExt, BETWEEN_NODES_DELAY,
-        LAUNCH_DELAY,
-    },
+    launch::{spawn_zebrad_for_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY},
     lightwalletd::{
         random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
         LightwalletdTestType::{self, *},
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
-        LARGE_CHECKPOINT_TIMEOUT, LIGHTWALLETD_SYNC_FINISHED_REGEX, MEDIUM_CHECKPOINT_TEST_HEIGHT,
-        STOP_AT_HEIGHT_REGEX, STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX,
-        TINY_CHECKPOINT_TEST_HEIGHT, TINY_CHECKPOINT_TIMEOUT,
+        LARGE_CHECKPOINT_TIMEOUT, MEDIUM_CHECKPOINT_TEST_HEIGHT, STOP_AT_HEIGHT_REGEX,
+        STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX, TINY_CHECKPOINT_TEST_HEIGHT,
+        TINY_CHECKPOINT_TIMEOUT,
     },
 };
 
@@ -1476,21 +1473,21 @@ async fn lightwalletd_test_suite() -> Result<()> {
     // Only runs when ZEBRA_CACHED_STATE_DIR is set.
     lightwalletd_integration_test(UpdateZebraCachedStateNoRpc)?;
 
-    // Only runs when ZEBRA_CACHED_STATE_DIR is set.
-    // When manually running the test suite, allow cached state in the full sync test.
-    lightwalletd_integration_test(FullSyncFromGenesis {
-        allow_lightwalletd_cached_state: true,
-    })?;
-
-    // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
-    lightwalletd_integration_test(UpdateCachedState)?;
-
-    // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set,
-    // and the compile-time gRPC feature is on.
+    // These tests need the compile-time gRPC feature
     #[cfg(feature = "lightwalletd-grpc-tests")]
     {
-        common::lightwalletd::send_transaction_test::run().await?;
+        // Only runs when ZEBRA_CACHED_STATE_DIR is set.
+        // When manually running the test suite, allow cached state in the full sync test.
+        lightwalletd_integration_test(FullSyncFromGenesis {
+            allow_lightwalletd_cached_state: true,
+        })?;
+
+        // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
+        lightwalletd_integration_test(UpdateCachedState)?;
+
+        // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
         common::lightwalletd::wallet_grpc_test::run().await?;
+        common::lightwalletd::send_transaction_test::run().await?;
     }
 
     Ok(())
@@ -1498,9 +1495,19 @@ async fn lightwalletd_test_suite() -> Result<()> {
 
 /// Run a lightwalletd integration test with a configuration for `test_type`.
 ///
+/// Tests that sync `lightwalletd` to the chain tip require the `lightwalletd-grpc-tests` feature`:
+/// - [`FullSyncFromGenesis`]
+/// - [`UpdateCachedState`]
+///
 /// Set `FullSyncFromGenesis { allow_lightwalletd_cached_state: true }` to speed up manual full sync tests.
 ///
+/// # Relibility
+///
 /// The random ports in this test can cause [rare port conflicts.](#Note on port conflict)
+///
+/// # Panics
+///
+/// If the `test_type` is UpdateZebraCachedStateNoRpc
 #[tracing::instrument]
 fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -1655,43 +1662,24 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     };
 
     let (mut zebrad, lightwalletd) = if test_type.needs_zebra_cached_state() {
-        if let Some(mut lightwalletd) = lightwalletd {
-            // Wait for lightwalletd to sync to Zebra's tip.
-            //
-            // "Adding block" and "Waiting for block" logs stop when `lightwalletd` reaches the tip.
-            // But if the logs just stop, we can't tell the difference between a hang and fully synced.
-            // So we assume `lightwalletd` will sync and log large groups of blocks,
-            // and check for logs with heights near the mainnet tip height.
-            let lightwalletd_thread = std::thread::spawn(move || -> Result<_> {
-                tracing::info!(?test_type, "waiting for lightwalletd to sync to the tip");
+        if let Some(lightwalletd) = lightwalletd {
+            #[cfg(feature = "lightwalletd-grpc-tests")]
+            {
+                let (zebrad, lightwalletd) =
+                    common::lightwalletd::wallet_grpc::wait_for_zebrad_and_lightwalletd_tip(
+                        lightwalletd,
+                        zebrad,
+                        test_type,
+                    )?;
+                (zebrad, Some(lightwalletd))
+            }
 
-                lightwalletd.expect_stdout_line_matches(LIGHTWALLETD_SYNC_FINISHED_REGEX)?;
-
-                Ok(lightwalletd)
-            });
-
-            // `lightwalletd` syncs can take a long time,
-            // so we need to check that `zebrad` has synced to the tip in parallel.
-            let lightwalletd_thread_and_zebrad = std::thread::spawn(move || -> Result<_> {
-                tracing::info!(?test_type, "waiting for zebrad to sync to the tip");
-
-                while !lightwalletd_thread.is_finished() {
-                    zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
-                }
-
-                Ok((lightwalletd_thread, zebrad))
-            });
-
-            // Retrieve the child process handles from the threads
-            let (lightwalletd_thread, zebrad) = lightwalletd_thread_and_zebrad
-                .join()
-                .unwrap_or_else(|panic_object| panic::resume_unwind(panic_object))?;
-
-            let lightwalletd = lightwalletd_thread
-                .join()
-                .unwrap_or_else(|panic_object| panic::resume_unwind(panic_object))?;
-
-            (zebrad, Some(lightwalletd))
+            #[cfg(not(feature = "lightwalletd-grpc-tests"))]
+            panic!(
+                "the {test_type:?} test requires `cargo test --feature lightwalletd-grpc-tests` \n\
+                 zebrad: {zebrad:?} \n\
+                 lightwalletd: {lightwalletd:?}"
+            );
         } else {
             // We're just syncing Zebra, so there's no lightwalletd to check
             tracing::info!(?test_type, "waiting for zebrad to sync to the tip");
@@ -1995,12 +1983,8 @@ async fn fully_synced_rpc_test() -> Result<()> {
 
     let network = Network::Mainnet;
 
-    let (_zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
-        network,
-        cached_state_path.unwrap(),
-        test_type,
-        true,
-    )?;
+    let (_zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc(network, cached_state_path.unwrap(), test_type, true, false)?;
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used

@@ -46,12 +46,12 @@ use zebra_chain::{
 use zebra_network::constants::USER_AGENT;
 
 use crate::common::{
-    launch::spawn_zebrad_for_rpc_without_initial_peers,
+    launch::spawn_zebrad_for_rpc,
     lightwalletd::{
         wallet_grpc::{
-            connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Address, AddressList,
-            BlockId, BlockRange, ChainSpec, Empty, GetAddressUtxosArg,
-            TransparentAddressBlockFilter, TxFilter,
+            connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server,
+            wait_for_zebrad_and_lightwalletd_tip, Address, AddressList, BlockId, BlockRange,
+            ChainSpec, Empty, GetAddressUtxosArg, TransparentAddressBlockFilter, TxFilter,
         },
         zebra_skip_lightwalletd_tests,
         LightwalletdTestType::UpdateCachedState,
@@ -100,14 +100,14 @@ pub async fn run() -> Result<()> {
          launching disconnected zebrad...",
     );
 
-    // Launch zebra using a predefined zebrad state path
-    //
-    // TODO: change debug_skip_parameter_preload to true if we do the mempool test in the send transaction test
-    let (mut zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
+    // Launch zebra with peers and using a predefined zebrad state path.
+    // As this tests are just queries we can have a live chain where blocks are coming.
+    let (zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc(
         network,
-        zebrad_state_path.unwrap(),
+        zebrad_state_path.clone().unwrap(),
         test_type,
-        false,
+        true,
+        true,
     )?;
 
     tracing::info!(
@@ -116,9 +116,9 @@ pub async fn run() -> Result<()> {
     );
 
     // Launch lightwalletd
-    let (_lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(
+    let (lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(
         zebra_rpc_address,
-        lightwalletd_state_path,
+        lightwalletd_state_path.clone(),
         test_type,
         false,
     )?;
@@ -128,13 +128,11 @@ pub async fn run() -> Result<()> {
         "spawned lightwalletd connected to zebrad, waiting for zebrad mempool activation...",
     );
 
-    zebrad.expect_stdout_line_matches("activating mempool")?;
+    // Make sure we are in sync
+    let (_zebrad, _lightwalletd) =
+        wait_for_zebrad_and_lightwalletd_tip(lightwalletd, zebrad, test_type)?;
 
     // Give lightwalletd a few seconds to sync to the tip before connecting to it
-    //
-    // TODO: check that lightwalletd is at the tip using gRPC (#4894)
-    //
-    // If this takes a long time, we might need to check zebrad logs for failures in a separate thread.
     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
 
     tracing::info!(
@@ -144,6 +142,29 @@ pub async fn run() -> Result<()> {
 
     // Connect to the lightwalletd instance
     let mut rpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
+
+    // Check if zebrad and lightwalletd are both in the same height.
+
+    // Get the block tip from lightwalletd
+    let block_tip = rpc_client
+        .get_latest_block(ChainSpec {})
+        .await?
+        .into_inner();
+
+    // Get the block tip from zebrad
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("http://{}", &zebra_rpc_address.to_string()))
+        .body(r#"{"jsonrpc": "2.0", "method": "getblockchaininfo", "params": [], "id":123 }"#)
+        .header("Content-Type", "application/json")
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    // Make sure tip from lightwalletd and from zebrad are the same
+    let parsed: serde_json::Value = serde_json::from_str(&res)?;
+    assert_eq!(block_tip.height, parsed["result"]["blocks"]);
 
     // End of the setup and start the tests
     tracing::info!(?lightwalletd_rpc_port, "sending gRPC queries...");
