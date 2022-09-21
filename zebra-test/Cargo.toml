@@ -33,7 +33,7 @@ thiserror = "1.0.35"
 
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 tracing-error = "0.2.0"
-tracing = "0.1.31"
+tracing = "0.1.35"
 
 [dev-dependencies]
 tempfile = "3.3.0"

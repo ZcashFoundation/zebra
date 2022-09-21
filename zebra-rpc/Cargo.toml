@@ -30,7 +30,7 @@ indexmap = { version = "1.9.1", features = ["serde"] }
 tokio = { version = "1.21.1", features = ["time", "rt-multi-thread", "macros", "tracing"] }
 tower = "0.4.13"
 
-tracing = "0.1.31"
+tracing = "0.1.35"
 tracing-futures = "0.2.5"
 
 hex = { version = "0.4.3", features = ["serde"] }
