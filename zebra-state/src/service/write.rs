@@ -40,6 +40,11 @@ pub fn write_blocks_from_channels(
         }
 
         // Discard any children of invalid blocks in the channel
+        //
+        // `commit_finalized()` requires blocks in height order.
+        // So if there has been a block commit error,
+        // we need to drop all the descendants of that block,
+        // until we receive a block at the required next height.
         let next_valid_height = finalized_state
             .db
             .finalized_tip_height()
