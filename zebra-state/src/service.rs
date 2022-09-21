@@ -1293,7 +1293,6 @@ pub fn init(
 }
 
 /// Calls [`init`] with the provided [`Config`] and [`Network`] from a blocking task.
-/// 
 /// Returns a [`tokio::task::JoinHandle`] with a boxed state service,
 /// a read state service, and receivers for state chain tip updates.
 pub fn spawn_init(
