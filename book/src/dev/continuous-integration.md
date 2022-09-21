@@ -50,8 +50,8 @@ The [Delete GCP Resources](https://github.com/ZcashFoundation/zebra/blob/main/.g
 workflow automatically deletes test instances, instance templates, disks, and images older than a few days.
 
 If you want to keep instances, instance templates, disks, or images in Google Cloud, name them so they don't match the automated names:
-- deleted instance templates and disks end in a commit hash, so use a name that doesn't end in `-[0-9a-f]{7,}`
-- deleted images start with `zebrad-cache` or `lwd-cache`, so use a name starting with anything else
+- deleted instances, instance templates and disks end in a commit hash, so use a name that doesn't end in `-[0-9a-f]{7,}`
+- deleted disks and images start with `zebrad-` or `lwd-`, so use a name starting with anything else
 
 Our production Google Cloud project doesn't have automated deletion.
 
