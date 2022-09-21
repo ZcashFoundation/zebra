@@ -32,7 +32,7 @@ jubjub = "0.9.0"
 lazy_static = "1.4.0"
 primitive-types = "0.11.1"
 rand_core = "0.6.3"
-ripemd = "0.1.1"
+ripemd = "0.1.2"
 # Matches version used by hdwallet
 secp256k1 = { version = "0.21.3", features = ["serde"] }
 sha2 = { version = "0.9.9", features = ["compress"] }
