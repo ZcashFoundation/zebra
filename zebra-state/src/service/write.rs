@@ -10,8 +10,8 @@ use crate::service::{
     ChainTipBlock, ChainTipSender,
 };
 
-/// Reads blocks from the channels, write them to the `finalized_state`,
-/// and updates the
+/// Reads blocks from the channels, writes them to the `finalized_state`,
+/// and updates the `chain_tip_sender`.
 ///
 /// TODO: pass the non-finalized state and associated update channel to this function
 #[instrument(skip(

@@ -250,6 +250,8 @@ impl Drop for StateService {
         // so dropping it should shut down everything.
 
         // Close the channels (non-blocking)
+        // This makes the block write thread exit the next time it checks the channels.
+        // We want to do this here so we get any errors or panics from the block write task before it shuts down.
         self.invalid_block_reset_receiver.close();
 
         std::mem::drop(self.finalized_block_write_sender.take());
@@ -465,7 +467,7 @@ impl StateService {
     }
 
     /// Finds queued finalized blocks to be committed to the state in order,
-    /// remove them from the queue, and sends them to the block commit task.
+    /// removes them from the queue, and sends them to the block commit task.
     ///
     /// After queueing a finalized block, this method checks whether the newly
     /// queued block (and any of its descendants) can be committed to the state.
