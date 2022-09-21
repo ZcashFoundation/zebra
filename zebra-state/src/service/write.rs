@@ -56,6 +56,8 @@ pub fn write_blocks_from_channels(
             );
 
             // We don't want to send a reset here, because it could overwrite a valid sent hash
+            std::mem::drop(ordered_block);
+            continue;
         }
 
         // Try committing the block
