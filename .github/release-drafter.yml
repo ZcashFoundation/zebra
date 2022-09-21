@@ -146,7 +146,7 @@ sort-direction: ascending
 change-title-escapes: '\<*_&#@'
 # Strip PR series numbers, leading spaces, and conventional commit prefixes from PR titles.
 replacers:
-  - search: '/- [0-9\. ]*([a-zA-Z0-9\(\)]+:)?/'
+  - search: '/- [0-9\. ]*([a-zA-Z0-9\(\)!]+:)?/'
     replace: '- '
 
 # The list of contributors to each release.
