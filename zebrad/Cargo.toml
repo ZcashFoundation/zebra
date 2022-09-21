@@ -104,7 +104,7 @@ tracing-error = "0.2.0"
 tracing-futures = "0.2.5"
 tracing = "0.1.31"
 
-metrics = "0.18.1"
+metrics = "0.20.1"
 
 dirs = "4.0.0"
 atty = "0.2.14"
