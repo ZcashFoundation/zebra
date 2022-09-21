@@ -47,16 +47,13 @@ Please shut down large instances when they are not being used.
 ### Automated Deletion
 
 The [Delete GCP Resources](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/delete-gcp-resources.yml)
-workflow automatically deletes instance templates, disks, and images older than a few days.
+workflow automatically deletes test instances, instance templates, disks, and images older than a few days.
 
-Running instances and their disks are protected from deletion.
-
-If you want to keep instance templates, disks, or images in Google Cloud, name them so they don't match the automated names:
-- deleted instance templates and disks end in a commit hash, so use a name ending in `-` or `-[^0-9a-f]+`
+If you want to keep instances, instance templates, disks, or images in Google Cloud, name them so they don't match the automated names:
+- deleted instance templates and disks end in a commit hash, so use a name that doesn't end in `-[0-9a-f]{7,}`
 - deleted images start with `zebrad-cache` or `lwd-cache`, so use a name starting with anything else
 
-Our other Google Cloud projects don't have automated deletion, so you can also use them for experiments or production deployments.
-
+Our production Google Cloud project doesn't have automated deletion.
 
 ## Troubleshooting
 
