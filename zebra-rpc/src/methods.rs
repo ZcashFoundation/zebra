@@ -1283,7 +1283,7 @@ fn check_height_range(start: Height, end: Height, chain_height: Height) -> Resul
     }
     if start > chain_height || end > chain_height {
         return Err(Error::invalid_params(format!(
-            "start {start:?} or end {end:?} must both be less than or equal to the chain tip {chain_height:?}"
+            "start {start:?} and end {end:?} must both be less than or equal to the chain tip {chain_height:?}"
         )));
     }
 
