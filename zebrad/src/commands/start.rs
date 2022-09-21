@@ -103,8 +103,11 @@ impl StartCmd {
         info!(?config);
 
         info!("initializing node state");
+        info!("opening database, this may take a couple minutes");
+
         let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
-            zebra_state::init(config.state.clone(), config.network.network);
+            zebra_state::spawn_init(config.state.clone(), config.network.network).await?;
+
         let state = ServiceBuilder::new()
             .buffer(Self::state_buffer_bound())
             .service(state_service);
