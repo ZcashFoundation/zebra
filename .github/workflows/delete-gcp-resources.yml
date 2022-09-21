@@ -44,6 +44,10 @@ jobs:
       #
       # We only delete instances that end in 7 or more hex characters,
       # to avoid deleting managed instance groups and manually created instances.
+      #
+      # ${INSTANCE_AND_ZONE} expands to:
+      # <instance-name> --zone=<zone-name>
+      # so it can't be shell-quoted.
       - name: Delete old instances
         run: |
           DELETE_BEFORE_DATE=$(date --date="$DELETE_INSTANCE_DAYS days ago" '+%Y%m%d')
@@ -72,7 +76,11 @@ jobs:
 
       # Deletes all the disks older than $DELETE_AGE_DAYS days.
       #
-      # Disks that are attached to an instance template can't be deleted, so it is safe to delete all disks here.
+      # Disks that are attached to an instance template can't be deleted, so it is safe to try to delete all disks here.
+      #
+      # ${DISK_AND_LOCATION} expands to:
+      # <disk-name> --[zone|region]=<location-name>
+      # so it can't be shell-quoted.
       - name: Delete old disks
         run: |
           DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
