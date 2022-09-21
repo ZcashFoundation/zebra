@@ -41,7 +41,7 @@ autolabeler:
       - '/fix/i'
       - '/bug/i'
   # Changes that are almost always trivial for users
-  - label: 'C-trivial'  # TODO: fix trivial label name
+  - label: 'C-trivial'
     branch:
       - '/clean/i'
       - '/chore/i'
@@ -95,11 +95,12 @@ categories:
   - title: 'Removed'
     labels:
       - 'C-removal'
-      # TODO: add breaking change label here
+      - 'C-breaking'
   - title: 'Deprecated'
     labels:
       - 'C-deprecation'
-      These features might be removed in Zebra $NEXT_MINOR_VERSION
+      # TODO: when release drafter has per-category templates, add this to the Deprecated category template:
+      # 'These features might be removed in Zebra $NEXT_MINOR_VERSION'
   - title: 'Added'
     labels:
       - 'C-feature'
@@ -116,7 +117,7 @@ categories:
   # TODO: if we're happy with the trivial PRs, use "exclude-labels:" instead
   - title: 'Trivial *TODO:* put this in a PR comment, not the CHANGELOG'
     labels:
-      # TODO: add trivial label here
+      - 'C-trivial'
       - 'C-cleanup'
 
 # The next release's $RESOLVED_VERSION, based on the labels of the PRs in the release.
@@ -130,7 +131,7 @@ version-resolver:
   minor:
     labels:
       - 'C-feature'
-      # TODO: add breaking change label here
+      - 'C-breaking'
       - 'C-removal'
       - 'C-deprecation'
   # We increment the patch version for every release

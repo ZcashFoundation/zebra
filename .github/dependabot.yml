@@ -7,7 +7,7 @@ updates:
       timezone: America/New_York
     open-pull-requests-limit: 10
     labels:
-      - 'C-trivial' # TODO: fix trivial label name
+      - 'C-trivial'
       - 'A-rust'
       - 'A-dependencies'
       - 'P-Low :snowflake:'
@@ -18,7 +18,7 @@ updates:
       timezone: America/New_York
     open-pull-requests-limit: 10
     labels:
-      - 'C-trivial' # TODO: fix trivial label name
+      - 'C-trivial'
       - 'A-infrastructure'
       - 'A-dependencies'
       - 'P-Low :snowflake:'
