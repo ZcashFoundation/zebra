@@ -91,7 +91,7 @@ tokio = { version = "1.21.1", features = ["time", "rt-multi-thread", "macros", "
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.0.12"
 
-color-eyre = { version = "0.6.1", default_features = false, features = ["issue-url"] }
+color-eyre = { version = "0.6.2", default_features = false, features = ["issue-url"] }
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
@@ -173,7 +173,7 @@ proptest = "0.10.1"
 proptest-derive = "0.3.0"
 
 # enable span traces and track caller in tests
-color-eyre = { version = "0.6.1", features = ["issue-url"] }
+color-eyre = { version = "0.6.2", features = ["issue-url"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-consensus = { path = "../zebra-consensus/", features = ["proptest-impl"] }

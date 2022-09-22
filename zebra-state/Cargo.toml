@@ -38,7 +38,7 @@ proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
 [dev-dependencies]
-color-eyre = "0.6.1"
+color-eyre = "0.6.2"
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
