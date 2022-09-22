@@ -72,7 +72,7 @@ This means that the entire workflow must be re-run when a single test fails.
 
 ### Finding Errors
 
-Look for the earliest job that failed, and find the earliest failure.
+1. Look for the earliest job that failed, and find the earliest failure.
 
 For example, this failure doesn't tell us what actually went wrong:
 >  Error: The template is not valid. ZcashFoundation/zebra/.github/workflows/build-docker-image.yml@8bbc5b21c97fafc83b70fbe7f3b5e9d0ffa19593 (Line: 52, Col: 19): Error reading JToken from JsonReader. Path '', line 0, position 0.
@@ -85,8 +85,11 @@ But the specific failure is a few steps earlier:
 
 https://github.com/ZcashFoundation/zebra/runs/8181760421?check_suite_focus=true#step:8:2112
 
-The earlier failure can also be in another job, check out the whole workflow run for details.
-(Use the "Summary" button on the top left of the job details, and zoom in.)
+2. The earliest failure can also be in another job or pull request:
+  a. check the whole workflow run (use the "Summary" button on the top left of the job details, and zoom in)
+  b. if Mergify failed with "The pull request embarked with main cannot be merged", look at the PR "Conversation" tab, and find the latest Mergify PR that tried to merge this PR. Then start again from step 1.
+
+3. If that doesn't help, try looking for the latest failure. In Rust tests, the "failure:" notice contains the failed test names.
 
 ### Fixing CI Sync Timeouts
 
