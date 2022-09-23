@@ -420,10 +420,10 @@ impl StateService {
         let queued_height = finalized.height;
 
         let (rsp_tx, rsp_rx) = oneshot::channel();
+        let queued = (finalized, rsp_tx);
 
         if self.finalized_block_write_sender.is_some() {
             // We're still committing finalized blocks
-            let queued = (finalized, rsp_tx);
             self.queued_finalized_blocks
                 .insert(queued_prev_hash, queued);
 
@@ -431,14 +431,19 @@ impl StateService {
         } else {
             // We've finished committing finalized blocks, so drop any repeated queued blocks,
             // and return an error.
-            self.queued_finalized_blocks.clear();
-
-            // We don't care if this error ever gets received.
-            let _ = rsp_tx.send(Err(
+            //
+            // TODO: track the latest sent height, and drop any blocks under that height
+            //       every time we send some blocks (like QueuedNonFinalizedBlocks)
+            Self::send_finalized_block_error(
+                queued,
                 "already finished committing finalized blocks: dropped duplicate block, \
-                 block is already committed to the state"
-                    .into(),
-            ));
+                 block is already committed to the state",
+            );
+
+            self.clear_finalized_block_queue(
+                "already finished committing finalized blocks: dropped duplicate block, \
+                 block is already committed to the state",
+            );
         }
 
         if self.queued_finalized_blocks.is_empty() {
@@ -504,15 +509,36 @@ impl StateService {
                 let send_result = finalized_block_write_sender.send(queued_block);
 
                 // If the receiver is closed, we can't send any more blocks.
-                // TODO: also immediately fail the block that we just queued?
-                if let Err(SendError((_finalized, block_result_sender))) = send_result {
-                    // If Zebra is shutting down, ignore dropped block result receivers
-                    let _ = block_result_sender.send(Err(
-                        "block commit task exited. Is Zebra shutting down?".into(),
-                    ));
+                if let Err(SendError(queued)) = send_result {
+                    // If Zebra is shutting down, drop blocks and return an error.
+                    Self::send_finalized_block_error(
+                        queued,
+                        "block commit task exited. Is Zebra shutting down?",
+                    );
+
+                    self.clear_finalized_block_queue(
+                        "block commit task exited. Is Zebra shutting down?",
+                    );
                 };
             }
         }
+    }
+
+    /// Drops all queued finalized blocks, and sends an error on their result channels.
+    fn clear_finalized_block_queue(&mut self, error: impl Into<BoxError> + Clone) {
+        for (_hash, queued) in self.queued_finalized_blocks.drain() {
+            Self::send_finalized_block_error(queued, error.clone());
+        }
+    }
+
+    /// Send an error on a `QueuedFinalized` block's result channel, and drop the block
+    fn send_finalized_block_error(queued: QueuedFinalized, error: impl Into<BoxError>) {
+        let (finalized, rsp_tx) = queued;
+
+        // The block sender might have already given up on this block,
+        // so ignore any channel send errors.
+        let _ = rsp_tx.send(Err(error.into()));
+        std::mem::drop(finalized);
     }
 
     /// Queue a non finalized block for verification and check if any queued
