@@ -85,7 +85,7 @@ pub async fn run() -> Result<()> {
 
     // Launch zebra with peers and using a predefined zebrad state path.
     // As this tests are just queries we can have a live chain where blocks are coming.
-    let (zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
+    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
         spawn_zebrad_for_rpc(network, test_name, test_type, use_internet_connection)?
     {
         tracing::info!(
@@ -100,19 +100,24 @@ pub async fn run() -> Result<()> {
         return Ok(());
     };
 
+    let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
+
+    tracing::info!(
+        ?test_type,
+        ?zebra_rpc_address,
+        "launched zebrad, waiting for zebrad to open its RPC port..."
+    );
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", zebra_rpc_address))?;
+
     tracing::info!(
         ?zebra_rpc_address,
-        "launched zebrad, launching lightwalletd connected to zebrad...",
+        "zebrad opened its RPC port, spawning lightwalletd...",
     );
 
     // Launch lightwalletd
-    let (lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_for_rpc(
-        network,
-        test_name,
-        test_type,
-        zebra_rpc_address.expect("lightwalletd test must have RPC port"),
-    )?
-    .expect("already checked cached state and network requirements");
+    let (lightwalletd, lightwalletd_rpc_port) =
+        spawn_lightwalletd_for_rpc(network, test_name, test_type, zebra_rpc_address)?
+            .expect("already checked cached state and network requirements");
 
     tracing::info!(
         ?lightwalletd_rpc_port,
@@ -123,7 +128,7 @@ pub async fn run() -> Result<()> {
         lightwalletd,
         lightwalletd_rpc_port,
         zebrad,
-        zebra_rpc_address.expect("lightwalletd test must have RPC port"),
+        zebra_rpc_address,
         test_type,
         // We want our queries to include the mempool and network for better coverage
         true,

@@ -1555,6 +1555,16 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     // Launch lightwalletd, if needed
     let lightwalletd_and_port = if test_type.launches_lightwalletd() {
         tracing::info!(
+            ?test_type,
+            ?zebra_rpc_address,
+            "waiting for zebrad to open its RPC port..."
+        );
+        zebrad.expect_stdout_line_matches(&format!(
+            "Opened RPC endpoint at {}",
+            zebra_rpc_address.expect("lightwalletd test must have RPC port")
+        ))?;
+
+        tracing::info!(
             ?zebra_rpc_address,
             "launching lightwalletd connected to zebrad",
         );

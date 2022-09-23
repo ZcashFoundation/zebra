@@ -59,14 +59,6 @@ pub fn wait_for_zebrad_and_lightwalletd_sync<
     // so we need to check that `zebrad` has synced to the tip in parallel.
     let zebrad_mut = &mut zebrad;
     let zebrad_wait_fn = || -> Result<_> {
-        tracing::info!(
-            ?test_type,
-            ?zebra_rpc_address,
-            "waiting for zebrad to open its RPC port..."
-        );
-        zebrad_mut
-            .expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", zebra_rpc_address))?;
-
         // When we are near the tip, the mempool should activate at least once
         if wait_for_zebrad_mempool {
             tracing::info!(
