@@ -9,7 +9,7 @@ edition = "2021"
 pin-project = "0.4.29"
 tower = "0.4.13"
 futures-core = "0.3.24"
-tracing = "0.1.31"
+tracing = "0.1.35"
 
 [dev-dependencies]
 tokio = { version = "1.21.1", features = ["full", "tracing", "test-util"] }

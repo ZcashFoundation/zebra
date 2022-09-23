@@ -56,7 +56,7 @@ humantime = "2.1.0"
 displaydoc = "0.2.3"
 static_assertions = "1.1.0"
 thiserror = "1.0.35"
-tracing = "0.1.31"
+tracing = "0.1.35"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
@@ -94,7 +94,7 @@ color-eyre = "0.6.1"
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 spandoc = "0.2.2"
-tracing = "0.1.31"
+tracing = "0.1.35"
 
 # Make the optional testing dependencies required
 proptest = "0.10.1"
