@@ -217,7 +217,7 @@ pub async fn populated_state(
         // which both happen in a separate thread from this one.
         rsp.expect("unexpected block commit failure");
 
-        // Allow the chain tip update
+        // Wait for the chain tip update
         if let Err(timeout_error) = timeout(
             CHAIN_TIP_UPDATE_WAIT_LIMIT,
             chain_tip_change.wait_for_tip_change(),
