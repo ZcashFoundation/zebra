@@ -149,7 +149,9 @@ pub fn are_zebrad_and_lightwalletd_tips_synced(
     lightwalletd_rpc_port: u16,
     zebra_rpc_address: SocketAddr,
 ) -> Result<bool> {
-    let rt = tokio::runtime::Builder::new_multi_thread().build()?;
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
 
     rt.block_on(async {
         let mut lightwalletd_grpc_client = connect_to_lightwalletd(lightwalletd_rpc_port).await?;
