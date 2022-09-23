@@ -242,7 +242,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     // Writes a configuration that has RPC listen_addr set (if needed).
     // If the state path env var is set, uses it in the config.
     let zebrad = testdir()?
-        .with_config(&mut config)?
+        .with_exact_config(&config)?
         .spawn_child(args!["start"])?
         .bypass_test_capture(true)
         .with_timeout(test_type.zebrad_timeout())
