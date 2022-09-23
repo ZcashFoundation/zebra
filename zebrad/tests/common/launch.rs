@@ -207,13 +207,15 @@ where
 /// - `Ok(Some(zebrad, zebra_rpc_address))` on success,
 /// - `Ok(None)` if the test doesn't have the required network or cached state, and
 /// - `Err(_)` if spawning zebrad fails.
+///
+/// `zebra_rpc_address` is `None` if the test type doesn't need an RPC port.
 #[tracing::instrument]
 pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     network: Network,
     test_name: S,
     test_type: LightwalletdTestType,
     use_internet_connection: bool,
-) -> Result<Option<(TestChild<TempDir>, SocketAddr)>> {
+) -> Result<Option<(TestChild<TempDir>, Option<SocketAddr>)>> {
     let test_name = test_name.as_ref();
 
     // Skip the test unless the user specifically asked for it
@@ -246,9 +248,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
         .with_timeout(test_type.zebrad_timeout())
         .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
-    let rpc_address = config.rpc.listen_addr.unwrap();
-
-    Ok(Some((zebrad, rpc_address)))
+    Ok(Some((zebrad, config.rpc.listen_addr)))
 }
 
 /// Returns `true` if a zebrad test for `test_type` has everything it needs to run.

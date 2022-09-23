@@ -1560,9 +1560,13 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         );
 
         // Launch lightwalletd
-        let (mut lightwalletd, lightwalletd_rpc_port) =
-            spawn_lightwalletd_for_rpc(network, test_name, test_type, zebra_rpc_address)?
-                .expect("already checked for lightwalletd cached state and network");
+        let (mut lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_for_rpc(
+            network,
+            test_name,
+            test_type,
+            zebra_rpc_address.expect("lightwalletd test must have RPC port"),
+        )?
+        .expect("already checked for lightwalletd cached state and network");
 
         tracing::info!(
             ?lightwalletd_rpc_port,
@@ -1639,7 +1643,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
                     lightwalletd,
                     lightwalletd_rpc_port,
                     zebrad,
-                    zebra_rpc_address,
+                    zebra_rpc_address.expect("lightwalletd test must have RPC port"),
                     test_type,
                     // We want to wait for the mempool and network for better coverage
                     true,
@@ -1960,14 +1964,22 @@ async fn fully_synced_rpc_test() -> Result<()> {
         return Ok(());
     };
 
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", zebra_rpc_address))?;
+    zebrad.expect_stdout_line_matches(&format!(
+        "Opened RPC endpoint at {}",
+        zebra_rpc_address.expect("lightwalletd test must have RPC port"),
+    ))?;
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
     // if desired.
     let client = reqwest::Client::new();
     let res = client
-        .post(format!("http://{}", &zebra_rpc_address.to_string()))
+        .post(format!(
+            "http://{}",
+            &zebra_rpc_address
+                .expect("lightwalletd test must have RPC port")
+                .to_string()
+        ))
         // Manually constructed request to avoid encoding it, for simplicity
         .body(r#"{"jsonrpc": "2.0", "method": "getblock", "params": ["1180900", 0], "id":123 }"#)
         .header("Content-Type", "application/json")

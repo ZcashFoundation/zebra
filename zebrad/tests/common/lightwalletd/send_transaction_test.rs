@@ -122,9 +122,13 @@ pub async fn run() -> Result<()> {
         "spawned isolated zebrad with shorter chain, spawning lightwalletd...",
     );
 
-    let (lightwalletd, lightwalletd_rpc_port) =
-        spawn_lightwalletd_for_rpc(network, test_name, test_type, zebra_rpc_address)?
-            .expect("already checked cached state and network requirements");
+    let (lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_for_rpc(
+        network,
+        test_name,
+        test_type,
+        zebra_rpc_address.expect("lightwalletd test must have RPC port"),
+    )?
+    .expect("already checked cached state and network requirements");
 
     tracing::info!(
         ?lightwalletd_rpc_port,
@@ -135,7 +139,7 @@ pub async fn run() -> Result<()> {
         lightwalletd,
         lightwalletd_rpc_port,
         zebrad,
-        zebra_rpc_address,
+        zebra_rpc_address.expect("lightwalletd test must have RPC port"),
         test_type,
         // We want to send transactions to the mempool, but we aren't syncing with the network
         true,
