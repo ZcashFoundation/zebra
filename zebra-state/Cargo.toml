@@ -29,7 +29,7 @@ thiserror = "1.0.35"
 rayon = "1.5.3"
 tokio = { version = "1.21.1", features = ["sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
-tracing = "0.1.31"
+tracing = "0.1.35"
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-test = { path = "../zebra-test/", optional = true }
