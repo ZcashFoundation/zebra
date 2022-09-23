@@ -72,6 +72,9 @@ This means that the entire workflow must be re-run when a single test fails.
 
 ### Finding Errors
 
+0. Check if the same failure is happening on the `main` branch or multiple PRs.
+   If it is, open a ticket and tell the Zebra team lead.
+
 1. Look for the earliest job that failed, and find the earliest failure.
 
 For example, this failure doesn't tell us what actually went wrong:
@@ -149,16 +152,18 @@ To fix duplicate dependencies, follow these steps until the duplicate dependenci
 
 4. Repeat step 3 until the dependency warnings are fixed. Adding a single `skip-tree` exception can resolve multiple warnings.
 
-### Fixing Disk Full Errors
+### Fixing Disk Full Errors and Zcash Parameter Download Timeouts
 
 If the Docker cached state disks are full, increase the disk sizes in:
 - [deploy-gcp-tests.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/deploy-gcp-tests.yml)
 - [continous-delivery.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/continous-delivery.yml)
 
-If the GitHub Actions disks are full, follow these steps until the errors are fixed:
+If the GitHub Actions disks are full, follow these steps until the errors are fixed, or the Zcash Parameter downloads timeout without any network errors:
 1. Update your branch to the latest `main` branch, this builds with all the latest dependencies in the `main` branch cache
 2. Clear the GitHub Actions cache for the failing branch
 3. Clear the GitHub Actions caches for all the branches and the `main` branch
+
+You can skip the first step if the error is also happening on the `main` branch.
 
 If the `*-sprout-and-sapling-params` caches are around 765 MB, they are the correct size.
 There is no need to clear them, the replacement cache will be the same size.
