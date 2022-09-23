@@ -1482,6 +1482,16 @@ async fn lightwalletd_test_suite() -> Result<()> {
     // These tests need the compile-time gRPC feature
     #[cfg(feature = "lightwalletd-grpc-tests")]
     {
+        // Do the quick tests first
+
+        // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
+        lightwalletd_integration_test(UpdateCachedState)?;
+
+        // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
+        common::lightwalletd::wallet_grpc_test::run().await?;
+
+        // Then do the slow tests
+
         // Only runs when ZEBRA_CACHED_STATE_DIR is set.
         // When manually running the test suite, allow cached state in the full sync test.
         lightwalletd_integration_test(FullSyncFromGenesis {
@@ -1489,10 +1499,6 @@ async fn lightwalletd_test_suite() -> Result<()> {
         })?;
 
         // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
-        lightwalletd_integration_test(UpdateCachedState)?;
-
-        // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
-        common::lightwalletd::wallet_grpc_test::run().await?;
         common::lightwalletd::send_transaction_test::run().await?;
     }
 
