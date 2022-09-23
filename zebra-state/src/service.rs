@@ -424,8 +424,15 @@ impl StateService {
 
         if self.finalized_block_write_sender.is_some() {
             // We're still committing finalized blocks
-            self.queued_finalized_blocks
-                .insert(queued_prev_hash, queued);
+            if let Some(duplicate_queued) = self
+                .queued_finalized_blocks
+                .insert(queued_prev_hash, queued)
+            {
+                Self::send_finalized_block_error(
+                    duplicate_queued,
+                    "dropping older finalized block: got newer duplicate block",
+                );
+            }
 
             self.drain_queue_and_commit_finalized();
         } else {
