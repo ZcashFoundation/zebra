@@ -128,15 +128,34 @@ pub fn wait_for_zebrad_and_lightwalletd_sync<
 
     // Run both threads in parallel, automatically propagating any panics to this thread.
     std::thread::scope(|s| {
-        s.spawn(|| {
-            let zebrad_result = zebrad_wait_fn();
-            is_zebrad_finished.store(true, Ordering::SeqCst);
-            zebrad_result.expect("test failed while waiting for zebrad to sync");
+        // Launch the sync-waiting threads
+        let zebrad_thread = s.spawn(|| {
+            zebrad_wait_fn().expect("test failed while waiting for zebrad to sync");
         });
-        s.spawn(|| {
+
+        let lightwalletd_thread = s.spawn(|| {
             let lightwalletd_result = lightwalletd_wait_fn();
             is_lightwalletd_finished.store(true, Ordering::SeqCst);
             lightwalletd_result.expect("test failed while waiting for lightwalletd to sync");
+        });
+
+        // Mark the sync-waiting threads as finished if they fail or panic.
+        // This tells the other thread that it can exit.
+        //
+        // TODO: use `panic::catch_unwind()` instead,
+        //       when `&mut zebra_test::command::TestChild<TempDir>` is unwind-safe
+        s.spawn(|| {
+            let zebrad_result = zebrad_thread.join();
+            is_zebrad_finished.store(true, Ordering::SeqCst);
+
+            zebrad_result.expect("test panicked or failed while waiting for zebrad to sync");
+        });
+        s.spawn(|| {
+            let lightwalletd_result = lightwalletd_thread.join();
+            is_lightwalletd_finished.store(true, Ordering::SeqCst);
+
+            lightwalletd_result
+                .expect("test panicked or failed while waiting for lightwalletd to sync");
         });
     });
 
