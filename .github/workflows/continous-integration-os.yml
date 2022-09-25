@@ -64,7 +64,8 @@ jobs:
       matrix:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
         os: [ubuntu-latest, macos-latest]
-        rust: [stable, beta]
+        # Rust 1.64 hangs when downloading the Zcash Parameters on GitHub Actions runners
+        rust: [1.63, beta]
         exclude:
         # TODO: re-enable beta Rust tests on ubuntu (#4929)
           - os: ubuntu-latest
