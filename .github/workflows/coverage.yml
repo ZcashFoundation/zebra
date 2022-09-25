@@ -61,7 +61,8 @@ jobs:
 
       - uses: actions-rs/toolchain@v1.0.7
         with:
-          toolchain: stable
+          # Rust 1.64 hangs when downloading the Zcash Parameters on GitHub Actions runners
+          toolchain: 1.63
           override: true
           profile: minimal
           components: llvm-tools-preview
