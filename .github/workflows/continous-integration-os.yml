@@ -158,6 +158,9 @@ jobs:
       - name: Fetch Zcash parameters
         if: steps.cache-params.outputs.cache-hit != 'true'
         working-directory: ./zebra-consensus
+        # Temporarily run with trace logging, until the hangs in #5091 are fixed
+        env:
+          RUST_LOG: trace
         run: cargo run --example download-params
 
       - name: Run tests
