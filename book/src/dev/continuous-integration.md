@@ -160,6 +160,7 @@ If the Docker cached state disks are full, increase the disk sizes in:
 
 If the GitHub Actions disks are full, or the Zcash parameter downloads time out without any network messages or errors,
 follow these steps until the errors are fixed:
+
 0. Check if error is also happening on the `main` branch. If it is, skip the next step.
 1. Update your branch to the latest `main` branch, this builds with all the latest dependencies in the `main` branch cache.
 2. Clear the GitHub Actions code cache for the failing branch. Code caches are named after the compiler version.
