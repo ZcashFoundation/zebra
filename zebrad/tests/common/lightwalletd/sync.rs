@@ -137,9 +137,7 @@ pub fn wait_for_zebrad_and_lightwalletd_sync<
         });
 
         let lightwalletd_thread = s.spawn(|| {
-            let lightwalletd_result = lightwalletd_wait_fn();
-            is_lightwalletd_finished.store(true, Ordering::SeqCst);
-            lightwalletd_result.expect("test failed while waiting for lightwalletd to sync");
+            lightwalletd_wait_fn().expect("test failed while waiting for lightwalletd to sync.");
         });
 
         // Mark the sync-waiting threads as finished if they fail or panic.
