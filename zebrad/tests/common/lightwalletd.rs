@@ -420,6 +420,12 @@ impl LightwalletdTestType {
         // except when we're doing the quick empty state test
         config.consensus.debug_skip_parameter_preload = !self.needs_zebra_cached_state();
 
+        // We want to run multi-threaded RPCs, if we're using them
+        if self.launches_lightwalletd() {
+            // Automatically runs one thread per available CPU core
+            config.rpc.parallel_cpu_threads = 0;
+        }
+
         if !self.needs_zebra_cached_state() {
             return Some(Ok(config));
         }
