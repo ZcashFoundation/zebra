@@ -19,7 +19,7 @@ use std::{
     convert,
     future::Future,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -51,8 +51,8 @@ use crate::{
         queued_blocks::QueuedBlocks,
         watch_receiver::WatchReceiver,
     },
-    BoxError, CloneError, CommitBlockError, Config, FinalizedBlock, PreparedBlock, ReadRequest,
-    ReadResponse, Request, Response, ValidateContextError,
+    BoxError, CloneError, Config, FinalizedBlock, PreparedBlock, ReadRequest, ReadResponse,
+    Request, Response,
 };
 
 pub mod block_iter;
@@ -68,6 +68,8 @@ mod queued_blocks;
 pub(crate) mod read;
 mod write;
 
+use write::NonFinalizedWriteCmd;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
 
@@ -76,7 +78,7 @@ mod tests;
 
 pub use finalized_state::{OutputIndex, OutputLocation, TransactionLocation};
 
-use self::queued_blocks::{QueuedFinalized, QueuedNonFinalized};
+use self::{block_iter::any_ancestor_blocks, queued_blocks::QueuedFinalized};
 
 /// A read-write service for Zebra's cached blockchain state.
 ///
@@ -130,10 +132,8 @@ pub(crate) struct StateService {
 
     /// A channel to send blocks to the `block_write_task`,
     /// so they can be written to the [`NonFinalizedState`].
-    //
-    // TODO: actually send blocks on this channel
     non_finalized_block_write_sender:
-        Option<tokio::sync::mpsc::UnboundedSender<QueuedNonFinalized>>,
+        Option<tokio::sync::mpsc::UnboundedSender<NonFinalizedWriteCmd>>,
 
     /// A channel to send blocks to the `block_write_task`,
     /// so they can be written to the [`FinalizedState`].
@@ -172,17 +172,6 @@ pub(crate) struct StateService {
 
     /// Instant tracking the last time `pending_utxos` was pruned.
     last_prune: Instant,
-
-    // Updating Concurrently Readable State
-    //
-    /// A sender channel used to update the current best chain tip for
-    /// [`LatestChainTip`] and [`ChainTipChange`].
-    //
-    // TODO: remove this copy of the chain tip sender, and get rid of the mutex in the block write task
-    chain_tip_sender: Arc<Mutex<ChainTipSender>>,
-
-    /// A sender channel used to update the recent non-finalized state for the [`ReadStateService`].
-    non_finalized_state_sender: watch::Sender<NonFinalizedState>,
 
     // Concurrently Readable State
     //
@@ -321,9 +310,11 @@ impl StateService {
         let timer = CodeTimer::start();
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
-        let chain_tip_sender = Arc::new(Mutex::new(chain_tip_sender));
 
         let non_finalized_state = NonFinalizedState::new(network);
+
+        let (non_finalized_state_sender, non_finalized_state_receiver) =
+            watch::channel(NonFinalizedState::new(finalized_state.network()));
 
         // Security: The number of blocks in these channels is limited by
         //           the syncer and inbound lookahead limits.
@@ -335,20 +326,26 @@ impl StateService {
             tokio::sync::mpsc::unbounded_channel();
 
         let finalized_state_for_writing = finalized_state.clone();
-        let chain_tip_sender_for_writing = chain_tip_sender.clone();
+        let non_finalized_state_for_writing = non_finalized_state.clone();
         let block_write_task = std::thread::spawn(move || {
             write::write_blocks_from_channels(
                 finalized_block_write_receiver,
                 non_finalized_block_write_receiver,
                 finalized_state_for_writing,
+                non_finalized_state_for_writing,
+                network,
                 invalid_block_reset_sender,
-                chain_tip_sender_for_writing,
+                chain_tip_sender,
+                non_finalized_state_sender,
             )
         });
         let block_write_task = Arc::new(block_write_task);
 
-        let (read_service, non_finalized_state_sender) =
-            ReadStateService::new(&finalized_state, block_write_task);
+        let read_service = ReadStateService::new(
+            &finalized_state,
+            block_write_task,
+            non_finalized_state_receiver,
+        );
 
         let queued_non_finalized_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
@@ -367,8 +364,6 @@ impl StateService {
             invalid_block_reset_receiver,
             pending_utxos,
             last_prune: Instant::now(),
-            chain_tip_sender,
-            non_finalized_state_sender,
             read_service: read_service.clone(),
             max_queued_finalized_height: f64::NAN,
         };
@@ -384,7 +379,7 @@ impl StateService {
 
             if let Err(error) = check::legacy_chain(
                 nu5_activation_height,
-                state.any_ancestor_blocks(tip.1),
+                any_ancestor_blocks(&state.mem, &state.disk, tip.1),
                 state.network,
                 MAX_LEGACY_CHAIN_BLOCKS,
             ) {
@@ -542,12 +537,11 @@ impl StateService {
 
     /// Send an error on a `QueuedFinalized` block's result channel, and drop the block
     fn send_finalized_block_error(queued: QueuedFinalized, error: impl Into<BoxError>) {
-        let (finalized, rsp_tx) = queued;
+        let (_finalized, rsp_tx) = queued;
 
         // The block sender might have already given up on this block,
         // so ignore any channel send errors.
         let _ = rsp_tx.send(Err(error.into()));
-        std::mem::drop(finalized);
     }
 
     /// Queue a non finalized block for verification and check if any queued
@@ -623,96 +617,19 @@ impl StateService {
             return rsp_rx;
         }
 
-        // TODO: move this code into the state block commit task:
-        //   - process_queued()'s validate_and_commit() call becomes a send to the block commit channel
-        //   - run validate_and_commit() in the state block commit task
-        //   - run all the rest of the code in this function in the state block commit task
-        //   - move all that code to the inner service
-        self.process_queued(parent_hash);
+        // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
+        if self.finalized_block_write_sender.is_none() {
+            self.send_process_queued(parent_hash);
 
-        while self.mem.best_chain_len() > crate::constants::MAX_BLOCK_REORG_HEIGHT {
-            tracing::trace!("finalizing block past the reorg limit");
-            let finalized_with_trees = self.mem.finalize();
-            self.disk
-                .commit_finalized_direct(finalized_with_trees, "best non-finalized chain root")
-                .expect(
-                    "expected that errors would not occur when writing to disk or updating note commitment and history trees",
-                );
-        }
-
-        let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
-            "Finalized state must have at least one block before committing non-finalized state",
-        );
-        self.queued_non_finalized_blocks
-            .prune_by_height(finalized_tip_height);
-
-        let tip_block_height = self.update_latest_chain_channels();
-
-        // update metrics using the best non-finalized tip
-        if let Some(tip_block_height) = tip_block_height {
-            metrics::gauge!(
-                "state.full_verifier.committed.block.height",
-                tip_block_height.0 as f64,
+            let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
+                "Finalized state must have at least one block before committing non-finalized state",
             );
 
-            // This height gauge is updated for both fully verified and checkpoint blocks.
-            // These updates can't conflict, because the state makes sure that blocks
-            // are committed in order.
-            metrics::gauge!(
-                "zcash.chain.verified.block.height",
-                tip_block_height.0 as f64,
-            );
+            self.queued_non_finalized_blocks
+                .prune_by_height(finalized_tip_height);
         }
 
-        tracing::trace!("finished processing queued block");
         rsp_rx
-    }
-
-    /// Update the [`LatestChainTip`], [`ChainTipChange`], and `non_finalized_state_sender`
-    /// channels with the latest non-finalized [`ChainTipBlock`] and
-    /// [`Chain`][1].
-    ///
-    /// Returns the latest non-finalized chain tip height, or `None` if the
-    /// non-finalized state is empty.
-    ///
-    /// [1]: non_finalized_state::Chain
-    //
-    // TODO: remove this clippy allow when we remove self.chain_tip_sender
-    #[allow(clippy::unwrap_in_result)]
-    #[instrument(level = "debug", skip(self))]
-    fn update_latest_chain_channels(&mut self) -> Option<block::Height> {
-        let best_chain = self.mem.best_chain();
-        let tip_block = best_chain
-            .and_then(|chain| chain.tip_block())
-            .cloned()
-            .map(ChainTipBlock::from);
-        let tip_block_height = tip_block.as_ref().map(|block| block.height);
-
-        // If the final receiver was just dropped, ignore the error.
-        let _ = self.non_finalized_state_sender.send(self.mem.clone());
-
-        self.chain_tip_sender
-            .lock()
-            .expect("unexpected panic in block commit task or state")
-            .set_best_non_finalized_tip(tip_block);
-
-        tip_block_height
-    }
-
-    /// Run contextual validation on the prepared block and add it to the
-    /// non-finalized state if it is contextually valid.
-    #[tracing::instrument(level = "debug", skip(self, prepared))]
-    fn validate_and_commit(&mut self, prepared: PreparedBlock) -> Result<(), CommitBlockError> {
-        self.check_contextual_validity(&prepared)?;
-        let parent_hash = prepared.block.header.previous_block_hash;
-
-        if self.disk.db.finalized_tip_hash() == parent_hash {
-            self.mem.commit_new_chain(prepared, &self.disk.db)?;
-        } else {
-            self.mem.commit_block(prepared, &self.disk.db)?;
-        }
-
-        Ok(())
     }
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
@@ -723,96 +640,51 @@ impl StateService {
     /// Attempt to validate and commit all queued blocks whose parents have
     /// recently arrived starting from `new_parent`, in breadth-first ordering.
     #[tracing::instrument(level = "debug", skip(self, new_parent))]
-    fn process_queued(&mut self, new_parent: block::Hash) {
-        let mut new_parents: Vec<(block::Hash, Result<(), CloneError>)> =
-            vec![(new_parent, Ok(()))];
+    fn send_process_queued(&mut self, new_parent: block::Hash) {
+        use tokio::sync::mpsc::error::SendError;
+        if let Some(non_finalized_block_write_sender) = &self.non_finalized_block_write_sender {
+            let mut new_parents: Vec<block::Hash> = vec![new_parent];
 
-        while let Some((parent_hash, parent_result)) = new_parents.pop() {
-            let queued_children = self
-                .queued_non_finalized_blocks
-                .dequeue_children(parent_hash);
+            while let Some(parent_hash) = new_parents.pop() {
+                let queued_children = self
+                    .queued_non_finalized_blocks
+                    .dequeue_children(parent_hash);
 
-            for (child, rsp_tx) in queued_children {
-                let child_hash = child.hash;
-                let result;
+                for queued_child in queued_children {
+                    let child_hash = queued_child.0.hash;
 
-                // If the block is invalid, reject any descendant blocks.
-                //
-                // At this point, we know that the block and all its descendants
-                // are invalid, because we checked all the consensus rules before
-                // committing the block to the non-finalized state.
-                // (These checks also bind the transaction data to the block
-                // header, using the transaction merkle tree and authorizing data
-                // commitment.)
-                if let Err(ref parent_error) = parent_result {
-                    tracing::trace!(
-                        ?child_hash,
-                        ?parent_error,
-                        "rejecting queued child due to parent error"
+                    let send_result = non_finalized_block_write_sender.send(
+                        NonFinalizedWriteCmd::ProcessQueued {
+                            parent_hash,
+                            queued_child,
+                        },
                     );
-                    result = Err(parent_error.clone());
-                } else {
-                    tracing::trace!(?child_hash, "validating queued child");
-                    result = self.validate_and_commit(child).map_err(CloneError::from);
-                    if result.is_ok() {
-                        // Update the metrics if semantic and contextual validation passes
-                        metrics::counter!("state.full_verifier.committed.block.count", 1);
-                        metrics::counter!("zcash.chain.verified.block.total", 1);
-                    }
+
+                    if let Err(SendError(NonFinalizedWriteCmd::ProcessQueued {
+                        parent_hash: _,
+                        queued_child: (_, rsp_tx),
+                    })) = send_result
+                    {
+                        // If Zebra is shutting down, ignore dropped block result receivers
+                        let _ = rsp_tx.send(Err(
+                            "block commit task exited. Is Zebra shutting down?".into(),
+                        ));
+
+                        return;
+                    };
+
+                    new_parents.push(child_hash);
                 }
-
-                let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
-                new_parents.push((child_hash, result));
             }
-        }
-    }
 
-    /// Check that the prepared block is contextually valid for the configured
-    /// network, based on the committed finalized and non-finalized state.
-    ///
-    /// Note: some additional contextual validity checks are performed by the
-    /// non-finalized [`Chain`](non_finalized_state::Chain).
-    fn check_contextual_validity(
-        &mut self,
-        prepared: &PreparedBlock,
-    ) -> Result<(), ValidateContextError> {
-        let relevant_chain = self.any_ancestor_blocks(prepared.block.header.previous_block_hash);
-
-        // Security: check proof of work before any other checks
-        check::block_is_valid_for_recent_chain(
-            prepared,
-            self.network,
-            self.disk.db.finalized_tip_height(),
-            relevant_chain,
-        )?;
-
-        check::nullifier::no_duplicates_in_finalized_chain(prepared, &self.disk.db)?;
-
-        Ok(())
+            let _ = non_finalized_block_write_sender
+                .send(NonFinalizedWriteCmd::FinishProcessingQueued);
+        };
     }
 
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
         self.mem.best_tip().or_else(|| self.read_service.db.tip())
-    }
-
-    /// Return the height for the block at `hash` in any chain.
-    pub fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
-        self.mem
-            .any_height_by_hash(hash)
-            .or_else(|| self.read_service.db.height(hash))
-    }
-
-    /// Return an iterator over the relevant chain of the block identified by
-    /// `hash`, in order from the largest height to the genesis block.
-    ///
-    /// The block identified by `hash` is included in the chain of blocks yielded
-    /// by the iterator. `hash` can come from any chain.
-    pub fn any_ancestor_blocks(&self, hash: block::Hash) -> block_iter::Iter<'_> {
-        block_iter::Iter {
-            service: self,
-            state: block_iter::IterState::NonFinalized(hash),
-        }
     }
 
     /// Assert some assumptions about the prepared `block` before it is validated.
@@ -836,10 +708,8 @@ impl ReadStateService {
     pub(crate) fn new(
         finalized_state: &FinalizedState,
         block_write_task: Arc<std::thread::JoinHandle<()>>,
-    ) -> (Self, watch::Sender<NonFinalizedState>) {
-        let (non_finalized_state_sender, non_finalized_state_receiver) =
-            watch::channel(NonFinalizedState::new(finalized_state.network()));
-
+        non_finalized_state_receiver: watch::Receiver<NonFinalizedState>,
+    ) -> Self {
         let read_service = Self {
             network: finalized_state.network(),
             db: finalized_state.db.clone(),
@@ -849,7 +719,7 @@ impl ReadStateService {
 
         tracing::info!("created new read-only state service");
 
-        (read_service, non_finalized_state_sender)
+        read_service
     }
 }
 

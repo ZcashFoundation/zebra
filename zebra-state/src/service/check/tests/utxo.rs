@@ -16,8 +16,8 @@ use zebra_chain::{
 use crate::{
     arbitrary::Prepare,
     constants::MIN_TRANSPARENT_COINBASE_MATURITY,
-    service::check,
     service::StateService,
+    service::{check, write::validate_and_commit_non_finalized},
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
     FinalizedBlock,
     ValidateContextError::{
@@ -191,7 +191,9 @@ proptest! {
             prop_assert!(state.mem.any_utxo(&expected_outpoint).is_none());
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result = state.validate_and_commit(block1.clone());
+            let commit_result = validate_and_commit_non_finalized(
+            &state.disk,
+            &mut state.mem, state.network, block1.clone());
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
@@ -275,7 +277,9 @@ proptest! {
             prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
         } else {
             let block2 = Arc::new(block2).prepare();
-            let commit_result = state.validate_and_commit(block2.clone());
+            let commit_result = validate_and_commit_non_finalized(
+            &state.disk,
+            &mut state.mem, state.network, block2.clone());
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
@@ -352,7 +356,9 @@ proptest! {
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result = state.validate_and_commit(block1);
+        let commit_result = validate_and_commit_non_finalized(
+            &state.disk,
+            &mut state.mem, state.network, block1);
 
         // the block was rejected
         prop_assert_eq!(
@@ -412,7 +418,9 @@ proptest! {
         block2.transactions.push(spend_transaction.into());
 
         let block2 = Arc::new(block2).prepare();
-        let commit_result = state.validate_and_commit(block2);
+        let commit_result = validate_and_commit_non_finalized(
+            &state.disk,
+            &mut state.mem, state.network, block2);
 
         // the block was rejected
         prop_assert_eq!(
@@ -495,7 +503,9 @@ proptest! {
             .extend([spend_transaction1.into(), spend_transaction2.into()]);
 
         let block2 = Arc::new(block2).prepare();
-        let commit_result = state.validate_and_commit(block2);
+        let commit_result = validate_and_commit_non_finalized(
+            &state.disk,
+            &mut state.mem, state.network, block2);
 
         // the block was rejected
         prop_assert_eq!(
@@ -606,7 +616,9 @@ proptest! {
             prop_assert!(state.mem.any_utxo(&expected_outpoint).is_none());
         } else {
             let block2 = block2.clone().prepare();
-            let commit_result = state.validate_and_commit(block2.clone());
+            let commit_result = validate_and_commit_non_finalized(
+            &state.disk,
+            &mut state.mem, state.network, block2.clone());
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
@@ -641,7 +653,9 @@ proptest! {
         }
 
         let block3 = Arc::new(block3).prepare();
-        let commit_result = state.validate_and_commit(block3);
+        let commit_result = validate_and_commit_non_finalized(
+            &state.disk,
+            &mut state.mem, state.network, block3);
 
         // the block was rejected
         if use_finalized_state_spend {
@@ -713,7 +727,9 @@ proptest! {
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result = state.validate_and_commit(block1);
+        let commit_result = validate_and_commit_non_finalized(
+            &state.disk,
+            &mut state.mem, state.network, block1);
 
         // the block was rejected
         prop_assert_eq!(
@@ -776,7 +792,9 @@ proptest! {
         let previous_mem = state.mem.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result = state.validate_and_commit(block1);
+        let commit_result = validate_and_commit_non_finalized(
+            &state.disk,
+            &mut state.mem, state.network, block1);
 
         // the block was rejected
         prop_assert_eq!(
@@ -865,7 +883,12 @@ fn new_state_with_mainnet_transparent_data(
         }
     } else {
         let block1 = block1.clone().prepare();
-        let commit_result = state.validate_and_commit(block1.clone());
+        let commit_result = validate_and_commit_non_finalized(
+            &state.disk,
+            &mut state.mem,
+            state.network,
+            block1.clone(),
+        );
 
         // the block was committed
         assert_eq!(
