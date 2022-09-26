@@ -60,7 +60,7 @@ tracing = "0.1.35"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.144", features = ["serde_derive", "rc"] }
+serde = { version = "1.0.145", features = ["serde_derive", "rc"] }
 serde_with = "2.0.1"
 serde-big-array = "0.4.1"
 
