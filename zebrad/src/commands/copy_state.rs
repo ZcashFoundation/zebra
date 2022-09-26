@@ -117,7 +117,7 @@ impl CopyStateCmd {
             _source_read_only_state_service,
             _source_latest_chain_tip,
             _source_chain_tip_change,
-        ) = old_zs::init(source_config.clone(), network);
+        ) = old_zs::spawn_init(source_config.clone(), network).await?;
 
         let elapsed = source_start_time.elapsed();
         info!(?elapsed, "finished initializing source state service");
@@ -136,7 +136,7 @@ impl CopyStateCmd {
             _target_read_only_state_service,
             _target_latest_chain_tip,
             _target_chain_tip_change,
-        ) = new_zs::init(target_config.clone(), network);
+        ) = new_zs::spawn_init(target_config.clone(), network).await?;
 
         let elapsed = target_start_time.elapsed();
         info!(?elapsed, "finished initializing target state service");
