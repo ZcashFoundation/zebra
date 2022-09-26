@@ -764,7 +764,7 @@ async fn setup(
     );
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
     let (sync_status, mut recent_syncs) = SyncStatus::new();
-    let (state, _read_only_state_service, latest_chain_tip, chain_tip_change) =
+    let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(state_config.clone(), network);
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
@@ -806,6 +806,21 @@ async fn setup(
         .unwrap();
     committed_blocks.push(genesis_block);
 
+    // Wait for the chain tip update
+    if let Err(timeout_error) = timeout(
+        CHAIN_TIP_UPDATE_WAIT_LIMIT,
+        chain_tip_change.wait_for_tip_change(),
+    )
+    .await
+    .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+    {
+        info!(
+            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
+            ?timeout_error,
+            "timeout waiting for chain tip change after committing block"
+        );
+    }
+
     // Also push block 1.
     // Block one is a network upgrade and the mempool will be cleared at it,
     // let all our tests start after this event.
@@ -820,6 +835,8 @@ async fn setup(
         .await
         .unwrap();
     committed_blocks.push(block_one);
+
+    // Don't wait for the chain tip update here, we wait for AdvertiseBlock below
 
     let (mut mempool_service, transaction_receiver) = Mempool::new(
         &MempoolConfig::default(),
