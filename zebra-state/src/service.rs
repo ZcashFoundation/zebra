@@ -1292,6 +1292,21 @@ pub fn init(
     )
 }
 
+/// Calls [`init`] with the provided [`Config`] and [`Network`] from a blocking task.
+/// Returns a [`tokio::task::JoinHandle`] with a boxed state service,
+/// a read state service, and receivers for state chain tip updates.
+pub fn spawn_init(
+    config: Config,
+    network: Network,
+) -> tokio::task::JoinHandle<(
+    BoxService<Request, Response, BoxError>,
+    ReadStateService,
+    LatestChainTip,
+    ChainTipChange,
+)> {
+    tokio::task::spawn_blocking(move || init(config, network))
+}
+
 /// Returns a [`StateService`] with an ephemeral [`Config`] and a buffer with a single slot.
 ///
 /// This can be used to create a state service for testing.
