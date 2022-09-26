@@ -41,6 +41,8 @@ use LightwalletdTestType::*;
 #[cfg(feature = "lightwalletd-grpc-tests")]
 pub mod send_transaction_test;
 #[cfg(feature = "lightwalletd-grpc-tests")]
+pub mod sync;
+#[cfg(feature = "lightwalletd-grpc-tests")]
 pub mod wallet_grpc;
 #[cfg(feature = "lightwalletd-grpc-tests")]
 pub mod wallet_grpc_test;

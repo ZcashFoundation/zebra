@@ -1648,7 +1648,7 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
         if let Some((lightwalletd, lightwalletd_rpc_port)) = lightwalletd_and_port {
             #[cfg(feature = "lightwalletd-grpc-tests")]
             {
-                use common::lightwalletd::wallet_grpc::wait_for_zebrad_and_lightwalletd_sync;
+                use common::lightwalletd::sync::wait_for_zebrad_and_lightwalletd_sync;
 
                 tracing::info!(
                     ?lightwalletd_rpc_port,

@@ -49,10 +49,10 @@ use crate::common::{
     launch::spawn_zebrad_for_rpc,
     lightwalletd::{
         can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
+        sync::wait_for_zebrad_and_lightwalletd_sync,
         wallet_grpc::{
-            connect_to_lightwalletd, wait_for_zebrad_and_lightwalletd_sync, Address, AddressList,
-            BlockId, BlockRange, ChainSpec, Empty, GetAddressUtxosArg,
-            TransparentAddressBlockFilter, TxFilter,
+            connect_to_lightwalletd, Address, AddressList, BlockId, BlockRange, ChainSpec, Empty,
+            GetAddressUtxosArg, TransparentAddressBlockFilter, TxFilter,
         },
         LightwalletdTestType::UpdateCachedState,
     },
