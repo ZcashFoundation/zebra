@@ -25,6 +25,10 @@ ENV CARGO_HOME /opt/zebrad/.cargo/
 # Build dependencies - this is the caching Docker layer!
 RUN cargo chef cook --release --features sentry --package zebrad --recipe-path recipe.json
 
+# Temporarily run with trace logging, until the hangs in #5091 are fixed
+ARG RUST_LOG
+ENV RUST_LOG ${RUST_LOG:-trace}
+
 ARG RUST_BACKTRACE=0
 ENV RUST_BACKTRACE ${RUST_BACKTRACE}
 
