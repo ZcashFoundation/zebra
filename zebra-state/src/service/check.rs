@@ -385,7 +385,7 @@ pub(crate) fn contextual_validity(
         relevant_chain,
     )?;
 
-    check::nullifier::no_duplicates_in_finalized_chain(prepared, finalized_state)?;
+    check::nullifier::no_duplicates_in_finalized_chain(prepared, &finalized_state.db)?;
 
     Ok(())
 }

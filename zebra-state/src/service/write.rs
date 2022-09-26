@@ -1,4 +1,5 @@
 //! Writing blocks to the finalized and non-finalized states.
+#![allow(clippy::too_many_arguments)]
 
 use tokio::sync::watch;
 use zebra_chain::{
@@ -42,9 +43,9 @@ pub(crate) fn validate_and_commit_non_finalized(
     let parent_hash = prepared.block.header.previous_block_hash;
 
     if finalized_state.db.finalized_tip_hash() == parent_hash {
-        non_finalized_state.commit_new_chain(prepared, finalized_state)?;
+        non_finalized_state.commit_new_chain(prepared, &finalized_state.db)?;
     } else {
-        non_finalized_state.commit_block(prepared, finalized_state)?;
+        non_finalized_state.commit_block(prepared, &finalized_state.db)?;
     }
 
     Ok(())
