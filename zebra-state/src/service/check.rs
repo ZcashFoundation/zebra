@@ -12,7 +12,13 @@ use zebra_chain::{
     work::difficulty::CompactDifficulty,
 };
 
-use crate::{BoxError, PreparedBlock, ValidateContextError};
+use crate::{
+    service::{
+        block_iter::any_ancestor_blocks, finalized_state::FinalizedState,
+        non_finalized_state::NonFinalizedState,
+    },
+    BoxError, PreparedBlock, ValidateContextError,
+};
 
 // use self as check
 use super::check;
@@ -350,6 +356,36 @@ where
             return Ok(());
         }
     }
+
+    Ok(())
+}
+
+/// Check that the prepared block is contextually valid for the configured
+/// network, based on the committed finalized and non-finalized state.
+///
+/// Note: some additional contextual validity checks are performed by the
+/// non-finalized [`Chain`](non_finalized_state::Chain).
+pub(crate) fn contextual_validity(
+    finalized_state: &FinalizedState,
+    non_finalized_state: &NonFinalizedState,
+    network: Network,
+    prepared: &PreparedBlock,
+) -> Result<(), ValidateContextError> {
+    let relevant_chain = any_ancestor_blocks(
+        non_finalized_state,
+        finalized_state,
+        prepared.block.header.previous_block_hash,
+    );
+
+    // Security: check proof of work before any other checks
+    check::block_is_valid_for_recent_chain(
+        prepared,
+        network,
+        finalized_state.db.finalized_tip_height(),
+        relevant_chain,
+    )?;
+
+    check::nullifier::no_duplicates_in_finalized_chain(prepared, finalized_state)?;
 
     Ok(())
 }
