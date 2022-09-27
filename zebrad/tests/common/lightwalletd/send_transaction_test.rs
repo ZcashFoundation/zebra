@@ -176,7 +176,7 @@ pub async fn run() -> Result<()> {
         assert_eq!(response, expected_response);
     }
 
-    // The timing of verification logs are unrealiable, so we've disabled this check for now. 
+    // The timing of verification logs are unrealiable, so we've disabled this check for now.
     //
     // TODO: when lightwalletd starts returning transactions again:
     //       re-enable this check, find a better way to check, or delete this commented-out check
