@@ -9,7 +9,9 @@ assignees: ''
 
 ## Versioning
 
-### Which Crates to Increment
+### How to Increment Versions
+
+Zebra follows [semantic versioning](https://semver.org).
 
 Look for the [draft `zebrad` changelog](https://github.com/ZcashFoundation/zebra/releases) for the automatic version bump.
 This version is based on [the labels on the PRs in the release](https://github.com/ZcashFoundation/zebra/blob/main/.github/release-drafter.yml).
@@ -21,61 +23,11 @@ Check that the automatic `zebrad` version increment is correct:
 If we're not doing a `major` release, you need to check which crates have changed:
 1. Go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra
 2. Check if the last commit to each crate is a Zebra version bump. If it is a version bump, the crate has not changed since the last release.
-
-<details>
-   
-Alternatively you can:
-- Use the github compare tool and check the `main` branch against the last tag ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.15...main))
-- Use `git diff --stat <previous-release-tag> origin/main`
-
-</details>
    
 Once you know which crates have changed:
 - [ ] Increment the crates that have new commits since the last version update
 - [ ] Increment any crates that depend on crates that have changed
 - [ ] Keep a list of the crates that haven't been incremented, to include in the PR
-
-### How to Increment Versions
-
-Zebra follows [semantic versioning](https://semver.org).
-
-Semantic versions look like: MAJOR`.`MINOR`.`PATCH[`-`TAG`.`PRE-RELEASE]
-   
-<details>
-
-#### Pre-Release Crates
-
-Pre-Release versions have a `TAG` like "alpha" or "beta". For example: `1.0.0-alpha.0`
-
-1. Increment the `PRE-RELEASE` version for the crate.
-
-#### Unstable Crates
-
-Unstable versions have a `MAJOR` version of zero. For example: `0.1.0`
-
-1. Follow stable crate versioning, but increment the `MINOR` version for breaking changes
-
-#### Stable Crates
-
-For example: `1.0.0`
-
-Increment the first version component in this list, and reset the other components to zero:
-1. MAJOR versions for breaking public API changes and removals
-    * check for types from dependencies that appear in the public API
-2. MINOR versions for new features
-3. PATCH versions for bug fixes
-    * includes dependency updates that don't impact the public API
-
-### Reviewing Version Bumps
-
-Check for missed changes by going to:
-`https://github.com/ZcashFoundation/zebra/tree/<commit-hash>/`
-Where `<commit-hash>` is the hash of the last commit in the version bump PR.
-
-If any Zebra or Tower crates have commit messages that are **not** a version bump, we have missed an update.
-Also check for crates that depend on crates that have changed. They should get a version bump as well.
-
-</details>
    
 ### Version Locations
 
