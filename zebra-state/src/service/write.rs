@@ -241,7 +241,7 @@ pub fn write_blocks_from_channels(
                     finalized_state
                         .commit_finalized_direct(finalized_with_trees, "best non-finalized chain root")
                         .expect(
-                            "expected that errors would not occur when writing to disk or updating note commitment and history trees",
+                            "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
                         );
                 }
 
