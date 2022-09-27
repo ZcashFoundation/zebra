@@ -30,11 +30,11 @@ indexmap = { version = "1.9.1", features = ["serde"] }
 tokio = { version = "1.21.1", features = ["time", "rt-multi-thread", "macros", "tracing"] }
 tower = "0.4.13"
 
-tracing = "0.1.31"
+tracing = "0.1.35"
 tracing-futures = "0.2.5"
 
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.144", features = ["serde_derive"] }
+serde = { version = "1.0.145", features = ["serde_derive"] }
 
 proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
@@ -45,7 +45,7 @@ zebra-node-services = { path = "../zebra-node-services" }
 zebra-state = { path = "../zebra-state" }
 
 [dev-dependencies]
-insta = { version = "1.19.1", features = ["redactions", "json"] }
+insta = { version = "1.20.0", features = ["redactions", "json"] }
 proptest = "0.10.1"
 proptest-derive = "0.3.0"
 serde_json = "1.0.85"

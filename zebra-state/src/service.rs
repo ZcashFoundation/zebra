@@ -38,7 +38,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::{MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA},
+    constants::{
+        MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA,
+        MAX_LEGACY_CHAIN_BLOCKS,
+    },
     service::{
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
         finalized_state::{FinalizedState, ZebraDb},
@@ -251,6 +254,7 @@ impl StateService {
                 nu5_activation_height,
                 state.any_ancestor_blocks(tip.1),
                 state.network,
+                MAX_LEGACY_CHAIN_BLOCKS,
             ) {
                 let legacy_db_path = state.disk.path().to_path_buf();
                 panic!(
@@ -1286,6 +1290,21 @@ pub fn init(
         latest_chain_tip,
         chain_tip_change,
     )
+}
+
+/// Calls [`init`] with the provided [`Config`] and [`Network`] from a blocking task.
+/// Returns a [`tokio::task::JoinHandle`] with a boxed state service,
+/// a read state service, and receivers for state chain tip updates.
+pub fn spawn_init(
+    config: Config,
+    network: Network,
+) -> tokio::task::JoinHandle<(
+    BoxService<Request, Response, BoxError>,
+    ReadStateService,
+    LatestChainTip,
+    ChainTipChange,
+)> {
+    tokio::task::spawn_blocking(move || init(config, network))
 }
 
 /// Returns a [`StateService`] with an ephemeral [`Config`] and a buffer with a single slot.
