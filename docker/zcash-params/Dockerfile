@@ -1,6 +1,6 @@
 # This steps implement cargo-chef for docker layer caching
 # This image is for caching Zcash Sprout and Sapling parameters
-FROM rust:bullseye as chef
+FROM rust:1.63-bullseye as chef
 RUN cargo install cargo-chef --locked
 WORKDIR /opt/zebrad
 

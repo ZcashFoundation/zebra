@@ -313,6 +313,31 @@ fn start_args() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn db_init_outside_future_executor() -> Result<()> {
+    use std::time::{Duration, Instant};
+
+    let _init_guard = zebra_test::init();
+    let config = default_test_config()?;
+
+    let start = Instant::now();
+
+    let db_init_handle = zebra_state::spawn_init(config.state.clone(), config.network.network);
+
+    // it's faster to panic if it takes longer than expected, since the executor
+    // will wait indefinitely for blocking operation to finish once started
+    let block_duration = start.elapsed();
+    assert!(
+        block_duration < Duration::from_millis(5),
+        "futures executor was blocked longer than expected ({:?})",
+        block_duration,
+    );
+
+    db_init_handle.await?;
+
+    Ok(())
+}
+
 #[test]
 fn persistent_mode() -> Result<()> {
     let _init_guard = zebra_test::init();
