@@ -35,7 +35,7 @@ tokio-stream = { version = "0.1.10", features = ["sync", "time"] }
 tokio-util = { version = "0.7.4", features = ["codec"] }
 tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
-metrics = "0.18.1"
+metrics = "0.20.1"
 tracing-futures = "0.2.5"
 tracing-error = { version = "0.2.0", features = ["traced-error"] }
 tracing = "0.1.35"
