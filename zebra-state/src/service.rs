@@ -257,6 +257,8 @@ impl Drop for StateService {
         std::mem::drop(self.finalized_block_write_sender.take());
         std::mem::drop(self.non_finalized_block_write_sender.take());
 
+        self.clear_finalized_block_queue("dropping the state: dropped unused queued block");
+
         // Then drop self.read_service, which checks the block write task for panics,
         // and tries to shut down the database.
     }
@@ -607,7 +609,10 @@ impl StateService {
             std::mem::drop(self.finalized_block_write_sender.take());
 
             // We've finished committing finalized blocks, so drop any repeated queued blocks.
-            self.queued_finalized_blocks.clear();
+            self.clear_finalized_block_queue(
+                "already finished committing finalized blocks: dropped duplicate block, \
+                 block is already committed to the state",
+            );
         }
 
         // TODO: avoid a temporary verification failure that can happen
