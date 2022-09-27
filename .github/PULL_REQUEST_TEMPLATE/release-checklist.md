@@ -16,11 +16,11 @@ This version is based on [the labels on the PRs in the release](https://github.c
 
 Check that the automatic `zebrad` version increment is correct:
 1. If we're releasing a mainnet network upgrade, increment the `major` version of all Zebra crates
-2. Check for features, major changes, deprecations, and removals. If this release has any, it is a `minor` release
+2. If we're not releasing a mainnet network upgrade, check for features, major changes, deprecations, and removals. If this release has any, it is a `minor` release
 
-To check if the other crates need version increments:
+If we're not doing a `major` release, you need to check which crates have changed:
 1. Go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra
-2. Check if the last commit to each crate was a Zebra version bump, or something else
+2. Check if the last commit to each crate is a Zebra version bump. If it is a version bump, the crate has not changed since the last release.
 
 <details>
    
