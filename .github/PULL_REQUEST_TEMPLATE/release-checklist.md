@@ -9,19 +9,20 @@ assignees: ''
 
 ## Versioning
 
-### Which Crates to Increment
+### How to Increment Versions
 
-To check if any of the top-level crates need version increments:
+Zebra follows [semantic versioning](https://semver.org).
+
+Look for the [draft `zebrad` changelog](https://github.com/ZcashFoundation/zebra/releases) for the automatic version bump.
+This version is based on [the labels on the PRs in the release](https://github.com/ZcashFoundation/zebra/blob/main/.github/release-drafter.yml).
+
+Check that the automatic `zebrad` version increment is correct:
+1. If we're releasing a mainnet network upgrade, increment the `major` version of all Zebra crates
+2. If we're not releasing a mainnet network upgrade, check for features, major changes, deprecations, and removals. If this release has any, it is a `minor` release
+
+If we're not doing a `major` release, you need to check which crates have changed:
 1. Go to the zebra GitHub code page: https://github.com/ZcashFoundation/zebra
-2. Check if the last commit was a Zebra version bump, or something else
-
-<details>
-   
-Alternatively you can:
-- Use the github compare tool and check the `main` branch against the last tag ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-alpha.15...main))
-- Use `git diff --stat <previous-release-tag> origin/main`
-
-</details>
+2. Check if the last commit to each crate is a Zebra version bump. If it is a version bump, the crate has not changed since the last release.
    
 Once you know which crates have changed:
 - [ ] Increment the crates that have new commits since the last version update
