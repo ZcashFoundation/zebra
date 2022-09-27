@@ -8,7 +8,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-color-eyre = "0.6.1"
+color-eyre = "0.6.2"
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
@@ -17,7 +17,7 @@ structopt = "0.3.26"
 hex = "0.4.3"
 serde_json = "1.0.85"
 tracing-error = "0.2.0"
-tracing-subscriber = "0.3.11"
+tracing-subscriber = "0.3.15"
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-consensus = { path = "../zebra-consensus" }

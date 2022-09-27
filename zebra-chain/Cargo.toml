@@ -37,7 +37,7 @@ ripemd = "0.1.1"
 secp256k1 = { version = "0.21.3", features = ["serde"] }
 sha2 = { version = "0.9.9", features = ["compress"] }
 subtle = "2.4.1"
-uint = "0.9.1"
+uint = "0.9.4"
 x25519-dalek = { version = "1.2.0", features = ["serde"] }
 
 # ECC deps
@@ -56,17 +56,17 @@ humantime = "2.1.0"
 displaydoc = "0.2.3"
 static_assertions = "1.1.0"
 thiserror = "1.0.35"
-tracing = "0.1.31"
+tracing = "0.1.35"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.144", features = ["serde_derive", "rc"] }
+serde = { version = "1.0.145", features = ["serde_derive", "rc"] }
 serde_with = "2.0.1"
 serde-big-array = "0.4.1"
 
 # Processing
 futures = "0.3.24"
-itertools = "0.10.4"
+itertools = "0.10.5"
 rayon = "1.5.3"
 
 # ZF deps
@@ -89,12 +89,12 @@ zebra-test = { path = "../zebra-test/", optional = true }
 criterion = { version = "0.4.0", features = ["html_reports"] }
 
 # Error Handling & Formatting
-color-eyre = "0.6.1"
+color-eyre = "0.6.2"
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 spandoc = "0.2.2"
-tracing = "0.1.31"
+tracing = "0.1.35"
 
 # Make the optional testing dependencies required
 proptest = "0.10.1"

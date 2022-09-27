@@ -61,7 +61,8 @@ jobs:
 
       - uses: actions-rs/toolchain@v1.0.7
         with:
-          toolchain: stable
+          # Rust 1.64 hangs when downloading the Zcash Parameters on GitHub Actions runners
+          toolchain: 1.63
           override: true
           profile: minimal
           components: llvm-tools-preview
@@ -109,4 +110,4 @@ jobs:
         run: cargo llvm-cov --lcov --no-run --output-path lcov.info
 
       - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v3.1.0
+        uses: codecov/codecov-action@v3.1.1
