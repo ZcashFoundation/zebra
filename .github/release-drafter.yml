@@ -126,8 +126,9 @@ categories:
 # and minor versions for less significant breaking changes.
 version-resolver:
   major:
+    # We increment the major release version manually
     labels:
-      # We increment the major release version manually
+      - ""
   minor:
     labels:
       - 'C-feature'
