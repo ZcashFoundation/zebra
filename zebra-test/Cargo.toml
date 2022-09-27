@@ -29,7 +29,7 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 humantime = "2.1.0"
 owo-colors = "3.5.0"
 spandoc = "0.2.2"
-thiserror = "1.0.35"
+thiserror = "1.0.36"
 
 tracing-subscriber = { version = "0.3.15", features = ["env-filter"] }
 tracing-error = "0.2.0"
