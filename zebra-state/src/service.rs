@@ -684,7 +684,7 @@ impl StateService {
 
     /// Assert some assumptions about the prepared `block` before it is queued.
     fn assert_block_can_be_validated(&self, block: &PreparedBlock) {
-        // required by validate_and_commit, moved here to make testing easier
+        // required by CommitBlock call
         assert!(
             block.height > self.network.mandatory_checkpoint_height(),
             "invalid non-finalized block height: the canopy checkpoint is mandatory, pre-canopy \
