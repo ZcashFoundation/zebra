@@ -31,7 +31,7 @@ incrementalmerkletree = "0.3.0"
 jubjub = "0.9.0"
 lazy_static = "1.4.0"
 primitive-types = "0.11.1"
-rand_core = "0.6.3"
+rand_core = "0.6.4"
 ripemd = "0.1.3"
 # Matches version used by hdwallet
 secp256k1 = { version = "0.21.3", features = ["serde"] }
