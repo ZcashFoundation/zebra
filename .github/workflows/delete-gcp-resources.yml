@@ -8,7 +8,10 @@ on:
   workflow_dispatch:
 
 env:
-  # Delete all resources created before $DELETE_AGE_DAYS days ago.
+  # Delete all resources created before $DELETE_INSTANCE_DAYS days ago.
+  # We keep this short to reduce CPU, RAM, and storage costs.
+  DELETE_INSTANCE_DAYS: 3
+  # Delete all other resources created before $DELETE_AGE_DAYS days ago.
   # We keep this short to reduce storage costs.
   DELETE_AGE_DAYS: 2
   # But keep the latest $KEEP_LATEST_IMAGE_COUNT images of each type.
@@ -37,38 +40,73 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
+      # Deletes all instances older than $DELETE_INSTANCE_DAYS days.
+      #
+      # We only delete instances that end in 7 or more hex characters,
+      # to avoid deleting managed instance groups and manually created instances.
+      #
+      # ${INSTANCE_AND_ZONE} expands to:
+      # <instance-name> --zone=<zone-name>
+      # so it can't be shell-quoted.
+      - name: Delete old instances
+        run: |
+          DELETE_BEFORE_DATE=$(date --date="$DELETE_INSTANCE_DAYS days ago" '+%Y%m%d')
+
+          IFS=$'\n'
+          INSTANCES=$(gcloud compute instances list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME,ZONE)' | \
+                      sed 's/\(.*\)\t\(.*\)/\1 --zone=\2/')
+
+          for INSTANCE_AND_ZONE in $INSTANCES
+          do
+            IFS=$' '
+            gcloud compute instances delete --verbosity=info ${INSTANCE_AND_ZONE} --delete-disks=all || continue
+            IFS=$'\n'
+          done
+
       # Deletes all the instance templates older than $DELETE_AGE_DAYS days.
       - name: Delete old instance templates
         run: |
           DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
-          TEMPLATES=$(gcloud compute instance-templates list --sort-by=creationTimestamp  --filter="name~-[0-9a-f]+$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          TEMPLATES=$(gcloud compute instance-templates list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
 
           for TEMPLATE in $TEMPLATES
           do
-            gcloud compute instance-templates delete ${TEMPLATE} || continue
+            gcloud compute instance-templates delete "${TEMPLATE}" || continue
           done
 
       # Deletes all the disks older than $DELETE_AGE_DAYS days.
       #
-      # Disks that are attached to an instance template can't be deleted, so it is safe to delete all disks here.
+      # Disks that are attached to an instance template can't be deleted, so it is safe to try to delete all disks here.
+      #
+      # ${DISK_AND_LOCATION} expands to:
+      # <disk-name> --[zone|region]=<location-name>
+      # so it can't be shell-quoted.
       - name: Delete old disks
         run: |
           DELETE_BEFORE_DATE=$(date --date="$DELETE_AGE_DAYS days ago" '+%Y%m%d')
 
+          IFS=$'\n'
           # Disks created by PR jobs, and other jobs that use a commit hash
-          COMMIT_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp  --filter="name~-[0-9a-f]+$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          COMMIT_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME,LOCATION,LOCATION_SCOPE)' | \
+                         sed 's/\(.*\)\t\(.*\)\t\(.*\)/\1 --\3=\2/')
 
-          for DISK in $COMMIT_DISKS
+          for DISK_AND_LOCATION in $COMMIT_DISKS
           do
-            gcloud compute disks delete --verbosity=info ${DISK} || continue
+            IFS=$' '
+            gcloud compute disks delete --verbosity=info ${DISK_AND_LOCATION} || continue
+            IFS=$'\n'
           done
           
+          IFS=$'\n'
           # Disks created by managed instance groups, and other jobs that start with "zebrad-"
-          ZEBRAD_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp  --filter="name~^zebrad- AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
+          ZEBRAD_DISKS=$(gcloud compute disks list --sort-by=creationTimestamp --filter="name~^zebrad- AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME,LOCATION,LOCATION_SCOPE)' | \
+                         sed 's/\(.*\)\t\(.*\)\t\(.*\)/\1 --\3=\2/')
 
-          for DISK in $ZEBRAD_DISKS
+          for DISK_AND_LOCATION in $ZEBRAD_DISKS
           do
-            gcloud compute disks delete --verbosity=info ${DISK} || continue
+            IFS=$' '
+            gcloud compute disks delete --verbosity=info ${DISK_AND_LOCATION} || continue
+            IFS=$'\n'
           done
 
       # Deletes cache images older than $DELETE_AGE_DAYS days.
@@ -98,7 +136,7 @@ jobs:
               continue
             fi
             
-            gcloud compute images delete ${IMAGE} || continue
+            gcloud compute images delete "${IMAGE}" || continue
           done
 
           ZEBRAD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^zebrad-cache-.*net-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
@@ -112,7 +150,7 @@ jobs:
               continue
             fi
             
-            gcloud compute images delete ${IMAGE} || continue
+            gcloud compute images delete "${IMAGE}" || continue
           done
           
           LWD_TIP_IMAGES=$(gcloud compute images list --sort-by=~creationTimestamp --filter="name~^lwd-cache-.*net-tip AND creationTimestamp < $DELETE_BEFORE_DATE" --format='value(NAME)')
@@ -126,5 +164,5 @@ jobs:
               continue
             fi
             
-            gcloud compute images delete ${IMAGE} || continue
+            gcloud compute images delete "${IMAGE}" || continue
           done

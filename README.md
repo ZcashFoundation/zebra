@@ -87,7 +87,7 @@ for your platform:
 2. Install Zebra's build dependencies:
    - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
    - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.14 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-beta.15 zebrad`
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 For more detailed instructions, refer to the [documentation](https://zebra.zfnd.org/user/install.html).
@@ -219,10 +219,6 @@ There are a few bugs in Zebra that we're still working on fixing:
 
 - No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801)
   - We used to test with Windows Server 2019, but not anymore; see issue for details
-
-### Performance
-
-- Revert deserializing state transactions in rayon threads [#4831](https://github.com/ZcashFoundation/zebra/issues/4831)
 
 ## Future Work
 
