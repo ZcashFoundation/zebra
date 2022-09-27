@@ -44,6 +44,7 @@ use crate::{
         MAX_LEGACY_CHAIN_BLOCKS,
     },
     service::{
+        block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
@@ -68,8 +69,6 @@ mod queued_blocks;
 pub(crate) mod read;
 mod write;
 
-use write::NonFinalizedWriteCmd;
-
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
 
@@ -77,8 +76,9 @@ pub mod arbitrary;
 mod tests;
 
 pub use finalized_state::{OutputIndex, OutputLocation, TransactionLocation};
+use write::NonFinalizedWriteCmd;
 
-use self::{block_iter::any_ancestor_blocks, queued_blocks::QueuedFinalized};
+use self::queued_blocks::QueuedFinalized;
 
 /// A read-write service for Zebra's cached blockchain state.
 ///
@@ -537,11 +537,12 @@ impl StateService {
 
     /// Send an error on a `QueuedFinalized` block's result channel, and drop the block
     fn send_finalized_block_error(queued: QueuedFinalized, error: impl Into<BoxError>) {
-        let (_finalized, rsp_tx) = queued;
+        let (finalized, rsp_tx) = queued;
 
         // The block sender might have already given up on this block,
         // so ignore any channel send errors.
         let _ = rsp_tx.send(Err(error.into()));
+        std::mem::drop(finalized);
     }
 
     /// Queue a non finalized block for verification and check if any queued
@@ -619,7 +620,7 @@ impl StateService {
 
         // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
         if self.finalized_block_write_sender.is_none() {
-            self.send_process_queued(parent_hash);
+            self.send_ready_non_finalized_queued(parent_hash);
 
             let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
                 "Finalized state must have at least one block before committing non-finalized state",
@@ -637,10 +638,10 @@ impl StateService {
         self.mem.any_chain_contains(hash) || &self.read_service.db.finalized_tip_hash() == hash
     }
 
-    /// Attempt to validate and commit all queued blocks whose parents have
-    /// recently arrived starting from `new_parent`, in breadth-first ordering.
+    /// Sends all queued blocks whose parents have recently arrived starting from `new_parent`
+    /// in breadth-first ordering to the block write task which will attempt to validate and commit them
     #[tracing::instrument(level = "debug", skip(self, new_parent))]
-    fn send_process_queued(&mut self, new_parent: block::Hash) {
+    fn send_ready_non_finalized_queued(&mut self, new_parent: block::Hash) {
         use tokio::sync::mpsc::error::SendError;
         if let Some(non_finalized_block_write_sender) = &self.non_finalized_block_write_sender {
             let mut new_parents: Vec<block::Hash> = vec![new_parent];
@@ -653,17 +654,11 @@ impl StateService {
                 for queued_child in queued_children {
                     let child_hash = queued_child.0.hash;
 
-                    let send_result = non_finalized_block_write_sender.send(
-                        NonFinalizedWriteCmd::ProcessQueued {
-                            parent_hash,
-                            queued_child,
-                        },
-                    );
+                    let send_result = non_finalized_block_write_sender
+                        .send(NonFinalizedWriteCmd::ProcessQueued(queued_child));
 
-                    if let Err(SendError(NonFinalizedWriteCmd::ProcessQueued {
-                        parent_hash: _,
-                        queued_child: (_, rsp_tx),
-                    })) = send_result
+                    if let Err(SendError(NonFinalizedWriteCmd::ProcessQueued((_, rsp_tx)))) =
+                        send_result
                     {
                         // If Zebra is shutting down, ignore dropped block result receivers
                         let _ = rsp_tx.send(Err(
@@ -677,8 +672,8 @@ impl StateService {
                 }
             }
 
-            let _ = non_finalized_block_write_sender
-                .send(NonFinalizedWriteCmd::FinishProcessingQueued);
+            let _ =
+                non_finalized_block_write_sender.send(NonFinalizedWriteCmd::FinishProcessingQueued);
         };
     }
 
@@ -687,7 +682,7 @@ impl StateService {
         self.mem.best_tip().or_else(|| self.read_service.db.tip())
     }
 
-    /// Assert some assumptions about the prepared `block` before it is validated.
+    /// Assert some assumptions about the prepared `block` before it is queued.
     fn assert_block_can_be_validated(&self, block: &PreparedBlock) {
         // required by validate_and_commit, moved here to make testing easier
         assert!(

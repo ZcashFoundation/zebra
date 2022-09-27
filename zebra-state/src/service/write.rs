@@ -1,7 +1,12 @@
 //! Writing blocks to the finalized and non-finalized states.
-#![allow(clippy::too_many_arguments)]
 
-use tokio::sync::watch;
+use std::collections::HashMap;
+
+use tokio::sync::{
+    mpsc::{UnboundedReceiver, UnboundedSender},
+    watch,
+};
+
 use zebra_chain::{
     block::{self, Height},
     parameters::Network,
@@ -18,17 +23,10 @@ use crate::{
     CommitBlockError, PreparedBlock,
 };
 
-use std::collections::HashMap;
-
 pub enum NonFinalizedWriteCmd {
-    ProcessQueued {
-        parent_hash: block::Hash,
-        queued_child: QueuedNonFinalized,
-    },
+    ProcessQueued(QueuedNonFinalized),
     FinishProcessingQueued,
 }
-
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 /// Run contextual validation on the prepared block and add it to the
 /// non-finalized state if it is contextually valid.
@@ -73,7 +71,6 @@ fn update_latest_chain_channels(
         .map(ChainTipBlock::from);
     let tip_block_height = tip_block.as_ref().map(|block| block.height);
 
-    // TODO: Update the non_finalized_state_receiver
     // If the final receiver was just dropped, ignore the error.
     let _ = non_finalized_state_sender.send(non_finalized_state.clone());
 
@@ -82,10 +79,10 @@ fn update_latest_chain_channels(
     tip_block_height
 }
 
-/// Reads blocks from the channels, write them to the `finalized_state`,
-/// and updates the `chain_tip_sender`.
-///
-/// TODO: make the task an object
+/// Reads blocks from the channels, writes them to the `finalized_state` or `non_finalized_state`,
+/// sends any errors on the `invalid_block_reset_sender`, then updates the `chain_tip_sender` and `non_finalized_state_sender`.
+// TODO: make the task an object
+#[allow(clippy::too_many_arguments)]
 #[instrument(skip(
     finalized_block_write_receiver,
     non_finalized_block_write_receiver,
@@ -181,13 +178,11 @@ pub fn write_blocks_from_channels(
 
     while let Some(non_finalized_write_cmd) = non_finalized_block_write_receiver.blocking_recv() {
         match non_finalized_write_cmd {
-            NonFinalizedWriteCmd::ProcessQueued {
-                parent_hash,
-                queued_child: (child, rsp_tx),
-            } => {
+            NonFinalizedWriteCmd::ProcessQueued((queued_child, rsp_tx)) => {
+                let child_hash = queued_child.hash;
+                let parent_hash = queued_child.block.header.previous_block_hash;
                 let parent_error = parent_error_map.get(&parent_hash);
 
-                let child_hash = child.hash;
                 let result;
 
                 // If the block is invalid, reject any descendant blocks.
@@ -211,7 +206,7 @@ pub fn write_blocks_from_channels(
                         &finalized_state,
                         &mut non_finalized_state,
                         network,
-                        child,
+                        queued_child,
                     )
                     .map_err(CloneError::from);
 
@@ -225,7 +220,7 @@ pub fn write_blocks_from_channels(
                 let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
 
                 if let Err(ref error) = result {
-                    parent_error_map.insert(parent_hash, error.clone());
+                    parent_error_map.insert(child_hash, error.clone());
                 }
             }
 
