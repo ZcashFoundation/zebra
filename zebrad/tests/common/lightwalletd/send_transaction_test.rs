@@ -176,8 +176,13 @@ pub async fn run() -> Result<()> {
         assert_eq!(response, expected_response);
     }
 
-    tracing::info!("waiting for mempool to verify some transactions...");
-    zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
+    // The timing of verification logs are unrealiable, so we've disabled this check for now. 
+    //
+    // TODO: when lightwalletd starts returning transactions again:
+    //       re-enable this check, find a better way to check, or delete this commented-out check
+    //
+    //tracing::info!("waiting for mempool to verify some transactions...");
+    //zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
 
     tracing::info!("calling GetMempoolTx gRPC to fetch transactions...");
     let mut transactions_stream = rpc_client
