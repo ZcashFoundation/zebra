@@ -99,7 +99,8 @@ impl Tracing {
 
             let subscriber = tracing_subscriber::registry();
             // TODO: find out why crawl_and_dial and try_to_sync evade this filter,
-            //       and why they also don't get the global net/commit span
+            //       and why they also don't get the global net/commit span.
+            // Note: this might have been fixed by tracing 0.3.15, or by recent Zebra refactors.
             //
             // Using `registry` as the base subscriber, the logs from most other functions get filtered.
             // Using `FmtSubscriber` as the base subscriber, all the logs get filtered.

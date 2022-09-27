@@ -12,7 +12,7 @@ use zebra_chain::{
     work::difficulty::CompactDifficulty,
 };
 
-use crate::{constants, BoxError, PreparedBlock, ValidateContextError};
+use crate::{BoxError, PreparedBlock, ValidateContextError};
 
 // use self as check
 use super::check;
@@ -289,10 +289,15 @@ fn difficulty_threshold_is_valid(
 }
 
 /// Check if zebra is following a legacy chain and return an error if so.
+///
+/// `nu5_activation_height` should be `NetworkUpgrade::Nu5.activation_height(network)`, and
+/// `max_legacy_chain_blocks` should be [`MAX_LEGACY_CHAIN_BLOCKS`](crate::constants::MAX_LEGACY_CHAIN_BLOCKS).
+/// They are only changed from the defaults for testing.
 pub(crate) fn legacy_chain<I>(
     nu5_activation_height: block::Height,
     ancestors: I,
     network: Network,
+    max_legacy_chain_blocks: usize,
 ) -> Result<(), BoxError>
 where
     I: Iterator<Item = Arc<Block>>,
@@ -315,8 +320,8 @@ where
         }
 
         // If we are past our NU5 activation height, but there are no V5 transactions in recent blocks,
-        // the Zebra instance that verified those blocks had no NU5 activation height.
-        if index >= constants::MAX_LEGACY_CHAIN_BLOCKS {
+        // the last Zebra instance that updated this cached state had no NU5 activation height.
+        if index >= max_legacy_chain_blocks {
             return Err(format!(
                 "could not find any transactions in recent blocks: \
                  checked {index} blocks back from {:?}",

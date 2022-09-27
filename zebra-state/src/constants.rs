@@ -22,7 +22,9 @@ pub const DATABASE_FORMAT_VERSION: u32 = 25;
 
 /// The maximum number of blocks to check for NU5 transactions,
 /// before we assume we are on a pre-NU5 legacy chain.
-pub const MAX_LEGACY_CHAIN_BLOCKS: usize = 1000;
+///
+/// Zebra usually only has to check back a few blocks, but on testnet it can be a long time between v5 transactions.
+pub const MAX_LEGACY_CHAIN_BLOCKS: usize = 10_000;
 
 /// The maximum number of block hashes allowed in `getblocks` responses in the Zcash network protocol.
 pub const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;
