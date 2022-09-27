@@ -45,8 +45,11 @@ pub(super) use zebra_db::ZebraDb;
 /// The finalized part of the chain state, stored in the db.
 ///
 /// `rocksdb` allows concurrent writes through a shared reference,
-/// so finalized state instances are cloneable. When the final clone is dropped,
-/// the database is closed.
+/// so clones of the finalized state represent the same database instance.
+/// When the final clone is dropped, the database is closed.
+///
+/// This is different from `NonFinalizedState::clone()`,
+/// which returns an independent copy of the chains.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FinalizedState {
     // Configuration
