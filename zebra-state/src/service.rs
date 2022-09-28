@@ -151,43 +151,6 @@ pub(crate) struct StateService {
     // TODO: add tests for finalized and non-finalized resets (#2654)
     invalid_block_reset_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
 
-    /// A channel to send blocks to the `block_write_task`,
-    /// so they can be written to the [`NonFinalizedState`].
-    //
-    // TODO: actually send blocks on this channel
-    non_finalized_block_write_sender:
-        Option<tokio::sync::mpsc::UnboundedSender<QueuedNonFinalized>>,
-
-    /// A channel to send blocks to the `block_write_task`,
-    /// so they can be written to the [`FinalizedState`].
-    ///
-    /// This sender is dropped after the state has finished sending all the checkpointed blocks,
-    /// and the lowest non-finalized block arrives.
-    finalized_block_write_sender: Option<tokio::sync::mpsc::UnboundedSender<QueuedFinalized>>,
-
-    /// The [`block::Hash`] of the most recent block sent on
-    /// `finalized_block_write_sender` or `non_finalized_block_write_sender`.
-    ///
-    /// On startup, this is:
-    /// - the finalized tip, if there are stored blocks, or
-    /// - the genesis block's parent hash, if the database is empty.
-    ///
-    /// If `invalid_block_reset_receiver` gets a reset, this is:
-    /// - the hash of the last valid committed block (the parent of the invalid block).
-    //
-    // TODO:
-    // - turn this into an IndexMap containing recent non-finalized block hashes and heights
-    //   (they are all potential tips)
-    // - remove block hashes once their heights are strictly less than the finalized tip
-    last_block_hash_sent: block::Hash,
-
-    /// If an invalid block is sent on `finalized_block_write_sender`
-    /// or `non_finalized_block_write_sender`,
-    /// this channel gets the [`block::Hash`] of the valid tip.
-    //
-    // TODO: add tests for finalized and non-finalized resets (#2654)
-    invalid_block_reset_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
-
     // Pending UTXO Request Tracking
     //
     /// The set of outpoints with pending requests for their associated transparent::Output.
