@@ -51,6 +51,10 @@ pub struct CommitBlockError(#[from] ValidateContextError);
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
+    #[error("commit_block is only called with blocks that are ready to be committed")]
+    #[non_exhaustive]
+    NotReadyToBeCommitted,
+
     #[error("block height {candidate_height:?} is lower than the current finalized height {finalized_tip_height:?}")]
     #[non_exhaustive]
     OrphanedBlock {

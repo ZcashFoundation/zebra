@@ -478,9 +478,8 @@ impl NonFinalizedState {
                             )
                             .transpose()
                     })
-                    .expect(
-                        "commit_block is only called with blocks that are ready to be committed",
-                    )?;
+                    .transpose()?
+                    .ok_or(ValidateContextError::NotReadyToBeCommitted)?;
 
                 Ok(Arc::new(fork_chain))
             }
