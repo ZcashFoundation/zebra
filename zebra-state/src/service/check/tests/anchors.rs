@@ -13,7 +13,7 @@ use zebra_chain::{
 
 use crate::{
     arbitrary::Prepare,
-    service::write::validate_and_commit_non_finalized,
+    service::{write::validate_and_commit_non_finalized},
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
     PreparedBlock,
 };
@@ -26,7 +26,7 @@ use crate::{
 fn check_sprout_anchors() {
     let _init_guard = zebra_test::init();
 
-    let (mut state, _genesis) = new_state_with_mainnet_genesis();
+    let (finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
     // Bootstrap a block at height == 1.
     let block_1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
@@ -44,9 +44,8 @@ fn check_sprout_anchors() {
     // Validate and commit [`block_1`]. This will add an anchor referencing the
     // empty note commitment tree to the state.
     assert!(validate_and_commit_non_finalized(
-        &state.disk,
-        &mut state.mem,
-        state.network,
+        &finalized_state,
+        &mut non_finalized_state,
         block_1
     )
     .is_ok());
@@ -68,7 +67,11 @@ fn check_sprout_anchors() {
 
     // Validate and commit [`block_2`]. This will also check the anchors.
     assert_eq!(
-        validate_and_commit_non_finalized(&state.disk, &mut state.mem, state.network, block_2),
+        validate_and_commit_non_finalized(
+            &finalized_state,
+            &mut non_finalized_state,
+            block_2
+        ),
         Ok(())
     );
 }
@@ -145,7 +148,7 @@ fn prepare_sprout_block(mut block_to_prepare: Block, reference_block: Block) -> 
 fn check_sapling_anchors() {
     let _init_guard = zebra_test::init();
 
-    let (mut state, _genesis) = new_state_with_mainnet_genesis();
+    let (finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
     // Bootstrap a block at height == 1 that has the first Sapling note commitments
     let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
@@ -192,9 +195,8 @@ fn check_sapling_anchors() {
 
     let block1 = Arc::new(block1).prepare();
     assert!(validate_and_commit_non_finalized(
-        &state.disk,
-        &mut state.mem,
-        state.network,
+        &finalized_state,
+        &mut non_finalized_state,
         block1
     )
     .is_ok());
@@ -245,7 +247,7 @@ fn check_sapling_anchors() {
 
     let block2 = Arc::new(block2).prepare();
     assert_eq!(
-        validate_and_commit_non_finalized(&state.disk, &mut state.mem, state.network, block2),
+        validate_and_commit_non_finalized(&finalized_state, &mut non_finalized_state, block2),
         Ok(())
     );
 }
