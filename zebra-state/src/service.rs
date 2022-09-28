@@ -62,8 +62,8 @@ pub mod watch_receiver;
 
 pub(crate) mod check;
 
-mod finalized_state;
-mod non_finalized_state;
+pub(crate) mod finalized_state;
+pub(crate) mod non_finalized_state;
 mod pending_utxos;
 mod queued_blocks;
 pub(crate) mod read;
@@ -363,7 +363,11 @@ impl StateService {
 
             if let Err(error) = check::legacy_chain(
                 nu5_activation_height,
-                any_ancestor_blocks(&state.read_service.latest_mem(), &state.read_service.db, tip.1),
+                any_ancestor_blocks(
+                    &state.read_service.latest_mem(),
+                    &state.read_service.db,
+                    tip.1,
+                ),
                 state.network,
                 MAX_LEGACY_CHAIN_BLOCKS,
             ) {
@@ -667,10 +671,7 @@ impl StateService {
 
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
-        self.read_service
-            .latest_mem()
-            .best_tip()
-            .or_else(|| self.read_service.db.tip())
+        read::best_tip(&self.read_service.latest_mem(), &self.read_service.db)
     }
 
     /// Assert some assumptions about the prepared `block` before it is queued.
