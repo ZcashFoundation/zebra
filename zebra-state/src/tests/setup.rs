@@ -15,7 +15,9 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::{check, finalized_state::FinalizedState, non_finalized_state::NonFinalizedState, read},
+    service::{
+        check, finalized_state::FinalizedState, non_finalized_state::NonFinalizedState, read,
+    },
     Config, FinalizedBlock,
 };
 
@@ -93,14 +95,20 @@ pub(crate) fn new_state_with_mainnet_genesis() -> (FinalizedState, NonFinalizedS
     let mut finalized_state = FinalizedState::new(&config, network);
     let non_finalized_state = NonFinalizedState::new(network);
 
-    assert_eq!(None, read::best_tip(&non_finalized_state, &finalized_state.db));
+    assert_eq!(
+        None,
+        read::best_tip(&non_finalized_state, &finalized_state.db)
+    );
 
     let genesis = FinalizedBlock::from(genesis);
     finalized_state
         .commit_finalized_direct(genesis.clone().into(), "test")
         .expect("unexpected invalid genesis block test vector");
 
-    assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+    assert_eq!(
+        Some((Height(0), genesis.hash)),
+        read::best_tip(&non_finalized_state, &finalized_state.db)
+    );
 
     (finalized_state, non_finalized_state, genesis)
 }

@@ -13,7 +13,7 @@ use zebra_chain::{
 
 use crate::{
     arbitrary::Prepare,
-    service::{write::validate_and_commit_non_finalized},
+    service::write::validate_and_commit_non_finalized,
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
     PreparedBlock,
 };
@@ -43,12 +43,10 @@ fn check_sprout_anchors() {
 
     // Validate and commit [`block_1`]. This will add an anchor referencing the
     // empty note commitment tree to the state.
-    assert!(validate_and_commit_non_finalized(
-        &finalized_state,
-        &mut non_finalized_state,
-        block_1
-    )
-    .is_ok());
+    assert!(
+        validate_and_commit_non_finalized(&finalized_state, &mut non_finalized_state, block_1)
+            .is_ok()
+    );
 
     // Bootstrap a block at height == 2 that references the Sprout note commitment tree state
     // from [`block_1`].
@@ -67,11 +65,7 @@ fn check_sprout_anchors() {
 
     // Validate and commit [`block_2`]. This will also check the anchors.
     assert_eq!(
-        validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,
-            block_2
-        ),
+        validate_and_commit_non_finalized(&finalized_state, &mut non_finalized_state, block_2),
         Ok(())
     );
 }
@@ -194,12 +188,10 @@ fn check_sapling_anchors() {
         });
 
     let block1 = Arc::new(block1).prepare();
-    assert!(validate_and_commit_non_finalized(
-        &finalized_state,
-        &mut non_finalized_state,
-        block1
-    )
-    .is_ok());
+    assert!(
+        validate_and_commit_non_finalized(&finalized_state, &mut non_finalized_state, block1)
+            .is_ok()
+    );
 
     // Bootstrap a block at height == 2 that references the Sapling note commitment tree state
     // from earlier block

@@ -19,7 +19,7 @@ use zebra_chain::{
 
 use crate::{
     arbitrary::Prepare,
-    service::{write::validate_and_commit_non_finalized, read},
+    service::{read, write::validate_and_commit_non_finalized},
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
     FinalizedBlock,
     ValidateContextError::{

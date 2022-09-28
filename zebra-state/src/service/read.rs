@@ -29,7 +29,7 @@ pub use address::{
 };
 pub use block::{any_utxo, block, block_header, transaction, utxo};
 pub use find::{
-    block_locator, chain_contains_hash, depth, find_chain_hashes, find_chain_headers,
-    hash_by_height, height_by_hash, tip, tip_height, best_tip,
+    best_tip, block_locator, chain_contains_hash, depth, find_chain_hashes, find_chain_headers,
+    hash_by_height, height_by_hash, tip, tip_height,
 };
 pub use tree::{orchard_tree, sapling_tree};
