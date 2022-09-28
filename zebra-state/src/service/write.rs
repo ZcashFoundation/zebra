@@ -7,10 +7,7 @@ use tokio::sync::{
     watch,
 };
 
-use zebra_chain::{
-    block::{self, Height},
-    parameters::Network,
-};
+use zebra_chain::block::{self, Height};
 
 use crate::{
     service::{
@@ -34,10 +31,9 @@ pub enum NonFinalizedWriteCmd {
 pub(crate) fn validate_and_commit_non_finalized(
     finalized_state: &FinalizedState,
     non_finalized_state: &mut NonFinalizedState,
-    network: Network,
     prepared: PreparedBlock,
 ) -> Result<(), CommitBlockError> {
-    check::contextual_validity(finalized_state, non_finalized_state, network, &prepared)?;
+    check::contextual_validity(finalized_state, non_finalized_state, &prepared)?;
     let parent_hash = prepared.block.header.previous_block_hash;
 
     if finalized_state.db.finalized_tip_hash() == parent_hash {
@@ -94,7 +90,6 @@ pub fn write_blocks_from_channels(
     mut non_finalized_block_write_receiver: UnboundedReceiver<NonFinalizedWriteCmd>,
     mut finalized_state: FinalizedState,
     mut non_finalized_state: NonFinalizedState,
-    network: Network,
     invalid_block_reset_sender: UnboundedSender<block::Hash>,
     mut chain_tip_sender: ChainTipSender,
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
@@ -205,7 +200,6 @@ pub fn write_blocks_from_channels(
                     result = validate_and_commit_non_finalized(
                         &finalized_state,
                         &mut non_finalized_state,
-                        network,
                         queued_child,
                     )
                     .map_err(CloneError::from);

@@ -319,7 +319,6 @@ impl StateService {
                 non_finalized_block_write_receiver,
                 finalized_state_for_writing,
                 non_finalized_state,
-                network,
                 invalid_block_reset_sender,
                 chain_tip_sender,
                 non_finalized_state_sender,
