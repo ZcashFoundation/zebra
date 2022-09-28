@@ -1,7 +1,6 @@
 //! Writing blocks to the finalized and non-finalized states.
 
-use std::collections::HashMap;
-
+use indexmap::IndexMap;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     watch,
@@ -164,8 +163,7 @@ pub fn write_blocks_from_channels(
     }
 
     // Save any errors to propagate down to queued child blocks
-    // TODO: Replace this with an IndexMap immediately.
-    let mut parent_error_map: HashMap<block::Hash, CloneError> = HashMap::new();
+    let mut parent_error_map: IndexMap<block::Hash, CloneError> = IndexMap::new();
 
     while let Some((queued_child, rsp_tx)) = non_finalized_block_write_receiver.blocking_recv() {
         let child_hash = queued_child.hash;
@@ -245,6 +243,12 @@ pub fn write_blocks_from_channels(
         }
 
         tracing::trace!("finished processing queued block");
+
+        if parent_error_map.len() > 1000 {
+            parent_error_map.reverse();
+            parent_error_map.truncate(20);
+            parent_error_map.reverse();
+        }
     }
 
     // We're finished receiving non-finalized blocks from the state, and
