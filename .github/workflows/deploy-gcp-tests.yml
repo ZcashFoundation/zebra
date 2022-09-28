@@ -96,7 +96,7 @@ env:
   EXTRA_LOG_LINES: 200
   # How many blocks to wait before creating an updated cached state image.
   # 1 day is approximately 1152 blocks.
-  CACHED_STATE_UPDATE_LIMIT: 1152
+  CACHED_STATE_UPDATE_LIMIT: 576
 
 jobs:
   # set up the test, if it doesn't use any cached state
