@@ -2,7 +2,7 @@
 //!
 //! TODO: move these tests into tests::vectors and tests::prop modules.
 
-use std::{env, sync::Arc};
+use std::{env, sync::Arc, time::Duration};
 
 use tower::{buffer::Buffer, util::BoxService};
 
@@ -386,59 +386,6 @@ proptest! {
         prop_assert_eq!(response, Ok(()));
     }
 
-    /// Test that the best tip height is updated accordingly.
-    ///
-    /// 1. Generate a finalized chain and some non-finalized blocks.
-    /// 2. Check that initially the best tip height is empty.
-    /// 3. Commit the finalized blocks and check that the best tip height is updated accordingly.
-    /// 4. Commit the non-finalized blocks and check that the best tip height is also updated
-    ///    accordingly.
-    #[test]
-    fn chain_tip_sender_is_updated(
-        (network, finalized_blocks, non_finalized_blocks)
-            in continuous_empty_blocks_from_test_vectors(),
-    ) {
-        let _init_guard = zebra_test::init();
-
-        let (mut state_service, _read_only_state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network);
-
-        prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
-        prop_assert_eq!(chain_tip_change.last_tip_change(), None);
-
-        for block in finalized_blocks {
-            let expected_block = block.clone();
-
-            let expected_action = if expected_block.height <= block::Height(1) {
-                // 0: reset by both initialization and the Genesis network upgrade
-                // 1: reset by the BeforeOverwinter network upgrade
-                TipAction::reset_with(expected_block.clone().into())
-            } else {
-                TipAction::grow_with(expected_block.clone().into())
-            };
-
-            state_service.queue_and_commit_finalized(block);
-
-            prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
-            prop_assert_eq!(chain_tip_change.last_tip_change(), Some(expected_action));
-        }
-
-        for block in non_finalized_blocks {
-            let expected_block = block.clone();
-
-            let expected_action = if expected_block.height == block::Height(1) {
-                // 1: reset by the BeforeOverwinter network upgrade
-                TipAction::reset_with(expected_block.clone().into())
-            } else {
-                TipAction::grow_with(expected_block.clone().into())
-            };
-
-            state_service.queue_and_commit_non_finalized(block);
-
-            prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
-            prop_assert_eq!(chain_tip_change.last_tip_change(), Some(expected_action));
-        }
-    }
-
     /// Test that the value pool is updated accordingly.
     ///
     /// 1. Generate a finalized chain and some non-finalized blocks.
@@ -476,7 +423,10 @@ proptest! {
                 expected_finalized_value_pool += *block_value_pool;
             }
 
-            state_service.queue_and_commit_finalized(block.clone());
+            let result_receiver = state_service.queue_and_commit_finalized(block.clone());
+            let result = result_receiver.blocking_recv();
+
+            prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
 
             prop_assert_eq!(
                 state_service.disk.finalized_value_pool(),
@@ -499,7 +449,10 @@ proptest! {
             let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos))?;
             expected_non_finalized_value_pool += *block_value_pool;
 
-            state_service.queue_and_commit_non_finalized(block.clone());
+            let result_receiver = state_service.queue_and_commit_non_finalized(block.clone());
+            let result = result_receiver.blocking_recv();
+
+            prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
 
             prop_assert_eq!(
                 state_service.mem.best_chain().unwrap().chain_value_pools,
@@ -514,6 +467,80 @@ proptest! {
                 state_service.mem.best_chain().unwrap().chain_value_pools,
                 expected_transparent_pool
             );
+        }
+    }
+}
+
+// This test sleeps for every block, so we only ever want to run it once
+proptest! {
+    #![proptest_config(
+        proptest::test_runner::Config::with_cases(1)
+    )]
+
+    /// Test that the best tip height is updated accordingly.
+    ///
+    /// 1. Generate a finalized chain and some non-finalized blocks.
+    /// 2. Check that initially the best tip height is empty.
+    /// 3. Commit the finalized blocks and check that the best tip height is updated accordingly.
+    /// 4. Commit the non-finalized blocks and check that the best tip height is also updated
+    ///    accordingly.
+    #[test]
+    fn chain_tip_sender_is_updated(
+        (network, finalized_blocks, non_finalized_blocks)
+            in continuous_empty_blocks_from_test_vectors(),
+    ) {
+        let _init_guard = zebra_test::init();
+
+        let (mut state_service, _read_only_state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network);
+
+        prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
+        prop_assert_eq!(chain_tip_change.last_tip_change(), None);
+
+        for block in finalized_blocks {
+            let expected_block = block.clone();
+
+            let expected_action = if expected_block.height <= block::Height(1) {
+                // 0: reset by both initialization and the Genesis network upgrade
+                // 1: reset by the BeforeOverwinter network upgrade
+                TipAction::reset_with(expected_block.clone().into())
+            } else {
+                TipAction::grow_with(expected_block.clone().into())
+            };
+
+            let result_receiver = state_service.queue_and_commit_finalized(block);
+            let result = result_receiver.blocking_recv();
+
+            prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
+
+            // Wait for the channels to be updated by the block commit task.
+            // TODO: add a blocking method on ChainTipChange
+            std::thread::sleep(Duration::from_secs(1));
+
+            prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
+            prop_assert_eq!(chain_tip_change.last_tip_change(), Some(expected_action));
+        }
+
+        for block in non_finalized_blocks {
+            let expected_block = block.clone();
+
+            let expected_action = if expected_block.height == block::Height(1) {
+                // 1: reset by the BeforeOverwinter network upgrade
+                TipAction::reset_with(expected_block.clone().into())
+            } else {
+                TipAction::grow_with(expected_block.clone().into())
+            };
+
+            let result_receiver = state_service.queue_and_commit_non_finalized(block);
+            let result = result_receiver.blocking_recv();
+
+            prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
+
+            // Wait for the channels to be updated by the block commit task.
+            // TODO: add a blocking method on ChainTipChange
+            std::thread::sleep(Duration::from_secs(1));
+
+            prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
+            prop_assert_eq!(chain_tip_change.last_tip_change(), Some(expected_action));
         }
     }
 }

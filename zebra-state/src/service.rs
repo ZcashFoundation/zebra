@@ -19,6 +19,7 @@ use std::{
     convert,
     future::Future,
     pin::Pin,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -65,6 +66,7 @@ mod non_finalized_state;
 mod pending_utxos;
 mod queued_blocks;
 pub(crate) mod read;
+mod write;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
@@ -74,7 +76,7 @@ mod tests;
 
 pub use finalized_state::{OutputIndex, OutputLocation, TransactionLocation};
 
-use self::queued_blocks::QueuedFinalized;
+use self::queued_blocks::{QueuedFinalized, QueuedNonFinalized};
 
 /// A read-write service for Zebra's cached blockchain state.
 ///
@@ -126,6 +128,43 @@ pub(crate) struct StateService {
     //       and block write task share ownership of the database.
     pub(crate) disk: FinalizedState,
 
+    /// A channel to send blocks to the `block_write_task`,
+    /// so they can be written to the [`NonFinalizedState`].
+    //
+    // TODO: actually send blocks on this channel
+    non_finalized_block_write_sender:
+        Option<tokio::sync::mpsc::UnboundedSender<QueuedNonFinalized>>,
+
+    /// A channel to send blocks to the `block_write_task`,
+    /// so they can be written to the [`FinalizedState`].
+    ///
+    /// This sender is dropped after the state has finished sending all the checkpointed blocks,
+    /// and the lowest non-finalized block arrives.
+    finalized_block_write_sender: Option<tokio::sync::mpsc::UnboundedSender<QueuedFinalized>>,
+
+    /// The [`block::Hash`] of the most recent block sent on
+    /// `finalized_block_write_sender` or `non_finalized_block_write_sender`.
+    ///
+    /// On startup, this is:
+    /// - the finalized tip, if there are stored blocks, or
+    /// - the genesis block's parent hash, if the database is empty.
+    ///
+    /// If `invalid_block_reset_receiver` gets a reset, this is:
+    /// - the hash of the last valid committed block (the parent of the invalid block).
+    //
+    // TODO:
+    // - turn this into an IndexMap containing recent non-finalized block hashes and heights
+    //   (they are all potential tips)
+    // - remove block hashes once their heights are strictly less than the finalized tip
+    last_block_hash_sent: block::Hash,
+
+    /// If an invalid block is sent on `finalized_block_write_sender`
+    /// or `non_finalized_block_write_sender`,
+    /// this channel gets the [`block::Hash`] of the valid tip.
+    //
+    // TODO: add tests for finalized and non-finalized resets (#2654)
+    invalid_block_reset_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
+
     // Pending UTXO Request Tracking
     //
     /// The set of outpoints with pending requests for their associated transparent::Output.
@@ -134,15 +173,19 @@ pub(crate) struct StateService {
     /// Instant tracking the last time `pending_utxos` was pruned.
     last_prune: Instant,
 
-    // Concurrently Readable State
+    // Updating Concurrently Readable State
     //
     /// A sender channel used to update the current best chain tip for
     /// [`LatestChainTip`] and [`ChainTipChange`].
-    chain_tip_sender: ChainTipSender,
+    //
+    // TODO: remove this copy of the chain tip sender, and get rid of the mutex in the block write task
+    chain_tip_sender: Arc<Mutex<ChainTipSender>>,
 
     /// A sender channel used to update the recent non-finalized state for the [`ReadStateService`].
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
 
+    // Concurrently Readable State
+    //
     /// A cloneable [`ReadStateService`], used to answer concurrent read requests.
     ///
     /// TODO: move users of read [`Request`]s to [`ReadStateService`], and remove `read_service`.
@@ -154,7 +197,9 @@ pub(crate) struct StateService {
     ///
     /// Set to `f64::NAN` if `queued_finalized_blocks` is empty, because grafana shows NaNs
     /// as a break in the graph.
-    max_queued_height: f64,
+    //
+    // TODO: add a similar metric for `queued_non_finalized_blocks`
+    max_queued_finalized_height: f64,
 }
 
 /// A read-only service for accessing Zebra's cached blockchain state.
@@ -177,7 +222,7 @@ pub struct ReadStateService {
 
     // Shared Concurrently Readable State
     //
-    /// A watch channel for a recent [`NonFinalizedState`].
+    /// A watch channel with a cached copy of the [`NonFinalizedState`].
     ///
     /// This state is only updated between requests,
     /// so it might include some block data that is also on `disk`.
@@ -191,6 +236,63 @@ pub struct ReadStateService {
     /// This chain is updated concurrently with requests,
     /// so it might include some block data that is also in `best_mem`.
     db: ZebraDb,
+
+    /// A shared handle to a task that writes blocks to the [`NonFinalizedState`] or [`FinalizedState`],
+    /// once the queues have received all their parent blocks.
+    ///
+    /// Used to check for panics when writing blocks.
+    block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
+}
+
+impl Drop for StateService {
+    fn drop(&mut self) {
+        // The state service owns the state, tasks, and channels,
+        // so dropping it should shut down everything.
+
+        // Close the channels (non-blocking)
+        // This makes the block write thread exit the next time it checks the channels.
+        // We want to do this here so we get any errors or panics from the block write task before it shuts down.
+        self.invalid_block_reset_receiver.close();
+
+        std::mem::drop(self.finalized_block_write_sender.take());
+        std::mem::drop(self.non_finalized_block_write_sender.take());
+
+        self.clear_finalized_block_queue("dropping the state: dropped unused queued block");
+
+        // Then drop self.read_service, which checks the block write task for panics,
+        // and tries to shut down the database.
+    }
+}
+
+impl Drop for ReadStateService {
+    fn drop(&mut self) {
+        // The read state service shares the state,
+        // so dropping it should check if we can shut down.
+
+        if let Some(block_write_task) = self.block_write_task.take() {
+            if let Ok(block_write_task_handle) = Arc::try_unwrap(block_write_task) {
+                // We're the last database user, so we can tell it to shut down (blocking):
+                // - flushes the database to disk, and
+                // - drops the database, which cleans up any database tasks correctly.
+                self.db.shutdown(true);
+
+                // We are the last state with a reference to this thread, so we can
+                // wait until the block write task finishes, then check for panics (blocking).
+                // (We'd also like to abort the thread, but std::thread::JoinHandle can't do that.)
+                info!("waiting for the block write task to finish");
+                if let Err(thread_panic) = block_write_task_handle.join() {
+                    std::panic::resume_unwind(thread_panic);
+                } else {
+                    info!("shutting down the state without waiting for the block write task");
+                }
+            }
+        } else {
+            // Even if we're not the last database user, try shutting it down.
+            //
+            // TODO: rename this to try_shutdown()?
+            self.db.shutdown(false);
+        }
+    }
 }
 
 impl StateService {
@@ -205,12 +307,12 @@ impl StateService {
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         let timer = CodeTimer::start();
 
-        let disk = FinalizedState::new(&config, network);
+        let finalized_state = FinalizedState::new(&config, network);
         timer.finish(module_path!(), line!(), "opening finalized state database");
 
         let timer = CodeTimer::start();
-        let initial_tip = disk
-            .db()
+        let initial_tip = finalized_state
+            .db
             .tip_block()
             .map(FinalizedBlock::from)
             .map(ChainTipBlock::from);
@@ -219,26 +321,56 @@ impl StateService {
         let timer = CodeTimer::start();
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
+        let chain_tip_sender = Arc::new(Mutex::new(chain_tip_sender));
 
-        let mem = NonFinalizedState::new(network);
+        let non_finalized_state = NonFinalizedState::new(network);
 
-        let (read_service, non_finalized_state_sender) = ReadStateService::new(&disk);
+        // Security: The number of blocks in these channels is limited by
+        //           the syncer and inbound lookahead limits.
+        let (non_finalized_block_write_sender, non_finalized_block_write_receiver) =
+            tokio::sync::mpsc::unbounded_channel();
+        let (finalized_block_write_sender, finalized_block_write_receiver) =
+            tokio::sync::mpsc::unbounded_channel();
+        let (invalid_block_reset_sender, invalid_block_reset_receiver) =
+            tokio::sync::mpsc::unbounded_channel();
+
+        let finalized_state_for_writing = finalized_state.clone();
+        let chain_tip_sender_for_writing = chain_tip_sender.clone();
+        let block_write_task = std::thread::spawn(move || {
+            write::write_blocks_from_channels(
+                finalized_block_write_receiver,
+                non_finalized_block_write_receiver,
+                finalized_state_for_writing,
+                invalid_block_reset_sender,
+                chain_tip_sender_for_writing,
+            )
+        });
+        let block_write_task = Arc::new(block_write_task);
+
+        let (read_service, non_finalized_state_sender) =
+            ReadStateService::new(&finalized_state, block_write_task);
 
         let queued_non_finalized_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
+
+        let last_block_hash_sent = finalized_state.db.finalized_tip_hash();
 
         let state = Self {
             network,
             queued_non_finalized_blocks,
             queued_finalized_blocks: HashMap::new(),
-            mem,
-            disk,
+            mem: non_finalized_state,
+            disk: finalized_state,
+            non_finalized_block_write_sender: Some(non_finalized_block_write_sender),
+            finalized_block_write_sender: Some(finalized_block_write_sender),
+            last_block_hash_sent,
+            invalid_block_reset_receiver,
             pending_utxos,
             last_prune: Instant::now(),
             chain_tip_sender,
             non_finalized_state_sender,
             read_service: read_service.clone(),
-            max_queued_height: f64::NAN,
+            max_queued_finalized_height: f64::NAN,
         };
         timer.finish(module_path!(), line!(), "initializing state service");
 
@@ -256,7 +388,7 @@ impl StateService {
                 state.network,
                 MAX_LEGACY_CHAIN_BLOCKS,
             ) {
-                let legacy_db_path = state.disk.path().to_path_buf();
+                let legacy_db_path = state.read_service.db.path().to_path_buf();
                 panic!(
                     "Cached state contains a legacy chain.\n\
                      An outdated Zebra version did not know about a recent network upgrade,\n\
@@ -275,75 +407,147 @@ impl StateService {
     }
 
     /// Queue a finalized block for verification and storage in the finalized state.
+    ///
+    /// Returns a channel receiver that provides the result of the block commit.
     fn queue_and_commit_finalized(
         &mut self,
         finalized: FinalizedBlock,
     ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
+        // # Correctness & Performance
+        //
+        // This method must not block, access the database, or perform CPU-intensive tasks,
+        // because it is called directly from the tokio executor's Future threads.
+
+        let queued_prev_hash = finalized.block.header.previous_block_hash;
+        let queued_height = finalized.height;
+
         let (rsp_tx, rsp_rx) = oneshot::channel();
+        let queued = (finalized, rsp_tx);
 
-        // TODO: move this code into the state block commit task:
-        //   - queue_and_commit_finalized()'s commit_finalized() call becomes a send to the block commit channel
-        //   - run commit_finalized() in the state block commit task
-        //   - run the metrics update in queue_and_commit_finalized() in the block commit task
-        //   - run the set_finalized_tip() in this function in the state block commit task
-        //   - move all that code to the inner service
-        let tip_block = self
-            .drain_queue_and_commit_finalized((finalized, rsp_tx))
-            .map(ChainTipBlock::from);
-
-        self.chain_tip_sender.set_finalized_tip(tip_block);
-
-        rsp_rx
-    }
-
-    /// Queue a finalized block to be committed to the state.
-    ///
-    /// After queueing a finalized block, this method checks whether the newly
-    /// queued block (and any of its descendants) can be committed to the state.
-    ///
-    /// Returns the highest finalized tip block committed from the queue,
-    /// or `None` if no blocks were committed in this call.
-    /// (Use `tip_block` to get the finalized tip, regardless of when it was committed.)
-    pub fn drain_queue_and_commit_finalized(
-        &mut self,
-        queued: QueuedFinalized,
-    ) -> Option<FinalizedBlock> {
-        let mut highest_queue_commit = None;
-
-        let prev_hash = queued.0.block.header.previous_block_hash;
-        let height = queued.0.height;
-        self.queued_finalized_blocks.insert(prev_hash, queued);
-
-        while let Some(queued_block) = self
-            .queued_finalized_blocks
-            .remove(&self.disk.db().finalized_tip_hash())
-        {
-            if let Ok(finalized) = self.disk.commit_finalized(queued_block) {
-                highest_queue_commit = Some(finalized);
-            } else {
-                // the last block in the queue failed, so we can't commit the next block
-                break;
+        if self.finalized_block_write_sender.is_some() {
+            // We're still committing finalized blocks
+            if let Some(duplicate_queued) = self
+                .queued_finalized_blocks
+                .insert(queued_prev_hash, queued)
+            {
+                Self::send_finalized_block_error(
+                    duplicate_queued,
+                    "dropping older finalized block: got newer duplicate block",
+                );
             }
+
+            self.drain_queue_and_commit_finalized();
+        } else {
+            // We've finished committing finalized blocks, so drop any repeated queued blocks,
+            // and return an error.
+            //
+            // TODO: track the latest sent height, and drop any blocks under that height
+            //       every time we send some blocks (like QueuedNonFinalizedBlocks)
+            Self::send_finalized_block_error(
+                queued,
+                "already finished committing finalized blocks: dropped duplicate block, \
+                 block is already committed to the state",
+            );
+
+            self.clear_finalized_block_queue(
+                "already finished committing finalized blocks: dropped duplicate block, \
+                 block is already committed to the state",
+            );
         }
 
         if self.queued_finalized_blocks.is_empty() {
-            self.max_queued_height = f64::NAN;
-        } else if self.max_queued_height.is_nan() || self.max_queued_height < height.0 as f64 {
+            self.max_queued_finalized_height = f64::NAN;
+        } else if self.max_queued_finalized_height.is_nan()
+            || self.max_queued_finalized_height < queued_height.0 as f64
+        {
             // if there are still blocks in the queue, then either:
             //   - the new block was lower than the old maximum, and there was a gap before it,
             //     so the maximum is still the same (and we skip this code), or
             //   - the new block is higher than the old maximum, and there is at least one gap
             //     between the finalized tip and the new maximum
-            self.max_queued_height = height.0 as f64;
+            self.max_queued_finalized_height = queued_height.0 as f64;
         }
 
-        metrics::gauge!("state.checkpoint.queued.max.height", self.max_queued_height);
+        metrics::gauge!(
+            "state.checkpoint.queued.max.height",
+            self.max_queued_finalized_height
+        );
         metrics::gauge!(
             "state.checkpoint.queued.block.count",
             self.queued_finalized_blocks.len() as f64,
         );
 
-        highest_queue_commit
+        rsp_rx
+    }
+
+    /// Finds queued finalized blocks to be committed to the state in order,
+    /// removes them from the queue, and sends them to the block commit task.
+    ///
+    /// After queueing a finalized block, this method checks whether the newly
+    /// queued block (and any of its descendants) can be committed to the state.
+    ///
+    /// Returns an error if the block commit channel has been closed.
+    pub fn drain_queue_and_commit_finalized(&mut self) {
+        use tokio::sync::mpsc::error::{SendError, TryRecvError};
+
+        // # Correctness & Performance
+        //
+        // This method must not block, access the database, or perform CPU-intensive tasks,
+        // because it is called directly from the tokio executor's Future threads.
+
+        // If a block failed, we need to start again from a valid tip.
+        match self.invalid_block_reset_receiver.try_recv() {
+            Ok(reset_tip_hash) => self.last_block_hash_sent = reset_tip_hash,
+            Err(TryRecvError::Disconnected) => {
+                info!("Block commit task closed the block reset channel. Is Zebra shutting down?");
+                return;
+            }
+            // There are no errors, so we can just use the last block hash we sent
+            Err(TryRecvError::Empty) => {}
+        }
+
+        while let Some(queued_block) = self
+            .queued_finalized_blocks
+            .remove(&self.last_block_hash_sent)
+        {
+            self.last_block_hash_sent = queued_block.0.hash;
+
+            // If we've finished sending finalized blocks, ignore any repeated blocks.
+            // (Blocks can be repeated after a syncer reset.)
+            if let Some(finalized_block_write_sender) = &self.finalized_block_write_sender {
+                let send_result = finalized_block_write_sender.send(queued_block);
+
+                // If the receiver is closed, we can't send any more blocks.
+                if let Err(SendError(queued)) = send_result {
+                    // If Zebra is shutting down, drop blocks and return an error.
+                    Self::send_finalized_block_error(
+                        queued,
+                        "block commit task exited. Is Zebra shutting down?",
+                    );
+
+                    self.clear_finalized_block_queue(
+                        "block commit task exited. Is Zebra shutting down?",
+                    );
+                };
+            }
+        }
+    }
+
+    /// Drops all queued finalized blocks, and sends an error on their result channels.
+    fn clear_finalized_block_queue(&mut self, error: impl Into<BoxError> + Clone) {
+        for (_hash, queued) in self.queued_finalized_blocks.drain() {
+            Self::send_finalized_block_error(queued, error.clone());
+        }
+    }
+
+    /// Send an error on a `QueuedFinalized` block's result channel, and drop the block
+    fn send_finalized_block_error(queued: QueuedFinalized, error: impl Into<BoxError>) {
+        let (finalized, rsp_tx) = queued;
+
+        // The block sender might have already given up on this block,
+        // so ignore any channel send errors.
+        let _ = rsp_tx.send(Err(error.into()));
+        std::mem::drop(finalized);
     }
 
     /// Queue a non finalized block for verification and check if any queued
@@ -362,7 +566,7 @@ impl StateService {
         let parent_hash = prepared.block.header.previous_block_hash;
 
         if self.mem.any_chain_contains(&prepared.hash)
-            || self.disk.db().hash(prepared.height).is_some()
+            || self.read_service.db.hash(prepared.height).is_some()
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Err("block is already committed to the state".into()));
@@ -385,6 +589,31 @@ impl StateService {
             self.queued_non_finalized_blocks.queue((prepared, rsp_tx));
             rsp_rx
         };
+
+        // We've finished sending finalized blocks when:
+        // - we've sent the finalized block for the last checkpoint, and
+        // - it has been successfully written to disk.
+        //
+        // We detect the last checkpoint by looking for non-finalized blocks
+        // that are a child of the last block we sent.
+        //
+        // TODO: configure the state with the last checkpoint hash instead?
+        if self.finalized_block_write_sender.is_some()
+            && self
+                .queued_non_finalized_blocks
+                .has_queued_children(self.last_block_hash_sent)
+            && self.read_service.db.finalized_tip_hash() == self.last_block_hash_sent
+        {
+            // Tell the block write task to stop committing finalized blocks,
+            // and move on to committing non-finalized blocks.
+            std::mem::drop(self.finalized_block_write_sender.take());
+
+            // We've finished committing finalized blocks, so drop any repeated queued blocks.
+            self.clear_finalized_block_queue(
+                "already finished committing finalized blocks: dropped duplicate block, \
+                 block is already committed to the state",
+            );
+        }
 
         // TODO: avoid a temporary verification failure that can happen
         //       if the first non-finalized block arrives before the last finalized block is committed
@@ -411,7 +640,7 @@ impl StateService {
                 );
         }
 
-        let finalized_tip_height = self.disk.db().finalized_tip_height().expect(
+        let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
             "Finalized state must have at least one block before committing non-finalized state",
         );
         self.queued_non_finalized_blocks
@@ -447,6 +676,9 @@ impl StateService {
     /// non-finalized state is empty.
     ///
     /// [1]: non_finalized_state::Chain
+    //
+    // TODO: remove this clippy allow when we remove self.chain_tip_sender
+    #[allow(clippy::unwrap_in_result)]
     #[instrument(level = "debug", skip(self))]
     fn update_latest_chain_channels(&mut self) -> Option<block::Height> {
         let best_chain = self.mem.best_chain();
@@ -459,7 +691,10 @@ impl StateService {
         // If the final receiver was just dropped, ignore the error.
         let _ = self.non_finalized_state_sender.send(self.mem.clone());
 
-        self.chain_tip_sender.set_best_non_finalized_tip(tip_block);
+        self.chain_tip_sender
+            .lock()
+            .expect("unexpected panic in block commit task or state")
+            .set_best_non_finalized_tip(tip_block);
 
         tip_block_height
     }
@@ -471,10 +706,10 @@ impl StateService {
         self.check_contextual_validity(&prepared)?;
         let parent_hash = prepared.block.header.previous_block_hash;
 
-        if self.disk.db().finalized_tip_hash() == parent_hash {
-            self.mem.commit_new_chain(prepared, self.disk.db())?;
+        if self.disk.db.finalized_tip_hash() == parent_hash {
+            self.mem.commit_new_chain(prepared, &self.disk.db)?;
         } else {
-            self.mem.commit_block(prepared, self.disk.db())?;
+            self.mem.commit_block(prepared, &self.disk.db)?;
         }
 
         Ok(())
@@ -482,7 +717,7 @@ impl StateService {
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.mem.any_chain_contains(hash) || &self.disk.db().finalized_tip_hash() == hash
+        self.mem.any_chain_contains(hash) || &self.read_service.db.finalized_tip_hash() == hash
     }
 
     /// Attempt to validate and commit all queued blocks whose parents have
@@ -547,25 +782,25 @@ impl StateService {
         check::block_is_valid_for_recent_chain(
             prepared,
             self.network,
-            self.disk.db().finalized_tip_height(),
+            self.disk.db.finalized_tip_height(),
             relevant_chain,
         )?;
 
-        check::nullifier::no_duplicates_in_finalized_chain(prepared, self.disk.db())?;
+        check::nullifier::no_duplicates_in_finalized_chain(prepared, &self.disk.db)?;
 
         Ok(())
     }
 
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
-        self.mem.best_tip().or_else(|| self.disk.db().tip())
+        self.mem.best_tip().or_else(|| self.read_service.db.tip())
     }
 
     /// Return the height for the block at `hash` in any chain.
     pub fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         self.mem
             .any_height_by_hash(hash)
-            .or_else(|| self.disk.db().height(hash))
+            .or_else(|| self.read_service.db.height(hash))
     }
 
     /// Return an iterator over the relevant chain of the block identified by
@@ -593,18 +828,23 @@ impl StateService {
 }
 
 impl ReadStateService {
-    /// Creates a new read-only state service, using the provided finalized state.
+    /// Creates a new read-only state service, using the provided finalized state and
+    /// block write task handle.
     ///
     /// Returns the newly created service,
     /// and a watch channel for updating the shared recent non-finalized chain.
-    pub(crate) fn new(disk: &FinalizedState) -> (Self, watch::Sender<NonFinalizedState>) {
+    pub(crate) fn new(
+        finalized_state: &FinalizedState,
+        block_write_task: Arc<std::thread::JoinHandle<()>>,
+    ) -> (Self, watch::Sender<NonFinalizedState>) {
         let (non_finalized_state_sender, non_finalized_state_receiver) =
-            watch::channel(NonFinalizedState::new(disk.network()));
+            watch::channel(NonFinalizedState::new(finalized_state.network()));
 
         let read_service = Self {
-            network: disk.network(),
-            db: disk.db().clone(),
+            network: finalized_state.network(),
+            db: finalized_state.db.clone(),
             non_finalized_state_receiver: WatchReceiver::new(non_finalized_state_receiver),
+            block_write_task: Some(block_write_task),
         };
 
         tracing::info!("created new read-only state service");
@@ -619,7 +859,11 @@ impl Service<Request> for StateService {
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Check for panics in the block write task
+        let poll = self.read_service.poll_ready(cx);
+
+        // Prune outdated UTXO requests
         let now = Instant::now();
 
         if self.last_prune + Self::PRUNE_INTERVAL < now {
@@ -646,7 +890,7 @@ impl Service<Request> for StateService {
             }
         }
 
-        Poll::Ready(Ok(()))
+        poll
     }
 
     #[instrument(name = "state", skip(self, req))]
@@ -679,6 +923,10 @@ impl Service<Request> for StateService {
                     span.in_scope(|| self.queue_and_commit_non_finalized(prepared))
                 });
 
+                // TODO:
+                //   - check for panics in the block write task here,
+                //     as well as in poll_ready()
+
                 // The work is all done, the future just waits on a channel for the result
                 timer.finish(module_path!(), line!(), "CommitBlock");
 
@@ -700,7 +948,7 @@ impl Service<Request> for StateService {
             }
 
             // Uses queued_finalized_blocks and pending_utxos in the StateService.
-            // Accesses shared writeable state in the StateService and ZebraDb.
+            // Accesses shared writeable state in the StateService.
             Request::CommitFinalizedBlock(finalized) => {
                 let timer = CodeTimer::start();
 
@@ -716,14 +964,13 @@ impl Service<Request> for StateService {
 
                 // # Performance
                 //
-                // Allow other async tasks to make progress while blocks are being verified
-                // and written to disk.
-                //
-                // See the note in `CommitBlock` for more details.
-                let span = Span::current();
-                let rsp_rx = tokio::task::block_in_place(move || {
-                    span.in_scope(|| self.queue_and_commit_finalized(finalized))
-                });
+                // This method doesn't block, access the database, or perform CPU-intensive tasks,
+                // so we can run it directly in the tokio executor's Future threads.
+                let rsp_rx = self.queue_and_commit_finalized(finalized);
+
+                // TODO:
+                //   - check for panics in the block write task here,
+                //     as well as in poll_ready()
 
                 // The work is all done, the future just waits on a channel for the result
                 timer.finish(module_path!(), line!(), "CommitFinalizedBlock");
@@ -847,6 +1094,27 @@ impl Service<ReadRequest> for ReadStateService {
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Check for panics in the block write task
+        let block_write_task = self.block_write_task.take();
+
+        if let Some(block_write_task) = block_write_task {
+            if block_write_task.is_finished() {
+                match Arc::try_unwrap(block_write_task) {
+                    // We are the last state with a reference to this task, so we can propagate any panics
+                    Ok(block_write_task_handle) => {
+                        if let Err(thread_panic) = block_write_task_handle.join() {
+                            std::panic::resume_unwind(thread_panic);
+                        }
+                    }
+                    // We're not the last state, so we need to put it back
+                    Err(arc_block_write_task) => self.block_write_task = Some(arc_block_write_task),
+                }
+            } else {
+                // It hasn't finished, so we need to put it back
+                self.block_write_task = Some(block_write_task);
+            }
+        }
+
         Poll::Ready(Ok(()))
     }
 
