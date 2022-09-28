@@ -51,7 +51,7 @@ pub struct CommitBlockError(#[from] ValidateContextError);
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
-    #[error("commit_block is only called with blocks that are ready to be committed")]
+    #[error("block parent not found in any chain")]
     #[non_exhaustive]
     NotReadyToBeCommitted,
 
