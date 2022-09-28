@@ -19,7 +19,7 @@ use zebra_chain::{
 
 use crate::{
     arbitrary::Prepare,
-    service::write::validate_and_commit_non_finalized,
+    service::{write::validate_and_commit_non_finalized, read},
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
     FinalizedBlock,
     ValidateContextError::{
@@ -73,54 +73,50 @@ proptest! {
 
         block1.transactions.push(transaction.into());
 
-        let (mut state, _genesis) = new_state_with_mainnet_genesis();
+    let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
-        state.disk.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block1);
 
-        let previous_mem = state.mem.clone();
+        let previous_mem = non_finalized_state.clone();
 
         // randomly choose to commit the block to the finalized or non-finalized state
         if use_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
+            let commit_result = finalized_state.commit_finalized_direct(block1.clone().into(), "test");
 
             // the block was committed
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
             prop_assert!(commit_result.is_ok());
 
             // the non-finalized state didn't change
-            prop_assert!(state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
 
             // the finalized state has the nullifiers
-            prop_assert!(state
-                .disk
+            prop_assert!(finalized_state
                 .contains_sprout_nullifier(&expected_nullifiers[0]));
-            prop_assert!(state
-                .disk
+            prop_assert!(finalized_state
                 .contains_sprout_nullifier(&expected_nullifiers[1]));
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-                &state.disk,
-                &mut state.mem,
-                state.network, block1.clone()
+                &finalized_state,
+                &mut non_finalized_state,
+                 block1.clone()
             );
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
 
             // the block data is in the non-finalized state
-            prop_assert!(!state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(!non_finalized_state.eq_internal_state(&previous_mem));
 
             // the non-finalized state has the nullifiers
-            prop_assert_eq!(state.mem.chain_set.len(), 1);
-            prop_assert!(state
-                .mem
+            prop_assert_eq!(non_finalized_state.chain_set.len(), 1);
+            prop_assert!(non_finalized_state
                 .best_contains_sprout_nullifier(&expected_nullifiers[0]));
-            prop_assert!(state
-                .mem
+            prop_assert!(non_finalized_state
                 .best_contains_sprout_nullifier(&expected_nullifiers[1]));
         }
     }
@@ -149,17 +145,17 @@ proptest! {
 
         block1.transactions.push(transaction.into());
 
-        let (mut state, genesis) = new_state_with_mainnet_genesis();
+            let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
-        state.disk.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block1);
 
-        let previous_mem = state.mem.clone();
+        let previous_mem = non_finalized_state.clone();
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block1);
+            &finalized_state,
+            &mut non_finalized_state,  block1);
 
         // if the random proptest data produces other errors,
         // we might need to just check `is_err()` here
@@ -172,8 +168,8 @@ proptest! {
             .into())
         );
         // block was rejected
-        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
 
     /// Make sure duplicate sprout nullifiers are rejected by state contextual validation,
@@ -208,17 +204,17 @@ proptest! {
 
         block1.transactions.push(transaction.into());
 
-        let (mut state, genesis) = new_state_with_mainnet_genesis();
+            let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
-        state.disk.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block1);
 
-        let previous_mem = state.mem.clone();
+        let previous_mem = non_finalized_state.clone();
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block1);
+            &finalized_state,
+            &mut non_finalized_state,  block1);
 
         prop_assert_eq!(
             commit_result,
@@ -228,8 +224,8 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
 
     /// Make sure duplicate sprout nullifiers are rejected by state contextual validation,
@@ -267,17 +263,17 @@ proptest! {
             .transactions
             .extend([transaction1.into(), transaction2.into()]);
 
-        let (mut state, genesis) = new_state_with_mainnet_genesis();
+            let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
-        state.disk.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block1);
 
-        let previous_mem = state.mem.clone();
+        let previous_mem = non_finalized_state.clone();
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block1);
+            &finalized_state,
+            &mut non_finalized_state,  block1);
 
         prop_assert_eq!(
             commit_result,
@@ -287,8 +283,8 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
 
     /// Make sure duplicate sprout nullifiers are rejected by state contextual validation,
@@ -331,55 +327,51 @@ proptest! {
         block1.transactions.push(transaction1.into());
         block2.transactions.push(transaction2.into());
 
-        let (mut state, _genesis) = new_state_with_mainnet_genesis();
+    let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
-        state.disk.populate_with_anchors(&block1);
-        state.disk.populate_with_anchors(&block2);
+        finalized_state.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block2);
 
-        let mut previous_mem = state.mem.clone();
+        let mut previous_mem = non_finalized_state.clone();
 
         let block1_hash;
         // randomly choose to commit the next block to the finalized or non-finalized state
         if duplicate_in_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
+            let commit_result = finalized_state.commit_finalized_direct(block1.clone().into(), "test");
 
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
             prop_assert!(commit_result.is_ok());
-            prop_assert!(state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state
-                .disk
+            prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
+            prop_assert!(finalized_state
                 .contains_sprout_nullifier(&expected_nullifiers[0]));
-            prop_assert!(state
-                .disk
+            prop_assert!(finalized_state
                 .contains_sprout_nullifier(&expected_nullifiers[1]));
 
             block1_hash = block1.hash;
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block1.clone());
+            &finalized_state,
+            &mut non_finalized_state,  block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
-            prop_assert!(!state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state
-                .mem
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+            prop_assert!(!non_finalized_state.eq_internal_state(&previous_mem));
+            prop_assert!(non_finalized_state
                 .best_contains_sprout_nullifier(&expected_nullifiers[0]));
-            prop_assert!(state
-                .mem
+            prop_assert!(non_finalized_state
                 .best_contains_sprout_nullifier(&expected_nullifiers[1]));
 
             block1_hash = block1.hash;
-            previous_mem = state.mem.clone();
+            previous_mem = non_finalized_state.clone();
         }
 
         let block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block2);
+            &finalized_state,
+            &mut non_finalized_state,  block2);
 
         prop_assert_eq!(
             commit_result,
@@ -389,8 +381,8 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert_eq!(Some((Height(1), block1_hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
 
     // sapling
@@ -421,33 +413,32 @@ proptest! {
 
         block1.transactions.push(transaction.into());
 
-        let (mut state, _genesis) = new_state_with_mainnet_genesis();
+    let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
-        state.disk.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block1);
 
-        let previous_mem = state.mem.clone();
+        let previous_mem = non_finalized_state.clone();
 
         // randomly choose to commit the block to the finalized or non-finalized state
         if use_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
+            let commit_result = finalized_state.commit_finalized_direct(block1.clone().into(), "test");
 
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
             prop_assert!(commit_result.is_ok());
-            prop_assert!(state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.disk.contains_sapling_nullifier(&expected_nullifier));
+            prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
+            prop_assert!(finalized_state.contains_sapling_nullifier(&expected_nullifier));
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block1.clone());
+            &finalized_state,
+            &mut non_finalized_state,  block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
-            prop_assert!(!state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state
-                .mem
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+            prop_assert!(!non_finalized_state.eq_internal_state(&previous_mem));
+            prop_assert!(non_finalized_state
                 .best_contains_sapling_nullifier(&expected_nullifier));
         }
     }
@@ -479,17 +470,17 @@ proptest! {
 
         block1.transactions.push(transaction.into());
 
-        let (mut state, genesis) = new_state_with_mainnet_genesis();
+            let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
-        state.disk.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block1);
 
-        let previous_mem = state.mem.clone();
+        let previous_mem = non_finalized_state.clone();
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block1);
+            &finalized_state,
+            &mut non_finalized_state,  block1);
 
         prop_assert_eq!(
             commit_result,
@@ -499,8 +490,8 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
 
     /// Make sure duplicate sapling nullifiers are rejected by state contextual validation,
@@ -533,17 +524,17 @@ proptest! {
             .transactions
             .extend([transaction1.into(), transaction2.into()]);
 
-        let (mut state, genesis) = new_state_with_mainnet_genesis();
+            let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
-        state.disk.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block1);
 
-        let previous_mem = state.mem.clone();
+        let previous_mem = non_finalized_state.clone();
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block1);
+            &finalized_state,
+            &mut non_finalized_state,  block1);
 
         prop_assert_eq!(
             commit_result,
@@ -553,8 +544,8 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
 
     /// Make sure duplicate sapling nullifiers are rejected by state contextual validation,
@@ -591,47 +582,47 @@ proptest! {
         block1.transactions.push(transaction1.into());
         block2.transactions.push(transaction2.into());
 
-        let (mut state, _genesis) = new_state_with_mainnet_genesis();
+    let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
-        state.disk.populate_with_anchors(&block1);
-        state.disk.populate_with_anchors(&block2);
+        finalized_state.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block2);
 
-        let mut previous_mem = state.mem.clone();
+        let mut previous_mem = non_finalized_state.clone();
 
         let block1_hash;
         // randomly choose to commit the next block to the finalized or non-finalized state
         if duplicate_in_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
+            let commit_result = finalized_state.commit_finalized_direct(block1.clone().into(), "test");
 
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
             prop_assert!(commit_result.is_ok());
-            prop_assert!(state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.disk.contains_sapling_nullifier(&duplicate_nullifier));
+            prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
+            prop_assert!(finalized_state.contains_sapling_nullifier(&duplicate_nullifier));
 
             block1_hash = block1.hash;
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block1.clone());
+            &finalized_state,
+            &mut non_finalized_state,  block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
-            prop_assert!(!state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state
-                .mem
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+            prop_assert!(!non_finalized_state.eq_internal_state(&previous_mem));
+            prop_assert!(non_finalized_state
+
                 .best_contains_sapling_nullifier(&duplicate_nullifier));
 
             block1_hash = block1.hash;
-            previous_mem = state.mem.clone();
+            previous_mem = non_finalized_state.clone();
         }
 
         let block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block2);
+            &finalized_state,
+            &mut non_finalized_state,  block2);
 
         prop_assert_eq!(
             commit_result,
@@ -641,8 +632,8 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert_eq!(Some((Height(1), block1_hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
 
     // orchard
@@ -675,33 +666,33 @@ proptest! {
 
         block1.transactions.push(transaction.into());
 
-        let (mut state, _genesis) = new_state_with_mainnet_genesis();
+    let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
-        state.disk.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block1);
 
-        let previous_mem = state.mem.clone();
+        let previous_mem = non_finalized_state.clone();
 
         // randomly choose to commit the block to the finalized or non-finalized state
         if use_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
+            let commit_result = finalized_state.commit_finalized_direct(block1.clone().into(), "test");
 
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
             prop_assert!(commit_result.is_ok());
-            prop_assert!(state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.disk.contains_orchard_nullifier(&expected_nullifier));
+            prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
+            prop_assert!(finalized_state.contains_orchard_nullifier(&expected_nullifier));
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block1.clone());
+            &finalized_state,
+            &mut non_finalized_state,  block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
-            prop_assert!(!state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state
-                .mem
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+            prop_assert!(!non_finalized_state.eq_internal_state(&previous_mem));
+            prop_assert!(non_finalized_state
+
                 .best_contains_orchard_nullifier(&expected_nullifier));
         }
     }
@@ -733,17 +724,17 @@ proptest! {
 
         block1.transactions.push(transaction.into());
 
-        let (mut state, genesis) = new_state_with_mainnet_genesis();
+            let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
-        state.disk.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block1);
 
-        let previous_mem = state.mem.clone();
+        let previous_mem = non_finalized_state.clone();
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block1);
+            &finalized_state,
+            &mut non_finalized_state,  block1);
 
         prop_assert_eq!(
             commit_result,
@@ -753,8 +744,8 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
 
     /// Make sure duplicate orchard nullifiers are rejected by state contextual validation,
@@ -791,17 +782,17 @@ proptest! {
             .transactions
             .extend([transaction1.into(), transaction2.into()]);
 
-        let (mut state, genesis) = new_state_with_mainnet_genesis();
+            let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
-        state.disk.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block1);
 
-        let previous_mem = state.mem.clone();
+        let previous_mem = non_finalized_state.clone();
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block1);
+            &finalized_state,
+            &mut non_finalized_state,  block1);
 
         prop_assert_eq!(
             commit_result,
@@ -811,8 +802,8 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
 
     /// Make sure duplicate orchard nullifiers are rejected by state contextual validation,
@@ -853,47 +844,46 @@ proptest! {
         block1.transactions.push(transaction1.into());
         block2.transactions.push(transaction2.into());
 
-        let (mut state, _genesis) = new_state_with_mainnet_genesis();
+    let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
-        state.disk.populate_with_anchors(&block1);
-        state.disk.populate_with_anchors(&block2);
+        finalized_state.populate_with_anchors(&block1);
+        finalized_state.populate_with_anchors(&block2);
 
-        let mut previous_mem = state.mem.clone();
+        let mut previous_mem = non_finalized_state.clone();
 
         let block1_hash;
         // randomly choose to commit the next block to the finalized or non-finalized state
         if duplicate_in_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
+            let commit_result = finalized_state.commit_finalized_direct(block1.clone().into(), "test");
 
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
             prop_assert!(commit_result.is_ok());
-            prop_assert!(state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state.disk.contains_orchard_nullifier(&duplicate_nullifier));
+            prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
+            prop_assert!(finalized_state.contains_orchard_nullifier(&duplicate_nullifier));
 
             block1_hash = block1.hash;
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block1.clone());
+            &finalized_state,
+            &mut non_finalized_state,  block1.clone());
 
             prop_assert_eq!(commit_result, Ok(()));
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
-            prop_assert!(!state.mem.eq_internal_state(&previous_mem));
-            prop_assert!(state
-                .mem
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+            prop_assert!(!non_finalized_state.eq_internal_state(&previous_mem));
+            prop_assert!(non_finalized_state
                 .best_contains_orchard_nullifier(&duplicate_nullifier));
 
             block1_hash = block1.hash;
-            previous_mem = state.mem.clone();
+            previous_mem = non_finalized_state.clone();
         }
 
         let block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &state.disk,
-            &mut state.mem, state.network, block2);
+            &finalized_state,
+            &mut non_finalized_state,  block2);
 
         prop_assert_eq!(
             commit_result,
@@ -903,8 +893,8 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(1), block1_hash)), state.best_tip());
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert_eq!(Some((Height(1), block1_hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
 }
 
