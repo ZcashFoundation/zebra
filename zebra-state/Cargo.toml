@@ -27,7 +27,7 @@ tempfile = "3.3.0"
 thiserror = "1.0.35"
 
 rayon = "1.5.3"
-tokio = { version = "1.21.1", features = ["sync", "tracing"] }
+tokio = { version = "1.21.2", features = ["sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
 tracing = "0.1.36"
 
@@ -55,7 +55,7 @@ proptest-derive = "0.3.0"
 halo2 = { package = "halo2_proofs", version = "0.2.0" }
 jubjub = "0.9.0"
 
-tokio = { version = "1.21.1", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.21.2", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
