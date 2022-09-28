@@ -1,7 +1,7 @@
 //! Queued blocks that are awaiting their parent block for verification.
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{hash_map::Drain, BTreeMap, HashMap, HashSet},
     mem,
 };
 
@@ -195,5 +195,17 @@ impl QueuedBlocks {
     #[instrument(skip(self))]
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         self.known_utxos.get(outpoint).cloned()
+    }
+
+    /// Clears known_utxos, by_parent, and by_height, then drains blocks.
+    /// Returns all key-value pairs of blocks as an iterator
+    pub fn drain(&mut self) -> Drain<'_, block::Hash, QueuedNonFinalized> {
+        self.known_utxos.clear();
+        self.known_utxos.shrink_to_fit();
+        self.by_parent.clear();
+        self.by_parent.shrink_to_fit();
+        self.by_height.clear();
+
+        self.blocks.drain()
     }
 }
