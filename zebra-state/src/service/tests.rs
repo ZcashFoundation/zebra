@@ -404,7 +404,7 @@ proptest! {
 
         prop_assert_eq!(state_service.disk.finalized_value_pool(), ValueBalance::zero());
         prop_assert_eq!(
-            state_service.mem.best_chain().map(|chain| chain.chain_value_pools).unwrap_or_else(ValueBalance::zero),
+            state_service.read_service.latest_mem().best_chain().map(|chain| chain.chain_value_pools).unwrap_or_else(ValueBalance::zero),
             ValueBalance::zero()
         );
 
@@ -455,7 +455,7 @@ proptest! {
             prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
 
             prop_assert_eq!(
-                state_service.mem.best_chain().unwrap().chain_value_pools,
+                state_service.read_service.latest_mem().best_chain().unwrap().chain_value_pools,
                 expected_non_finalized_value_pool.clone()?.constrain()?
             );
 
@@ -464,7 +464,7 @@ proptest! {
             let transparent_value = ValueBalance::from_transparent_amount(transparent_value);
             expected_transparent_pool = (expected_transparent_pool + transparent_value).unwrap();
             prop_assert_eq!(
-                state_service.mem.best_chain().unwrap().chain_value_pools,
+                state_service.read_service.latest_mem().best_chain().unwrap().chain_value_pools,
                 expected_transparent_pool
             );
         }
