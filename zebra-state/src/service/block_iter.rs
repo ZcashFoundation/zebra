@@ -9,13 +9,15 @@ use crate::{
     HashOrHeight,
 };
 
+use super::finalized_state::ZebraDb;
+
 /// Iterator for state blocks.
 ///
 /// Starts at any block in any non-finalized or finalized chain,
 /// and iterates in reverse height order. (Towards the genesis block.)
 pub(crate) struct Iter<'a> {
     pub(super) non_finalized_state: &'a NonFinalizedState,
-    pub(super) finalized_state: &'a FinalizedState,
+    pub(super) db: &'a ZebraDb,
     pub(super) state: IterState,
 }
 
@@ -29,7 +31,7 @@ impl Iter<'_> {
     fn next_non_finalized_block(&mut self) -> Option<Arc<Block>> {
         let Iter {
             non_finalized_state,
-            finalized_state: _,
+            db: _,
             state,
         } = self;
 
@@ -51,7 +53,7 @@ impl Iter<'_> {
     fn next_finalized_block(&mut self) -> Option<Arc<Block>> {
         let Iter {
             non_finalized_state: _,
-            finalized_state,
+            db,
             state,
         } = self;
 
@@ -61,7 +63,7 @@ impl Iter<'_> {
             IterState::Finished => unreachable!(),
         };
 
-        if let Some(block) = finalized_state.db.block(hash_or_height) {
+        if let Some(block) = db.block(hash_or_height) {
             let height = block
                 .coinbase_height()
                 .expect("valid blocks have a coinbase height");
@@ -83,7 +85,7 @@ impl Iter<'_> {
     fn any_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         self.non_finalized_state
             .any_height_by_hash(hash)
-            .or_else(|| self.finalized_state.db.height(hash))
+            .or_else(|| self.db.height(hash))
     }
 }
 
@@ -128,12 +130,12 @@ impl ExactSizeIterator for Iter<'_> {
 /// by the iterator. `hash` can come from any chain.
 pub(crate) fn any_ancestor_blocks<'a>(
     non_finalized_state: &'a NonFinalizedState,
-    finalized_state: &'a FinalizedState,
+    db: &'a ZebraDb,
     hash: block::Hash,
 ) -> Iter<'a> {
     Iter {
         non_finalized_state,
-        finalized_state,
+        db,
         state: IterState::NonFinalized(hash),
     }
 }

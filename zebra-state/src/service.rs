@@ -117,12 +117,6 @@ pub(crate) struct StateService {
     /// Indexed by their parent block hash.
     queued_finalized_blocks: HashMap<block::Hash, QueuedFinalized>,
 
-    /// The finalized chain state, including its on-disk database.
-    //
-    // TODO: get rid of this struct member, and just let the ReadStateService
-    //       and block write task share ownership of the database.
-    pub(crate) disk: FinalizedState,
-
     /// A channel to send blocks to the `block_write_task`,
     /// so they can be written to the [`NonFinalizedState`].
     non_finalized_block_write_sender:
@@ -348,7 +342,6 @@ impl StateService {
             network,
             queued_non_finalized_blocks,
             queued_finalized_blocks: HashMap::new(),
-            disk: finalized_state,
             non_finalized_block_write_sender: Some(non_finalized_block_write_sender),
             finalized_block_write_sender: Some(finalized_block_write_sender),
             last_block_hash_sent,
@@ -370,7 +363,7 @@ impl StateService {
 
             if let Err(error) = check::legacy_chain(
                 nu5_activation_height,
-                any_ancestor_blocks(&state.read_service.latest_mem(), &state.disk, tip.1),
+                any_ancestor_blocks(&state.read_service.latest_mem(), &state.read_service.db, tip.1),
                 state.network,
                 MAX_LEGACY_CHAIN_BLOCKS,
             ) {
@@ -551,7 +544,10 @@ impl StateService {
         tracing::debug!(block = %prepared.block, "queueing block for contextual verification");
         let parent_hash = prepared.block.header.previous_block_hash;
 
-        if self.read_service.latest_mem().any_chain_contains(&prepared.hash)
+        if self
+            .read_service
+            .latest_mem()
+            .any_chain_contains(&prepared.hash)
             || self.read_service.db.hash(prepared.height).is_some()
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -626,7 +622,8 @@ impl StateService {
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.read_service.latest_mem().any_chain_contains(hash) || &self.read_service.db.finalized_tip_hash() == hash
+        self.read_service.latest_mem().any_chain_contains(hash)
+            || &self.read_service.db.finalized_tip_hash() == hash
     }
 
     /// Sends all queued blocks whose parents have recently arrived starting from `new_parent`
@@ -670,7 +667,10 @@ impl StateService {
 
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
-        self.read_service.latest_mem().best_tip().or_else(|| self.read_service.db.tip())
+        self.read_service
+            .latest_mem()
+            .best_tip()
+            .or_else(|| self.read_service.db.tip())
     }
 
     /// Assert some assumptions about the prepared `block` before it is queued.
