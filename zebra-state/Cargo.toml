@@ -18,7 +18,7 @@ hex = "0.4.3"
 indexmap = "1.9.1"
 itertools = "0.10.5"
 lazy_static = "1.4.0"
-metrics = "0.18.1"
+metrics = "0.20.1"
 mset = "0.1.0"
 regex = "1.6.0"
 rlimit = "0.8.3"
@@ -30,7 +30,7 @@ thiserror = "1.0.35"
 rayon = "1.5.3"
 tokio = { version = "1.21.1", features = ["sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
-tracing = "0.1.35"
+tracing = "0.1.36"
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-test = { path = "../zebra-test/", optional = true }

@@ -139,9 +139,14 @@ jobs:
           # To improve build speeds, for each branch we push an additional image to the registry,
           # to be used as the caching layer, using the `max` caching mode.
           #
-          # We use multiple cache sources to confirm a cache hit, starting from the `main` branch cache,
-          # and if there's no hit, then continue with a cache scoped per branch.
+          # We use multiple cache sources to confirm a cache hit, starting from a per-branch cache,
+          # and if there's no hit, then continue with the `main` branch. When changes are added to a PR,
+          # they are usually smaller than the diff between the PR and `main` branch. So this provides the
+          # best performance.
+          #
+          # The caches are tried in top-down order, the first available cache is used:
+          # https://github.com/moby/moby/pull/26839#issuecomment-277383550
           cache-from: |
-            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:main-cache
             type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:main-cache
           cache-to: type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max

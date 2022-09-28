@@ -110,12 +110,12 @@ pub fn write_blocks_from_channels(
             .map(|height| (height + 1).expect("committed heights are valid"))
             .unwrap_or(Height(0));
 
-        if ordered_block.0.height > next_valid_height {
+        if ordered_block.0.height != next_valid_height {
             debug!(
                 ?next_valid_height,
                 invalid_height = ?ordered_block.0.height,
                 invalid_hash = ?ordered_block.0.hash,
-                "got a block that was too high. \
+                "got a block that was the wrong height. \
                  Assuming a parent block failed, and dropping this block",
             );
 

@@ -184,3 +184,19 @@ gh api --method DELETE -H "Accept: application/vnd.github+json" /repos/ZcashFoun
 ```
 
 These commands are from the [GitHub Actions Cache API reference](https://docs.github.com/en/rest/actions/cache).
+
+### Retrying After Temporary Errors
+
+Some errors happen due to network connection issues, high load, or other rare situations.
+
+If it looks like a failure might be temporary, try re-running all the jobs on the PR using one of these methods:
+1. `@mergifyio update`
+2. `@dependabot recreate` (for dependabot PRs only)
+3. click on the failed job, and select "re-run all jobs". If the workflow hasn't finished, you might need to cancel it, and wait for it to finish.
+
+Here are some of the rare and temporary errors that should be retried:
+- Docker: "buildx failed with ... cannot reuse body, request must be retried"
+- Failure in `local_listener_fixed_port_localhost_addr_v4` Rust test, mention [ticket #4999](https://github.com/ZcashFoundation/zebra/issues/4999) on the PR
+- any network connection or download failures
+
+We track some rare errors using tickets, so we know if they are becoming more common and we need to fix them.

@@ -7,8 +7,9 @@ updates:
       timezone: America/New_York
     open-pull-requests-limit: 10
     labels:
-      - 'A-dependencies'
+      - 'C-trivial'
       - 'A-rust'
+      - 'A-dependencies'
       - 'P-Low :snowflake:'
   - package-ecosystem: github-actions
     directory: '/'
@@ -17,6 +18,7 @@ updates:
       timezone: America/New_York
     open-pull-requests-limit: 10
     labels:
+      - 'C-trivial'
       - 'A-infrastructure'
       - 'A-dependencies'
       - 'P-Low :snowflake:'
