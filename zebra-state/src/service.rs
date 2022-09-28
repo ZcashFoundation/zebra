@@ -76,9 +76,8 @@ pub mod arbitrary;
 mod tests;
 
 pub use finalized_state::{OutputIndex, OutputLocation, TransactionLocation};
-use write::NonFinalizedWriteCmd;
 
-use self::queued_blocks::QueuedFinalized;
+use self::queued_blocks::{QueuedFinalized, QueuedNonFinalized};
 
 /// A read-write service for Zebra's cached blockchain state.
 ///
@@ -120,7 +119,7 @@ pub(crate) struct StateService {
     /// A channel to send blocks to the `block_write_task`,
     /// so they can be written to the [`NonFinalizedState`].
     non_finalized_block_write_sender:
-        Option<tokio::sync::mpsc::UnboundedSender<NonFinalizedWriteCmd>>,
+        Option<tokio::sync::mpsc::UnboundedSender<QueuedNonFinalized>>,
 
     /// A channel to send blocks to the `block_write_task`,
     /// so they can be written to the [`FinalizedState`].
@@ -645,12 +644,9 @@ impl StateService {
                 for queued_child in queued_children {
                     let child_hash = queued_child.0.hash;
 
-                    let send_result = non_finalized_block_write_sender
-                        .send(NonFinalizedWriteCmd::ProcessQueued(queued_child));
+                    let send_result = non_finalized_block_write_sender.send(queued_child);
 
-                    if let Err(SendError(NonFinalizedWriteCmd::ProcessQueued((_, rsp_tx)))) =
-                        send_result
-                    {
+                    if let Err(SendError((_, rsp_tx))) = send_result {
                         // If Zebra is shutting down, ignore dropped block result receivers
                         let _ = rsp_tx.send(Err(
                             "block commit task exited. Is Zebra shutting down?".into(),
@@ -662,9 +658,6 @@ impl StateService {
                     new_parents.push(child_hash);
                 }
             }
-
-            let _ =
-                non_finalized_block_write_sender.send(NonFinalizedWriteCmd::FinishProcessingQueued);
         };
     }
 

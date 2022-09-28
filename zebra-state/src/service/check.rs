@@ -372,7 +372,7 @@ pub(crate) fn contextual_validity(
 ) -> Result<(), ValidateContextError> {
     let relevant_chain = any_ancestor_blocks(
         non_finalized_state,
-        finalized_state,
+        &finalized_state.db,
         prepared.block.header.previous_block_hash,
     );
 

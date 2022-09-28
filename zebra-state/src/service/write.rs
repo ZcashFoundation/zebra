@@ -20,11 +20,6 @@ use crate::{
     CommitBlockError, PreparedBlock,
 };
 
-pub enum NonFinalizedWriteCmd {
-    ProcessQueued(QueuedNonFinalized),
-    FinishProcessingQueued,
-}
-
 /// Run contextual validation on the prepared block and add it to the
 /// non-finalized state if it is contextually valid.
 #[tracing::instrument(level = "debug", skip(prepared))]
@@ -87,7 +82,7 @@ fn update_latest_chain_channels(
 ))]
 pub fn write_blocks_from_channels(
     mut finalized_block_write_receiver: UnboundedReceiver<QueuedFinalized>,
-    mut non_finalized_block_write_receiver: UnboundedReceiver<NonFinalizedWriteCmd>,
+    mut non_finalized_block_write_receiver: UnboundedReceiver<QueuedNonFinalized>,
     mut finalized_state: FinalizedState,
     mut non_finalized_state: NonFinalizedState,
     invalid_block_reset_sender: UnboundedSender<block::Hash>,
@@ -169,97 +164,87 @@ pub fn write_blocks_from_channels(
     }
 
     // Save any errors to propagate down to queued child blocks
+    // TODO: Replace this with an IndexMap immediately.
     let mut parent_error_map: HashMap<block::Hash, CloneError> = HashMap::new();
 
-    while let Some(non_finalized_write_cmd) = non_finalized_block_write_receiver.blocking_recv() {
-        match non_finalized_write_cmd {
-            NonFinalizedWriteCmd::ProcessQueued((queued_child, rsp_tx)) => {
-                let child_hash = queued_child.hash;
-                let parent_hash = queued_child.block.header.previous_block_hash;
-                let parent_error = parent_error_map.get(&parent_hash);
+    while let Some((queued_child, rsp_tx)) = non_finalized_block_write_receiver.blocking_recv() {
+        let child_hash = queued_child.hash;
+        let parent_hash = queued_child.block.header.previous_block_hash;
+        let parent_error = parent_error_map.get(&parent_hash);
 
-                let result;
+        let result;
 
-                // If the block is invalid, reject any descendant blocks.
-                //
-                // At this point, we know that the block and all its descendants
-                // are invalid, because we checked all the consensus rules before
-                // committing the block to the non-finalized state.
-                // (These checks also bind the transaction data to the block
-                // header, using the transaction merkle tree and authorizing data
-                // commitment.)
-                if let Some(parent_error) = parent_error {
-                    tracing::trace!(
-                        ?child_hash,
-                        ?parent_error,
-                        "rejecting queued child due to parent error"
-                    );
-                    result = Err(parent_error.clone());
-                } else {
-                    tracing::trace!(?child_hash, "validating queued child");
-                    result = validate_and_commit_non_finalized(
-                        &finalized_state,
-                        &mut non_finalized_state,
-                        queued_child,
-                    )
-                    .map_err(CloneError::from);
+        // If the block is invalid, reject any descendant blocks.
+        //
+        // At this point, we know that the block and all its descendants
+        // are invalid, because we checked all the consensus rules before
+        // committing the block to the non-finalized state.
+        // (These checks also bind the transaction data to the block
+        // header, using the transaction merkle tree and authorizing data
+        // commitment.)
+        if let Some(parent_error) = parent_error {
+            tracing::trace!(
+                ?child_hash,
+                ?parent_error,
+                "rejecting queued child due to parent error"
+            );
+            result = Err(parent_error.clone());
+        } else {
+            tracing::trace!(?child_hash, "validating queued child");
+            result = validate_and_commit_non_finalized(
+                &finalized_state,
+                &mut non_finalized_state,
+                queued_child,
+            )
+            .map_err(CloneError::from);
 
-                    if result.is_ok() {
-                        // Update the metrics if semantic and contextual validation passes
-                        metrics::counter!("state.full_verifier.committed.block.count", 1);
-                        metrics::counter!("zcash.chain.verified.block.total", 1);
-                    }
-                }
-
-                let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
-
-                if let Err(ref error) = result {
-                    parent_error_map.insert(child_hash, error.clone());
-                }
+            if result.is_ok() {
+                // Update the metrics if semantic and contextual validation passes
+                metrics::counter!("state.full_verifier.committed.block.count", 1);
+                metrics::counter!("zcash.chain.verified.block.total", 1);
             }
+        }
 
-            NonFinalizedWriteCmd::FinishProcessingQueued => {
-                // Clear out any errors from processed queued blocks without children
-                parent_error_map.clear();
+        if let Err(ref error) = result {
+            parent_error_map.insert(child_hash, error.clone());
+        }
 
-                while non_finalized_state.best_chain_len()
-                    > crate::constants::MAX_BLOCK_REORG_HEIGHT
-                {
-                    tracing::trace!("finalizing block past the reorg limit");
-                    let finalized_with_trees = non_finalized_state.finalize();
-                    finalized_state
+        let tip_block_height = update_latest_chain_channels(
+            &finalized_state,
+            &non_finalized_state,
+            &mut chain_tip_sender,
+            &non_finalized_state_sender,
+        );
+
+        let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
+
+        while non_finalized_state.best_chain_len() > crate::constants::MAX_BLOCK_REORG_HEIGHT {
+            tracing::trace!("finalizing block past the reorg limit");
+            let finalized_with_trees = non_finalized_state.finalize();
+            finalized_state
                         .commit_finalized_direct(finalized_with_trees, "best non-finalized chain root")
                         .expect(
                             "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
                         );
-                }
-
-                let tip_block_height = update_latest_chain_channels(
-                    &finalized_state,
-                    &non_finalized_state,
-                    &mut chain_tip_sender,
-                    &non_finalized_state_sender,
-                );
-
-                // update metrics using the best non-finalized tip
-                if let Some(tip_block_height) = tip_block_height {
-                    metrics::gauge!(
-                        "state.full_verifier.committed.block.height",
-                        tip_block_height.0 as f64,
-                    );
-
-                    // This height gauge is updated for both fully verified and checkpoint blocks.
-                    // These updates can't conflict, because the state makes sure that blocks
-                    // are committed in order.
-                    metrics::gauge!(
-                        "zcash.chain.verified.block.height",
-                        tip_block_height.0 as f64,
-                    );
-                }
-
-                tracing::trace!("finished processing queued block");
-            }
         }
+
+        // update metrics using the best non-finalized tip
+        if let Some(tip_block_height) = tip_block_height {
+            metrics::gauge!(
+                "state.full_verifier.committed.block.height",
+                tip_block_height.0 as f64,
+            );
+
+            // This height gauge is updated for both fully verified and checkpoint blocks.
+            // These updates can't conflict, because the state makes sure that blocks
+            // are committed in order.
+            metrics::gauge!(
+                "zcash.chain.verified.block.height",
+                tip_block_height.0 as f64,
+            );
+        }
+
+        tracing::trace!("finished processing queued block");
     }
 
     // We're finished receiving non-finalized blocks from the state, and

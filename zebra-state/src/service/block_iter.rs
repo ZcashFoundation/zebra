@@ -4,10 +4,7 @@ use std::sync::Arc;
 
 use zebra_chain::block::{self, Block};
 
-use crate::{
-    service::{finalized_state::FinalizedState, non_finalized_state::NonFinalizedState},
-    HashOrHeight,
-};
+use crate::{service::non_finalized_state::NonFinalizedState, HashOrHeight};
 
 use super::finalized_state::ZebraDb;
 
