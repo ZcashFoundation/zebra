@@ -49,7 +49,7 @@ impl Iter<'_> {
             IterState::Finished => unreachable!(),
         };
 
-        if let Some(block) = service.disk.db().block(hash_or_height) {
+        if let Some(block) = service.read_service.db.block(hash_or_height) {
             let height = block
                 .coinbase_height()
                 .expect("valid blocks have a coinbase height");

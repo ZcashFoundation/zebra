@@ -10,13 +10,14 @@ use std::{
 };
 
 use futures::FutureExt;
-use tokio::{sync::oneshot, task::JoinHandle};
+use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 use tower::{buffer::Buffer, builder::ServiceBuilder, util::BoxService, Service, ServiceExt};
 use tracing::Span;
 
 use zebra_chain::{
     amount::Amount,
     block::Block,
+    fmt::humantime_seconds,
     parameters::Network::{self, *},
     serialization::ZcashDeserializeInto,
     transaction::{UnminedTx, UnminedTxId, VerifiedUnminedTx},
@@ -24,7 +25,7 @@ use zebra_chain::{
 use zebra_consensus::{error::TransactionError, transaction, Config as ConsensusConfig};
 use zebra_network::{AddressBook, InventoryResponse, Request, Response};
 use zebra_node_services::mempool;
-use zebra_state::Config as StateConfig;
+use zebra_state::{ChainTipChange, Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
@@ -59,6 +60,7 @@ async fn mempool_requests_for_transactions() {
         _mock_tx_verifier,
         mut peer_set,
         _state_guard,
+        _chain_tip_change,
         sync_gossip_task_handle,
         tx_gossip_task_handle,
     ) = setup(true).await;
@@ -142,6 +144,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
         mut tx_verifier,
         mut peer_set,
         _state_guard,
+        _chain_tip_change,
         sync_gossip_task_handle,
         tx_gossip_task_handle,
     ) = setup(false).await;
@@ -236,6 +239,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         mut tx_verifier,
         mut peer_set,
         _state_guard,
+        _chain_tip_change,
         sync_gossip_task_handle,
         tx_gossip_task_handle,
     ) = setup(false).await;
@@ -342,6 +346,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         mut tx_verifier,
         mut peer_set,
         state_service,
+        _chain_tip_change,
         sync_gossip_task_handle,
         tx_gossip_task_handle,
     ) = setup(false).await;
@@ -638,6 +643,7 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
         mut tx_verifier,
         mut peer_set,
         state_service,
+        mut chain_tip_change,
         sync_gossip_task_handle,
         tx_gossip_task_handle,
     ) = setup(false).await;
@@ -658,7 +664,20 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
         .await
         .respond(Response::Blocks(vec![Available(block)]));
 
-    // TODO: check that the block is queued in the checkpoint verifier
+    // Wait for the chain tip update
+    if let Err(timeout_error) = timeout(
+        CHAIN_TIP_UPDATE_WAIT_LIMIT,
+        chain_tip_change.wait_for_tip_change(),
+    )
+    .await
+    .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+    {
+        info!(
+            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
+            ?timeout_error,
+            "timeout waiting for chain tip change after committing block"
+        );
+    }
 
     // check that nothing unexpected happened
     peer_set.expect_no_requests().await;
@@ -729,6 +748,7 @@ async fn setup(
     MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
     MockService<Request, Response, PanicAssertion>,
     Buffer<BoxService<zebra_state::Request, zebra_state::Response, BoxError>, zebra_state::Request>,
+    ChainTipChange,
     JoinHandle<Result<(), BlockGossipError>>,
     JoinHandle<Result<(), BoxError>>,
 ) {
@@ -744,7 +764,7 @@ async fn setup(
     );
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
     let (sync_status, mut recent_syncs) = SyncStatus::new();
-    let (state, _read_only_state_service, latest_chain_tip, chain_tip_change) =
+    let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(state_config.clone(), network);
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
@@ -786,6 +806,21 @@ async fn setup(
         .unwrap();
     committed_blocks.push(genesis_block);
 
+    // Wait for the chain tip update
+    if let Err(timeout_error) = timeout(
+        CHAIN_TIP_UPDATE_WAIT_LIMIT,
+        chain_tip_change.wait_for_tip_change(),
+    )
+    .await
+    .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+    {
+        info!(
+            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
+            ?timeout_error,
+            "timeout waiting for chain tip change after committing block"
+        );
+    }
+
     // Also push block 1.
     // Block one is a network upgrade and the mempool will be cleared at it,
     // let all our tests start after this event.
@@ -800,6 +835,8 @@ async fn setup(
         .await
         .unwrap();
     committed_blocks.push(block_one);
+
+    // Don't wait for the chain tip update here, we wait for AdvertiseBlock below
 
     let (mut mempool_service, transaction_receiver) = Mempool::new(
         &MempoolConfig::default(),
@@ -845,7 +882,7 @@ async fn setup(
 
     let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
         sync_status.clone(),
-        chain_tip_change,
+        chain_tip_change.clone(),
         peer_set.clone(),
     ));
 
@@ -873,6 +910,7 @@ async fn setup(
         mock_tx_verifier,
         peer_set,
         state_service,
+        chain_tip_change,
         sync_gossip_task_handle,
         tx_gossip_task_handle,
     )

@@ -395,7 +395,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         .unwrap_err();
     assert_eq!(
         error.message,
-        "End value is expected to be greater than or equal to start".to_string()
+        "start Height(2) must be less than or equal to end Height(1)".to_string()
     );
 
     // call the method with start equal zero
@@ -411,7 +411,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         .unwrap_err();
     assert_eq!(
         error.message,
-        "Start and end are expected to be greater than zero".to_string()
+        "start Height(0) and end Height(1) must both be greater than zero".to_string()
     );
 
     // call the method outside the chain tip height
@@ -427,7 +427,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         .unwrap_err();
     assert_eq!(
         error.message,
-        "Start or end is outside chain range".to_string()
+        "start Height(1) and end Height(11) must both be less than or equal to the chain tip Height(10)".to_string()
     );
 
     mempool.expect_no_requests().await;

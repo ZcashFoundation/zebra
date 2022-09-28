@@ -17,7 +17,6 @@
 
 use std::{
     io::{stderr, stdout, Write},
-    path::Path,
     sync::Arc,
 };
 
@@ -46,8 +45,11 @@ pub(super) use zebra_db::ZebraDb;
 /// The finalized part of the chain state, stored in the db.
 ///
 /// `rocksdb` allows concurrent writes through a shared reference,
-/// so finalized state instances are cloneable. When the final clone is dropped,
-/// the database is closed.
+/// so clones of the finalized state represent the same database instance.
+/// When the final clone is dropped, the database is closed.
+///
+/// This is different from `NonFinalizedState::clone()`,
+/// which returns an independent copy of the chains.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FinalizedState {
     // Configuration
@@ -72,7 +74,7 @@ pub struct FinalizedState {
     /// `rocksdb` allows reads and writes via a shared reference,
     /// so this database object can be freely cloned.
     /// The last instance that is dropped will close the underlying database.
-    db: ZebraDb,
+    pub db: ZebraDb,
 }
 
 impl FinalizedState {
@@ -134,29 +136,19 @@ impl FinalizedState {
         self.network
     }
 
-    /// Returns the `Path` where the files used by this database are located.
-    pub fn path(&self) -> &Path {
-        self.db.path()
-    }
-
-    /// Returns a reference to the inner database instance.
-    pub(crate) fn db(&self) -> &ZebraDb {
-        &self.db
-    }
-
     /// Commit a finalized block to the state.
     ///
     /// It's the caller's responsibility to ensure that blocks are committed in
     /// order.
     pub fn commit_finalized(
         &mut self,
-        queued_block: QueuedFinalized,
-    ) -> Result<FinalizedBlock, ()> {
-        let (finalized, rsp_tx) = queued_block;
+        ordered_block: QueuedFinalized,
+    ) -> Result<FinalizedBlock, BoxError> {
+        let (finalized, rsp_tx) = ordered_block;
         let result =
             self.commit_finalized_direct(finalized.clone().into(), "CommitFinalized request");
 
-        let block_result = if result.is_ok() {
+        if result.is_ok() {
             metrics::counter!("state.checkpoint.finalized.block.count", 1);
             metrics::gauge!(
                 "state.checkpoint.finalized.block.height",
@@ -171,21 +163,23 @@ impl FinalizedState {
                 finalized.height.0 as f64,
             );
             metrics::counter!("zcash.chain.verified.block.total", 1);
-
-            Ok(finalized)
         } else {
             metrics::counter!("state.checkpoint.error.block.count", 1);
             metrics::gauge!(
                 "state.checkpoint.error.block.height",
                 finalized.height.0 as f64,
             );
-
-            Err(())
         };
 
-        let _ = rsp_tx.send(result.map_err(Into::into));
+        // Some io errors can't be cloned, so we format them instead.
+        let owned_result = result
+            .as_ref()
+            .map(|_hash| finalized)
+            .map_err(|error| format!("{:?}", error).into());
 
-        block_result
+        let _ = rsp_tx.send(result);
+
+        owned_result
     }
 
     /// Immediately commit a `finalized` block to the finalized state.

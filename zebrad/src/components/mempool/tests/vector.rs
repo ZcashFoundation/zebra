@@ -3,19 +3,22 @@
 use std::{collections::HashSet, sync::Arc};
 
 use color_eyre::Report;
-use tokio::time;
+use tokio::time::{self, timeout};
 use tower::{ServiceBuilder, ServiceExt};
 
-use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
+use zebra_chain::{
+    block::Block, fmt::humantime_seconds, parameters::Network, serialization::ZcashDeserializeInto,
+};
 use zebra_consensus::transaction as tx;
-use zebra_state::Config as StateConfig;
+use zebra_state::{Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
-use super::UnboxMempoolError;
 use crate::components::{
     mempool::{self, storage::tests::unmined_transactions_in_blocks, *},
     sync::RecentSyncLengths,
 };
+
+use super::UnboxMempoolError;
 
 /// A [`MockService`] representing the network service.
 type MockPeerSet = MockService<zn::Request, zn::Response, PanicAssertion>;
@@ -51,7 +54,7 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     // inserted except one (the genesis block transaction).
     let cost_limit = more_transactions.iter().map(|tx| tx.cost()).sum();
 
-    let (mut service, _peer_set, _state_service, _tx_verifier, mut recent_syncs) =
+    let (mut service, _peer_set, _state_service, _chain_tip_change, _tx_verifier, mut recent_syncs) =
         setup(network, cost_limit).await;
 
     // Enable the mempool
@@ -198,7 +201,7 @@ async fn mempool_queue_single() -> Result<(), Report> {
         .map(|tx| tx.cost())
         .sum();
 
-    let (mut service, _peer_set, _state_service, _tx_verifier, mut recent_syncs) =
+    let (mut service, _peer_set, _state_service, _chain_tip_change, _tx_verifier, mut recent_syncs) =
         setup(network, cost_limit).await;
 
     // Enable the mempool
@@ -272,7 +275,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     // Using the mainnet for now
     let network = Network::Mainnet;
 
-    let (mut service, _peer_set, _state_service, _tx_verifier, mut recent_syncs) =
+    let (mut service, _peer_set, _state_service, _chain_tip_change, _tx_verifier, mut recent_syncs) =
         setup(network, u64::MAX).await;
 
     // get the genesis block transactions from the Zcash blockchain.
@@ -387,8 +390,14 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
     // Using the mainnet for now
     let network = Network::Mainnet;
 
-    let (mut mempool, _peer_set, mut state_service, _tx_verifier, mut recent_syncs) =
-        setup(network, u64::MAX).await;
+    let (
+        mut mempool,
+        _peer_set,
+        mut state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+    ) = setup(network, u64::MAX).await;
 
     // Enable the mempool
     mempool.enable(&mut recent_syncs).await;
@@ -480,8 +489,14 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
     // Using the mainnet for now
     let network = Network::Mainnet;
 
-    let (mut mempool, _peer_set, mut state_service, _tx_verifier, mut recent_syncs) =
-        setup(network, u64::MAX).await;
+    let (
+        mut mempool,
+        _peer_set,
+        mut state_service,
+        mut chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+    ) = setup(network, u64::MAX).await;
 
     // Enable the mempool
     mempool.enable(&mut recent_syncs).await;
@@ -500,6 +515,21 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         ))
         .await
         .unwrap();
+
+    // Wait for the chain tip update
+    if let Err(timeout_error) = timeout(
+        CHAIN_TIP_UPDATE_WAIT_LIMIT,
+        chain_tip_change.wait_for_tip_change(),
+    )
+    .await
+    .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+    {
+        info!(
+            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
+            ?timeout_error,
+            "timeout waiting for chain tip change after committing block"
+        );
+    }
 
     // Queue transaction from block 2 for download
     let txid = block2.transactions[0].unmined_id();
@@ -533,6 +563,21 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         .await
         .unwrap();
 
+    // Wait for the chain tip update
+    if let Err(timeout_error) = timeout(
+        CHAIN_TIP_UPDATE_WAIT_LIMIT,
+        chain_tip_change.wait_for_tip_change(),
+    )
+    .await
+    .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+    {
+        info!(
+            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
+            ?timeout_error,
+            "timeout waiting for chain tip change after committing block"
+        );
+    }
+
     // Query the mempool to make it poll chain_tip_change
     mempool.dummy_call().await;
 
@@ -548,8 +593,14 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     // Using the mainnet for now
     let network = Network::Mainnet;
 
-    let (mut mempool, _peer_set, _state_service, mut tx_verifier, mut recent_syncs) =
-        setup(network, u64::MAX).await;
+    let (
+        mut mempool,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        mut tx_verifier,
+        mut recent_syncs,
+    ) = setup(network, u64::MAX).await;
 
     // Get transactions to use in the test
     let mut unmined_transactions = unmined_transactions_in_blocks(1..=2, network);
@@ -617,8 +668,14 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     // Using the mainnet for now
     let network = Network::Mainnet;
 
-    let (mut mempool, mut peer_set, _state_service, _tx_verifier, mut recent_syncs) =
-        setup(network, u64::MAX).await;
+    let (
+        mut mempool,
+        mut peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+    ) = setup(network, u64::MAX).await;
 
     // Get transactions to use in the test
     let mut unmined_transactions = unmined_transactions_in_blocks(1..=2, network);
@@ -688,6 +745,7 @@ async fn setup(
     Mempool,
     MockPeerSet,
     StateService,
+    ChainTipChange,
     MockTxVerifier,
     RecentSyncLengths,
 ) {
@@ -712,8 +770,15 @@ async fn setup(
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
         sync_status,
         latest_chain_tip,
-        chain_tip_change,
+        chain_tip_change.clone(),
     );
 
-    (mempool, peer_set, state_service, tx_verifier, recent_syncs)
+    (
+        mempool,
+        peer_set,
+        state_service,
+        chain_tip_change,
+        tx_verifier,
+        recent_syncs,
+    )
 }

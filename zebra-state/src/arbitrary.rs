@@ -17,6 +17,8 @@ use crate::{
 
 /// Mocks computation done during semantic validation
 pub trait Prepare {
+    /// Runs block semantic validation computation, and returns the result.
+    /// Test-only method.
     fn prepare(self) -> PreparedBlock;
 }
 

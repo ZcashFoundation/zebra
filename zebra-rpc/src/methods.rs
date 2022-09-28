@@ -872,7 +872,7 @@ where
                     hashes
                         .iter()
                         .map(|(tx_loc, tx_id)| {
-                            // TODO: downgrade to debug, because there's nothing the user can do
+                            // Check that the returned transactions are in chain order.
                             assert!(
                                 *tx_loc > last_tx_location,
                                 "Transactions were not in chain order:\n\
@@ -931,7 +931,7 @@ where
                 let satoshis = u64::from(utxo_data.3.value);
 
                 let output_location = *utxo_data.2;
-                // TODO: downgrade to debug, because there's nothing the user can do
+                // Check that the returned UTXOs are in chain order.
                 assert!(
                     output_location > last_output_location,
                     "UTXOs were not in chain order:\n\
@@ -1272,17 +1272,19 @@ impl GetRawTransaction {
 /// Check if provided height range is valid for address indexes.
 fn check_height_range(start: Height, end: Height, chain_height: Height) -> Result<()> {
     if start == Height(0) || end == Height(0) {
-        return Err(Error::invalid_params(
-            "Start and end are expected to be greater than zero",
-        ));
+        return Err(Error::invalid_params(format!(
+            "start {start:?} and end {end:?} must both be greater than zero"
+        )));
     }
-    if end < start {
-        return Err(Error::invalid_params(
-            "End value is expected to be greater than or equal to start",
-        ));
+    if start > end {
+        return Err(Error::invalid_params(format!(
+            "start {start:?} must be less than or equal to end {end:?}"
+        )));
     }
     if start > chain_height || end > chain_height {
-        return Err(Error::invalid_params("Start or end is outside chain range"));
+        return Err(Error::invalid_params(format!(
+            "start {start:?} and end {end:?} must both be less than or equal to the chain tip {chain_height:?}"
+        )));
     }
 
     Ok(())

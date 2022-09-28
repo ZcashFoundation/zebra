@@ -30,7 +30,13 @@ mod tests;
 pub(crate) use chain::Chain;
 
 /// The state of the chains in memory, including queued blocks.
-#[derive(Debug, Clone)]
+///
+/// Clones of the non-finalized state contain independent copies of the chains.
+/// This is different from `FinalizedState::clone()`,
+/// which returns a shared reference to the database.
+///
+/// Most chain data is clone-on-write using [`Arc`].
+#[derive(Clone, Debug)]
 pub struct NonFinalizedState {
     /// Verified, non-finalized chains, in ascending order.
     ///

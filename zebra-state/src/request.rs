@@ -381,20 +381,44 @@ pub enum Request {
     /// documentation for details.
     CommitBlock(PreparedBlock),
 
-    /// Commit a finalized block to the state, skipping all validation.
+    /// Commit a checkpointed block to the state, skipping most block validation.
     ///
     /// This is exposed for use in checkpointing, which produces finalized
     /// blocks. It is the caller's responsibility to ensure that the block is
-    /// valid and final. This request can be made out-of-order; the state service
-    /// will queue it until its parent is ready.
+    /// semantically valid and final. This request can be made out-of-order;
+    /// the state service will queue it until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the newly committed
     /// block, or an error.
     ///
     /// This request cannot be cancelled once submitted; dropping the response
     /// future will have no effect on whether it is eventually processed.
-    /// Duplicate requests should not be made, because it is the caller's
-    /// responsibility to ensure that each block is valid and final.
+    /// Duplicate requests will replace the older duplicate, and return an error
+    /// in its response future.
+    ///
+    /// # Note
+    ///
+    /// Finalized and non-finalized blocks are an internal Zebra implementation detail.
+    /// There is no difference between these blocks on the network, or in Zebra's
+    /// network or syncer implementations.
+    ///
+    /// # Consensus
+    ///
+    /// Checkpointing is allowed under the Zcash "social consensus" rules.
+    /// Zebra checkpoints both settled network upgrades, and blocks past the rollback limit.
+    /// (By the time Zebra release is tagged, its final checkpoint is typically hours or days old.)
+    ///
+    /// > A network upgrade is settled on a given network when there is a social consensus
+    /// > that it has activated with a given activation block hash. A full validator that
+    /// > potentially risks Mainnet funds or displays Mainnet transaction information to a user
+    /// > MUST do so only for a block chain that includes the activation block of the most
+    /// > recent settled network upgrade, with the corresponding activation block hash.
+    /// > ...
+    /// > A full validator MAY impose a limit on the number of blocks it will “roll back”
+    /// > when switching from one best valid block chain to another that is not a descendent.
+    /// > For `zcashd` and `zebra` this limit is 100 blocks.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#blockchain>
     ///
     /// # Correctness
     ///
