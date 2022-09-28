@@ -368,7 +368,6 @@ where
 pub(crate) fn contextual_validity(
     finalized_state: &FinalizedState,
     non_finalized_state: &NonFinalizedState,
-    network: Network,
     prepared: &PreparedBlock,
 ) -> Result<(), ValidateContextError> {
     let relevant_chain = any_ancestor_blocks(
@@ -380,7 +379,7 @@ pub(crate) fn contextual_validity(
     // Security: check proof of work before any other checks
     check::block_is_valid_for_recent_chain(
         prepared,
-        network,
+        finalized_state.network(),
         finalized_state.db.finalized_tip_height(),
         relevant_chain,
     )?;
