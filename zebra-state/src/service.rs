@@ -233,6 +233,7 @@ impl Drop for StateService {
         std::mem::drop(self.non_finalized_block_write_sender.take());
 
         self.clear_finalized_block_queue("dropping the state: dropped unused queued block");
+        self.clear_non_finalized_block_queue("dropping the state: dropped unused queued block");
 
         // Then drop self.read_service, which checks the block write task for panics,
         // and tries to shut down the database.
@@ -531,6 +532,23 @@ impl StateService {
         std::mem::drop(finalized);
     }
 
+    /// Drops all queued non-finalized blocks, and sends an error on their result channels.
+    fn clear_non_finalized_block_queue(&mut self, error: impl Into<BoxError> + Clone) {
+        for (_hash, queued) in self.queued_non_finalized_blocks.drain() {
+            Self::send_non_finalized_block_error(queued, error.clone());
+        }
+    }
+
+    /// Send an error on a `QueuedNonFinalized` block's result channel, and drop the block
+    fn send_non_finalized_block_error(queued: QueuedNonFinalized, error: impl Into<BoxError>) {
+        let (finalized, rsp_tx) = queued;
+
+        // The block sender might have already given up on this block,
+        // so ignore any channel send errors.
+        let _ = rsp_tx.send(Err(error.into()));
+        std::mem::drop(finalized);
+    }
+
     /// Queue a non finalized block for verification and check if any queued
     /// blocks are ready to be verified and committed to the state.
     ///
@@ -646,11 +664,16 @@ impl StateService {
 
                     let send_result = non_finalized_block_write_sender.send(queued_child);
 
-                    if let Err(SendError((_, rsp_tx))) = send_result {
-                        // If Zebra is shutting down, ignore dropped block result receivers
-                        let _ = rsp_tx.send(Err(
-                            "block commit task exited. Is Zebra shutting down?".into(),
-                        ));
+                    if let Err(SendError(queued)) = send_result {
+                        // If Zebra is shutting down, drop blocks and return an error.
+                        Self::send_non_finalized_block_error(
+                            queued,
+                            "block commit task exited. Is Zebra shutting down?",
+                        );
+
+                        self.clear_non_finalized_block_queue(
+                            "block commit task exited. Is Zebra shutting down?",
+                        );
 
                         return;
                     };
