@@ -21,11 +21,20 @@ use zebra_chain::block::{self, Height};
 
 use crate::{
     constants,
-    service::{finalized_state::ZebraDb, non_finalized_state::Chain, read::block::block_header},
+    service::{
+        finalized_state::ZebraDb,
+        non_finalized_state::{Chain, NonFinalizedState},
+        read::block::block_header,
+    },
 };
 
 #[cfg(test)]
 mod tests;
+
+/// Returns the tip of the best chain in the non-finalized state or the non-finalized state is empty
+pub fn best_tip(mem: &NonFinalizedState, db: &ZebraDb) -> Option<(block::Height, block::Hash)> {
+    mem.best_tip().or_else(|| db.tip())
+}
 
 /// Returns the tip of `chain`.
 /// If there is no chain, returns the tip of `db`.
