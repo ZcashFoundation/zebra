@@ -23,6 +23,10 @@ use crate::{
 // use self as check
 use super::check;
 
+// These types are used in doc links
+#[allow(unused_imports)]
+use crate::service::non_finalized_state::Chain;
+
 pub(crate) mod anchors;
 pub(crate) mod difficulty;
 pub(crate) mod nullifier;
@@ -360,11 +364,10 @@ where
     Ok(())
 }
 
-/// Check that the prepared block is contextually valid for the configured
-/// network, based on the committed finalized and non-finalized state.
+/// Perform initial contextual validity checks for the configured network,
+/// based on the committed finalized and non-finalized state.
 ///
-/// Note: some additional contextual validity checks are performed by the
-/// non-finalized [`Chain`](non_finalized_state::Chain).
+/// Additional contextual validity checks are performed by the non-finalized [`Chain`].
 pub(crate) fn contextual_validity(
     finalized_state: &FinalizedState,
     non_finalized_state: &NonFinalizedState,

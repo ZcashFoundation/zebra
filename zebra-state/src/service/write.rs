@@ -19,6 +19,13 @@ use crate::{
     CommitBlockError, PreparedBlock,
 };
 
+// These types are used in doc links
+#[allow(unused_imports)]
+use crate::service::{
+    chain_tip::{ChainTipChange, LatestChainTip},
+    non_finalized_state::Chain,
+};
+
 /// Run contextual validation on the prepared block and add it to the
 /// non-finalized state if it is contextually valid.
 #[tracing::instrument(level = "debug", skip(prepared))]
@@ -41,12 +48,10 @@ pub(crate) fn validate_and_commit_non_finalized(
 
 /// Update the [`LatestChainTip`], [`ChainTipChange`], and `non_finalized_state_sender`
 /// channels with the latest non-finalized [`ChainTipBlock`] and
-/// [`Chain`][1].
+/// [`Chain`].
 ///
 /// Returns the latest non-finalized chain tip height, or `None` if the
 /// non-finalized state is empty.
-///
-/// [1]: non_finalized_state::Chain
 #[instrument(level = "debug", skip(chain_tip_sender))]
 fn update_latest_chain_channels(
     finalized_state: &FinalizedState,
@@ -70,7 +75,8 @@ fn update_latest_chain_channels(
 }
 
 /// Reads blocks from the channels, writes them to the `finalized_state` or `non_finalized_state`,
-/// sends any errors on the `invalid_block_reset_sender`, then updates the `chain_tip_sender` and `non_finalized_state_sender`.
+/// sends any errors on the `invalid_block_reset_sender`, then updates the `chain_tip_sender` and
+/// `non_finalized_state_sender`.
 // TODO: make the task an object
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip(
