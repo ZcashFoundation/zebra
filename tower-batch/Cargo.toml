@@ -10,7 +10,7 @@ futures = "0.3.24"
 futures-core = "0.3.24"
 pin-project = "1.0.12"
 rayon = "1.5.3"
-tokio = { version = "1.21.1", features = ["time", "sync", "tracing", "macros"] }
+tokio = { version = "1.21.2", features = ["time", "sync", "tracing", "macros"] }
 tokio-util = "0.7.4"
 tower = { version = "0.4.13", features = ["util", "buffer"] }
 tracing = "0.1.36"
@@ -25,7 +25,7 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 ed25519-zebra = "3.0.0"
 rand = { version = "0.8.5", package = "rand" }
 
-tokio = { version = "1.21.1", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.21.2", features = ["full", "tracing", "test-util"] }
 tokio-test = "0.4.2"
 tower-fallback = { path = "../tower-fallback/" }
 tower-test = "0.4.0"
