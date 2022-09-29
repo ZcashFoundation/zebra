@@ -9,6 +9,7 @@ use tokio::sync::{
 use zebra_chain::block::{self, Height};
 
 use crate::{
+    constants::MAX_BLOCK_REORG_HEIGHT,
     service::{
         check,
         finalized_state::FinalizedState,
@@ -25,6 +26,11 @@ use crate::service::{
     chain_tip::{ChainTipChange, LatestChainTip},
     non_finalized_state::Chain,
 };
+
+/// The maximum size of the parent error map.
+///
+/// We allow enough space for multiple concurrent chain forks with errors.
+const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
 
 /// Run contextual validation on the prepared block and add it to the
 /// non-finalized state if it is contextually valid.
@@ -205,57 +211,67 @@ pub fn write_blocks_from_channels(
             .map_err(CloneError::from);
         }
 
+        // Committing blocks to the finalized state keeps the same chain,
+        // so we can update the caller with the result now.
+        //
+        // TODO: if this causes test failures, fix the timing issues in the test,
+        //       or send the result after errors *and* successful finalized commits
+        let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
+
         if let Err(ref error) = result {
             // If the block is invalid, mark any descendant blocks as rejected.
             parent_error_map.insert(child_hash, error.clone());
 
-            if parent_error_map.len() > 1000 {
-                parent_error_map.reverse();
-                parent_error_map.truncate(20);
-                parent_error_map.reverse();
+            // Make sure the error map doesn't get too big.
+            if parent_error_map.len() > PARENT_ERROR_MAP_LIMIT {
+                // We only add one hash at a time, so we only need to remove one extra here.
+                parent_error_map.shift_remove_index(0);
             }
-        } else {
-            // Committing blocks to the finalized state keeps the same chain,
-            // so we can update the chain seen by the rest of the application now.
-            //
-            // TODO: if this causes state request errors due to chain conflicts,
-            //       fix the `service::read` bugs,
-            //       or do the channel update after the finalized state commit
-            let tip_block_height = update_latest_chain_channels(
-                &non_finalized_state,
-                &mut chain_tip_sender,
-                &non_finalized_state_sender,
-            );
 
-            while non_finalized_state.best_chain_len() > crate::constants::MAX_BLOCK_REORG_HEIGHT {
-                tracing::trace!("finalizing block past the reorg limit");
-                let finalized_with_trees = non_finalized_state.finalize();
-                finalized_state
+            // Skip the things we only need to do for successfully committed blocks
+            continue;
+        }
+
+        // Committing blocks to the finalized state keeps the same chain,
+        // so we can update the chain seen by the rest of the application now.
+        //
+        // TODO: if this causes state request errors due to chain conflicts,
+        //       fix the `service::read` bugs,
+        //       or do the channel update after the finalized state commit
+        let tip_block_height = update_latest_chain_channels(
+            &non_finalized_state,
+            &mut chain_tip_sender,
+            &non_finalized_state_sender,
+        );
+
+        while non_finalized_state.best_chain_len() > MAX_BLOCK_REORG_HEIGHT {
+            tracing::trace!("finalizing block past the reorg limit");
+            let finalized_with_trees = non_finalized_state.finalize();
+            finalized_state
                         .commit_finalized_direct(finalized_with_trees, "best non-finalized chain root")
                         .expect(
                             "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
                         );
-            }
-
-            // Update the metrics if semantic and contextual validation passes
-            metrics::counter!("state.full_verifier.committed.block.count", 1);
-            metrics::counter!("zcash.chain.verified.block.total", 1);
-
-            metrics::gauge!(
-                "state.full_verifier.committed.block.height",
-                tip_block_height.0 as f64,
-            );
-
-            // This height gauge is updated for both fully verified and checkpoint blocks.
-            // These updates can't conflict, because this block write task makes sure that blocks
-            // are committed in order.
-            metrics::gauge!(
-                "zcash.chain.verified.block.height",
-                tip_block_height.0 as f64,
-            );
         }
 
-        let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
+        // Update the metrics if semantic and contextual validation passes
+        //
+        // TODO: split this out into a function?
+        metrics::counter!("state.full_verifier.committed.block.count", 1);
+        metrics::counter!("zcash.chain.verified.block.total", 1);
+
+        metrics::gauge!(
+            "state.full_verifier.committed.block.height",
+            tip_block_height.0 as f64,
+        );
+
+        // This height gauge is updated for both fully verified and checkpoint blocks.
+        // These updates can't conflict, because this block write task makes sure that blocks
+        // are committed in order.
+        metrics::gauge!(
+            "zcash.chain.verified.block.height",
+            tip_block_height.0 as f64,
+        );
 
         tracing::trace!("finished processing queued block");
     }
