@@ -67,6 +67,11 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
     Transaction(Option<(Arc<Transaction>, block::Height)>),
 
+    /// Response to [`ReadRequest::TransactionIdsForBlock`],
+    /// with an list of transaction hashes in block order,
+    /// or `None` if the block was not found.
+    TransactionIdsForBlock(Option<Arc<[transaction::Hash]>>),
+
     /// Response to [`ReadRequest::BlockLocator`] with a block locator object.
     BlockLocator(Vec<block::Hash>),
 
@@ -130,7 +135,8 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockHashes(hashes) => Ok(Response::BlockHashes(hashes)),
             ReadResponse::BlockHeaders(headers) => Ok(Response::BlockHeaders(headers)),
 
-            ReadResponse::BestChainUtxo(_)
+            ReadResponse::TransactionIdsForBlock(_)
+            | ReadResponse::BestChainUtxo(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
             | ReadResponse::AddressBalance(_)
