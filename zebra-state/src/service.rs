@@ -731,7 +731,7 @@ impl ReadStateService {
 
     /// Gets a clone of the latest non-finalized state from the `non_finalized_state_receiver`
     fn latest_non_finalized_state(&self) -> NonFinalizedState {
-        self.non_finalized_state_receiver.with_watch_data(|mem| mem)
+        self.non_finalized_state_receiver.cloned_watch_data()
     }
 }
 
