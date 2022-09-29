@@ -363,7 +363,7 @@ impl StateService {
             if let Err(error) = check::legacy_chain(
                 nu5_activation_height,
                 any_ancestor_blocks(
-                    &state.read_service.latest_mem(),
+                    &state.read_service.latest_non_finalized_state(),
                     &state.read_service.db,
                     tip.1,
                 ),
@@ -566,7 +566,7 @@ impl StateService {
 
         if self
             .read_service
-            .latest_mem()
+            .latest_non_finalized_state()
             .any_chain_contains(&prepared.hash)
             || self.read_service.db.hash(prepared.height).is_some()
         {
@@ -642,7 +642,9 @@ impl StateService {
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.read_service.latest_mem().any_chain_contains(hash)
+        self.read_service
+            .latest_non_finalized_state()
+            .any_chain_contains(hash)
             || &self.read_service.db.finalized_tip_hash() == hash
     }
 
@@ -686,7 +688,10 @@ impl StateService {
 
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
-        read::best_tip(&self.read_service.latest_mem(), &self.read_service.db)
+        read::best_tip(
+            &self.read_service.latest_non_finalized_state(),
+            &self.read_service.db,
+        )
     }
 
     /// Assert some assumptions about the prepared `block` before it is queued.
@@ -725,7 +730,7 @@ impl ReadStateService {
     }
 
     /// Gets a clone of the latest non-finalized state from the `non_finalized_state_receiver`
-    fn latest_mem(&self) -> NonFinalizedState {
+    fn latest_non_finalized_state(&self) -> NonFinalizedState {
         self.non_finalized_state_receiver.with_watch_data(|mem| mem)
     }
 }
