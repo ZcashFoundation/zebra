@@ -50,21 +50,26 @@ pub(crate) fn validate_and_commit_non_finalized(
 /// channels with the latest non-finalized [`ChainTipBlock`] and
 /// [`Chain`].
 ///
-/// Returns the latest non-finalized chain tip height, or `None` if the
-/// non-finalized state is empty.
+/// Returns the latest non-finalized chain tip height.
+///
+/// # Panics
+///
+/// If the `non_finalized_state` is empty.
 #[instrument(level = "debug", skip(chain_tip_sender))]
 fn update_latest_chain_channels(
-    finalized_state: &FinalizedState,
     non_finalized_state: &NonFinalizedState,
     chain_tip_sender: &mut ChainTipSender,
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
-) -> Option<block::Height> {
-    let best_chain = non_finalized_state.best_chain();
+) -> block::Height {
+    let best_chain = non_finalized_state.best_chain().expect("unexpected empty non-finalized state: must commit at least one block before updating channels");
+
     let tip_block = best_chain
-        .and_then(|chain| chain.tip_block())
-        .cloned()
-        .map(ChainTipBlock::from);
-    let tip_block_height = tip_block.as_ref().map(|block| block.height);
+        .tip_block()
+        .expect("unexpected empty chain: must commit at least one block before updating channels")
+        .clone();
+    let tip_block = ChainTipBlock::from(tip_block);
+
+    let tip_block_height = tip_block.height;
 
     // If the final receiver was just dropped, ignore the error.
     let _ = non_finalized_state_sender.send(non_finalized_state.clone());
@@ -178,14 +183,11 @@ pub fn write_blocks_from_channels(
 
         let result;
 
-        // If the block is invalid, reject any descendant blocks.
+        // If the parent block was marked as rejected, also reject all its children.
         //
-        // At this point, we know that the block and all its descendants
+        // At this point, we know that all the block's descendants
         // are invalid, because we checked all the consensus rules before
-        // committing the block to the non-finalized state.
-        // (These checks also bind the transaction data to the block
-        // header, using the transaction merkle tree and authorizing data
-        // commitment.)
+        // committing the failing ancestor block to the non-finalized state.
         if let Some(parent_error) = parent_error {
             tracing::trace!(
                 ?child_hash,
@@ -201,46 +203,51 @@ pub fn write_blocks_from_channels(
                 queued_child,
             )
             .map_err(CloneError::from);
-
-            if result.is_ok() {
-                // Update the metrics if semantic and contextual validation passes
-                metrics::counter!("state.full_verifier.committed.block.count", 1);
-                metrics::counter!("zcash.chain.verified.block.total", 1);
-            }
         }
 
         if let Err(ref error) = result {
+            // If the block is invalid, mark any descendant blocks as rejected.
             parent_error_map.insert(child_hash, error.clone());
-        }
 
-        let tip_block_height = update_latest_chain_channels(
-            &finalized_state,
-            &non_finalized_state,
-            &mut chain_tip_sender,
-            &non_finalized_state_sender,
-        );
+            if parent_error_map.len() > 1000 {
+                parent_error_map.reverse();
+                parent_error_map.truncate(20);
+                parent_error_map.reverse();
+            }
+        } else {
+            // Committing blocks to the finalized state keeps the same chain,
+            // so we can update the chain seen by the rest of the application now.
+            //
+            // TODO: if this causes state request errors due to chain conflicts,
+            //       fix the `service::read` bugs,
+            //       or do the channel update after the finalized state commit
+            let tip_block_height = update_latest_chain_channels(
+                &non_finalized_state,
+                &mut chain_tip_sender,
+                &non_finalized_state_sender,
+            );
 
-        let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
-
-        while non_finalized_state.best_chain_len() > crate::constants::MAX_BLOCK_REORG_HEIGHT {
-            tracing::trace!("finalizing block past the reorg limit");
-            let finalized_with_trees = non_finalized_state.finalize();
-            finalized_state
+            while non_finalized_state.best_chain_len() > crate::constants::MAX_BLOCK_REORG_HEIGHT {
+                tracing::trace!("finalizing block past the reorg limit");
+                let finalized_with_trees = non_finalized_state.finalize();
+                finalized_state
                         .commit_finalized_direct(finalized_with_trees, "best non-finalized chain root")
                         .expect(
                             "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
                         );
-        }
+            }
 
-        // update metrics using the best non-finalized tip
-        if let Some(tip_block_height) = tip_block_height {
+            // Update the metrics if semantic and contextual validation passes
+            metrics::counter!("state.full_verifier.committed.block.count", 1);
+            metrics::counter!("zcash.chain.verified.block.total", 1);
+
             metrics::gauge!(
                 "state.full_verifier.committed.block.height",
                 tip_block_height.0 as f64,
             );
 
             // This height gauge is updated for both fully verified and checkpoint blocks.
-            // These updates can't conflict, because the state makes sure that blocks
+            // These updates can't conflict, because this block write task makes sure that blocks
             // are committed in order.
             metrics::gauge!(
                 "zcash.chain.verified.block.height",
@@ -248,13 +255,9 @@ pub fn write_blocks_from_channels(
             );
         }
 
-        tracing::trace!("finished processing queued block");
+        let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
 
-        if parent_error_map.len() > 1000 {
-            parent_error_map.reverse();
-            parent_error_map.truncate(20);
-            parent_error_map.reverse();
-        }
+        tracing::trace!("finished processing queued block");
     }
 
     // We're finished receiving non-finalized blocks from the state, and
