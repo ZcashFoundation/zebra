@@ -211,14 +211,14 @@ pub fn write_blocks_from_channels(
             .map_err(CloneError::from);
         }
 
-        // Committing blocks to the finalized state keeps the same chain,
-        // so we can update the caller with the result now.
-        //
-        // TODO: if this causes test failures, fix the timing issues in the test,
-        //       or send the result after errors *and* successful finalized commits
-        let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
+        // TODO: fix the test timing bugs that require the result to be sent
+        //       after `update_latest_chain_channels()`,
+        //       and send the result on rsp_tx here
 
         if let Err(ref error) = result {
+            // Update the caller with the error.
+            let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
+
             // If the block is invalid, mark any descendant blocks as rejected.
             parent_error_map.insert(child_hash, error.clone());
 
@@ -243,6 +243,9 @@ pub fn write_blocks_from_channels(
             &mut chain_tip_sender,
             &non_finalized_state_sender,
         );
+
+        // Update the caller with the result.
+        let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
 
         while non_finalized_state.best_chain_len() > MAX_BLOCK_REORG_HEIGHT {
             tracing::trace!("finalizing block past the reorg limit");
