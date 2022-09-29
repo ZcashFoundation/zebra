@@ -368,7 +368,7 @@ where
 /// based on the committed finalized and non-finalized state.
 ///
 /// Additional contextual validity checks are performed by the non-finalized [`Chain`].
-pub(crate) fn contextual_validity(
+pub(crate) fn initial_contextual_validity(
     finalized_state: &FinalizedState,
     non_finalized_state: &NonFinalizedState,
     prepared: &PreparedBlock,
