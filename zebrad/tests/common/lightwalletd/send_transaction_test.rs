@@ -139,7 +139,7 @@ pub async fn run() -> Result<()> {
         "spawned lightwalletd connected to zebrad, waiting for them both to sync...",
     );
 
-    let (_lightwalletd, mut zebrad) = wait_for_zebrad_and_lightwalletd_sync(
+    let (_lightwalletd, _zebrad) = wait_for_zebrad_and_lightwalletd_sync(
         lightwalletd,
         lightwalletd_rpc_port,
         zebrad,
