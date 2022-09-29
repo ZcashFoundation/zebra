@@ -377,6 +377,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the tip of the best chain.
+    #[allow(dead_code)]
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
         let best_chain = self.best_chain()?;
         let height = best_chain.non_finalized_tip_height();

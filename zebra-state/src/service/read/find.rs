@@ -31,9 +31,12 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// Returns the tip of the best chain in the non-finalized state or the non-finalized state is empty
-pub fn best_tip(mem: &NonFinalizedState, db: &ZebraDb) -> Option<(block::Height, block::Hash)> {
-    mem.best_tip().or_else(|| db.tip())
+/// Returns the tip of the best chain in the non-finalized or finalized state.
+pub fn best_tip(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+) -> Option<(block::Height, block::Hash)> {
+    tip(non_finalized_state.best_chain(), db)
 }
 
 /// Returns the tip of `chain`.
