@@ -232,8 +232,12 @@ impl Drop for StateService {
         std::mem::drop(self.finalized_block_write_sender.take());
         std::mem::drop(self.non_finalized_block_write_sender.take());
 
-        self.clear_finalized_block_queue("dropping the state: dropped unused queued block");
-        self.clear_non_finalized_block_queue("dropping the state: dropped unused queued block");
+        self.clear_finalized_block_queue(
+            "dropping the state: dropped unused queued finalized block",
+        );
+        self.clear_non_finalized_block_queue(
+            "dropping the state: dropped unused queued non-finalized block",
+        );
 
         // Then drop self.read_service, which checks the block write task for panics,
         // and tries to shut down the database.
