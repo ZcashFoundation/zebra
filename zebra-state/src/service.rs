@@ -77,7 +77,7 @@ mod tests;
 
 pub use finalized_state::{OutputIndex, OutputLocation, TransactionLocation};
 
-use self::queued_blocks::{QueuedFinalized, QueuedNonFinalized};
+use self::queued_blocks::{QueuedFinalized, QueuedNonFinalized, SentHashes};
 
 /// A read-write service for Zebra's cached blockchain state.
 ///
@@ -142,7 +142,11 @@ pub(crate) struct StateService {
     // - turn this into an IndexMap containing recent non-finalized block hashes and heights
     //   (they are all potential tips)
     // - remove block hashes once their heights are strictly less than the finalized tip
-    last_block_hash_sent: block::Hash,
+    last_sent_finalized_block_hash: block::Hash,
+
+    /// A set of non-finalized block hashes that have been sent to the block write task.
+    /// Hashes of blocks below the finalized tip height are periodically pruned. 
+    sent_non_finalized_block_hashes: SentHashes,
 
     /// If an invalid block is sent on `finalized_block_write_sender`
     /// or `non_finalized_block_write_sender`,
@@ -339,7 +343,7 @@ impl StateService {
         let queued_non_finalized_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
-        let last_block_hash_sent = finalized_state.db.finalized_tip_hash();
+        let last_sent_finalized_block_hash = finalized_state.db.finalized_tip_hash();
 
         let state = Self {
             network,
@@ -347,7 +351,8 @@ impl StateService {
             queued_finalized_blocks: HashMap::new(),
             non_finalized_block_write_sender: Some(non_finalized_block_write_sender),
             finalized_block_write_sender: Some(finalized_block_write_sender),
-            last_block_hash_sent,
+            last_sent_finalized_block_hash,
+            sent_non_finalized_block_hashes: SentHashes::default(),
             invalid_block_reset_receiver,
             pending_utxos,
             last_prune: Instant::now(),
@@ -483,7 +488,7 @@ impl StateService {
 
         // If a block failed, we need to start again from a valid tip.
         match self.invalid_block_reset_receiver.try_recv() {
-            Ok(reset_tip_hash) => self.last_block_hash_sent = reset_tip_hash,
+            Ok(reset_tip_hash) => self.last_sent_finalized_block_hash = reset_tip_hash,
             Err(TryRecvError::Disconnected) => {
                 info!("Block commit task closed the block reset channel. Is Zebra shutting down?");
                 return;
@@ -494,9 +499,9 @@ impl StateService {
 
         while let Some(queued_block) = self
             .queued_finalized_blocks
-            .remove(&self.last_block_hash_sent)
+            .remove(&self.last_sent_finalized_block_hash)
         {
-            self.last_block_hash_sent = queued_block.0.hash;
+            self.last_sent_finalized_block_hash = queued_block.0.hash;
 
             // If we've finished sending finalized blocks, ignore any repeated blocks.
             // (Blocks can be repeated after a syncer reset.)
@@ -607,8 +612,8 @@ impl StateService {
         if self.finalized_block_write_sender.is_some()
             && self
                 .queued_non_finalized_blocks
-                .has_queued_children(self.last_block_hash_sent)
-            && self.read_service.db.finalized_tip_hash() == self.last_block_hash_sent
+                .has_queued_children(self.last_sent_finalized_block_hash)
+            && self.read_service.db.finalized_tip_hash() == self.last_sent_finalized_block_hash
         {
             // Tell the block write task to stop committing finalized blocks,
             // and move on to committing non-finalized blocks.
@@ -639,6 +644,9 @@ impl StateService {
 
             self.queued_non_finalized_blocks
                 .prune_by_height(finalized_tip_height);
+
+            self.sent_non_finalized_block_hashes
+                .prune_by_height(finalized_tip_height);
         }
 
         rsp_rx
@@ -646,9 +654,7 @@ impl StateService {
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
-        self.read_service
-            .latest_non_finalized_state()
-            .any_chain_contains(hash)
+        self.sent_non_finalized_block_hashes.contains(hash)
             || &self.read_service.db.finalized_tip_hash() == hash
     }
 
@@ -666,7 +672,7 @@ impl StateService {
                     .dequeue_children(parent_hash);
 
                 for queued_child in queued_children {
-                    let child_hash = queued_child.0.hash;
+                    let (PreparedBlock { hash, height, .. }, _) = queued_child;
 
                     let send_result = non_finalized_block_write_sender.send(queued_child);
 
@@ -684,7 +690,10 @@ impl StateService {
                         return;
                     };
 
-                    new_parents.push(child_hash);
+                    self.sent_non_finalized_block_hashes
+                        .add_with_height(hash, height);
+
+                    new_parents.push(hash);
                 }
             }
         };

@@ -1,7 +1,7 @@
 //! Queued blocks that are awaiting their parent block for verification.
 
 use std::{
-    collections::{hash_map::Drain, BTreeMap, HashMap, HashSet},
+    collections::{hash_map::Drain, BTreeMap, HashMap, HashSet, VecDeque},
     mem,
 };
 
@@ -207,5 +207,54 @@ impl QueuedBlocks {
         self.by_height.clear();
 
         self.blocks.drain()
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct SentHashes {
+    /// A growable ring buf to be used for pruning outdated hashes that are mostly
+    /// inserted in the order of their height
+    buf: VecDeque<(block::Hash, block::Height)>,
+
+    /// Stores a set of hashes that have been sent to the block write task but
+    /// may not be in the finalized state yet.
+    set: HashSet<block::Hash>,
+}
+
+impl SentHashes {
+    /// Inserts the hash into the set of sent hashes, and pushes the (hash, height)
+    /// onto the buf to be used for pruning outdated hashes.
+    ///
+    /// Assumes that hashes are mostly added in the order of their height for efficient pruning.
+    //
+    // Trades off some memory usage to avoid iterating over the entire set when non-finalized blocks
+    // are sent to the block write task, as would be the case with a HashMap.
+    pub fn add_with_height(&mut self, hash: block::Hash, height: block::Height) {
+        self.buf.push_back((hash, height));
+        self.set.insert(hash);
+    }
+
+    /// Iterates over the buf removing hashes from the SentHashes until reaching
+    /// the first hash with a height above the `height_bound`
+    ///
+    /// Does not guarantee that all hashes below the `height_bound` will be removed.
+    pub fn prune_by_height(&mut self, height_bound: block::Height) {
+        while let Some((hash, height)) = self.buf.pop_front() {
+            if height > height_bound {
+                self.buf.push_front((hash, height));
+                break;
+            } else {
+                self.set.remove(&hash);
+            }
+        }
+
+        // shrink to a reasonable cap in cases where there are many hashes that
+        // are not in order of their heights in the buf
+        self.buf.shrink_to(127);
+    }
+
+    /// Returns true if the set contains the `hash`
+    pub fn contains(&self, hash: &block::Hash) -> bool {
+        self.set.contains(hash)
     }
 }
