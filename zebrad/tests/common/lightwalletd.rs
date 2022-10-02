@@ -384,6 +384,15 @@ impl LightwalletdTestType {
         }
     }
 
+    /// Can this test create a new `LIGHTWALLETD_DATA_DIR` cached state?
+    pub fn can_create_lightwalletd_cached_state(&self) -> bool {
+        match self {
+            LaunchWithEmptyState => false,
+            FullSyncFromGenesis { .. } | UpdateCachedState => true,
+            UpdateZebraCachedStateNoRpc => false,
+        }
+    }
+
     /// Returns the Zebra state path for this test, if set.
     #[allow(clippy::print_stderr)]
     pub fn zebrad_state_path<S: AsRef<str>>(&self, test_name: S) -> Option<PathBuf> {
@@ -447,7 +456,7 @@ impl LightwalletdTestType {
     pub fn lightwalletd_state_path<S: AsRef<str>>(&self, test_name: S) -> Option<PathBuf> {
         let test_name = test_name.as_ref();
 
-        if !self.launches_lightwalletd() || !self.allow_lightwalletd_cached_state() {
+        if !self.launches_lightwalletd() || !self.can_create_lightwalletd_cached_state() {
             tracing::info!(
                 "running {test_name:?} {self:?} lightwalletd test, \
                  ignoring any cached state in the {LIGHTWALLETD_DATA_DIR:?} environment variable",
