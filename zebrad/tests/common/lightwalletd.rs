@@ -456,7 +456,11 @@ impl LightwalletdTestType {
     pub fn lightwalletd_state_path<S: AsRef<str>>(&self, test_name: S) -> Option<PathBuf> {
         let test_name = test_name.as_ref();
 
-        if !self.launches_lightwalletd() || !self.can_create_lightwalletd_cached_state() {
+        // Can this test type use a lwd cached state, or create/update one?
+        let use_or_create_lwd_cache =
+            self.allow_lightwalletd_cached_state() || self.can_create_lightwalletd_cached_state();
+
+        if !self.launches_lightwalletd() || !use_or_create_lwd_cache {
             tracing::info!(
                 "running {test_name:?} {self:?} lightwalletd test, \
                  ignoring any cached state in the {LIGHTWALLETD_DATA_DIR:?} environment variable",
