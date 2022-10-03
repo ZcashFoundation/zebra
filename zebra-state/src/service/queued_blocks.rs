@@ -254,7 +254,6 @@ impl SentHashes {
     /// in order to remove all hashes that are below `height_bound`.
     pub fn prune_by_height(&mut self, height_bound: block::Height) {
         self.finish_batch();
-        
         self.sent_bufs.retain_mut(|buf| {
             while let Some((hash, height)) = buf.pop_front() {
                 if height > height_bound {
