@@ -148,27 +148,35 @@ ENV ZEBRA_CONF_FILE ${ZEBRA_CONF_FILE}
 
 # Build the `zebrad.toml` before starting the container, using the arguments from build
 # time, or using the default values set just above. And create the conf path and file if
-# it does not exist
+# it does not exist.
 #
-# TODO: move this file creation to an entrypoint as we can use default values at runtime,
-# and modify those as needed when starting the container (at runtime and not at build time)
+# It is safe to use multiple RPC threads in Docker, because we know we are the only running
+# `zebrad` or `zcashd` process in the container.
+#
+# TODO:
+#  - move this file creation to an entrypoint as we can use default values at runtime,
+#    and modify those as needed when starting the container (at runtime and not at build time)
+#  - make `cache_dir`, `rpc.listen_addr`, `metrics.endpoint_addr`, and `tracing.endpoint_addr` into Docker arguments
 RUN mkdir -p ${ZEBRA_CONF_PATH} \
     && touch ${ZEBRA_CONF_PATH}/${ZEBRA_CONF_FILE}
 RUN set -ex; \
   { \
-    echo "[consensus]"; \
-    echo "checkpoint_sync = ${CHECKPOINT_SYNC}"; \
-    echo "[metrics]"; \
-    echo "endpoint_addr = '0.0.0.0:9999'"; \
     echo "[network]"; \
     echo "network = '${NETWORK}'"; \
+    echo "[consensus]"; \
+    echo "checkpoint_sync = ${CHECKPOINT_SYNC}"; \
     echo "[state]"; \
     echo "cache_dir = '/zebrad-cache'"; \
+    echo "[rpc]"; \
+    echo "listen_addr = None"; \
+    echo "parallel_cpu_threads = 0"; \
+    echo "[metrics]"; \
+    echo "endpoint_addr = None"; \
     echo "[tracing]"; \
-    echo "endpoint_addr = '0.0.0.0:3000'"; \
+    echo "endpoint_addr = None"; \
   } > "${ZEBRA_CONF_PATH}/${ZEBRA_CONF_FILE}"
 
-EXPOSE 3000 8233 18233
+EXPOSE 8233 18233
 
 ARG SHORT_SHA
 ENV SHORT_SHA $SHORT_SHA
