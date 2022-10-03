@@ -55,15 +55,16 @@ Zebra aims to be
 [faster, more secure, and more easily extensible](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages)
 than other Zcash implementations.
 
-## Beta Releases
+## Release Candidates
 
-Every few weeks, we release a new Zebra beta [release](https://github.com/ZcashFoundation/zebra/releases).
+Every few weeks, we release a new Zebra [release candidate](https://github.com/ZcashFoundation/zebra/releases).
 
 Zebra's network stack is interoperable with `zcashd`,
 and Zebra implements all the features required to reach Zcash network consensus.
 
-Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
+Zebra also supports the [`lightwalletd` backend JSON-RPCs](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd).
 
+Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
 But it may not validate any:
 - Undocumented rules derived from Bitcoin
 - Undocumented network protocol requirements
