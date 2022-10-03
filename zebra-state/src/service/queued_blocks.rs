@@ -212,12 +212,11 @@ impl QueuedBlocks {
 
 #[derive(Debug, Default)]
 pub(crate) struct SentHashes {
-    /// A Vec of growable ring bufs to be used for pruning outdated hashes that are
-    /// inserted in the order of their height in a given batch.
+    /// A list of previously sent block batches, each batch is in increasing height order.
+    /// We use this list to efficiently prune outdated hashes that are at or below the finalized tip.
     sent_bufs: Vec<VecDeque<(block::Hash, block::Height)>>,
 
-    /// The growable ring buf to be used for pruning outdated hashes that are mostly
-    /// inserted in the order of their height for this batch of sent hashes
+    /// The list of blocks sent in the current batch, in increasing height order.
     curr_buf: VecDeque<(block::Hash, block::Height)>,
 
     /// Stores a set of hashes that have been sent to the block write task but
@@ -247,11 +246,15 @@ impl SentHashes {
     }
 
     /// Iterates over each buf in `sent_bufs`, removing hashes from SentHashes until reaching
-    /// the first hash with a height above the `height_bound`
+    /// the first hash with a height above the `height_bound`.
+    ///
+    /// Finishes the batch if `finish_batch()` hasn't been called already.
     ///
     /// Assumes that hashes in each `sent_buf` will be added in order of their heights
     /// in order to remove all hashes that are below `height_bound`.
     pub fn prune_by_height(&mut self, height_bound: block::Height) {
+        self.finish_batch();
+        
         self.sent_bufs.retain_mut(|buf| {
             while let Some((hash, height)) = buf.pop_front() {
                 if height > height_bound {
