@@ -73,8 +73,11 @@ But it may not validate any:
 
 You can run Zebra using our Docker image.
 This command will run our latest release, and sync it to the tip:
+
+<!-- TODO: replace with `docker run zfnd/zebra` when we release 1.0.0 -->
+
 ```sh
-docker run zfnd/zebra
+docker run zfnd/zebra:1.0.0-rc.0
 ```
 
 You can also [enable Zebra's RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd) and [configure other features](https://zebra.zfnd.org/user/run.html).
