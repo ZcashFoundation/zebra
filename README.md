@@ -70,13 +70,20 @@ But it may not validate any:
 
 ## Getting Started
 
-Building `zebrad` requires [Rust](https://www.rust-lang.org/tools/install),
-[libclang](https://clang.llvm.org/get_started.html), and a C++ compiler.
+You can run Zebra using our Docker image.
+This command will run our latest release, and sync it to the tip:
+```sh
+docker run zfnd/zebra
+```
 
-### Build and Run Instructions
+You can also [enable Zebra's RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd) and [configure other features](https://zebra.zfnd.org/user/run.html).
 
-`zebrad` is still under development, so there is no supported packaging or
-install mechanism. To run `zebrad`, follow the instructions to compile `zebrad`
+If you want to build `zebrad` yourself, you'll need [Rust](https://www.rust-lang.org/tools/install),
+[libclang](https://clang.llvm.org/get_started.html), a C++ compiler, and some other dependencies.
+
+### Build Instructions
+
+To run `zebrad`, follow the instructions to compile `zebrad`
 for your platform:
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
