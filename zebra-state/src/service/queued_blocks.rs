@@ -182,12 +182,19 @@ impl QueuedBlocks {
 
     /// Update metrics after the queue is modified
     fn update_metrics(&self) {
+        if let Some(min_height) = self.by_height.keys().next() {
+            metrics::gauge!("state.memory.queued.min.height", min_height.0 as f64);
+        } else {
+            // use f64::NAN as a sentinel value for "None", because 0 is a valid height
+            metrics::gauge!("state.memory.queued.min.height", f64::NAN);
+        }
         if let Some(max_height) = self.by_height.keys().next_back() {
             metrics::gauge!("state.memory.queued.max.height", max_height.0 as f64);
         } else {
             // use f64::NAN as a sentinel value for "None", because 0 is a valid height
             metrics::gauge!("state.memory.queued.max.height", f64::NAN);
         }
+
         metrics::gauge!("state.memory.queued.block.count", self.blocks.len() as f64);
     }
 
@@ -198,7 +205,9 @@ impl QueuedBlocks {
     }
 
     /// Clears known_utxos, by_parent, and by_height, then drains blocks.
-    /// Returns all key-value pairs of blocks as an iterator
+    /// Returns all key-value pairs of blocks as an iterator.
+    ///
+    /// Doesn't update the metrics, because it is only used when the state is being dropped.
     pub fn drain(&mut self) -> Drain<'_, block::Hash, QueuedNonFinalized> {
         self.known_utxos.clear();
         self.known_utxos.shrink_to_fit();

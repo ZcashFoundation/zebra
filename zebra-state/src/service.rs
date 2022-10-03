@@ -183,8 +183,6 @@ pub(crate) struct StateService {
     ///
     /// Set to `f64::NAN` if `queued_finalized_blocks` is empty, because grafana shows NaNs
     /// as a break in the graph.
-    //
-    // TODO: add a similar metric for `queued_non_finalized_blocks`
     max_queued_finalized_height: f64,
 }
 
