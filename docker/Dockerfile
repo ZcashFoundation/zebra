@@ -109,8 +109,8 @@ COPY ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
 
 # By default, runs the entrypoint tests specified by the environmental variables (if any are set)
-ENTRYPOINT ["/entrypoint.sh"]
-CMD [ "cargo"]
+ENTRYPOINT [ "/entrypoint.sh" ]
+CMD [ "cargo" ]
 
 # In this stage we build a release (generate the zebrad binary)
 #
@@ -185,4 +185,4 @@ ARG SENTRY_DSN
 ENV SENTRY_DSN ${SENTRY_DSN}
 
 # TODO: remove the specified config file location and use the default expected by zebrad
-CMD [ "zebrad", "-c", "${ZEBRA_CONF_PATH}/${ZEBRA_CONF_FILE}", "start" ]
+CMD zebrad -c "${ZEBRA_CONF_PATH}/${ZEBRA_CONF_FILE}" start
