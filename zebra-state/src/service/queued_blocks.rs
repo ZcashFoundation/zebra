@@ -212,9 +212,13 @@ impl QueuedBlocks {
 
 #[derive(Debug, Default)]
 pub(crate) struct SentHashes {
-    /// A growable ring buf to be used for pruning outdated hashes that are mostly
-    /// inserted in the order of their height
-    buf: VecDeque<(block::Hash, block::Height)>,
+    /// A Vec of growable ring bufs to be used for pruning outdated hashes that are
+    /// inserted in the order of their height in a given batch.
+    sent_bufs: Vec<VecDeque<(block::Hash, block::Height)>>,
+
+    /// The growable ring buf to be used for pruning outdated hashes that are mostly
+    /// inserted in the order of their height for this batch of sent hashes
+    curr_buf: VecDeque<(block::Hash, block::Height)>,
 
     /// Stores a set of hashes that have been sent to the block write task but
     /// may not be in the finalized state yet.
@@ -223,34 +227,43 @@ pub(crate) struct SentHashes {
 
 impl SentHashes {
     /// Inserts the hash into the set of sent hashes, and pushes the (hash, height)
-    /// onto the buf to be used for pruning outdated hashes.
+    /// onto the current buf to be used for pruning outdated hashes.
     ///
-    /// Assumes that hashes are mostly added in the order of their height for efficient pruning.
+    /// Assumes that hashes are added in the order of their height between `finish_batch` calls
+    /// for efficient pruning.
     //
     // Trades off some memory usage to avoid iterating over the entire set when non-finalized blocks
     // are sent to the block write task, as would be the case with a HashMap.
     pub fn add_with_height(&mut self, hash: block::Hash, height: block::Height) {
-        self.buf.push_back((hash, height));
+        self.curr_buf.push_back((hash, height));
         self.set.insert(hash);
     }
 
-    /// Iterates over the buf removing hashes from the SentHashes until reaching
+    /// Replaces `curr_buf` with an empty VecDeque and pushes the previous `curr_buf` to `sent_bufs`
+    pub fn finish_batch(&mut self) {
+        self.sent_bufs.push(std::mem::take(&mut self.curr_buf));
+    }
+
+    /// Iterates over each buf in `sent_bufs`, removing hashes from SentHashes until reaching
     /// the first hash with a height above the `height_bound`
     ///
-    /// Does not guarantee that all hashes below the `height_bound` will be removed.
+    /// Assumes that hashes in each `sent_buf` will be added in order of their heights
+    /// in order to remove all hashes that are below `height_bound`.
     pub fn prune_by_height(&mut self, height_bound: block::Height) {
-        while let Some((hash, height)) = self.buf.pop_front() {
-            if height > height_bound {
-                self.buf.push_front((hash, height));
-                break;
-            } else {
-                self.set.remove(&hash);
+        self.sent_bufs.retain_mut(|buf| {
+            while let Some((hash, height)) = buf.pop_front() {
+                if height > height_bound {
+                    buf.push_front((hash, height));
+                    return true;
+                } else {
+                    self.set.remove(&hash);
+                }
             }
-        }
 
-        // shrink to a reasonable cap in cases where there are many hashes that
-        // are not in order of their heights in the buf
-        self.buf.shrink_to(127);
+            false
+        });
+
+        self.set.shrink_to_fit();
     }
 
     /// Returns true if the set contains the `hash`

@@ -34,7 +34,7 @@ const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
 
 /// Run contextual validation on the prepared block and add it to the
 /// non-finalized state if it is contextually valid.
-#[tracing::instrument(level = "debug", skip(prepared))]
+#[tracing::instrument(level = "debug", skip(prepared), fields(height = ?prepared.height, hash = %prepared.hash))]
 pub(crate) fn validate_and_commit_non_finalized(
     finalized_state: &FinalizedState,
     non_finalized_state: &mut NonFinalizedState,

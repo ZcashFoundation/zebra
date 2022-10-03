@@ -145,7 +145,7 @@ pub(crate) struct StateService {
     last_sent_finalized_block_hash: block::Hash,
 
     /// A set of non-finalized block hashes that have been sent to the block write task.
-    /// Hashes of blocks below the finalized tip height are periodically pruned. 
+    /// Hashes of blocks below the finalized tip height are periodically pruned.
     sent_non_finalized_block_hashes: SentHashes,
 
     /// If an invalid block is sent on `finalized_block_write_sender`
@@ -574,11 +574,15 @@ impl StateService {
         let parent_hash = prepared.block.header.previous_block_hash;
 
         if self
-            .read_service
-            .latest_non_finalized_state()
-            .any_chain_contains(&prepared.hash)
-            || self.read_service.db.hash(prepared.height).is_some()
+            .sent_non_finalized_block_hashes
+            .contains(&prepared.hash)
         {
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            let _ = rsp_tx.send(Err("block already sent to be committed to the state".into()));
+            return rsp_rx;
+        }
+
+        if self.read_service.db.hash(prepared.height).is_some() {
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Err("block is already committed to the state".into()));
             return rsp_rx;
@@ -696,6 +700,8 @@ impl StateService {
                     new_parents.push(hash);
                 }
             }
+
+            self.sent_non_finalized_block_hashes.finish_batch();
         };
     }
 

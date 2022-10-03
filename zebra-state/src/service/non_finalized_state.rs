@@ -322,6 +322,7 @@ impl NonFinalizedState {
 
     /// Returns `true` if `hash` is contained in the non-finalized portion of any
     /// known chain.
+    #[allow(dead_code)]
     pub fn any_chain_contains(&self, hash: &block::Hash) -> bool {
         self.chain_set
             .iter()
