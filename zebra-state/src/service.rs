@@ -582,9 +582,11 @@ impl StateService {
             return rsp_rx;
         }
 
-        if self.read_service.db.hash(prepared.height).is_some() {
+        if self.read_service.db.contains_height(prepared.height) {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            let _ = rsp_tx.send(Err("block is already committed to the state".into()));
+            let _ = rsp_tx.send(Err(
+                "block height is already committed to the finalized state".into(),
+            ));
             return rsp_rx;
         }
 
