@@ -55,7 +55,6 @@ autolabeler:
       - 'CHANGELOG.md'
       - 'zebra-consensus/src/checkpoint/*-checkpoints.txt'
       # Developer-only changes
-      - 'zebra-utils'
       - '.gitignore'
       # Test-only changes
       - 'zebra-test'
