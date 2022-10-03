@@ -241,7 +241,9 @@ impl SentHashes {
 
     /// Replaces `curr_buf` with an empty VecDeque and pushes the previous `curr_buf` to `sent_bufs`
     pub fn finish_batch(&mut self) {
-        self.sent_bufs.push(std::mem::take(&mut self.curr_buf));
+        if !self.curr_buf.is_empty() {
+            self.sent_bufs.push(std::mem::take(&mut self.curr_buf));
+        }
     }
 
     /// Iterates over each buf in `sent_bufs`, removing hashes from SentHashes until reaching
