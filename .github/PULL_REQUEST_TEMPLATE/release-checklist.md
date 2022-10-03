@@ -32,7 +32,7 @@ Otherwise, it is a `patch` release:
 2. Increment the `pre-release` version of the other crates.
 3. Increment the `patch` version of the tower crates.
 
-Zebra's Rust API is not stable or supported, so we keep all the crates on the same `beta` release version.
+Zebra's Rust API is not stable or supported, so we keep all the crates on the same beta `pre-release` version.
 
 ### Version Locations
 
