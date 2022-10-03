@@ -57,7 +57,7 @@ than other Zcash implementations.
 
 ## Release Candidates
 
-Every few weeks, we release a new Zebra [release candidate](https://github.com/ZcashFoundation/zebra/releases).
+Every few weeks, we release a [new Zebra version](https://github.com/ZcashFoundation/zebra/releases).
 
 Zebra's network stack is interoperable with `zcashd`,
 and Zebra implements all the features required to reach Zcash network consensus.
