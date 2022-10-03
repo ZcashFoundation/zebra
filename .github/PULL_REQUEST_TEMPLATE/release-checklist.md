@@ -116,7 +116,7 @@ From "Keep a Changelog":
 
 After you have the version increments, the updated checkpoints and the updated changelog:
 
-- [ ] Make sure the PR with the new checkpoint hashes is already merged, or make it part of this PR
+- [ ] Make sure the PR with the new checkpoint hashes is already merged, or make it part of the changelog PR
 - [ ] Push the version increments and the updated changelog into a branch
       (name suggestion, example: `v100-rc0-release`)
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the
