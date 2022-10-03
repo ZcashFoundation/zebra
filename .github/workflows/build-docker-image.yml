@@ -78,17 +78,14 @@ jobs:
           # generate Docker tags based on the following events/attributes
           tags: |
             type=schedule
+            # semver and ref,tag automatically add a "latest" tag, but only on stable releases
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
+            type=ref,event=tag
             type=ref,event=branch
             type=ref,event=pr
-            type=ref,event=tag
             type=sha
-            # set latest and edge tags for the default branch.
-            # latest is the most recently published image on the main branch.
-            # It is the default tag that Docker fetches.
-            type=raw,value=latest,enable={{is_default_branch}}
             # edge is the latest commit on the default branch.
             # We only have edge builds for `us-docker.pkg.dev`, because DockerHub doesn't keep up with every `main` branch commit.
             type=edge,enable=${{ !env.USE_DOCKERHUB && is_default_branch }}
