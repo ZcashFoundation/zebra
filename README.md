@@ -82,11 +82,9 @@ docker run zfnd/zebra:1.0.0-rc.0
 
 You can also [enable Zebra's RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd) and [configure other features](https://zebra.zfnd.org/user/run.html).
 
-If you want to build `zebrad` yourself, you'll need [Rust](https://www.rust-lang.org/tools/install),
-[libclang](https://clang.llvm.org/get_started.html), a C++ compiler, and some other dependencies.
 
 ### Build Instructions
-
+If you want to build `zebrad` yourself, you'll need [Rust](https://www.rust-lang.org/tools/install), [libclang](https://clang.llvm.org/get_started.html), a C++ compiler, and some other dependencies.
 To run `zebrad`, follow the instructions to compile `zebrad`
 for your platform:
 
