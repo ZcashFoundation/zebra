@@ -214,34 +214,52 @@ impl QueuedBlocks {
 pub(crate) struct SentHashes {
     /// A list of previously sent block batches, each batch is in increasing height order.
     /// We use this list to efficiently prune outdated hashes that are at or below the finalized tip.
-    sent_bufs: Vec<VecDeque<(block::Hash, block::Height)>>,
+    bufs: Vec<VecDeque<(block::Hash, block::Height)>>,
 
     /// The list of blocks sent in the current batch, in increasing height order.
     curr_buf: VecDeque<(block::Hash, block::Height)>,
 
     /// Stores a set of hashes that have been sent to the block write task but
     /// may not be in the finalized state yet.
-    set: HashSet<block::Hash>,
+    sent: HashMap<block::Hash, Vec<transparent::OutPoint>>,
+
+    /// Known UTXOs.
+    known_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
 }
 
 impl SentHashes {
-    /// Inserts the hash into the set of sent hashes, and pushes the (hash, height)
+    /// Inserts the hash and it's outpoints into sent, and pushes the (hash, height)
     /// onto the current buf to be used for pruning outdated hashes.
     ///
     /// Assumes that hashes are added in the order of their height between `finish_batch` calls
     /// for efficient pruning.
-    //
-    // Trades off some memory usage to avoid iterating over the entire set when non-finalized blocks
-    // are sent to the block write task, as would be the case with a HashMap.
-    pub fn add_with_height(&mut self, hash: block::Hash, height: block::Height) {
-        self.curr_buf.push_back((hash, height));
-        self.set.insert(hash);
+    pub fn add(&mut self, block: &PreparedBlock) {
+        // Track known UTXOs in sent blocks.
+        let outpoints = block
+            .new_outputs
+            .iter()
+            .map(|(outpoint, ordered_utxo)| {
+                self.known_utxos
+                    .insert(*outpoint, ordered_utxo.utxo.clone());
+                outpoint
+            })
+            .cloned()
+            .collect();
+
+        self.curr_buf.push_back((block.hash, block.height));
+        self.sent.insert(block.hash, outpoints);
+    }
+
+    /// Try to look up this UTXO in any sent block.
+    #[instrument(skip(self))]
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
+        self.known_utxos.get(outpoint).cloned()
     }
 
     /// Replaces `curr_buf` with an empty VecDeque and pushes the previous `curr_buf` to `sent_bufs`
     pub fn finish_batch(&mut self) {
         if !self.curr_buf.is_empty() {
-            self.sent_bufs.push(std::mem::take(&mut self.curr_buf));
+            self.bufs.push(std::mem::take(&mut self.curr_buf));
         }
     }
 
@@ -254,24 +272,28 @@ impl SentHashes {
     /// in order to remove all hashes that are below `height_bound`.
     pub fn prune_by_height(&mut self, height_bound: block::Height) {
         self.finish_batch();
-        self.sent_bufs.retain_mut(|buf| {
+        self.bufs.retain_mut(|buf| {
             while let Some((hash, height)) = buf.pop_front() {
                 if height > height_bound {
                     buf.push_front((hash, height));
                     return true;
-                } else {
-                    self.set.remove(&hash);
+                } else if let Some(expired_outpoints) = self.sent.remove(&hash) {
+                    // TODO: only remove UTXOs if there are no queued blocks with that UTXO
+                    //       (known_utxos is best-effort, so this is ok for now)
+                    for outpoint in expired_outpoints.iter() {
+                        self.known_utxos.remove(outpoint);
+                    }
                 }
             }
 
             false
         });
 
-        self.set.shrink_to_fit();
+        self.sent.shrink_to_fit();
     }
 
-    /// Returns true if the set contains the `hash`
+    /// Returns true if SentHashes contains the `hash`
     pub fn contains(&self, hash: &block::Hash) -> bool {
-        self.set.contains(hash)
+        self.sent.contains_key(hash)
     }
 }

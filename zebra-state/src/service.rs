@@ -678,8 +678,9 @@ impl StateService {
                     .dequeue_children(parent_hash);
 
                 for queued_child in queued_children {
-                    let (PreparedBlock { hash, height, .. }, _) = queued_child;
+                    let (PreparedBlock { hash, .. }, _) = queued_child;
 
+                    self.sent_non_finalized_block_hashes.add(&queued_child.0);
                     let send_result = non_finalized_block_write_sender.send(queued_child);
 
                     if let Err(SendError(queued)) = send_result {
@@ -695,9 +696,6 @@ impl StateService {
 
                         return;
                     };
-
-                    self.sent_non_finalized_block_hashes
-                        .add_with_height(hash, height);
 
                     new_parents.push(hash);
                 }
@@ -912,6 +910,16 @@ impl Service<Request> for StateService {
                 // Check the non-finalized block queue outside the returned future,
                 // so we can access mutable state fields.
                 if let Some(utxo) = self.queued_non_finalized_blocks.utxo(&outpoint) {
+                    self.pending_utxos.respond(&outpoint, utxo);
+
+                    // We're finished, the returned future gets the UTXO from the respond() channel.
+                    timer.finish(module_path!(), line!(), "AwaitUtxo/queued-non-finalized");
+
+                    return response_fut;
+                }
+
+                // Check the sent non-finalized blocks
+                if let Some(utxo) = self.sent_non_finalized_block_hashes.utxo(&outpoint) {
                     self.pending_utxos.respond(&outpoint, utxo);
 
                     // We're finished, the returned future gets the UTXO from the respond() channel.
