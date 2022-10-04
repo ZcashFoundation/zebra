@@ -923,7 +923,7 @@ impl Service<Request> for StateService {
                     self.pending_utxos.respond(&outpoint, utxo);
 
                     // We're finished, the returned future gets the UTXO from the respond() channel.
-                    timer.finish(module_path!(), line!(), "AwaitUtxo/queued-non-finalized");
+                    timer.finish(module_path!(), line!(), "AwaitUtxo/sent-non-finalized");
 
                     return response_fut;
                 }

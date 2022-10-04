@@ -228,10 +228,10 @@ pub(crate) struct SentHashes {
 }
 
 impl SentHashes {
-    /// Inserts the block's utxos in `known_utxos` by outpoints, it's outpoints into `sent` by the block hash,
-    /// and pushes (block.hash, block.height) onto the current buf to be used for pruning outdated hashes.
+    /// Stores the `block`'s hash, height, and UTXOs, so they can be used to check if a block or UTXO
+    /// is available in the state.
     ///
-    /// Assumes that hashes are added in the order of their height between `finish_batch` calls
+    /// Assumes that blocks are added in the order of their height between `finish_batch` calls
     /// for efficient pruning.
     pub fn add(&mut self, block: &PreparedBlock) {
         // Track known UTXOs in sent blocks.
@@ -256,22 +256,24 @@ impl SentHashes {
         self.known_utxos.get(outpoint).cloned()
     }
 
-    /// Replaces `curr_buf` with an empty VecDeque and pushes the previous `curr_buf` to `sent_bufs`
+    /// Finishes the current block batch, and stores it for efficient pruning.
     pub fn finish_batch(&mut self) {
         if !self.curr_buf.is_empty() {
             self.bufs.push(std::mem::take(&mut self.curr_buf));
         }
     }
 
-    /// Iterates over each buf in `sent_bufs`, removing hashes from SentHashes until reaching
-    /// the first hash with a height above the `height_bound`.
+    /// Prunes sent blocks at or below `height_bound`.
     ///
     /// Finishes the batch if `finish_batch()` hasn't been called already.
     ///
-    /// Assumes that hashes in each `sent_buf` will be added in order of their heights
-    /// in order to remove all hashes that are below `height_bound`.
+    /// Assumes that blocks will be added in order of their heights between each `finish_batch()` call,
+    /// so that blocks can be efficiently and reliably removed by height.
     pub fn prune_by_height(&mut self, height_bound: block::Height) {
         self.finish_batch();
+
+        // Iterates over each buf in `sent_bufs`, removing sent blocks until reaching
+        // the first block with a height above the `height_bound`.
         self.bufs.retain_mut(|buf| {
             while let Some((hash, height)) = buf.pop_front() {
                 if height > height_bound {
