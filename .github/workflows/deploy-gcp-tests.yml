@@ -158,10 +158,10 @@ jobs:
         id: compute-ssh
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
-          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
-          zone: ${{ env.ZONE }}
+          instance_name: "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
+          zone: "${{ env.ZONE }}"
           ssh_private_key: "${{ secrets.GCP_SSH_PRIVATE_KEY }}"
-          ssh_args: "-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5"
+          # ssh_args: "-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5"
           command: |
             "
             sudo mkfs.ext4 -v /dev/sdb \
