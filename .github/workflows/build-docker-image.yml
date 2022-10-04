@@ -42,9 +42,6 @@ on:
         description: 'The image digest to be used on a caller workflow'
         value: ${{ jobs.build.outputs.image_digest }}
 
-env:
-  USE_DOCKERHUB: ${{ github.event_name == 'release' && !github.event.release.prerelease }}
-
 jobs:
   build:
     name: Build images
@@ -74,7 +71,7 @@ jobs:
           # list of Docker images to use as base name for tags
           images: |
             us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}
-            zfnd/zebra,enable=${{ env.USE_DOCKERHUB }}
+            zfnd/zebra,enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
           # generate Docker tags based on the following events/attributes
           tags: |
             type=schedule
@@ -87,8 +84,8 @@ jobs:
             type=ref,event=pr
             type=sha
             # edge is the latest commit on the default branch.
-            # We only have edge builds for `us-docker.pkg.dev`, because DockerHub doesn't keep up with every `main` branch commit.
-            type=edge,enable=${{ !env.USE_DOCKERHUB }},enable={{is_default_branch}}
+            # TODO: We only want edge builds for `us-docker.pkg.dev`, because DockerHub doesn't keep up with every `main` branch commit.
+            type=edge,enable={{is_default_branch}}
 
       # Setup Docker Buildx to allow use of docker cache layers from GH
       - name: Set up Docker Buildx
@@ -118,7 +115,7 @@ jobs:
       - name: Login to DockerHub
         # We only publish images to DockerHub if a release is not a pre-release
         # Ref: https://github.com/orgs/community/discussions/26281#discussioncomment-3251177
-        if: ${{ env.USE_DOCKERHUB }}
+        if: ${{ github.event_name == 'release' && !github.event.release.prerelease }}
         uses: docker/login-action@v2.0.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
