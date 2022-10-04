@@ -446,7 +446,7 @@ jobs:
         # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
         # TODO: we should find a better logic for this use cases
         if: ${{ (inputs.needs_zebra_state && !inputs.needs_lwd_state) && inputs.test_id != 'lwd-full-sync' }}
-        id: compute-ssh
+        id: attach-zebra-state
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
@@ -493,7 +493,7 @@ jobs:
         # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
         # TODO: we should find a better logic for this use cases
         if: ${{ (inputs.needs_zebra_state && inputs.needs_lwd_state) || inputs.test_id == 'lwd-full-sync' }}
-        id: compute-ssh
+        id: attach-multi-state
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
