@@ -1093,11 +1093,11 @@ jobs:
             grep --max-count=1 --extended-regexp --color=always \
             "test result: .*ok.* [1-9][0-9]* passed.*finished in"; \
             EXIT_STATUS=$( \
-            docker wait ${{ inputs.test_id }} || \
-            docker inspect --format "{{.State.ExitCode}}" ${{ inputs.test_id }} || \
+            sudo docker wait ${{ inputs.test_id }} || \
+            sudo docker inspect --format "{{.State.ExitCode}}" ${{ inputs.test_id }} || \
             echo "missing container, or missing exit status for container" \
             ); \
-            echo "docker exit status: $EXIT_STATUS"; \
+            echo "sudo docker exit status: $EXIT_STATUS"; \
             exit "$EXIT_STATUS"
 
   # create a state image from the instance's state disk, if requested by the caller
