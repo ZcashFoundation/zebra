@@ -167,7 +167,7 @@ jobs:
           command: |
             sudo mkfs.ext4 -v /dev/sdb \
             && \
-            docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
+            sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
             ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}
 
   # launch the test, if it doesn't use any cached state
@@ -214,9 +214,8 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          user: root
           command: |
-            docker run \
+            sudo docker run \
             --name ${{ inputs.test_id }} \
             --tty \
             --detach \
