@@ -384,7 +384,7 @@ jobs:
             && \
             sudo resize2fs -p /dev/sdb \
             && \
-            docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
+            sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
             ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}
 
   # launch the test, if it uses cached state
@@ -452,7 +452,7 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            docker run \
+           sudo docker run \
             --name ${{ inputs.test_id }} \
             --tty \
             --detach \
