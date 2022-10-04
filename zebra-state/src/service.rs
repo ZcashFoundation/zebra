@@ -525,6 +525,8 @@ impl StateService {
             .queued_finalized_blocks
             .remove(&self.last_sent_finalized_block_hash)
         {
+            let last_sent_finalized_block_height = queued_block.0.height;
+
             self.last_sent_finalized_block_hash = queued_block.0.hash;
 
             // If we've finished sending finalized blocks, ignore any repeated blocks.
@@ -542,6 +544,11 @@ impl StateService {
 
                     self.clear_finalized_block_queue(
                         "block commit task exited. Is Zebra shutting down?",
+                    );
+                } else {
+                    metrics::gauge!(
+                        "state.checkpoint.sent.block.height",
+                        last_sent_finalized_block_height.0 as f64,
                     );
                 };
             }
