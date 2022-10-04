@@ -1353,8 +1353,10 @@ fn non_blocking_logger() -> Result<()> {
         let zebra_rpc_address = config.rpc.listen_addr.unwrap();
 
         let dir = testdir()?.with_config(&mut config)?;
-        let mut child = dir.spawn_child(args!["start"])?.with_timeout(TINY_CHECKPOINT_TIMEOUT);
-        
+        let mut child = dir
+            .spawn_child(args!["start"])?
+            .with_timeout(TINY_CHECKPOINT_TIMEOUT);
+
         // Wait until port is open.
         child.expect_stdout_line_matches(
             format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
