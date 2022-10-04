@@ -394,7 +394,7 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         mut mempool,
         _peer_set,
         mut state_service,
-        _chain_tip_change,
+        mut chain_tip_change,
         _tx_verifier,
         mut recent_syncs,
     ) = setup(network, u64::MAX).await;
@@ -460,6 +460,21 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         ))
         .await
         .unwrap();
+
+    // Wait for the chain tip update
+    if let Err(timeout_error) = timeout(
+        CHAIN_TIP_UPDATE_WAIT_LIMIT,
+        chain_tip_change.wait_for_tip_change(),
+    )
+    .await
+    .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+    {
+        info!(
+            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
+            ?timeout_error,
+            "timeout waiting for chain tip change after committing block"
+        );
+    }
 
     // This is done twice because after the first query the cancellation
     // is picked up by select!, and after the second the mempool gets the
