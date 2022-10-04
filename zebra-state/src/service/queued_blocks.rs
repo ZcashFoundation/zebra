@@ -258,10 +258,7 @@ impl SentHashes {
         self.curr_buf.push_back((block.hash, block.height));
         self.sent.insert(block.hash, outpoints);
 
-        metrics::counter!("state.memory.sent.block.count", 1);
-        metrics::gauge!("state.memory.sent.block.height", block.height.0 as f64);
-
-        self.update_metrics();
+        self.update_metrics_for_block(block.height);
     }
 
     /// Stores the finalized `block`'s hash, height, and UTXOs, so they can be used to check if a
@@ -286,10 +283,7 @@ impl SentHashes {
         self.curr_buf.push_back((block.hash, block.height));
         self.sent.insert(block.hash, outpoints);
 
-        metrics::counter!("state.memory.sent.block.count", 1);
-        metrics::gauge!("state.memory.sent.block.height", block.height.0 as f64);
-
-        self.update_metrics();
+        self.update_metrics_for_block(block.height);
     }
 
     /// Try to look up this UTXO in any sent block.
@@ -335,7 +329,7 @@ impl SentHashes {
 
         self.sent.shrink_to_fit();
 
-        self.update_metrics();
+        self.update_metrics_for_cache();
     }
 
     /// Returns true if SentHashes contains the `hash`
@@ -343,8 +337,16 @@ impl SentHashes {
         self.sent.contains_key(hash)
     }
 
-    /// Update metrics after the sent blocks are modified
-    fn update_metrics(&self) {
+    /// Update sent block metrics after a block is sent.
+    fn update_metrics_for_block(&self, height: block::Height) {
+        metrics::counter!("state.memory.sent.block.count", 1);
+        metrics::gauge!("state.memory.sent.block.height", height.0 as f64);
+
+        self.update_metrics_for_cache();
+    }
+
+    /// Update sent block cache metrics after the sent blocks are modified.
+    fn update_metrics_for_cache(&self) {
         let batch_iter = || self.bufs.iter().chain(iter::once(&self.curr_buf));
 
         if let Some(min_height) = batch_iter()
