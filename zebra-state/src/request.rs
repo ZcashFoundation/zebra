@@ -597,6 +597,18 @@ pub enum ReadRequest {
     /// * [`ReadResponse::Transaction(None)`](ReadResponse::Transaction) otherwise.
     Transaction(transaction::Hash),
 
+    /// Looks up the transaction IDs for a block, using a block hash or height.
+    ///
+    /// Returns
+    ///
+    /// * An ordered list of transaction hashes, or
+    /// * `None` if the block was not found.
+    ///
+    /// Note: Each block has at least one transaction: the coinbase transaction.
+    ///
+    /// Returned txids are in the order they appear in the block.
+    TransactionIdsForBlock(HashOrHeight),
+
     /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
     /// returning `None` immediately if it is unknown.
     ///
@@ -728,6 +740,7 @@ impl ReadRequest {
             ReadRequest::Depth(_) => "depth",
             ReadRequest::Block(_) => "block",
             ReadRequest::Transaction(_) => "transaction",
+            ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
             ReadRequest::BestChainUtxo { .. } => "best_chain_utxo",
             ReadRequest::AnyChainUtxo { .. } => "any_chain_utxo",
             ReadRequest::BlockLocator => "block_locator",

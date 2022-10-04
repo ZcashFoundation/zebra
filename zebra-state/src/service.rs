@@ -1076,7 +1076,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
-            // Used by get_block RPC and the StateService.
+            // Used by the get_block (raw) RPC and the StateService.
             ReadRequest::Block(hash_or_height) => {
                 let timer = CodeTimer::start();
 
@@ -1127,6 +1127,39 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::Transaction"))
+                .boxed()
+            }
+
+            // Used by the getblock (verbose) RPC.
+            ReadRequest::TransactionIdsForBlock(hash_or_height) => {
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let transaction_ids = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::transaction_hashes_for_block(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(
+                            module_path!(),
+                            line!(),
+                            "ReadRequest::TransactionIdsForBlock",
+                        );
+
+                        Ok(ReadResponse::TransactionIdsForBlock(transaction_ids))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::Block"))
                 .boxed()
             }
 

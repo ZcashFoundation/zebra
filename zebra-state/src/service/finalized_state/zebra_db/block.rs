@@ -234,6 +234,39 @@ impl ZebraDb {
             .map(|tx| (tx, transaction_location.height))
     }
 
+    /// Returns the [`transaction::Hash`]es in the block with `hash_or_height`,
+    /// if it exists in this chain.
+    ///
+    /// Hashes are returned in block order.
+    ///
+    /// Returns `None` if the block is not found.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn transaction_hashes_for_block(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Option<Arc<[transaction::Hash]>> {
+        // Block
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+
+        // Transaction hashes
+        let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
+
+        // Manually fetch the entire block's transaction hashes
+        let mut transaction_hashes = Vec::new();
+
+        for tx_index in 0..=Transaction::max_allocation() {
+            let tx_loc = TransactionLocation::from_u64(height, tx_index);
+
+            if let Some(tx_hash) = self.db.zs_get(&hash_by_tx_loc, &tx_loc) {
+                transaction_hashes.push(tx_hash);
+            } else {
+                break;
+            }
+        }
+
+        Some(transaction_hashes.into())
+    }
+
     // Write block methods
 
     /// Write `finalized` to the finalized state.

@@ -471,6 +471,21 @@ impl Chain {
             .get(tx_loc.index.as_usize())
     }
 
+    /// Returns the [`transaction::Hash`]es in the block with `hash_or_height`,
+    /// if it exists in this chain.
+    ///
+    /// Hashes are returned in block order.
+    ///
+    /// Returns `None` if the block is not found.
+    pub fn transaction_hashes_for_block(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Option<Arc<[transaction::Hash]>> {
+        let transaction_hashes = self.block(hash_or_height)?.transaction_hashes.clone();
+
+        Some(transaction_hashes)
+    }
+
     /// Returns the [`block::Hash`] for `height`, if it exists in this chain.
     pub fn hash_by_height(&self, height: Height) -> Option<block::Hash> {
         let hash = self.blocks.get(&height)?.hash;

@@ -540,46 +540,65 @@ where
         let mut state = self.state.clone();
 
         async move {
-            let height = height.parse().map_err(|error: SerializationError| Error {
+            let height: Height = height.parse().map_err(|error: SerializationError| Error {
                 code: ErrorCode::ServerError(0),
                 message: error.to_string(),
                 data: None,
             })?;
 
-            let request =
-                zebra_state::ReadRequest::Block(zebra_state::HashOrHeight::Height(height));
-            let response = state
-                .ready()
-                .and_then(|service| service.call(request))
-                .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
+            if verbosity == 0 {
+                let request = zebra_state::ReadRequest::Block(height.into());
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
 
-            match response {
-                zebra_state::ReadResponse::Block(Some(block)) => match verbosity {
-                    0 => Ok(GetBlock::Raw(block.into())),
-                    1 => Ok(GetBlock::Object {
-                        tx: block
-                            .transactions
-                            .iter()
-                            .map(|tx| tx.hash().encode_hex())
-                            .collect(),
-                    }),
-                    _ => Err(Error {
-                        code: ErrorCode::InvalidParams,
-                        message: "Invalid verbosity value".to_string(),
+                match response {
+                    zebra_state::ReadResponse::Block(Some(block)) => {
+                        Ok(GetBlock::Raw(block.into()))
+                    }
+                    zebra_state::ReadResponse::Block(None) => Err(Error {
+                        code: MISSING_BLOCK_ERROR_CODE,
+                        message: "Block not found".to_string(),
                         data: None,
                     }),
-                },
-                zebra_state::ReadResponse::Block(None) => Err(Error {
-                    code: MISSING_BLOCK_ERROR_CODE,
-                    message: "Block not found".to_string(),
+                    _ => unreachable!("unmatched response to a block request"),
+                }
+            } else if verbosity == 1 {
+                let request = zebra_state::ReadRequest::TransactionIdsForBlock(height.into());
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
+
+                match response {
+                    zebra_state::ReadResponse::TransactionIdsForBlock(Some(tx_ids)) => {
+                        let tx_ids = tx_ids.iter().map(|tx_id| tx_id.encode_hex()).collect();
+                        Ok(GetBlock::Object { tx: tx_ids })
+                    }
+                    zebra_state::ReadResponse::TransactionIdsForBlock(None) => Err(Error {
+                        code: MISSING_BLOCK_ERROR_CODE,
+                        message: "Block not found".to_string(),
+                        data: None,
+                    }),
+                    _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
+                }
+            } else {
+                Err(Error {
+                    code: ErrorCode::InvalidParams,
+                    message: "Invalid verbosity value".to_string(),
                     data: None,
-                }),
-                _ => unreachable!("unmatched response to a block request"),
+                })
             }
         }
         .boxed()
@@ -1111,7 +1130,7 @@ pub enum GetBlock {
     Raw(#[serde(with = "hex")] SerializedBlock),
     /// The block object.
     Object {
-        /// Vector of hex-encoded TXIDs of the transactions of the block
+        /// List of transaction IDs in block order, hex-encoded.
         tx: Vec<String>,
     },
 }
