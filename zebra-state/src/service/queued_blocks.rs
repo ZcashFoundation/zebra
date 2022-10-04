@@ -228,8 +228,8 @@ pub(crate) struct SentHashes {
 }
 
 impl SentHashes {
-    /// Inserts the hash and it's outpoints into sent, and pushes the (hash, height)
-    /// onto the current buf to be used for pruning outdated hashes.
+    /// Inserts the block's utxos in `known_utxos` by outpoints, it's outpoints into `sent` by the block hash,
+    /// and pushes (block.hash, block.height) onto the current buf to be used for pruning outdated hashes.
     ///
     /// Assumes that hashes are added in the order of their height between `finish_batch` calls
     /// for efficient pruning.
