@@ -498,7 +498,7 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            docker run \
+            sudo docker run \
             --name ${{ inputs.test_id }} \
             --tty \
             --detach \
@@ -547,7 +547,7 @@ jobs:
       # Show all the logs since the container launched,
       # following until Sapling activation (or the test finishes).
       #
-      # The log pipeline ignores the exit status of `docker logs`.
+      # The log pipeline ignores the exit status of `sudo docker logs`.
       # It also ignores the expected 'broken pipe' error from `tee`,
       # which happens when `grep` finds a matching output and moves on to the next job.
       #
@@ -560,7 +560,7 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            docker logs \
+            sudo docker logs \
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
@@ -618,7 +618,7 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            docker logs \
+            sudo docker logs \
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
@@ -673,7 +673,7 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            docker logs \
+            sudo docker logs \
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
@@ -730,7 +730,7 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            docker logs \
+            sudo docker logs \
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
@@ -789,7 +789,7 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            docker logs \
+            sudo docker logs \
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
@@ -848,7 +848,7 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            docker logs \
+            sudo docker logs \
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
@@ -908,7 +908,7 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            docker logs \
+            sudo docker logs \
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
@@ -966,7 +966,7 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            docker logs \
+            sudo docker logs \
             --tail ${{ env.EXTRA_LOG_LINES }} \
             --follow \
             ${{ inputs.test_id }} | \
@@ -1020,7 +1020,7 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            docker logs \
+            sudo docker logs \
             --tail ${{ env.EXTRA_LOG_LINES }} \
             --follow \
             ${{ inputs.test_id }} | \
@@ -1086,7 +1086,7 @@ jobs:
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
             set -e;
-            docker logs \
+            sudo docker logs \
             --tail all \
             ${{ inputs.test_id }} | \
             tee --output-error=exit /dev/stderr | \
@@ -1206,7 +1206,7 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=" \
-          docker logs ${{ inputs.test_id }} --tail 200 \
+          sudo docker logs ${{ inputs.test_id }} --tail 200 \
           ")
 
           SYNC_HEIGHT=$( \
