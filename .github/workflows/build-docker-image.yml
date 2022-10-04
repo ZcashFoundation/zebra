@@ -88,7 +88,7 @@ jobs:
             type=sha
             # edge is the latest commit on the default branch.
             # We only have edge builds for `us-docker.pkg.dev`, because DockerHub doesn't keep up with every `main` branch commit.
-            type=edge,enable=${{ !env.USE_DOCKERHUB && is_default_branch }}
+            type=edge,enable=${{ !env.USE_DOCKERHUB && {{is_default_branch}} }}
 
       # Setup Docker Buildx to allow use of docker cache layers from GH
       - name: Set up Docker Buildx
