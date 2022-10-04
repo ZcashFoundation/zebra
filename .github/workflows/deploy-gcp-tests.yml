@@ -214,17 +214,15 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          user: root
           command: |
-            " \
             docker run \
             --name ${{ inputs.test_id }} \
             --tty \
             --detach \
             ${{ inputs.test_variables }} \
             --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-            ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-            "
-
+            ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
 
   # set up the test, if it uses cached state
   # each test runs one of the *-with/without-cached-state job series, and skips the other
