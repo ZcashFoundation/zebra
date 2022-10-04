@@ -164,7 +164,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             sudo mkfs.ext4 -v /dev/sdb \
             && \
@@ -215,7 +214,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             " \
             docker run \
@@ -384,7 +382,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             sudo e2fsck -v -f -p /dev/sdb \
             && \
@@ -457,7 +454,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             docker run \
             --name ${{ inputs.test_id }} \
@@ -504,7 +500,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             docker run \
             --name ${{ inputs.test_id }} \
@@ -567,7 +562,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             docker logs \
             --tail all \
@@ -626,7 +620,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             docker logs \
             --tail all \
@@ -682,7 +675,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             docker logs \
             --tail all \
@@ -740,7 +732,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             docker logs \
             --tail all \
@@ -800,7 +791,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             docker logs \
             --tail all \
@@ -860,7 +850,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             docker logs \
             --tail all \
@@ -921,7 +910,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             docker logs \
             --tail all \
@@ -980,7 +968,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             docker logs \
             --tail ${{ env.EXTRA_LOG_LINES }} \
@@ -1035,7 +1022,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             docker logs \
             --tail ${{ env.EXTRA_LOG_LINES }} \
@@ -1101,7 +1087,6 @@ jobs:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
-          ssh_args: '-o ServerAliveInterval=5 -o ConnectionAttempts=20 -o ConnectTimeout=5'
           command: |
             set -e;
             docker logs \
