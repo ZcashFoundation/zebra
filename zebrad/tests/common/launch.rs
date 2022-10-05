@@ -14,6 +14,7 @@ use std::{
 
 use color_eyre::eyre::Result;
 use indexmap::IndexSet;
+use tempfile::TempDir;
 
 use zebra_chain::parameters::Network;
 use zebra_test::{
@@ -24,7 +25,8 @@ use zebra_test::{
 use zebrad::config::ZebradConfig;
 
 use crate::common::{
-    lightwalletd::{random_known_rpc_port_config, LightwalletdTestType},
+    config::testdir,
+    lightwalletd::{zebra_skip_lightwalletd_tests, LightwalletdTestType},
     sync::FINISH_PARTIAL_SYNC_TIMEOUT,
 };
 
@@ -195,43 +197,79 @@ where
     }
 }
 
-/// Spawns a zebrad instance to interact with lightwalletd, but without an internet connection.
+/// Spawns a zebrad instance on `network` to test lightwalletd with `test_type`.
 ///
-/// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
-/// providing an initial state to the zebrad instance.
+/// If `use_internet_connection` is `false` then spawn, but without any peers.
+/// This prevents it from downloading blocks. Instead, use the `ZEBRA_CACHED_STATE_DIR`
+/// environmental variable to provide an initial state to the zebrad instance.
+///
+/// Returns:
+/// - `Ok(Some(zebrad, zebra_rpc_address))` on success,
+/// - `Ok(None)` if the test doesn't have the required network or cached state, and
+/// - `Err(_)` if spawning zebrad fails.
+///
+/// `zebra_rpc_address` is `None` if the test type doesn't need an RPC port.
 #[tracing::instrument]
-pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt + std::fmt::Debug>(
+pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     network: Network,
-    zebra_directory: P,
+    test_name: S,
     test_type: LightwalletdTestType,
-    debug_skip_parameter_preload: bool,
-) -> Result<(TestChild<P>, SocketAddr)> {
-    // This is what we recommend our users configure.
-    let mut config = random_known_rpc_port_config(true)
-        .expect("Failed to create a config file with a known RPC listener port");
+    use_internet_connection: bool,
+) -> Result<Option<(TestChild<TempDir>, Option<SocketAddr>)>> {
+    let test_name = test_name.as_ref();
 
-    config.state.ephemeral = false;
-    config.network.initial_mainnet_peers = IndexSet::new();
-    config.network.initial_testnet_peers = IndexSet::new();
+    // Skip the test unless the user specifically asked for it
+    if !can_spawn_zebrad_for_rpc(test_name, test_type) {
+        return Ok(None);
+    }
+
+    // Get the zebrad config
+    let mut config = test_type
+        .zebrad_config(test_name)
+        .expect("already checked config")?;
+
+    // TODO: move this into zebrad_config()
     config.network.network = network;
-    config.mempool.debug_enable_at_height = Some(0);
-    config.consensus.debug_skip_parameter_preload = debug_skip_parameter_preload;
+    if !use_internet_connection {
+        config.network.initial_mainnet_peers = IndexSet::new();
+        config.network.initial_testnet_peers = IndexSet::new();
+
+        config.mempool.debug_enable_at_height = Some(0);
+    }
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 
-    let mut zebrad = zebra_directory
-        .with_config(&mut config)?
+    // Writes a configuration that has RPC listen_addr set (if needed).
+    // If the state path env var is set, uses it in the config.
+    let zebrad = testdir()?
+        .with_exact_config(&config)?
         .spawn_child(args!["start"])?
         .bypass_test_capture(true)
         .with_timeout(test_type.zebrad_timeout())
         .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
-    let rpc_address = config.rpc.listen_addr.unwrap();
+    Ok(Some((zebrad, config.rpc.listen_addr)))
+}
 
-    zebrad.expect_stdout_line_matches("activating mempool")?;
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
+/// Returns `true` if a zebrad test for `test_type` has everything it needs to run.
+#[tracing::instrument]
+pub fn can_spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
+    test_name: S,
+    test_type: LightwalletdTestType,
+) -> bool {
+    if zebra_test::net::zebra_skip_network_tests() {
+        return false;
+    }
 
-    Ok((zebrad, rpc_address))
+    // Skip the test unless the user specifically asked for it
+    //
+    // TODO: pass test_type to zebra_skip_lightwalletd_tests() and check for lightwalletd launch in there
+    if test_type.launches_lightwalletd() && zebra_skip_lightwalletd_tests() {
+        return false;
+    }
+
+    // Check if we have any necessary cached states for the zebrad config
+    test_type.zebrad_config(test_name).is_some()
 }
 
 /// Panics if `$pred` is false, with an error report containing:
