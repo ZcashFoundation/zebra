@@ -79,6 +79,9 @@ on:
         type: string
         default: 'zebra'
         description: 'Application name, used to work out when a job is an update job'
+    secrets:
+      GCP_SSH_PRIVATE_KEY:
+        required: true
 
 env:
   # where we get the Docker image from
@@ -155,21 +158,17 @@ jobs:
       #
       # SSH into the just created VM, and create a docker volume with the newly created disk.
       - name: Create ${{ inputs.test_id }} Docker volume
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo mkfs.ext4 -v /dev/sdb \
-          && \
-          docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
-          ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
-          "
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo mkfs.ext4 -v /dev/sdb \
+            && \
+            sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
+            ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}
 
   # launch the test, if it doesn't use any cached state
   launch-without-cached-state:
@@ -209,25 +208,20 @@ jobs:
 
       # Launch the test without any cached state
       - name: Launch ${{ inputs.test_id }} test
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          docker run \
-          --name ${{ inputs.test_id }} \
-          --tty \
-          --detach \
-          ${{ inputs.test_variables }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          "
-
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo docker run \
+            --name ${{ inputs.test_id }} \
+            --tty \
+            --detach \
+            ${{ inputs.test_variables }} \
+            --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+            ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
 
   # set up the test, if it uses cached state
   # each test runs one of the *-with/without-cached-state job series, and skips the other
@@ -379,23 +373,19 @@ jobs:
       # (The cached state and disk are usually the same size,
       # but the cached state can be smaller if we just increased the disk size.)
       - name: Create ${{ inputs.test_id }} Docker volume
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo e2fsck -v -f -p /dev/sdb \
-          && \
-          sudo resize2fs -p /dev/sdb \
-          && \
-          docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
-          ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
-          "
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo e2fsck -v -f -p /dev/sdb \
+            && \
+            sudo resize2fs -p /dev/sdb \
+            && \
+            sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
+            ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}
 
   # launch the test, if it uses cached state
   launch-with-cached-state:
@@ -455,24 +445,20 @@ jobs:
         # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
         # TODO: we should find a better logic for this use cases
         if: ${{ (inputs.needs_zebra_state && !inputs.needs_lwd_state) && inputs.test_id != 'lwd-full-sync' }}
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          docker run \
-          --name ${{ inputs.test_id }} \
-          --tty \
-          --detach \
-          ${{ inputs.test_variables }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          "
+        id: attach-zebra-state
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+           sudo docker run \
+            --name ${{ inputs.test_id }} \
+            --tty \
+            --detach \
+            ${{ inputs.test_variables }} \
+            --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+            ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
 
       # Launch the test with the previously created Lightwalletd and Zebra cached state.
       # Each test runs one of the "Launch test" steps, and skips the other.
@@ -505,26 +491,21 @@ jobs:
         # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
         # TODO: we should find a better logic for this use cases
         if: ${{ (inputs.needs_zebra_state && inputs.needs_lwd_state) || inputs.test_id == 'lwd-full-sync' }}
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          docker run \
-          --name ${{ inputs.test_id }} \
-          --tty \
-          --detach \
-          ${{ inputs.test_variables }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
-          --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
-          ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          "
-
+        id: attach-multi-state
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo docker run \
+            --name ${{ inputs.test_id }} \
+            --tty \
+            --detach \
+            ${{ inputs.test_variables }} \
+            --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} \
+            --mount type=volume,src=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }},dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} \
+            ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
 
   # follow the logs of the test we just launched, up to Sapling activation (or the test finishing)
   logs-sprout:
@@ -566,35 +547,31 @@ jobs:
       # Show all the logs since the container launched,
       # following until Sapling activation (or the test finishes).
       #
-      # The log pipeline ignores the exit status of `docker logs`.
+      # The log pipeline ignores the exit status of `sudo docker logs`.
       # It also ignores the expected 'broken pipe' error from `tee`,
       # which happens when `grep` finds a matching output and moves on to the next job.
       #
       # Errors in the tests are caught by the final test status job.
       - name: Show logs for ${{ inputs.test_id }} test (sprout)
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*network_upgrade.*=.*Sapling' \
-          -e 'estimated progress.*network_upgrade.*=.*Blossom' \
-          -e 'estimated progress.*network_upgrade.*=.*Heartwood' \
-          -e 'estimated progress.*network_upgrade.*=.*Canopy' \
-          -e 'estimated progress.*network_upgrade.*=.*Nu5' \
-          -e 'test result:.*finished in' \
-          "
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo docker logs \
+            --tail all \
+            --follow \
+            ${{ inputs.test_id }} | \
+            tee --output-error=exit /dev/stderr | \
+            grep --max-count=1 --extended-regexp --color=always \
+            -e 'estimated progress.*network_upgrade.*=.*Sapling' \
+            -e 'estimated progress.*network_upgrade.*=.*Blossom' \
+            -e 'estimated progress.*network_upgrade.*=.*Heartwood' \
+            -e 'estimated progress.*network_upgrade.*=.*Canopy' \
+            -e 'estimated progress.*network_upgrade.*=.*Nu5' \
+            -e 'test result:.*finished in'
 
   # follow the logs of the test we just launched, up to Canopy activation (or the test finishing)
   logs-heartwood:
@@ -634,26 +611,22 @@ jobs:
 
       # Show recent logs, following until Canopy activation (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (heartwood)
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*network_upgrade.*=.*Canopy' \
-          -e 'estimated progress.*network_upgrade.*=.*Nu5' \
-          -e 'test result:.*finished in' \
-          "
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo docker logs \
+            --tail all \
+            --follow \
+            ${{ inputs.test_id }} | \
+            tee --output-error=exit /dev/stderr | \
+            grep --max-count=1 --extended-regexp --color=always \
+            -e 'estimated progress.*network_upgrade.*=.*Canopy' \
+            -e 'estimated progress.*network_upgrade.*=.*Nu5' \
+            -e 'test result:.*finished in'
 
   # follow the logs of the test we just launched, up to NU5 activation (or the test finishing)
   logs-canopy:
@@ -693,25 +666,21 @@ jobs:
 
       # Show recent logs, following until NU5 activation (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (canopy)
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*network_upgrade.*=.*Nu5' \
-          -e 'test result:.*finished in' \
-          "
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo docker logs \
+            --tail all \
+            --follow \
+            ${{ inputs.test_id }} | \
+            tee --output-error=exit /dev/stderr | \
+            grep --max-count=1 --extended-regexp --color=always \
+            -e 'estimated progress.*network_upgrade.*=.*Nu5' \
+            -e 'test result:.*finished in'
 
   # follow the logs of the test we just launched, up to block 1,740,000 or later
   # (or the test finishing)
@@ -754,27 +723,23 @@ jobs:
 
       # Show recent logs, following until block 1,740,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1740k)
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*17[4-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo docker logs \
+            --tail all \
+            --follow \
+            ${{ inputs.test_id }} | \
+            tee --output-error=exit /dev/stderr | \
+            grep --max-count=1 --extended-regexp --color=always \
+            -e 'estimated progress.*current_height.*=.*17[4-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+            -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+            -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+            -e 'test result:.*finished in'
 
   # follow the logs of the test we just launched, up to block 1,760,000 or later
   # (or the test finishing)
@@ -817,27 +782,23 @@ jobs:
 
       # Show recent logs, following until block 1,760,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1760k)
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*17[6-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo docker logs \
+            --tail all \
+            --follow \
+            ${{ inputs.test_id }} | \
+            tee --output-error=exit /dev/stderr | \
+            grep --max-count=1 --extended-regexp --color=always \
+            -e 'estimated progress.*current_height.*=.*17[6-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+            -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+            -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+            -e 'test result:.*finished in'
 
   # follow the logs of the test we just launched, up to block 1,780,000 or later
   # (or the test finishing)
@@ -880,27 +841,23 @@ jobs:
 
       # Show recent logs, following until block 1,780,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1780k)
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*17[8-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo docker logs \
+            --tail all \
+            --follow \
+            ${{ inputs.test_id }} | \
+            tee --output-error=exit /dev/stderr | \
+            grep --max-count=1 --extended-regexp --color=always \
+            -e 'estimated progress.*current_height.*=.*17[8-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+            -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+            -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+            -e 'test result:.*finished in'
 
   # follow the logs of the test we just launched, up to block 1,790,000 or later
   # (or the test finishing)
@@ -944,27 +901,23 @@ jobs:
 
       # Show recent logs, following until block 1,790,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1790k)
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*179[0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'test result:.*finished in' \
-          "
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo docker logs \
+            --tail all \
+            --follow \
+            ${{ inputs.test_id }} | \
+            tee --output-error=exit /dev/stderr | \
+            grep --max-count=1 --extended-regexp --color=always \
+            -e 'estimated progress.*current_height.*=.*179[0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+            -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+            -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+            -e 'test result:.*finished in'
 
   # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
   logs-checkpoint:
@@ -1006,25 +959,21 @@ jobs:
       #
       # TODO: when doing obtain/extend tips, log the verifier in use, and check for full verification here
       - name: Show logs for ${{ inputs.test_id }} test (checkpoint)
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          docker logs \
-          --tail ${{ env.EXTRA_LOG_LINES }} \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'verified final checkpoint' \
-          -e 'test result:.*finished in' \
-          "
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo docker logs \
+            --tail ${{ env.EXTRA_LOG_LINES }} \
+            --follow \
+            ${{ inputs.test_id }} | \
+            tee --output-error=exit /dev/stderr | \
+            grep --max-count=1 --extended-regexp --color=always \
+            -e 'verified final checkpoint' \
+            -e 'test result:.*finished in'
 
   # follow the logs of the test we just launched, until it finishes
   logs-end:
@@ -1064,24 +1013,20 @@ jobs:
 
       # Show recent logs, following until the test finishes
       - name: Show logs for ${{ inputs.test_id }} test (end)
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          docker logs \
-          --tail ${{ env.EXTRA_LOG_LINES }} \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          'test result:.*finished in' \
-          "
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo docker logs \
+            --tail ${{ env.EXTRA_LOG_LINES }} \
+            --follow \
+            ${{ inputs.test_id }} | \
+            tee --output-error=exit /dev/stderr | \
+            grep --max-count=1 --extended-regexp --color=always \
+            'test result:.*finished in'
 
 
   # check the results of the test, and show all of the test logs
@@ -1133,31 +1078,27 @@ jobs:
       # with that status.
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
-        run: |
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command=' \
-          set -e;
-          docker logs \
-          --tail all \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          "test result: .*ok.* [1-9][0-9]* passed.*finished in"; \
-          EXIT_STATUS=$( \
-          docker wait ${{ inputs.test_id }} || \
-          docker inspect --format "{{.State.ExitCode}}" ${{ inputs.test_id }} || \
-          echo "missing container, or missing exit status for container" \
-          ); \
-          echo "docker exit status: $EXIT_STATUS"; \
-          exit "$EXIT_STATUS" \
-          '
-
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            set -e;
+            sudo docker logs \
+            --tail all \
+            ${{ inputs.test_id }} | \
+            tee --output-error=exit /dev/stderr | \
+            grep --max-count=1 --extended-regexp --color=always \
+            "test result: .*ok.* [1-9][0-9]* passed.*finished in"; \
+            EXIT_STATUS=$( \
+            sudo docker wait ${{ inputs.test_id }} || \
+            sudo docker inspect --format "{{.State.ExitCode}}" ${{ inputs.test_id }} || \
+            echo "missing container, or missing exit status for container" \
+            ); \
+            echo "sudo docker exit status: $EXIT_STATUS"; \
+            exit "$EXIT_STATUS"
 
   # create a state image from the instance's state disk, if requested by the caller
   create-state-image:
@@ -1244,7 +1185,16 @@ jobs:
 
       # Get the sync height from the test logs, which is later used as part of the
       # disk description and labels.
-      #
+      - name: Get sync height from logs
+        id: get-sync-height
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo docker logs ${{ inputs.test_id }} --tail 200
+
       # The regex used to grep the sync height is provided by ${{ inputs.height_grep_text }},
       # this allows to dynamically change the height as needed by different situations or
       # based on the logs output from different tests.
@@ -1256,20 +1206,8 @@ jobs:
         run: |
           SYNC_HEIGHT=""
 
-          DOCKER_LOGS=$( \
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command=" \
-          docker logs ${{ inputs.test_id }} --tail 200 \
-          ")
-
           SYNC_HEIGHT=$( \
-          echo "$DOCKER_LOGS" | \
+          echo "${{ steps.get-sync-height.outputs.stdout }}" | \
           grep --extended-regexp --only-matching '${{ inputs.height_grep_text }}[0-9]+' | \
           grep --extended-regexp --only-matching  '[0-9]+' | \
           tail -1 || \

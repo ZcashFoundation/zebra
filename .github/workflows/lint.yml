@@ -41,6 +41,7 @@ jobs:
         id: changed-files-rust
         uses: tj-actions/changed-files@v29.0.7
         with:
+          fetch-depth: 2
           files: |
             **/*.rs
             **/Cargo.toml
@@ -53,6 +54,7 @@ jobs:
         id: changed-files-workflows
         uses: tj-actions/changed-files@v29.0.7
         with:
+          fetch-depth: 2
           files: |
             .github/workflows/*.yml
 
