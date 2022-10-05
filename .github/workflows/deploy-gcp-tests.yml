@@ -1185,9 +1185,8 @@ jobs:
 
       # Get the sync height from the test logs, which is later used as part of the
       # disk description and labels.
-      #
       - name: Get sync height from logs
-        id: compute-ssh
+        id: get-sync-height
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
@@ -1195,13 +1194,6 @@ jobs:
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
             sudo docker logs ${{ inputs.test_id }} --tail 200
-
-      - name: Assign sync height to a variable
-        run: |-
-          echo 'STDOUT: ${{ steps.compute-ssh.outputs.stdout }}'
-          echo 'STDERR: ${{ steps.compute-ssh.outputs.stderr }}'
-
-          echo "DOCKER_LOGS=${{ steps.compute-ssh.outputs.stdout }} >> $GITHUB_ENV"
 
       # The regex used to grep the sync height is provided by ${{ inputs.height_grep_text }},
       # this allows to dynamically change the height as needed by different situations or
@@ -1215,7 +1207,7 @@ jobs:
           SYNC_HEIGHT=""
 
           SYNC_HEIGHT=$( \
-          echo "$DOCKER_LOGS" | \
+          echo "${{ steps.get-sync-height.outputs.stdout }}" | \
           grep --extended-regexp --only-matching '${{ inputs.height_grep_text }}[0-9]+' | \
           grep --extended-regexp --only-matching  '[0-9]+' | \
           tail -1 || \
