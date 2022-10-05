@@ -52,26 +52,26 @@ impl QueuedBlocks {
         let new_height = new.0.height;
         let parent_hash = new.0.block.header.previous_block_hash;
 
+        if self.blocks.contains_key(&new_hash) {
+            // Skip queueing the block and return early if the hash is not unique
+            return;
+        }
+
         // Track known UTXOs in queued blocks.
         for (outpoint, ordered_utxo) in new.0.new_outputs.iter() {
             self.known_utxos
                 .insert(*outpoint, ordered_utxo.utxo.clone());
         }
 
-        let replaced = self.blocks.insert(new_hash, new);
-        assert!(replaced.is_none(), "hashes must be unique");
-        let inserted = self
-            .by_height
+        self.blocks.insert(new_hash, new);
+        self.by_height
             .entry(new_height)
             .or_default()
             .insert(new_hash);
-        assert!(inserted, "hashes must be unique");
-        let inserted = self
-            .by_parent
+        self.by_parent
             .entry(parent_hash)
             .or_default()
             .insert(new_hash);
-        assert!(inserted, "hashes must be unique");
 
         tracing::trace!(%parent_hash, queued = %self.blocks.len(), "queued block");
         self.update_metrics();
