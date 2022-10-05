@@ -142,11 +142,8 @@ After you have the version increments, the updated checkpoints and the updated c
 - [ ] Mark the release as 'pre-release', until it has been built and tested
 - [ ] Publish the pre-release to GitHub using "Publish Release"
 
-## Build and Binary Testing
+## Binary Testing
 
-- [ ] After tagging the release, test that the exact `cargo install` command in `README.md` works
-      (`--git` behaves a bit differently to `--path`)
-- [ ] Test that the newly built Zebra starts correctly, by running `~/.cargo/bin/zebrad`
 - [ ] Wait until the [Docker binaries have been built on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml), and the quick tests have passed.
       (You can ignore the full sync and `lightwalletd` tests, because they take about a day to run.)
 - [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Publish Release"
