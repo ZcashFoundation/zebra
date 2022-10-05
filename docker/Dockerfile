@@ -150,6 +150,9 @@ ENV ZEBRA_CONF_FILE ${ZEBRA_CONF_FILE}
 # time, or using the default values set just above. And create the conf path and file if
 # it does not exist.
 #
+# We disable most ports by default, so the default config is secure.
+# Users have to opt-in to additional functionality by editing `zebrad.toml`.
+#
 # It is safe to use multiple RPC threads in Docker, because we know we are the only running
 # `zebrad` or `zcashd` process in the container.
 #
@@ -168,12 +171,12 @@ RUN set -ex; \
     echo "[state]"; \
     echo "cache_dir = '/zebrad-cache'"; \
     echo "[rpc]"; \
-    echo "listen_addr = None"; \
+    echo "#listen_addr = '127.0.0.1:8232'"; \
     echo "parallel_cpu_threads = 0"; \
     echo "[metrics]"; \
-    echo "endpoint_addr = None"; \
+    echo "#endpoint_addr = '127.0.0.1:9999'"; \
     echo "[tracing]"; \
-    echo "endpoint_addr = None"; \
+    echo "#endpoint_addr = '127.0.0.1:3000'"; \
   } > "${ZEBRA_CONF_PATH}/${ZEBRA_CONF_FILE}"
 
 EXPOSE 8233 18233

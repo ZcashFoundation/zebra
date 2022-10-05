@@ -113,7 +113,12 @@
 //! export TMPDIR=/path/to/disk/directory
 //! ```
 
-use std::{collections::HashSet, env, fs, panic, path::PathBuf, time::Duration};
+use std::{
+    collections::HashSet,
+    env, fs, panic,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use color_eyre::{
     eyre::{eyre, Result, WrapErr},
@@ -148,6 +153,13 @@ use common::{
         TINY_CHECKPOINT_TIMEOUT,
     },
 };
+
+/// The maximum amount of time that we allow the creation of a future to block the `tokio` executor.
+///
+/// This should be larger than the amount of time between thread time slices on a busy test VM.
+///
+/// This limit only applies to some tests.
+pub const MAX_ASYNC_BLOCKING_TIME: Duration = zebra_test::mock_service::DEFAULT_MAX_REQUEST_DELAY;
 
 #[test]
 fn generate_no_args() -> Result<()> {
@@ -312,8 +324,6 @@ fn start_args() -> Result<()> {
 
 #[tokio::test]
 async fn db_init_outside_future_executor() -> Result<()> {
-    use std::time::{Duration, Instant};
-
     let _init_guard = zebra_test::init();
     let config = default_test_config()?;
 
@@ -325,7 +335,7 @@ async fn db_init_outside_future_executor() -> Result<()> {
     // will wait indefinitely for blocking operation to finish once started
     let block_duration = start.elapsed();
     assert!(
-        block_duration < Duration::from_millis(5),
+        block_duration <= MAX_ASYNC_BLOCKING_TIME,
         "futures executor was blocked longer than expected ({:?})",
         block_duration,
     );
