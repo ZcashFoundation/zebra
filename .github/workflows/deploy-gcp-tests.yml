@@ -1186,6 +1186,23 @@ jobs:
       # Get the sync height from the test logs, which is later used as part of the
       # disk description and labels.
       #
+      - name: Get sync height from logs
+        id: compute-ssh
+        uses: google-github-actions/ssh-compute@v0.1.2
+        with:
+          instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          command: |
+            sudo docker logs ${{ inputs.test_id }} --tail 200
+
+      - name: Assign sync height to a variable
+        run: |-
+          echo 'STDOUT: ${{ steps.compute-ssh.outputs.stdout }}'
+          echo 'STDERR: ${{ steps.compute-ssh.outputs.stderr }}'
+
+          echo "DOCKER_LOGS=${{ steps.compute-ssh.outputs.stdout }} >> $GITHUB_ENV"
+
       # The regex used to grep the sync height is provided by ${{ inputs.height_grep_text }},
       # this allows to dynamically change the height as needed by different situations or
       # based on the logs output from different tests.
@@ -1196,18 +1213,6 @@ jobs:
       - name: Get sync height from logs
         run: |
           SYNC_HEIGHT=""
-
-          DOCKER_LOGS=$( \
-          gcloud compute ssh \
-          ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command=" \
-          sudo docker logs ${{ inputs.test_id }} --tail 200 \
-          ")
 
           SYNC_HEIGHT=$( \
           echo "$DOCKER_LOGS" | \
