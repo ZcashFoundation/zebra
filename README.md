@@ -55,28 +55,38 @@ Zebra aims to be
 [faster, more secure, and more easily extensible](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages)
 than other Zcash implementations.
 
-## Beta Releases
+## Release Candidates
 
-Every few weeks, we release a new Zebra beta [release](https://github.com/ZcashFoundation/zebra/releases).
+Every few weeks, we release a [new Zebra version](https://github.com/ZcashFoundation/zebra/releases).
 
 Zebra's network stack is interoperable with `zcashd`,
 and Zebra implements all the features required to reach Zcash network consensus.
 
-Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
+Zebra also supports the [`lightwalletd` backend JSON-RPCs](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd).
 
+Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
 But it may not validate any:
 - Undocumented rules derived from Bitcoin
 - Undocumented network protocol requirements
 
 ## Getting Started
 
-Building `zebrad` requires [Rust](https://www.rust-lang.org/tools/install),
-[libclang](https://clang.llvm.org/get_started.html), and a C++ compiler.
+You can run Zebra using our Docker image.
+This command will run our latest release, and sync it to the tip:
 
-### Build and Run Instructions
+<!-- TODO: replace with `docker run zfnd/zebra` when we release 1.0.0 -->
 
-`zebrad` is still under development, so there is no supported packaging or
-install mechanism. To run `zebrad`, follow the instructions to compile `zebrad`
+```sh
+docker run zfnd/zebra:1.0.0-rc.0
+```
+
+You can also [enable Zebra's RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd) and [configure other features](https://zebra.zfnd.org/user/run.html).
+
+### Build Instructions
+
+If you want to build `zebrad` yourself, you'll need [Rust](https://www.rust-lang.org/tools/install), [libclang](https://clang.llvm.org/get_started.html), a C++ compiler, and some other dependencies.
+
+To run `zebrad`, follow the instructions to compile `zebrad`
 for your platform:
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
