@@ -576,12 +576,14 @@ jobs:
       - name: Show ${{ inputs.test_id }} test logs
         # We always want to show the logs, even if the test failed or was cancelled
         if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
         run: |
-          echo 'Test stdout:'
-          echo '${{ steps.compute-ssh.outputs.stdout }}'
-          echo
-          echo 'Test stderr:'
-          echo '${{ steps.compute-ssh.outputs.stderr }}'
+          Test stdout:
+          ${{ steps.compute-ssh.outputs.stdout }}
+          
+          Test stderr:
+          ${{ steps.compute-ssh.outputs.stderr }}
 
   # follow the logs of the test we just launched, up to Canopy activation (or the test finishing)
   logs-heartwood:
@@ -642,12 +644,14 @@ jobs:
       - name: Show ${{ inputs.test_id }} test logs
         # We always want to show the logs, even if the test failed or was cancelled
         if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
         run: |
-          echo 'Test stdout:'
-          echo '${{ steps.compute-ssh.outputs.stdout }}'
-          echo
-          echo 'Test stderr:'
-          echo '${{ steps.compute-ssh.outputs.stderr }}'
+          Test stdout:
+          ${{ steps.compute-ssh.outputs.stdout }}
+          
+          Test stderr:
+          ${{ steps.compute-ssh.outputs.stderr }}
 
   # follow the logs of the test we just launched, up to NU5 activation (or the test finishing)
   logs-canopy:
@@ -707,12 +711,14 @@ jobs:
       - name: Show ${{ inputs.test_id }} test logs
         # We always want to show the logs, even if the test failed or was cancelled
         if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
         run: |
-          echo 'Test stdout:'
-          echo '${{ steps.compute-ssh.outputs.stdout }}'
-          echo
-          echo 'Test stderr:'
-          echo '${{ steps.compute-ssh.outputs.stderr }}'
+          Test stdout:
+          ${{ steps.compute-ssh.outputs.stdout }}
+          
+          Test stderr:
+          ${{ steps.compute-ssh.outputs.stderr }}
 
   # follow the logs of the test we just launched, up to block 1,740,000 or later
   # (or the test finishing)
@@ -777,12 +783,14 @@ jobs:
       - name: Show ${{ inputs.test_id }} test logs
         # We always want to show the logs, even if the test failed or was cancelled
         if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
         run: |
-          echo 'Test stdout:'
-          echo '${{ steps.compute-ssh.outputs.stdout }}'
-          echo
-          echo 'Test stderr:'
-          echo '${{ steps.compute-ssh.outputs.stderr }}'
+          Test stdout:
+          ${{ steps.compute-ssh.outputs.stdout }}
+          
+          Test stderr:
+          ${{ steps.compute-ssh.outputs.stderr }}
 
   # follow the logs of the test we just launched, up to block 1,760,000 or later
   # (or the test finishing)
@@ -847,12 +855,14 @@ jobs:
       - name: Show ${{ inputs.test_id }} test logs
         # We always want to show the logs, even if the test failed or was cancelled
         if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
         run: |
-          echo 'Test stdout:'
-          echo '${{ steps.compute-ssh.outputs.stdout }}'
-          echo
-          echo 'Test stderr:'
-          echo '${{ steps.compute-ssh.outputs.stderr }}'
+          Test stdout:
+          ${{ steps.compute-ssh.outputs.stdout }}
+          
+          Test stderr:
+          ${{ steps.compute-ssh.outputs.stderr }}
 
   # follow the logs of the test we just launched, up to block 1,780,000 or later
   # (or the test finishing)
@@ -917,12 +927,14 @@ jobs:
       - name: Show ${{ inputs.test_id }} test logs
         # We always want to show the logs, even if the test failed or was cancelled
         if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
         run: |
-          echo 'Test stdout:'
-          echo '${{ steps.compute-ssh.outputs.stdout }}'
-          echo
-          echo 'Test stderr:'
-          echo '${{ steps.compute-ssh.outputs.stderr }}'
+          Test stdout:
+          ${{ steps.compute-ssh.outputs.stdout }}
+          
+          Test stderr:
+          ${{ steps.compute-ssh.outputs.stderr }}
 
   # follow the logs of the test we just launched, up to block 1,790,000 or later
   # (or the test finishing)
@@ -988,12 +1000,14 @@ jobs:
       - name: Show ${{ inputs.test_id }} test logs
         # We always want to show the logs, even if the test failed or was cancelled
         if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
         run: |
-          echo 'Test stdout:'
-          echo '${{ steps.compute-ssh.outputs.stdout }}'
-          echo
-          echo 'Test stderr:'
-          echo '${{ steps.compute-ssh.outputs.stderr }}'
+          Test stdout:
+          ${{ steps.compute-ssh.outputs.stdout }}
+          
+          Test stderr:
+          ${{ steps.compute-ssh.outputs.stderr }}
 
   # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
   logs-checkpoint:
@@ -1055,12 +1069,14 @@ jobs:
       - name: Show ${{ inputs.test_id }} test logs
         # We always want to show the logs, even if the test failed or was cancelled
         if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
         run: |
-          echo 'Test stdout:'
-          echo '${{ steps.compute-ssh.outputs.stdout }}'
-          echo
-          echo 'Test stderr:'
-          echo '${{ steps.compute-ssh.outputs.stderr }}'
+          Test stdout:
+          ${{ steps.compute-ssh.outputs.stdout }}
+          
+          Test stderr:
+          ${{ steps.compute-ssh.outputs.stderr }}
 
   # follow the logs of the test we just launched, until it finishes
   logs-end:
@@ -1119,12 +1135,14 @@ jobs:
       - name: Show ${{ inputs.test_id }} test logs
         # We always want to show the logs, even if the test failed or was cancelled
         if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
         run: |
-          echo 'Test stdout:'
-          echo '${{ steps.compute-ssh.outputs.stdout }}'
-          echo
-          echo 'Test stderr:'
-          echo '${{ steps.compute-ssh.outputs.stderr }}'
+          Test stdout:
+          ${{ steps.compute-ssh.outputs.stdout }}
+          
+          Test stderr:
+          ${{ steps.compute-ssh.outputs.stderr }}
 
 
   # check the results of the test, and show all of the test logs
@@ -1202,12 +1220,14 @@ jobs:
       - name: Show ${{ inputs.test_id }} test logs
         # We always want to show the logs, even if the test failed or was cancelled
         if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
         run: |
-          echo 'Test stdout:'
-          echo '${{ steps.compute-ssh.outputs.stdout }}'
-          echo
-          echo 'Test stderr:'
-          echo '${{ steps.compute-ssh.outputs.stderr }}'
+          Test stdout:
+          ${{ steps.compute-ssh.outputs.stdout }}
+          
+          Test stderr:
+          ${{ steps.compute-ssh.outputs.stderr }}
 
 
   # create a state image from the instance's state disk, if requested by the caller
@@ -1338,12 +1358,14 @@ jobs:
       - name: Show logs from get sync height ssh
         # We always want to show the logs, even if the test failed or was cancelled
         if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
         run: |
-          echo 'Sync height stdout:'
-          echo '${{ steps.get-sync-height.outputs.stdout }}'
-          echo
-          echo 'Sync height stderr:'
-          echo '${{ steps.get-sync-height.outputs.stderr }}'
+          Test stdout:
+          ${{ steps.get-sync-height.outputs.stdout }}
+          
+          Test stderr:
+          ${{ steps.get-sync-height.outputs.stderr }}
 
       # Get the original cached state height from google cloud.
       #
