@@ -1105,11 +1105,11 @@ jobs:
         # We always want to show the logs, even if the test failed or was cancelled
         if: ${{ always() }}
         run: |
-          echo "Test stdout:"
-          echo "${{ steps.check-logs.outputs.stdout }}"
+          echo 'Test stdout:'
+          echo '${{ steps.check-logs.outputs.stdout }}'
           echo
-          echo "Test stderr:"
-          echo "${{ steps.check-logs.outputs.stderr }}"
+          echo 'Test stderr:'
+          echo '${{ steps.check-logs.outputs.stderr }}'
 
 
   # create a state image from the instance's state disk, if requested by the caller
@@ -1219,7 +1219,7 @@ jobs:
           SYNC_HEIGHT=""
 
           SYNC_HEIGHT=$( \
-          echo "${{ steps.get-sync-height.outputs.stdout }}" | \
+          echo '${{ steps.get-sync-height.outputs.stdout }}' | \
           grep --extended-regexp --only-matching '${{ inputs.height_grep_text }}[0-9]+' | \
           grep --extended-regexp --only-matching  '[0-9]+' | \
           tail -1 || \
