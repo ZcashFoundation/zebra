@@ -1078,7 +1078,7 @@ jobs:
       # with that status.
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
-        id: compute-ssh
+        id: check-logs
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
@@ -1099,6 +1099,18 @@ jobs:
             ); \
             echo "sudo docker exit status: $EXIT_STATUS"; \
             exit "$EXIT_STATUS"
+
+      # The ssh-compute action doesn't show the SSH output, so we need a separate step for it.
+      - name: Show ${{ inputs.test_id }} test logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        run: |
+          echo "Test stdout:"
+          echo "${{ steps.check-logs.outputs.stdout }}"
+          echo
+          echo "Test stderr:"
+          echo "${{ steps.check-logs.outputs.stderr }}"
+
 
   # create a state image from the instance's state disk, if requested by the caller
   create-state-image:
