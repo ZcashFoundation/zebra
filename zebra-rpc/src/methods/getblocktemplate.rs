@@ -1,14 +1,11 @@
 //! RPC methods related to mining only available with `getblocktemplate-rpcs` rust feature.
-use crate::methods::Rpc;
-use crate::methods::RpcImpl;
-use zebra_chain::chain_tip::ChainTip;
-
 use jsonrpc_core::{self, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
-
-use zebra_node_services::{mempool, BoxError};
-
 use tower::Service;
+
+use crate::methods::{Rpc, RpcImpl};
+use zebra_chain::chain_tip::ChainTip;
+use zebra_node_services::{mempool, BoxError};
 
 #[rpc(server)]
 pub trait GetBlockTemplateRpc: Rpc {
