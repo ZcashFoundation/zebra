@@ -18,7 +18,7 @@ use zebra_chain::parameters::Network;
 
 use crate::{
     service::finalized_state::disk_format::{FromDisk, IntoDisk},
-    Config,
+    BoxError, Config,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -484,8 +484,10 @@ impl DiskDb {
     // Low-level write methods are located in the WriteDisk trait
 
     /// Writes `batch` to the database.
-    pub fn write(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
-        self.db.write(batch.batch)
+    pub fn write(&self, _batch: DiskWriteBatch) -> Result<(), BoxError> {
+        //self.db.write(batch.batch)
+
+        Err("fake test failure".into())
     }
 
     // Private methods

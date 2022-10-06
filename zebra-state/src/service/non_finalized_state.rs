@@ -309,7 +309,9 @@ impl NonFinalizedState {
         block_commitment_result.expect("scope has finished")?;
         sprout_anchor_result.expect("scope has finished")?;
 
-        chain_push_result.expect("scope has finished")
+        chain_push_result.expect("scope has finished")?;
+
+        Err(ValidateContextError::NotReadyToBeCommitted)
     }
 
     /// Returns the length of the non-finalized portion of the current best chain.
