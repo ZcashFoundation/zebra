@@ -37,6 +37,9 @@ use crate::queue::Queue;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+mod getblocktemplate;
+
 /// The RPC error code used by `zcashd` for missing blocks.
 ///
 /// `lightwalletd` expects error code `-8` when a block is not found:
