@@ -100,10 +100,10 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool) {
     let _init_guard = zebra_test::init();
 
     let port = zebra_test::net::random_unallocated_port();
+    #[allow(unknown_lints)]
+    #[allow(clippy::bool_to_int_with_if)]
     let config = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
-        #[allow(unknown_lints)]
-        #[allow(clippy::bool_to_int_with_if)]
         parallel_cpu_threads: if parallel_cpu_threads { 0 } else { 1 },
         debug_force_finished_sync: false,
     };
