@@ -24,5 +24,7 @@
     - [Value Pools](dev/rfcs/0012-value-pools.md)
   - [Diagrams](dev/diagrams.md)
     - [Network Architecture](dev/diagrams/zebra-network.md)
+  - [Continuous Integration](dev/continuous-integration.md)
+  - [Continuous Delivery](dev/continuous-delivery.md)
   - [zebra-checkpoints](dev/zebra-checkpoints.md)
 - [API Reference](api.md)
