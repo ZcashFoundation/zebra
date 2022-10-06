@@ -544,15 +544,14 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Show all the logs since the container launched,
-      # following until Sapling activation (or the test finishes).
+      # Wait until Sapling activation (or the test finishes).
       #
       # The log pipeline ignores the exit status of `sudo docker logs`.
       # It also ignores the expected 'broken pipe' error from `tee`,
       # which happens when `grep` finds a matching output and moves on to the next job.
       #
       # Errors in the tests are caught by the final test status job.
-      - name: Show logs for ${{ inputs.test_id }} test (sprout)
+      - name: Wait for ${{ inputs.test_id }} test (sprout)
         id: compute-ssh
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
@@ -572,6 +571,17 @@ jobs:
             -e 'estimated progress.*network_upgrade.*=.*Canopy' \
             -e 'estimated progress.*network_upgrade.*=.*Nu5' \
             -e 'test result:.*finished in'
+
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show ${{ inputs.test_id }} test logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        run: |
+          echo 'Test stdout:'
+          echo '${{ steps.compute-ssh.outputs.stdout }}'
+          echo
+          echo 'Test stderr:'
+          echo '${{ steps.compute-ssh.outputs.stderr }}'
 
   # follow the logs of the test we just launched, up to Canopy activation (or the test finishing)
   logs-heartwood:
@@ -609,8 +619,8 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Show recent logs, following until Canopy activation (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (heartwood)
+      # Wait until Canopy activation (or the test finishes)
+      - name: Wait for ${{ inputs.test_id }} test (heartwood)
         id: compute-ssh
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
@@ -627,6 +637,17 @@ jobs:
             -e 'estimated progress.*network_upgrade.*=.*Canopy' \
             -e 'estimated progress.*network_upgrade.*=.*Nu5' \
             -e 'test result:.*finished in'
+
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show ${{ inputs.test_id }} test logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        run: |
+          echo 'Test stdout:'
+          echo '${{ steps.compute-ssh.outputs.stdout }}'
+          echo
+          echo 'Test stderr:'
+          echo '${{ steps.compute-ssh.outputs.stderr }}'
 
   # follow the logs of the test we just launched, up to NU5 activation (or the test finishing)
   logs-canopy:
@@ -664,8 +685,8 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Show recent logs, following until NU5 activation (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (canopy)
+      # Wait until NU5 activation (or the test finishes)
+      - name: Wait for ${{ inputs.test_id }} test (canopy)
         id: compute-ssh
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
@@ -681,6 +702,17 @@ jobs:
             grep --max-count=1 --extended-regexp --color=always \
             -e 'estimated progress.*network_upgrade.*=.*Nu5' \
             -e 'test result:.*finished in'
+
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show ${{ inputs.test_id }} test logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        run: |
+          echo 'Test stdout:'
+          echo '${{ steps.compute-ssh.outputs.stdout }}'
+          echo
+          echo 'Test stderr:'
+          echo '${{ steps.compute-ssh.outputs.stderr }}'
 
   # follow the logs of the test we just launched, up to block 1,740,000 or later
   # (or the test finishing)
@@ -721,8 +753,8 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Show recent logs, following until block 1,740,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1740k)
+      # Wait until block 1,740,000 (or the test finishes)
+      - name: Wait for ${{ inputs.test_id }} test (1740k)
         id: compute-ssh
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
@@ -740,6 +772,17 @@ jobs:
             -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
             -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
             -e 'test result:.*finished in'
+
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show ${{ inputs.test_id }} test logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        run: |
+          echo 'Test stdout:'
+          echo '${{ steps.compute-ssh.outputs.stdout }}'
+          echo
+          echo 'Test stderr:'
+          echo '${{ steps.compute-ssh.outputs.stderr }}'
 
   # follow the logs of the test we just launched, up to block 1,760,000 or later
   # (or the test finishing)
@@ -780,8 +823,8 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Show recent logs, following until block 1,760,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1760k)
+      # Wait until block 1,760,000 (or the test finishes)
+      - name: Wait for ${{ inputs.test_id }} test (1760k)
         id: compute-ssh
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
@@ -799,6 +842,17 @@ jobs:
             -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
             -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
             -e 'test result:.*finished in'
+
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show ${{ inputs.test_id }} test logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        run: |
+          echo 'Test stdout:'
+          echo '${{ steps.compute-ssh.outputs.stdout }}'
+          echo
+          echo 'Test stderr:'
+          echo '${{ steps.compute-ssh.outputs.stderr }}'
 
   # follow the logs of the test we just launched, up to block 1,780,000 or later
   # (or the test finishing)
@@ -839,8 +893,8 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Show recent logs, following until block 1,780,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1780k)
+      # Wait until block 1,780,000 (or the test finishes)
+      - name: Wait for ${{ inputs.test_id }} test (1780k)
         id: compute-ssh
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
@@ -858,6 +912,17 @@ jobs:
             -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
             -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
             -e 'test result:.*finished in'
+
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show ${{ inputs.test_id }} test logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        run: |
+          echo 'Test stdout:'
+          echo '${{ steps.compute-ssh.outputs.stdout }}'
+          echo
+          echo 'Test stderr:'
+          echo '${{ steps.compute-ssh.outputs.stderr }}'
 
   # follow the logs of the test we just launched, up to block 1,790,000 or later
   # (or the test finishing)
@@ -899,8 +964,8 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Show recent logs, following until block 1,790,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1790k)
+      # Wait until block 1,790,000 (or the test finishes)
+      - name: Wait for ${{ inputs.test_id }} test (1790k)
         id: compute-ssh
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
@@ -918,6 +983,17 @@ jobs:
             -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
             -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
             -e 'test result:.*finished in'
+
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show ${{ inputs.test_id }} test logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        run: |
+          echo 'Test stdout:'
+          echo '${{ steps.compute-ssh.outputs.stdout }}'
+          echo
+          echo 'Test stderr:'
+          echo '${{ steps.compute-ssh.outputs.stderr }}'
 
   # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
   logs-checkpoint:
@@ -955,10 +1031,10 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Show recent logs, following until the last checkpoint (or the test finishes)
+      # Wait until the last checkpoint (or the test finishes)
       #
       # TODO: when doing obtain/extend tips, log the verifier in use, and check for full verification here
-      - name: Show logs for ${{ inputs.test_id }} test (checkpoint)
+      - name: Wait for ${{ inputs.test_id }} test (checkpoint)
         id: compute-ssh
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
@@ -974,6 +1050,17 @@ jobs:
             grep --max-count=1 --extended-regexp --color=always \
             -e 'verified final checkpoint' \
             -e 'test result:.*finished in'
+
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show ${{ inputs.test_id }} test logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        run: |
+          echo 'Test stdout:'
+          echo '${{ steps.compute-ssh.outputs.stdout }}'
+          echo
+          echo 'Test stderr:'
+          echo '${{ steps.compute-ssh.outputs.stderr }}'
 
   # follow the logs of the test we just launched, until it finishes
   logs-end:
@@ -1011,8 +1098,8 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Show recent logs, following until the test finishes
-      - name: Show logs for ${{ inputs.test_id }} test (end)
+      # Wait until the test finishes
+      - name: Wait for ${{ inputs.test_id }} test (end)
         id: compute-ssh
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
@@ -1027,6 +1114,17 @@ jobs:
             tee --output-error=exit /dev/stderr | \
             grep --max-count=1 --extended-regexp --color=always \
             'test result:.*finished in'
+
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show ${{ inputs.test_id }} test logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        run: |
+          echo 'Test stdout:'
+          echo '${{ steps.compute-ssh.outputs.stdout }}'
+          echo
+          echo 'Test stderr:'
+          echo '${{ steps.compute-ssh.outputs.stderr }}'
 
 
   # check the results of the test, and show all of the test logs
@@ -1078,7 +1176,7 @@ jobs:
       # with that status.
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
-        id: check-logs
+        id: compute-ssh
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
           instance_name: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
@@ -1100,16 +1198,16 @@ jobs:
             echo "sudo docker exit status: $EXIT_STATUS"; \
             exit "$EXIT_STATUS"
 
-      # The ssh-compute action doesn't show the SSH output, so we need a separate step for it.
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
       - name: Show ${{ inputs.test_id }} test logs
         # We always want to show the logs, even if the test failed or was cancelled
         if: ${{ always() }}
         run: |
           echo 'Test stdout:'
-          echo '${{ steps.check-logs.outputs.stdout }}'
+          echo '${{ steps.compute-ssh.outputs.stdout }}'
           echo
           echo 'Test stderr:'
-          echo '${{ steps.check-logs.outputs.stderr }}'
+          echo '${{ steps.compute-ssh.outputs.stderr }}'
 
 
   # create a state image from the instance's state disk, if requested by the caller
@@ -1235,6 +1333,17 @@ jobs:
 
           echo "Found sync height in logs: $SYNC_HEIGHT"
           echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
+
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show logs from get sync height ssh
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        run: |
+          echo 'Sync height stdout:'
+          echo '${{ steps.get-sync-height.outputs.stdout }}'
+          echo
+          echo 'Sync height stderr:'
+          echo '${{ steps.get-sync-height.outputs.stderr }}'
 
       # Get the original cached state height from google cloud.
       #
