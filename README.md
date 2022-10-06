@@ -90,10 +90,9 @@ To run `zebrad`, follow the instructions to compile `zebrad`
 for your platform:
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
-   - Zebra is tested with the latest `stable` Rust version.
-     Earlier versions are not supported or tested.
-     Any Zebra release can remove support for older Rust versions, without any notice.
-     (Rust 1.59 and earlier are definitely not supported, due to missing features.)
+   - Zebra requires Rust 1.63, due to [a compiler performance regression in Rust 1.64](https://github.com/ZcashFoundation/zebra/issues/5091).
+     Zebra is also tested with the latest `stable` Rust version.
+     Earlier versions are not supported or tested. Any Zebra release can remove support for older Rust versions, without any notice.
 2. Install Zebra's build dependencies:
    - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
    - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
@@ -227,6 +226,7 @@ So Zebra's state should always be valid, unless your OS or disk hardware is corr
 
 There are a few bugs in Zebra that we're still working on fixing:
 
+- Zebra requires Rust 1.63, due to [a compiler performance regression in Rust 1.64](https://github.com/ZcashFoundation/zebra/issues/5091)
 - No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801)
   - We used to test with Windows Server 2019, but not anymore; see issue for details
 
