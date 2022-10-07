@@ -126,7 +126,7 @@ use color_eyre::{
 };
 
 use zebra_chain::{
-    block,
+    block::{self, Height},
     parameters::Network::{self, *},
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
@@ -332,7 +332,9 @@ async fn db_init_outside_future_executor() -> Result<()> {
 
     let start = Instant::now();
 
-    let db_init_handle = zebra_state::spawn_init(config.state.clone(), config.network.network);
+    // This test doesn't need UTXOs to be verified efficiently, because it uses an empty state.
+    let db_init_handle =
+        zebra_state::spawn_init(config.state.clone(), config.network.network, Height::MAX, 0);
 
     // it's faster to panic if it takes longer than expected, since the executor
     // will wait indefinitely for blocking operation to finish once started

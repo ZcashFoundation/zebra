@@ -13,7 +13,7 @@ use tower::{
 };
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, Height},
     parameters::Network,
     serialization::ZcashDeserializeInto,
     transaction::{AuthDigest, Hash as TxHash, Transaction, UnminedTx, UnminedTxId, WtxId},
@@ -642,9 +642,10 @@ async fn setup(
         .service(inbound_service);
 
     // State
+    // UTXO verification doesn't matter for these tests.
     let state_config = StateConfig::ephemeral();
     let (state_service, _read_only_state_service, latest_chain_tip, chain_tip_change) =
-        zebra_state::init(state_config, network);
+        zebra_state::init(state_config, network, Height::MAX, 0);
     let state_service = ServiceBuilder::new().buffer(10).service(state_service);
 
     // Network

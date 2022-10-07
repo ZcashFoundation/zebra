@@ -235,15 +235,7 @@ where
     let transaction = Buffer::new(BoxService::new(transaction), VERIFIER_BUFFER_BOUND);
 
     // block verification
-
-    let list = CheckpointList::new(network);
-
-    let max_checkpoint_height = if config.checkpoint_sync {
-        list.max_height()
-    } else {
-        list.min_height_in_range(network.mandatory_checkpoint_height()..)
-            .expect("hardcoded checkpoint list extends past canopy activation")
-    };
+    let (list, max_checkpoint_height) = init_checkpoint_list(config, network);
 
     let tip = match state_service
         .ready()
@@ -274,4 +266,21 @@ where
         groth16_download_handle,
         max_checkpoint_height,
     )
+}
+
+/// Parses the checkpoint list for `network` and `config`.
+/// Returns the checkpoint list and maximum checkpoint height.
+pub fn init_checkpoint_list(config: Config, network: Network) -> (CheckpointList, Height) {
+    // TODO: Zebra parses the checkpoint list twice at startup.
+    //       Instead, cache the checkpoint list for each `network`.
+    let list = CheckpointList::new(network);
+
+    let max_checkpoint_height = if config.checkpoint_sync {
+        list.max_height()
+    } else {
+        list.min_height_in_range(network.mandatory_checkpoint_height()..)
+            .expect("hardcoded checkpoint list extends past canopy activation")
+    };
+
+    (list, max_checkpoint_height)
 }

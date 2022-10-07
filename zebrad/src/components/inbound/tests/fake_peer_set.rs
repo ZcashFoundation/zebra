@@ -16,7 +16,7 @@ use tracing::Span;
 
 use zebra_chain::{
     amount::Amount,
-    block::Block,
+    block::{Block, Height},
     fmt::humantime_seconds,
     parameters::Network::{self, *},
     serialization::ZcashDeserializeInto,
@@ -764,8 +764,10 @@ async fn setup(
     );
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
     let (sync_status, mut recent_syncs) = SyncStatus::new();
+
+    // UTXO verification doesn't matter for these tests.
     let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
-        zebra_state::init(state_config.clone(), network);
+        zebra_state::init(state_config.clone(), network, Height::MAX, 0);
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
 
