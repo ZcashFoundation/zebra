@@ -7,7 +7,7 @@ use std::{env, sync::Arc, time::Duration};
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
-    block::{self, Block, CountedHeader},
+    block::{self, Block, CountedHeader, Height},
     chain_tip::ChainTip,
     fmt::SummaryDebug,
     parameters::{Network, NetworkUpgrade},
@@ -400,7 +400,8 @@ proptest! {
     ) {
         let _init_guard = zebra_test::init();
 
-        let (mut state_service, _, _, _) = StateService::new(Config::ephemeral(), network);
+        // We're waiting to verify each block here, so we don't need the maximum checkpoint height.
+        let (mut state_service, _, _, _) = StateService::new(Config::ephemeral(), network, Height::MAX, 0);
 
         prop_assert_eq!(state_service.read_service.db.finalized_value_pool(), ValueBalance::zero());
         prop_assert_eq!(
@@ -491,7 +492,8 @@ proptest! {
     ) {
         let _init_guard = zebra_test::init();
 
-        let (mut state_service, _read_only_state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network);
+        // We're waiting to verify each block here, so we don't need the maximum checkpoint height.
+        let (mut state_service, _read_only_state_service, latest_chain_tip, mut chain_tip_change) = StateService::new(Config::ephemeral(), network, Height::MAX, 0);
 
         prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
         prop_assert_eq!(chain_tip_change.last_tip_change(), None);
