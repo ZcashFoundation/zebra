@@ -250,6 +250,29 @@ impl SentHashes {
         self.sent.insert(block.hash, outpoints);
     }
 
+    /// Stores the finalized `block`'s hash, height, and UTXOs, so they can be used to check if a
+    /// block or UTXO is available in the state.
+    ///
+    /// Used for finalized blocks close to the final checkpoint, so non-finalized blocks can look up
+    /// their UTXOs.
+    ///
+    /// For more details see `add()`.
+    pub fn add_finalized(&mut self, block: &FinalizedBlock) {
+        // Track known UTXOs in sent blocks.
+        let outpoints = block
+            .new_outputs
+            .iter()
+            .map(|(outpoint, utxo)| {
+                self.known_utxos.insert(*outpoint, utxo.clone());
+                outpoint
+            })
+            .cloned()
+            .collect();
+
+        self.curr_buf.push_back((block.hash, block.height));
+        self.sent.insert(block.hash, outpoints);
+    }
+
     /// Try to look up this UTXO in any sent block.
     #[instrument(skip(self))]
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
