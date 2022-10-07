@@ -39,6 +39,7 @@ mod tests;
 
 use downloads::{AlwaysHedge, Downloads};
 
+pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
 pub use progress::show_block_chain_progress;
 pub use recent_sync_lengths::RecentSyncLengths;

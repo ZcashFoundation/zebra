@@ -81,7 +81,7 @@ use crate::{
     components::{
         inbound::{self, InboundSetupData},
         mempool::{self, Mempool},
-        sync::{self, show_block_chain_progress},
+        sync::{self, show_block_chain_progress, VERIFICATION_PIPELINE_SCALING_MULTIPLIER},
         tokio::{RuntimeRun, TokioComponent},
         ChainSync, Inbound,
     },
@@ -115,7 +115,8 @@ impl StartCmd {
                 config.state.clone(),
                 config.network.network,
                 max_checkpoint_height,
-                config.sync.checkpoint_verify_concurrency_limit,
+                config.sync.checkpoint_verify_concurrency_limit
+                    * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1),
             )
             .await?;
 

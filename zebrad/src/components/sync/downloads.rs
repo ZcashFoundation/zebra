@@ -44,7 +44,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// the rest of the capacity is reserved for the other queues.
 /// There is no reserved capacity for the syncer queue:
 /// if the other queues stay full, the syncer will eventually time out and reset.
-const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 3;
+pub const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 3;
 
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
