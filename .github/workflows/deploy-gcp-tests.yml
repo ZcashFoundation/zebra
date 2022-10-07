@@ -546,6 +546,8 @@ jobs:
 
       # Wait until Sapling activation (or the test finishes).
       #
+      # Puts the grep result in the `stdout` output, and the last 1 MB of the test logs in the `stderr` output.
+      #
       # The log pipeline ignores the exit status of `sudo docker logs`.
       # It also ignores the expected 'broken pipe' error from `tee`,
       # which happens when `grep` finds a matching output and moves on to the next job.
@@ -563,7 +565,7 @@ jobs:
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
-            tee --output-error=exit /dev/stderr | \
+            (tee --output-error=exit /dev/stderr | tail -c 1000000) 3>&2 2>&1 1>&3 | \
             grep --max-count=1 --extended-regexp --color=always \
             -e 'estimated progress.*network_upgrade.*=.*Sapling' \
             -e 'estimated progress.*network_upgrade.*=.*Blossom' \
@@ -634,7 +636,7 @@ jobs:
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
-            tee --output-error=exit /dev/stderr | \
+            (tee --output-error=exit /dev/stderr | tail -c 1000000) 3>&2 2>&1 1>&3 | \
             grep --max-count=1 --extended-regexp --color=always \
             -e 'estimated progress.*network_upgrade.*=.*Canopy' \
             -e 'estimated progress.*network_upgrade.*=.*Nu5' \
@@ -702,7 +704,7 @@ jobs:
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
-            tee --output-error=exit /dev/stderr | \
+            (tee --output-error=exit /dev/stderr | tail -c 1000000) 3>&2 2>&1 1>&3 | \
             grep --max-count=1 --extended-regexp --color=always \
             -e 'estimated progress.*network_upgrade.*=.*Nu5' \
             -e 'test result:.*finished in'
@@ -772,7 +774,7 @@ jobs:
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
-            tee --output-error=exit /dev/stderr | \
+            (tee --output-error=exit /dev/stderr | tail -c 1000000) 3>&2 2>&1 1>&3 | \
             grep --max-count=1 --extended-regexp --color=always \
             -e 'estimated progress.*current_height.*=.*17[4-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
             -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
@@ -844,7 +846,7 @@ jobs:
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
-            tee --output-error=exit /dev/stderr | \
+            (tee --output-error=exit /dev/stderr | tail -c 1000000) 3>&2 2>&1 1>&3 | \
             grep --max-count=1 --extended-regexp --color=always \
             -e 'estimated progress.*current_height.*=.*17[6-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
             -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
@@ -916,7 +918,7 @@ jobs:
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
-            tee --output-error=exit /dev/stderr | \
+            (tee --output-error=exit /dev/stderr | tail -c 1000000) 3>&2 2>&1 1>&3 | \
             grep --max-count=1 --extended-regexp --color=always \
             -e 'estimated progress.*current_height.*=.*17[8-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
             -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
@@ -989,7 +991,7 @@ jobs:
             --tail all \
             --follow \
             ${{ inputs.test_id }} | \
-            tee --output-error=exit /dev/stderr | \
+            (tee --output-error=exit /dev/stderr | tail -c 1000000) 3>&2 2>&1 1>&3 | \
             grep --max-count=1 --extended-regexp --color=always \
             -e 'estimated progress.*current_height.*=.*179[0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
             -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
@@ -1060,7 +1062,7 @@ jobs:
             --tail ${{ env.EXTRA_LOG_LINES }} \
             --follow \
             ${{ inputs.test_id }} | \
-            tee --output-error=exit /dev/stderr | \
+            (tee --output-error=exit /dev/stderr | tail -c 1000000) 3>&2 2>&1 1>&3 | \
             grep --max-count=1 --extended-regexp --color=always \
             -e 'verified final checkpoint' \
             -e 'test result:.*finished in'
@@ -1127,7 +1129,7 @@ jobs:
             --tail ${{ env.EXTRA_LOG_LINES }} \
             --follow \
             ${{ inputs.test_id }} | \
-            tee --output-error=exit /dev/stderr | \
+            (tee --output-error=exit /dev/stderr | tail -c 1000000) 3>&2 2>&1 1>&3 | \
             grep --max-count=1 --extended-regexp --color=always \
             'test result:.*finished in'
 
@@ -1205,7 +1207,7 @@ jobs:
             sudo docker logs \
             --tail all \
             ${{ inputs.test_id }} | \
-            tee --output-error=exit /dev/stderr | \
+            (tee --output-error=exit /dev/stderr | tail -c 1000000) 3>&2 2>&1 1>&3 | \
             grep --max-count=1 --extended-regexp --color=always \
             "test result: .*ok.* [1-9][0-9]* passed.*finished in"; \
             EXIT_STATUS=$( \
@@ -1313,9 +1315,10 @@ jobs:
           echo "UPDATE_SUFFIX=$UPDATE_SUFFIX" >> $GITHUB_ENV
           echo "TIME_SUFFIX=$TIME_SUFFIX" >> $GITHUB_ENV
 
-      # Get the sync height from the test logs, which is later used as part of the
-      # disk description and labels.
-      - name: Get sync height from logs
+      # Get the last few test log lines, so we can find the sync height.
+      #
+      # Puts the logs in the `stdout` output, limiting the number of log lines and bytes.
+      - name: Get final test logs
         id: get-sync-height
         uses: google-github-actions/ssh-compute@v0.1.2
         with:
@@ -1323,8 +1326,11 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            sudo docker logs ${{ inputs.test_id }} --tail 200
+            sudo docker logs ${{ inputs.test_id }} --tail 200 | tail -c 1000000
 
+      # Get the sync height from the test logs, which is later used as part of the
+      # disk description and labels.
+      #
       # The regex used to grep the sync height is provided by ${{ inputs.height_grep_text }},
       # this allows to dynamically change the height as needed by different situations or
       # based on the logs output from different tests.
