@@ -122,7 +122,9 @@ pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 ///
 /// If this timeout is set too low, the syncer will sometimes get stuck in a
 /// failure loop.
-pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
+///
+/// We set the timeout so that it requires under 1 Mbps bandwidth for a full 2 MB block.
+pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Controls how long we wait for a block verify request to complete.
 ///
@@ -151,8 +153,9 @@ pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
 /// If this timeout is set too low, the syncer will sometimes get stuck in a
 /// failure loop.
 ///
-/// TODO: reduce to `6 * 60`, after we implement orchard batching?
-pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// We've observed spurious 15 minute timeouts when a lot of blocks are being committed to
+/// the state, so we allow double that time here.
+pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
