@@ -103,10 +103,21 @@ impl StartCmd {
         info!(?config);
 
         info!("initializing node state");
-        info!("opening database, this may take a couple minutes");
+        let (_, max_checkpoint_height) = zebra_consensus::chain::init_checkpoint_list(
+            config.consensus.clone(),
+            config.network.network,
+        );
+
+        info!("opening database, this may take a few minutes");
 
         let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
-            zebra_state::spawn_init(config.state.clone(), config.network.network).await?;
+            zebra_state::spawn_init(
+                config.state.clone(),
+                config.network.network,
+                max_checkpoint_height,
+                config.sync.checkpoint_verify_concurrency_limit,
+            )
+            .await?;
 
         let state = ServiceBuilder::new()
             .buffer(Self::state_buffer_bound())

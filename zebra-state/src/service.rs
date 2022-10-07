@@ -289,12 +289,18 @@ impl Drop for ReadStateService {
 impl StateService {
     const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
-    /// Create a new read-write state service.
+    /// Creates a new state service for the state `config` and `network`.
+    ///
+    /// Uses the `max_checkpoint_height` and `checkpoint_verify_concurrency_limit`
+    /// to work out when it is near the final checkpoint.
+    ///
     /// Returns the read-write and read-only state services,
     /// and read-only watch channels for its best chain tip.
     pub fn new(
         config: Config,
         network: Network,
+        max_checkpoint_height: block::Height,
+        checkpoint_verify_concurrency_limit: usize,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         let timer = CodeTimer::start();
 
@@ -347,6 +353,11 @@ impl StateService {
             non_finalized_state_receiver,
         );
 
+        let full_verifier_utxo_lookahead = max_checkpoint_height
+            - i32::try_from(checkpoint_verify_concurrency_limit).expect("fits in i32");
+        let full_verifier_utxo_lookahead =
+            full_verifier_utxo_lookahead.expect("unexpected negative height");
+
         let queued_non_finalized_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
@@ -354,7 +365,7 @@ impl StateService {
 
         let state = Self {
             network,
-            full_verifier_utxo_lookahead: block::Height(1805214 - 1200),
+            full_verifier_utxo_lookahead,
             queued_non_finalized_blocks,
             queued_finalized_blocks: HashMap::new(),
             non_finalized_block_write_sender: Some(non_finalized_block_write_sender),
@@ -1504,6 +1515,9 @@ impl Service<ReadRequest> for ReadStateService {
 ///
 /// Each `network` has its own separate on-disk database.
 ///
+/// The state uses the `max_checkpoint_height` and `checkpoint_verify_concurrency_limit`
+/// to work out when it is near the final checkpoint.
+///
 /// To share access to the state, wrap the returned service in a `Buffer`,
 /// or clone the returned [`ReadStateService`].
 ///
@@ -1513,6 +1527,8 @@ impl Service<ReadRequest> for ReadStateService {
 pub fn init(
     config: Config,
     network: Network,
+    max_checkpoint_height: block::Height,
+    checkpoint_verify_concurrency_limit: usize,
 ) -> (
     BoxService<Request, Response, BoxError>,
     ReadStateService,
@@ -1520,7 +1536,12 @@ pub fn init(
     ChainTipChange,
 ) {
     let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
-        StateService::new(config, network);
+        StateService::new(
+            config,
+            network,
+            max_checkpoint_height,
+            checkpoint_verify_concurrency_limit,
+        );
 
     (
         BoxService::new(state_service),
@@ -1536,13 +1557,22 @@ pub fn init(
 pub fn spawn_init(
     config: Config,
     network: Network,
+    max_checkpoint_height: block::Height,
+    checkpoint_verify_concurrency_limit: usize,
 ) -> tokio::task::JoinHandle<(
     BoxService<Request, Response, BoxError>,
     ReadStateService,
     LatestChainTip,
     ChainTipChange,
 )> {
-    tokio::task::spawn_blocking(move || init(config, network))
+    tokio::task::spawn_blocking(move || {
+        init(
+            config,
+            network,
+            max_checkpoint_height,
+            checkpoint_verify_concurrency_limit,
+        )
+    })
 }
 
 /// Returns a [`StateService`] with an ephemeral [`Config`] and a buffer with a single slot.
@@ -1552,7 +1582,10 @@ pub fn spawn_init(
 /// See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
 pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
-    let (state_service, _, _, _) = StateService::new(Config::ephemeral(), network);
+    // TODO: pass max_checkpoint_height and checkpoint_verify_concurrency limit
+    //       if we ever need to test final checkpoint sent UTXO queries
+    let (state_service, _, _, _) =
+        StateService::new(Config::ephemeral(), network, block::Height::MAX, 0);
 
     Buffer::new(BoxService::new(state_service), 1)
 }
@@ -1570,8 +1603,10 @@ pub fn init_test_services(
     LatestChainTip,
     ChainTipChange,
 ) {
+    // TODO: pass max_checkpoint_height and checkpoint_verify_concurrency limit
+    //       if we ever need to test final checkpoint sent UTXO queries
     let (state_service, read_state_service, latest_chain_tip, chain_tip_change) =
-        StateService::new(Config::ephemeral(), network);
+        StateService::new(Config::ephemeral(), network, block::Height::MAX, 0);
 
     let state_service = Buffer::new(BoxService::new(state_service), 1);
 
