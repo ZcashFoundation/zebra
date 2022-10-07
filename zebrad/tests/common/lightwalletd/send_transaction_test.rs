@@ -26,7 +26,7 @@ use tower::{Service, ServiceExt};
 use zebra_chain::{
     block,
     chain_tip::ChainTip,
-    parameters::Network,
+    parameters::Network::{self, *},
     serialization::ZcashSerialize,
     transaction::{self, Transaction},
 };
@@ -36,12 +36,11 @@ use zebrad::components::mempool::downloads::MAX_INBOUND_CONCURRENCY;
 
 use crate::common::{
     cached_state::{load_tip_height_from_state_directory, start_state_service_with_cache_dir},
-    launch::spawn_zebrad_for_rpc_without_initial_peers,
+    launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
     lightwalletd::{
-        wallet_grpc::{
-            self, connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Empty, Exclude,
-        },
-        zebra_skip_lightwalletd_tests,
+        can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
+        sync::wait_for_zebrad_and_lightwalletd_sync,
+        wallet_grpc::{self, connect_to_lightwalletd, Empty, Exclude},
         LightwalletdTestType::*,
     },
     sync::copy_state_and_perform_full_sync,
@@ -65,38 +64,32 @@ fn max_sent_transactions() -> usize {
 pub async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    if zebra_test::net::zebra_skip_network_tests() {
-        return Ok(());
-    }
-
-    // Skip the test unless the user specifically asked for it
-    if zebra_skip_lightwalletd_tests() {
-        return Ok(());
-    }
-
     // We want a zebra state dir and a lightwalletd data dir in place,
     // so `UpdateCachedState` can be used as our test type
     let test_type = UpdateCachedState;
+    let test_name = "send_transaction_test";
+    let network = Mainnet;
 
-    let zebrad_state_path = test_type.zebrad_state_path("send_transaction_tests".to_string());
+    // Skip the test unless the user specifically asked for it
+    if !can_spawn_zebrad_for_rpc(test_name, test_type) {
+        return Ok(());
+    }
+
+    if test_type.launches_lightwalletd() && !can_spawn_lightwalletd_for_rpc(test_name, test_type) {
+        tracing::info!("skipping test due to missing lightwalletd network or cached state");
+        return Ok(());
+    }
+
+    let zebrad_state_path = test_type.zebrad_state_path(test_name);
     let zebrad_state_path = match zebrad_state_path {
         Some(zebrad_state_path) => zebrad_state_path,
         None => return Ok(()),
     };
 
-    let lightwalletd_state_path =
-        test_type.lightwalletd_state_path("send_transaction_tests".to_string());
-    if lightwalletd_state_path.is_none() {
-        return Ok(());
-    }
-
-    let network = Network::Mainnet;
-
     tracing::info!(
         ?network,
         ?test_type,
         ?zebrad_state_path,
-        ?lightwalletd_state_path,
         "running gRPC send transaction test using lightwalletd & zebrad",
     );
 
@@ -106,39 +99,56 @@ pub async fn run() -> Result<()> {
     tracing::info!(
         transaction_count = ?transactions.len(),
         partial_sync_path = ?zebrad_state_path,
-        "got transactions to send",
+        "got transactions to send, spawning isolated zebrad...",
     );
 
-    // TODO: change debug_skip_parameter_preload to true if we do the mempool test in the wallet gRPC test
-    let (mut zebrad, zebra_rpc_address) = spawn_zebrad_for_rpc_without_initial_peers(
-        Network::Mainnet,
-        zebrad_state_path,
-        test_type,
-        false,
-    )?;
+    // We run these gRPC tests without a network connection.
+    let use_internet_connection = false;
+
+    // Start zebrad with no peers, we want to send transactions without blocks coming in. If `wallet_grpc_test`
+    // runs before this test (as it does in `lightwalletd_test_suite`), then we are the most up to date with tip we can.
+    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
+        spawn_zebrad_for_rpc(network, test_name, test_type, use_internet_connection)?
+    {
+        zebrad_and_address
+    } else {
+        // Skip the test, we don't have the required cached state
+        return Ok(());
+    };
+
+    let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
+
+    tracing::info!(
+        ?test_type,
+        ?zebra_rpc_address,
+        "spawned isolated zebrad with shorter chain, waiting for zebrad to open its RPC port..."
+    );
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", zebra_rpc_address))?;
 
     tracing::info!(
         ?zebra_rpc_address,
-        "spawned disconnected zebrad with shorter chain, waiting for mempool activation...",
+        "zebrad opened its RPC port, spawning lightwalletd...",
     );
 
-    let (_lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(
-        zebra_rpc_address,
-        lightwalletd_state_path,
-        test_type,
-        true,
-    )?;
+    let (lightwalletd, lightwalletd_rpc_port) =
+        spawn_lightwalletd_for_rpc(network, test_name, test_type, zebra_rpc_address)?
+            .expect("already checked cached state and network requirements");
 
     tracing::info!(
         ?lightwalletd_rpc_port,
-        "spawned lightwalletd connected to zebrad, waiting for zebrad mempool activation...",
+        "spawned lightwalletd connected to zebrad, waiting for them both to sync...",
     );
 
-    zebrad.expect_stdout_line_matches("activating mempool")?;
-
-    // TODO: check that lightwalletd is at the tip using gRPC (#4894)
-    //
-    // If this takes a long time, we might need to check zebrad logs for failures in a separate thread.
+    let (_lightwalletd, _zebrad) = wait_for_zebrad_and_lightwalletd_sync(
+        lightwalletd,
+        lightwalletd_rpc_port,
+        zebrad,
+        zebra_rpc_address,
+        test_type,
+        // We want to send transactions to the mempool, but we aren't syncing with the network
+        true,
+        use_internet_connection,
+    )?;
 
     tracing::info!(
         ?lightwalletd_rpc_port,
