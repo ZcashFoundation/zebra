@@ -61,7 +61,7 @@ pub(crate) fn validate_and_commit_non_finalized(
 /// # Panics
 ///
 /// If the `non_finalized_state` is empty.
-#[instrument(level = "debug", skip(chain_tip_sender))]
+#[instrument(level = "debug", skip(chain_tip_sender, non_finalized_state_sender))]
 fn update_latest_chain_channels(
     non_finalized_state: &NonFinalizedState,
     chain_tip_sender: &mut ChainTipSender,
@@ -94,7 +94,8 @@ fn update_latest_chain_channels(
     finalized_block_write_receiver,
     non_finalized_block_write_receiver,
     invalid_block_reset_sender,
-    chain_tip_sender
+    chain_tip_sender,
+    non_finalized_state_sender,
 ))]
 pub fn write_blocks_from_channels(
     mut finalized_block_write_receiver: UnboundedReceiver<QueuedFinalized>,

@@ -25,7 +25,7 @@ use zebra_chain::{block, parameters::Network};
 use crate::{
     request::FinalizedWithTrees,
     service::{check, QueuedFinalized},
-    BoxError, Config, FinalizedBlock,
+    BoxError, CloneError, Config, FinalizedBlock,
 };
 
 mod disk_db;
@@ -171,15 +171,13 @@ impl FinalizedState {
             );
         };
 
-        // Some io errors can't be cloned, so we format them instead.
-        let owned_result = result
-            .as_ref()
-            .map(|_hash| finalized)
-            .map_err(|error| format!("{:?}", error).into());
+        // Make the error cloneable, so we can send it to the block verify future,
+        // and the block write task.
+        let result = result.map_err(CloneError::from);
 
-        let _ = rsp_tx.send(result);
+        let _ = rsp_tx.send(result.clone().map_err(BoxError::from));
 
-        owned_result
+        result.map(|_hash| finalized).map_err(BoxError::from)
     }
 
     /// Immediately commit a `finalized` block to the finalized state.
