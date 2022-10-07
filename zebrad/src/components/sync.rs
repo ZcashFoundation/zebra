@@ -81,10 +81,8 @@ pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize = zebra_consensus::MAX_CHECKPO
 /// The default for the user-specified lookahead limit.
 ///
 /// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
-///
-/// TODO: increase to `MAX_CHECKPOINT_HEIGHT_GAP * 5`, after we implement orchard batching
 pub const DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT: usize =
-    zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 3;
+    zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 
 /// A lower bound on the user-specified concurrency limit.
 ///
