@@ -104,6 +104,13 @@ pub(crate) struct StateService {
     /// The configured Zcash network.
     network: Network,
 
+    /// The height that we start storing UTXOs from finalized blocks.
+    ///
+    /// This height should be lower than the last few checkpoints,
+    /// so the full verifier can verify UTXO spends from those blocks,
+    /// even if they haven't been committed to the finalized state yet.
+    full_verifier_utxo_lookahead: block::Height,
+
     // Queued Blocks
     //
     /// Queued blocks for the [`NonFinalizedState`] that arrived out of order.
@@ -347,6 +354,7 @@ impl StateService {
 
         let state = Self {
             network,
+            full_verifier_utxo_lookahead: block::Height(1805214 - 1200),
             queued_non_finalized_blocks,
             queued_finalized_blocks: HashMap::new(),
             non_finalized_block_write_sender: Some(non_finalized_block_write_sender),
@@ -411,6 +419,13 @@ impl StateService {
 
         let queued_prev_hash = finalized.block.header.previous_block_hash;
         let queued_height = finalized.height;
+
+        // If we're close to the final checkpoint, make the block's UTXOs available for
+        // full verification of non-finalized blocks, even when it is in the channel.
+        if self.is_close_to_final_checkpoint(queued_height) {
+            self.sent_non_finalized_block_hashes
+                .add_finalized(&finalized)
+        }
 
         let (rsp_tx, rsp_rx) = oneshot::channel();
         let queued = (finalized, rsp_tx);
@@ -662,6 +677,17 @@ impl StateService {
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
         self.sent_non_finalized_block_hashes.contains(hash)
             || &self.read_service.db.finalized_tip_hash() == hash
+    }
+
+    /// Returns `true` if `queued_height` is near the final checkpoint.
+    ///
+    /// The non-finalized block verifier needs access to UTXOs from finalized blocks
+    /// near the final checkpoint, so that it can verify blocks that spend those UTXOs.
+    ///
+    /// If it doesn't have the required UTXOs, some blocks will time out,
+    /// but succeed after a syncer restart.
+    fn is_close_to_final_checkpoint(&self, queued_height: block::Height) -> bool {
+        queued_height >= self.full_verifier_utxo_lookahead
     }
 
     /// Sends all queued blocks whose parents have recently arrived starting from `new_parent`
