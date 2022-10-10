@@ -147,6 +147,7 @@ jobs:
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
+          --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
           sleep 60
@@ -368,6 +369,7 @@ jobs:
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
+          --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
           sleep 60
