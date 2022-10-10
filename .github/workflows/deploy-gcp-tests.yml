@@ -169,8 +169,6 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            echo 'sudo permissions:'
-            sudo cat /etc/sudoers
             ps auxwww | grep sshd
             echo
             sudo grep MaxStartups /etc/ssh/sshd_config
@@ -440,8 +438,6 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            echo 'sudo permissions:'
-            sudo cat /etc/sudoers
             ps auxwww | grep sshd
             echo
             sudo grep MaxStartups /etc/ssh/sshd_config
