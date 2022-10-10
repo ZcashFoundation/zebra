@@ -169,12 +169,15 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
+            echo 'sudo permissions:'
+            sudo cat /etc/sudoers
             ps auxwww | grep sshd
             echo
             sudo grep MaxStartups /etc/ssh/sshd_config
             echo 'Original config:'
             sudo cat /etc/ssh/sshd_config
             echo
+            echo 'Modifying config:'
             echo 'MaxStartups 500' | sudo tee --append /etc/ssh/sshd_config \
             || \
             (echo "updating instance sshd config failed: failing test"; exit 1)
@@ -182,7 +185,7 @@ jobs:
             echo 'Modified config:'
             sudo cat /etc/ssh/sshd_config
             echo
-            sudo /etc/init.d/ssh reload
+            sudo sh /etc/init.d/ssh reload
             echo
             ps auxwww | grep sshd
 
@@ -437,12 +440,15 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
+            echo 'sudo permissions:'
+            sudo cat /etc/sudoers
             ps auxwww | grep sshd
             echo
             sudo grep MaxStartups /etc/ssh/sshd_config
             echo 'Original config:'
             sudo cat /etc/ssh/sshd_config
             echo
+            echo 'Modifying config:'
             echo 'MaxStartups 500' | sudo tee --append /etc/ssh/sshd_config \
             || \
             (echo "updating instance sshd config failed: failing test"; exit 1)
@@ -450,7 +456,7 @@ jobs:
             echo 'Modified config:'
             sudo cat /etc/ssh/sshd_config
             echo
-            sudo /etc/init.d/ssh reload
+            sudo sh /etc/init.d/ssh reload
             echo
             ps auxwww | grep sshd
 
