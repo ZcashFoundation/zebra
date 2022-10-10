@@ -172,13 +172,13 @@ jobs:
             ps auxwww | grep sshd
             sudo grep MaxStartups /etc/ssh/sshd_config
             sudo cat /etc/ssh/sshd_config
-            sudo sed --in-place=.bak 's/MaxStartups .*/MaxStartups 500/g' /etc/ssh/sshd_config \
+            echo 'MaxStartups 500' | sudo tee --append /etc/ssh/sshd_config \
             || \
             (echo "updating instance sshd config failed: failing test"; exit 1)
             sudo grep MaxStartups /etc/ssh/sshd_config
             sudo cat /etc/ssh/sshd_config
-            !sudo killall --user root -HUP sshd \
-            || \
+            sudo killall --user root -HUP sshd \
+            && \
             (echo "activating new sshd config failed: failing test"; exit 1)
             ps auxwww | grep sshd
 
@@ -439,13 +439,13 @@ jobs:
             ps auxwww | grep sshd
             sudo grep MaxStartups /etc/ssh/sshd_config
             sudo cat /etc/ssh/sshd_config
-            sudo sed --in-place=.bak 's/MaxStartups .*/MaxStartups 500/g' /etc/ssh/sshd_config \
+            echo 'MaxStartups 500' | sudo tee --append /etc/ssh/sshd_config \
             || \
             (echo "updating instance sshd config failed: failing test"; exit 1)
             sudo grep MaxStartups /etc/ssh/sshd_config
             sudo cat /etc/ssh/sshd_config
-            !sudo killall --user root -HUP sshd \
-            || \
+            sudo killall --user root -HUP sshd \
+            && \
             (echo "activating new sshd config failed: failing test"; exit 1)
             ps auxwww | grep sshd
 
