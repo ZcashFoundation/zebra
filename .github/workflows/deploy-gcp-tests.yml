@@ -170,16 +170,20 @@ jobs:
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
             ps auxwww | grep sshd
+            echo
             sudo grep MaxStartups /etc/ssh/sshd_config
+            echo 'Original config:'
             sudo cat /etc/ssh/sshd_config
+            echo
             echo 'MaxStartups 500' | sudo tee --append /etc/ssh/sshd_config \
             || \
             (echo "updating instance sshd config failed: failing test"; exit 1)
             sudo grep MaxStartups /etc/ssh/sshd_config
+            echo 'Modified config:'
             sudo cat /etc/ssh/sshd_config
-            sudo killall --user root -HUP sshd \
-            && \
-            (echo "activating new sshd config failed: failing test"; exit 1)
+            echo
+            sudo /etc/init.d/ssh reload
+            echo
             ps auxwww | grep sshd
 
       # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
@@ -425,9 +429,6 @@ jobs:
       #
       # SSH into the just created VM, modify the sshd MaxStartups connection option, and restart sshd.
       # Restarting sshd will terminate the SSH connection.
-      #
-      # TODO: adjust the config file in the instance Docker image, before the instance starts
-      #       (Note: the instance Docker image is different from the test Docker image)
       - name: Fix sshd on ${{ inputs.test_id }} instance
         id: compute-ssh-sshd
         uses: google-github-actions/ssh-compute@v0.1.2
@@ -437,16 +438,20 @@ jobs:
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
             ps auxwww | grep sshd
+            echo
             sudo grep MaxStartups /etc/ssh/sshd_config
+            echo 'Original config:'
             sudo cat /etc/ssh/sshd_config
+            echo
             echo 'MaxStartups 500' | sudo tee --append /etc/ssh/sshd_config \
             || \
             (echo "updating instance sshd config failed: failing test"; exit 1)
             sudo grep MaxStartups /etc/ssh/sshd_config
+            echo 'Modified config:'
             sudo cat /etc/ssh/sshd_config
-            sudo killall --user root -HUP sshd \
-            && \
-            (echo "activating new sshd config failed: failing test"; exit 1)
+            echo
+            sudo /etc/init.d/ssh reload
+            echo
             ps auxwww | grep sshd
 
       # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
