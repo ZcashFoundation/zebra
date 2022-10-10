@@ -167,7 +167,7 @@ jobs:
           "\
           sudo mkfs.ext4 -v /dev/sdb \
           && \
-          docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
+          sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
 
@@ -219,7 +219,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          docker run \
+          sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
@@ -393,7 +393,7 @@ jobs:
           && \
           sudo resize2fs -p /dev/sdb \
           && \
-          docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
+          sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
           ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
           "
 
@@ -437,7 +437,7 @@ jobs:
       # Each test runs one of the "Launch test" steps, and skips the other.
       #
       # SSH into the just created VM, and create a Docker container to run the incoming test
-      # from ${{ inputs.test_id }}, then mount the docker volume created in the previous job.
+      # from ${{ inputs.test_id }}, then mount the sudo docker volume created in the previous job.
       #
       # The disk mounted in the VM is located at /dev/sdb, we mount the root `/` of this disk to the docker
       # container in one path:
@@ -465,7 +465,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          docker run \
+          sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
@@ -478,7 +478,7 @@ jobs:
       # Each test runs one of the "Launch test" steps, and skips the other.
       #
       # SSH into the just created VM, and create a Docker container to run the incoming test
-      # from ${{ inputs.test_id }}, then mount the docker volume created in the previous job.
+      # from ${{ inputs.test_id }}, then mount the sudo docker volume created in the previous job.
       #
       # In this step we're using the same disk for simplicity, as mounting multiple disks to the
       # VM and to the container might require more steps in this workflow, and additional
@@ -515,7 +515,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          docker run \
+          sudo docker run \
           --name ${{ inputs.test_id }} \
           --tty \
           --detach \
@@ -582,7 +582,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          docker logs \
+          sudo docker logs \
           --tail all \
           --follow \
           ${{ inputs.test_id }} | \
@@ -644,7 +644,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          docker logs \
+          sudo docker logs \
           --tail all \
           --follow \
           ${{ inputs.test_id }} | \
@@ -703,7 +703,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          docker logs \
+          sudo docker logs \
           --tail all \
           --follow \
           ${{ inputs.test_id }} | \
@@ -764,7 +764,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          docker logs \
+          sudo docker logs \
           --tail all \
           --follow \
           ${{ inputs.test_id }} | \
@@ -827,7 +827,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          docker logs \
+          sudo docker logs \
           --tail all \
           --follow \
           ${{ inputs.test_id }} | \
@@ -890,7 +890,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          docker logs \
+          sudo docker logs \
           --tail all \
           --follow \
           ${{ inputs.test_id }} | \
@@ -954,7 +954,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          docker logs \
+          sudo docker logs \
           --tail all \
           --follow \
           ${{ inputs.test_id }} | \
@@ -1016,7 +1016,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          docker logs \
+          sudo docker logs \
           --tail ${{ env.EXTRA_LOG_LINES }} \
           --follow \
           ${{ inputs.test_id }} | \
@@ -1074,7 +1074,7 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command \
           "\
-          docker logs \
+          sudo docker logs \
           --tail ${{ env.EXTRA_LOG_LINES }} \
           --follow \
           ${{ inputs.test_id }} | \
@@ -1143,18 +1143,18 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
           set -e;
-          docker logs \
+          sudo docker logs \
           --tail all \
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
           "test result: .*ok.* [1-9][0-9]* passed.*finished in"; \
           EXIT_STATUS=$( \
-          docker wait ${{ inputs.test_id }} || \
-          docker inspect --format "{{.State.ExitCode}}" ${{ inputs.test_id }} || \
+          sudo docker wait ${{ inputs.test_id }} || \
+          sudo docker inspect --format "{{.State.ExitCode}}" ${{ inputs.test_id }} || \
           echo "missing container, or missing exit status for container" \
           ); \
-          echo "docker exit status: $EXIT_STATUS"; \
+          echo "sudo docker exit status: $EXIT_STATUS"; \
           exit "$EXIT_STATUS" \
           '
 
