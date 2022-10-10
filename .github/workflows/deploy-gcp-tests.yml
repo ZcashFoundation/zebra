@@ -182,6 +182,19 @@ jobs:
             (echo "activating new sshd config failed: failing test"; exit 1)
             ps auxwww | grep sshd
 
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show sshd ${{ inputs.test_id }} adjustment logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
+        run: |
+          sshd adjustment stdout:
+          ${{ steps.compute-ssh-sshd.outputs.stdout }}
+          
+          sshd adjustment stderr:
+          ${{ steps.compute-ssh-sshd.outputs.stderr }}
+
       # Create a docker volume with the new disk we just created.
       #
       # SSH into the just created VM, and create a docker volume with the newly created disk.
@@ -198,6 +211,19 @@ jobs:
             && \
             sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
             ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}
+
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show docker ${{ inputs.test_id }} volume logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
+        run: |
+          Docker volume stdout:
+          ${{ steps.compute-ssh.outputs.stdout }}
+          
+          Docker volume stderr:
+          ${{ steps.compute-ssh.outputs.stderr }}
 
   # launch the test, if it doesn't use any cached state
   launch-without-cached-state:
@@ -423,6 +449,19 @@ jobs:
             (echo "activating new sshd config failed: failing test"; exit 1)
             ps auxwww | grep sshd
 
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show sshd ${{ inputs.test_id }} adjustment logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
+        run: |
+          sshd adjustment stdout:
+          ${{ steps.compute-ssh-sshd.outputs.stdout }}
+          
+          sshd adjustment stderr:
+          ${{ steps.compute-ssh-sshd.outputs.stderr }}
+
       # Create a docker volume with the selected cached state.
       #
       # SSH into the just created VM, expand the partition and filesystem to fill the entire disk,
@@ -444,6 +483,20 @@ jobs:
             && \
             sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
             ${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}
+
+      # The ssh-compute action doesn't show the SSH output, so that needs a separate step.
+      - name: Show docker ${{ inputs.test_id }} volume logs
+        # We always want to show the logs, even if the test failed or was cancelled
+        if: ${{ always() }}
+        # Ignore shell metacharacters like ' and $
+        shell: cat {0}
+        run: |
+          Docker volume stdout:
+          ${{ steps.compute-ssh.outputs.stdout }}
+          
+          Docker volume stderr:
+          ${{ steps.compute-ssh.outputs.stderr }}
+
 
   # launch the test, if it uses cached state
   launch-with-cached-state:
