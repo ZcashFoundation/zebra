@@ -156,8 +156,7 @@ jobs:
 
       # Adjust sshd config on the newly created VM, to avoid connection errors.
       #
-      # SSH into the just created VM, modify the sshd MaxStartups connection option, and restart sshd.
-      # Restarting sshd will terminate the SSH connection.
+      # SSH into the just created VM, modify the sshd MaxStartups connection option, and reload the sshd config.
       #
       # TODO: adjust the config file in the instance Docker image, before the instance starts
       #       (Note: the instance Docker image is different from the test Docker image)
@@ -211,7 +210,6 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            ps auxwww | grep sshd
             sudo mkfs.ext4 -v /dev/sdb \
             && \
             sudo docker volume create --driver local --opt type=ext4 --opt device=/dev/sdb \
@@ -428,8 +426,7 @@ jobs:
 
       # Adjust sshd config on the newly created VM, to avoid connection errors.
       #
-      # SSH into the just created VM, modify the sshd MaxStartups connection option, and restart sshd.
-      # Restarting sshd will terminate the SSH connection.
+      # SSH into the just created VM, modify the sshd MaxStartups connection option, and reload the sshd config.
       - name: Fix sshd on ${{ inputs.test_id }} instance
         id: compute-ssh-sshd
         uses: google-github-actions/ssh-compute@v0.1.2
@@ -483,7 +480,6 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           command: |
-            ps auxwww | grep sshd
             sudo e2fsck -v -f -p /dev/sdb \
             && \
             sudo resize2fs -p /dev/sdb \
