@@ -2,7 +2,10 @@
 # Increase the Google Cloud instance sshd connection limit
 #
 # This script appends 'MaxStartups 500' to /etc/ssh/sshd_config allowing up to 500
-# unauthenticated connections to Google Cloud instances.
+# unauthenticated connections to Google Cloud instances
+#
+# It also adds 'ClientAliveCountMax 0' and 'TCPKeepAlive no' to avoid SSH timeout from
+# the server
 ps auxwww | grep sshd
 echo
 sudo grep MaxStartups /etc/ssh/sshd_config
@@ -11,6 +14,8 @@ sudo cat /etc/ssh/sshd_config
 echo
 echo 'Modifying config:'
 echo 'MaxStartups 500' | sudo tee --append /etc/ssh/sshd_config \
+echo 'TCPKeepAlive no' | sudo tee --append /etc/ssh/sshd_config \
+echo 'ClientAliveCountMax 0' | sudo tee --append /etc/ssh/sshd_config \
 || \
 (echo "updating instance sshd config failed: failing test"; exit 1)
 sudo grep MaxStartups /etc/ssh/sshd_config
