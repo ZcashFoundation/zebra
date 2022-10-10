@@ -177,7 +177,7 @@ jobs:
     if: ${{ needs.changed-files.outputs.workflows == 'true' }}
     steps:
       - uses: actions/checkout@v3.1.0
-      - uses: reviewdog/action-actionlint@v1.32.0
+      - uses: reviewdog/action-actionlint@v1.33.0
         with:
           level: warning
           fail_on_error: false
