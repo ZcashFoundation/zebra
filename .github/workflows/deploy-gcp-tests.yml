@@ -185,7 +185,7 @@ jobs:
             echo 'Modified config:'
             sudo cat /etc/ssh/sshd_config
             echo
-            sudo sh /etc/init.d/ssh reload
+            sudo systemctl reload sshd.service
             echo
             ps auxwww | grep sshd
 
@@ -456,7 +456,7 @@ jobs:
             echo 'Modified config:'
             sudo cat /etc/ssh/sshd_config
             echo
-            sudo sh /etc/init.d/ssh reload
+            sudo systemctl reload sshd.service
             echo
             ps auxwww | grep sshd
 
