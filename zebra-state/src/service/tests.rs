@@ -559,31 +559,12 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
 > {
     any::<Network>()
         .prop_flat_map(|network| {
-            // Select the test vector based on the network
-            let raw_blocks = match network {
-                Network::Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
-                Network::Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
-            };
-
-            // Transform the test vector's block bytes into a vector of `PreparedBlock`s.
-            let blocks: Vec<_> = raw_blocks
-                .iter()
-                .map(|(_height, &block_bytes)| {
-                    let mut block_reader: &[u8] = block_bytes;
-                    let mut block = Block::zcash_deserialize(&mut block_reader)
-                        .expect("Failed to deserialize block from test vector");
-
-                    let coinbase = transaction_v4_from_coinbase(&block.transactions[0]);
-                    block.transactions = vec![Arc::new(coinbase)];
-
-                    Arc::new(block).prepare()
-                })
-                .collect();
+            let prepared_blocks = empty_prepared_blocks(network);
 
             // Always finalize the genesis block
-            let finalized_blocks_count = 1..=blocks.len();
+            let finalized_blocks_count = 1..=prepared_blocks.len();
 
-            (Just(network), Just(blocks), finalized_blocks_count)
+            (Just(network), Just(prepared_blocks), finalized_blocks_count)
         })
         .prop_map(|(network, mut blocks, finalized_blocks_count)| {
             let non_finalized_blocks = blocks.split_off(finalized_blocks_count);
@@ -598,4 +579,27 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
                 non_finalized_blocks.into(),
             )
         })
+}
+
+fn empty_prepared_blocks(network: Network) -> Vec<PreparedBlock> {
+    // Select the test vector based on the network
+    let raw_blocks = match network {
+        Network::Mainnet => &*zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS,
+        Network::Testnet => &*zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS,
+    };
+
+    // Transform the test vector's block bytes into a vector of `PreparedBlock`s.
+    raw_blocks
+        .iter()
+        .map(|(_height, &block_bytes)| {
+            let mut block_reader: &[u8] = block_bytes;
+            let mut block = Block::zcash_deserialize(&mut block_reader)
+                .expect("Failed to deserialize block from test vector");
+
+            let coinbase = transaction_v4_from_coinbase(&block.transactions[0]);
+            block.transactions = vec![Arc::new(coinbase)];
+
+            Arc::new(block).prepare()
+        })
+        .collect()
 }
