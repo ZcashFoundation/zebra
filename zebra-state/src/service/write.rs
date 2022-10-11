@@ -14,7 +14,7 @@ use crate::{
         check,
         finalized_state::FinalizedState,
         non_finalized_state::NonFinalizedState,
-        queued_blocks::{QueuedFinalized, QueuedNonFinalized},
+        pending_blocks::{QueuedFinalized, QueuedNonFinalized},
         BoxError, ChainTipBlock, ChainTipSender, CloneError,
     },
     CommitBlockError, PreparedBlock,
