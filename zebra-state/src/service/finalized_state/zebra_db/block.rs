@@ -421,6 +421,14 @@ impl DiskWriteBatch {
         note_commitment_trees: NoteCommitmentTrees,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
+        // Return a fake error for some tests.
+        #[cfg(test)]
+        {
+            if finalized.height < Height(100) && finalized.hash == block::Hash([0; 32]) {
+                return Err("Fake test failure.".into());
+            }
+        }
+
         let FinalizedBlock {
             block,
             hash,
