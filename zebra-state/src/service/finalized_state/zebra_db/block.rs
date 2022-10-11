@@ -432,6 +432,10 @@ impl DiskWriteBatch {
         // Return a fake error for some tests.
         #[cfg(test)]
         {
+            // This condition is checked for every test, so we limit the set of
+            // blocks that could trigger the failure by height. This might
+            // prevent future tests from failing unexpectedly if they attempt to
+            // commit blocks with the zero hash.
             if finalized.height < Height(100) && finalized.hash == block::Hash([0; 32]) {
                 return Err("Fake test failure.".into());
             }
