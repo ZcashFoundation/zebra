@@ -557,7 +557,9 @@ fn state_handles_error_correctly() -> Result<()> {
 
 fn state_handles_error_correctly_for_network(network: Network) -> Result<()> {
     let _init_guard = zebra_test::init();
-    let (mut state_service, _, _, _) = StateService::new(Config::ephemeral(), network);
+    let (mut state_service, _, _, _) =
+        StateService::new(Config::ephemeral(), network, Height::MAX, 0);
+
     let finalized_empty_blocks: Vec<_> = empty_prepared_blocks(network)
         .into_iter()
         .map(|prepared_block| FinalizedBlock::from(prepared_block.block))
