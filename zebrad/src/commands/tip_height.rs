@@ -8,7 +8,11 @@ use std::path::PathBuf;
 use abscissa_core::{Command, Options, Runnable};
 use color_eyre::eyre::{eyre, Result};
 
-use zebra_chain::{block, chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{
+    block::{self, Height},
+    chain_tip::ChainTip,
+    parameters::Network,
+};
 use zebra_state::LatestChainTip;
 
 use crate::prelude::app_config;
@@ -56,8 +60,9 @@ impl TipHeightCmd {
             config.cache_dir = cache_dir;
         }
 
+        // UTXO verification isn't used here: we're not updating the state.
         let (_state_service, _read_state_service, latest_chain_tip, _chain_tip_change) =
-            zebra_state::init(config, self.network);
+            zebra_state::init(config, self.network, Height::MAX, 0);
 
         latest_chain_tip
     }
