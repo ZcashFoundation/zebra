@@ -157,6 +157,17 @@ pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
 /// the state, so we allow double that time here.
 pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
+/// A shorter timeout used for the first few blocks after the final checkpoint.
+///
+/// This is a workaround for bug #5125, where the first fully validated blocks
+/// after the final checkpoint fail with a timeout, due to a UTXO race condition.
+const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// The number of blocks after the final checkpoint that get the shorter timeout.
+///
+/// We've only seen this error on the first few blocks after the final checkpoint.
+const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT: i32 = 100;
+
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
 /// This delay should be long enough to:
@@ -388,6 +399,7 @@ where
                     checkpoint_verify_concurrency_limit,
                     full_verify_concurrency_limit,
                 ),
+                max_checkpoint_height,
             )),
             state,
             latest_chain_tip,
