@@ -704,27 +704,26 @@ impl StateService {
     fn send_ready_non_finalized_queued(&mut self, new_parent: block::Hash) {
         use tokio::sync::mpsc::error::SendError;
         if let Some(non_finalized_block_write_sender) = &self.non_finalized_block_write_sender {
-            for queued_children in self
+            for queued_child in self
                 .pending_non_finalized_blocks
                 .dequeue_children(new_parent)
+                .flatten()
             {
-                for queued_child in queued_children {
-                    let send_result = non_finalized_block_write_sender.send(queued_child);
+                let send_result = non_finalized_block_write_sender.send(queued_child);
 
-                    if let Err(SendError(queued)) = send_result {
-                        // If Zebra is shutting down, drop blocks and return an error.
-                        Self::send_non_finalized_block_error(
-                            queued,
-                            "block commit task exited. Is Zebra shutting down?",
-                        );
+                if let Err(SendError(queued)) = send_result {
+                    // If Zebra is shutting down, drop blocks and return an error.
+                    Self::send_non_finalized_block_error(
+                        queued,
+                        "block commit task exited. Is Zebra shutting down?",
+                    );
 
-                        self.clear_non_finalized_block_queue(
-                            "block commit task exited. Is Zebra shutting down?",
-                        );
+                    self.clear_non_finalized_block_queue(
+                        "block commit task exited. Is Zebra shutting down?",
+                    );
 
-                        return;
-                    };
-                }
+                    return;
+                };
             }
         };
     }
