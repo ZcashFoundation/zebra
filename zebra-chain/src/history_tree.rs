@@ -275,7 +275,7 @@ impl NonEmptyHistoryTree {
         // /\ /\ /\ /\ /\ /\ /\ 0
         //
         // We start by determining the altitude of the highest peak (A).
-        let mut alt = (32 - ((self.size + 1) as u32).leading_zeros() - 1) - 1;
+        let mut alt = (32 - (self.size + 1).leading_zeros() - 1) - 1;
 
         // We determine the position of the highest peak (A) by pretending it is the right
         // sibling in a tree, and its left-most leaf has position 0. Then the left sibling
