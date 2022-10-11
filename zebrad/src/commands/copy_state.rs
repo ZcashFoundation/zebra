@@ -111,13 +111,16 @@ impl CopyStateCmd {
         );
 
         let source_start_time = Instant::now();
+
+        // We're not verifying UTXOs here, so we don't need the maximum checkpoint height.
+        //
         // TODO: use ReadStateService for the source?
         let (
             mut source_state,
             _source_read_only_state_service,
             _source_latest_chain_tip,
             _source_chain_tip_change,
-        ) = old_zs::spawn_init(source_config.clone(), network).await?;
+        ) = old_zs::spawn_init(source_config.clone(), network, Height::MAX, 0).await?;
 
         let elapsed = source_start_time.elapsed();
         info!(?elapsed, "finished initializing source state service");
@@ -128,6 +131,8 @@ impl CopyStateCmd {
         );
 
         let target_start_time = Instant::now();
+        // We're not verifying UTXOs here, so we don't need the maximum checkpoint height.
+        //
         // TODO: call Options::PrepareForBulkLoad()
         // See "What's the fastest way to load data into RocksDB?" in
         // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
@@ -136,7 +141,7 @@ impl CopyStateCmd {
             _target_read_only_state_service,
             _target_latest_chain_tip,
             _target_chain_tip_change,
-        ) = new_zs::spawn_init(target_config.clone(), network).await?;
+        ) = new_zs::spawn_init(target_config.clone(), network, Height::MAX, 0).await?;
 
         let elapsed = target_start_time.elapsed();
         info!(?elapsed, "finished initializing target state service");

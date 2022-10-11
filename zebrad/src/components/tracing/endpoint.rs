@@ -37,7 +37,7 @@ async fn read_filter(req: Request<Body>) -> Result<String, String> {
 impl TracingEndpoint {
     /// Create the component.
     pub fn new(config: &ZebradConfig) -> Result<Self, FrameworkError> {
-        if !cfg!(feature = "filter-reload") {
+        if config.tracing.endpoint_addr.is_some() && !cfg!(feature = "filter-reload") {
             warn!(addr = ?config.tracing.endpoint_addr,
                   "unable to activate configured tracing filter endpoint: \
                    enable the 'filter-reload' feature when compiling zebrad",

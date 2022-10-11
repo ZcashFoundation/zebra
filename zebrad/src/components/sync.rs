@@ -39,6 +39,7 @@ mod tests;
 
 use downloads::{AlwaysHedge, Downloads};
 
+pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
 pub use progress::show_block_chain_progress;
 pub use recent_sync_lengths::RecentSyncLengths;
@@ -81,10 +82,8 @@ pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize = zebra_consensus::MAX_CHECKPO
 /// The default for the user-specified lookahead limit.
 ///
 /// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
-///
-/// TODO: increase to `MAX_CHECKPOINT_HEIGHT_GAP * 5`, after we implement orchard batching
 pub const DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT: usize =
-    zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 3;
+    zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
 
 /// A lower bound on the user-specified concurrency limit.
 ///
@@ -123,7 +122,9 @@ pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 ///
 /// If this timeout is set too low, the syncer will sometimes get stuck in a
 /// failure loop.
-pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
+///
+/// We set the timeout so that it requires under 1 Mbps bandwidth for a full 2 MB block.
+pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Controls how long we wait for a block verify request to complete.
 ///
@@ -152,8 +153,20 @@ pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15);
 /// If this timeout is set too low, the syncer will sometimes get stuck in a
 /// failure loop.
 ///
-/// TODO: reduce to `6 * 60`, after we implement orchard batching?
-pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// We've observed spurious 15 minute timeouts when a lot of blocks are being committed to
+/// the state, so we allow double that time here.
+pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+/// A shorter timeout used for the first few blocks after the final checkpoint.
+///
+/// This is a workaround for bug #5125, where the first fully validated blocks
+/// after the final checkpoint fail with a timeout, due to a UTXO race condition.
+const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// The number of blocks after the final checkpoint that get the shorter timeout.
+///
+/// We've only seen this error on the first few blocks after the final checkpoint.
+const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT: i32 = 100;
 
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
@@ -386,6 +399,7 @@ where
                     checkpoint_verify_concurrency_limit,
                     full_verify_concurrency_limit,
                 ),
+                max_checkpoint_height,
             )),
             state,
             latest_chain_tip,

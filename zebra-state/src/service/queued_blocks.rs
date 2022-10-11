@@ -1,7 +1,7 @@
 //! Queued blocks that are awaiting their parent block for verification.
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{hash_map::Drain, BTreeMap, HashMap, HashSet, VecDeque},
     mem,
 };
 
@@ -52,26 +52,26 @@ impl QueuedBlocks {
         let new_height = new.0.height;
         let parent_hash = new.0.block.header.previous_block_hash;
 
+        if self.blocks.contains_key(&new_hash) {
+            // Skip queueing the block and return early if the hash is not unique
+            return;
+        }
+
         // Track known UTXOs in queued blocks.
         for (outpoint, ordered_utxo) in new.0.new_outputs.iter() {
             self.known_utxos
                 .insert(*outpoint, ordered_utxo.utxo.clone());
         }
 
-        let replaced = self.blocks.insert(new_hash, new);
-        assert!(replaced.is_none(), "hashes must be unique");
-        let inserted = self
-            .by_height
+        self.blocks.insert(new_hash, new);
+        self.by_height
             .entry(new_height)
             .or_default()
             .insert(new_hash);
-        assert!(inserted, "hashes must be unique");
-        let inserted = self
-            .by_parent
+        self.by_parent
             .entry(parent_hash)
             .or_default()
             .insert(new_hash);
-        assert!(inserted, "hashes must be unique");
 
         tracing::trace!(%parent_hash, queued = %self.blocks.len(), "queued block");
         self.update_metrics();
@@ -195,5 +195,130 @@ impl QueuedBlocks {
     #[instrument(skip(self))]
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
         self.known_utxos.get(outpoint).cloned()
+    }
+
+    /// Clears known_utxos, by_parent, and by_height, then drains blocks.
+    /// Returns all key-value pairs of blocks as an iterator
+    pub fn drain(&mut self) -> Drain<'_, block::Hash, QueuedNonFinalized> {
+        self.known_utxos.clear();
+        self.known_utxos.shrink_to_fit();
+        self.by_parent.clear();
+        self.by_parent.shrink_to_fit();
+        self.by_height.clear();
+
+        self.blocks.drain()
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct SentHashes {
+    /// A list of previously sent block batches, each batch is in increasing height order.
+    /// We use this list to efficiently prune outdated hashes that are at or below the finalized tip.
+    bufs: Vec<VecDeque<(block::Hash, block::Height)>>,
+
+    /// The list of blocks sent in the current batch, in increasing height order.
+    curr_buf: VecDeque<(block::Hash, block::Height)>,
+
+    /// Stores a set of hashes that have been sent to the block write task but
+    /// may not be in the finalized state yet.
+    sent: HashMap<block::Hash, Vec<transparent::OutPoint>>,
+
+    /// Known UTXOs.
+    known_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+}
+
+impl SentHashes {
+    /// Stores the `block`'s hash, height, and UTXOs, so they can be used to check if a block or UTXO
+    /// is available in the state.
+    ///
+    /// Assumes that blocks are added in the order of their height between `finish_batch` calls
+    /// for efficient pruning.
+    pub fn add(&mut self, block: &PreparedBlock) {
+        // Track known UTXOs in sent blocks.
+        let outpoints = block
+            .new_outputs
+            .iter()
+            .map(|(outpoint, ordered_utxo)| {
+                self.known_utxos
+                    .insert(*outpoint, ordered_utxo.utxo.clone());
+                outpoint
+            })
+            .cloned()
+            .collect();
+
+        self.curr_buf.push_back((block.hash, block.height));
+        self.sent.insert(block.hash, outpoints);
+    }
+
+    /// Stores the finalized `block`'s hash, height, and UTXOs, so they can be used to check if a
+    /// block or UTXO is available in the state.
+    ///
+    /// Used for finalized blocks close to the final checkpoint, so non-finalized blocks can look up
+    /// their UTXOs.
+    ///
+    /// For more details see `add()`.
+    pub fn add_finalized(&mut self, block: &FinalizedBlock) {
+        // Track known UTXOs in sent blocks.
+        let outpoints = block
+            .new_outputs
+            .iter()
+            .map(|(outpoint, utxo)| {
+                self.known_utxos.insert(*outpoint, utxo.clone());
+                outpoint
+            })
+            .cloned()
+            .collect();
+
+        self.curr_buf.push_back((block.hash, block.height));
+        self.sent.insert(block.hash, outpoints);
+    }
+
+    /// Try to look up this UTXO in any sent block.
+    #[instrument(skip(self))]
+    pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
+        self.known_utxos.get(outpoint).cloned()
+    }
+
+    /// Finishes the current block batch, and stores it for efficient pruning.
+    pub fn finish_batch(&mut self) {
+        if !self.curr_buf.is_empty() {
+            self.bufs.push(std::mem::take(&mut self.curr_buf));
+        }
+    }
+
+    /// Prunes sent blocks at or below `height_bound`.
+    ///
+    /// Finishes the batch if `finish_batch()` hasn't been called already.
+    ///
+    /// Assumes that blocks will be added in order of their heights between each `finish_batch()` call,
+    /// so that blocks can be efficiently and reliably removed by height.
+    pub fn prune_by_height(&mut self, height_bound: block::Height) {
+        self.finish_batch();
+
+        // Iterates over each buf in `sent_bufs`, removing sent blocks until reaching
+        // the first block with a height above the `height_bound`.
+        self.bufs.retain_mut(|buf| {
+            while let Some((hash, height)) = buf.pop_front() {
+                if height > height_bound {
+                    buf.push_front((hash, height));
+                    return true;
+                } else if let Some(expired_outpoints) = self.sent.remove(&hash) {
+                    // TODO: only remove UTXOs if there are no queued blocks with that UTXO
+                    //       (known_utxos is best-effort, so this is ok for now)
+                    for outpoint in expired_outpoints.iter() {
+                        self.known_utxos.remove(outpoint);
+                    }
+                }
+            }
+
+            false
+        });
+
+        self.sent.shrink_to_fit();
+    }
+
+    /// Returns true if SentHashes contains the `hash`
+    pub fn contains(&self, hash: &block::Hash) -> bool {
+        self.sent.contains_key(hash)
     }
 }
