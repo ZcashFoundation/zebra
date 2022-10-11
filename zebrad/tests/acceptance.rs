@@ -126,7 +126,7 @@ use color_eyre::{
 };
 
 use zebra_chain::{
-    block,
+    block::{self, Height},
     parameters::Network::{self, *},
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
@@ -329,7 +329,9 @@ async fn db_init_outside_future_executor() -> Result<()> {
 
     let start = Instant::now();
 
-    let db_init_handle = zebra_state::spawn_init(config.state.clone(), config.network.network);
+    // This test doesn't need UTXOs to be verified efficiently, because it uses an empty state.
+    let db_init_handle =
+        zebra_state::spawn_init(config.state.clone(), config.network.network, Height::MAX, 0);
 
     // it's faster to panic if it takes longer than expected, since the executor
     // will wait indefinitely for blocking operation to finish once started
@@ -661,13 +663,16 @@ fn last_config_is_stored() -> Result<()> {
         fs::read_to_string(generated_config_path).expect("Should have been able to read the file");
 
     // We need to replace the cache dir path as stored configs has a dummy `cache_dir` string there.
-    let processed_generated_content = generated_content.replace(
-        zebra_state::Config::default()
-            .cache_dir
-            .to_str()
-            .expect("a valid cache dir"),
-        "cache_dir",
-    );
+    let processed_generated_content = generated_content
+        .replace(
+            zebra_state::Config::default()
+                .cache_dir
+                .to_str()
+                .expect("a valid cache dir"),
+            "cache_dir",
+        )
+        .trim()
+        .to_string();
 
     // Loop all the stored configs
     for config_file in configs_dir()
@@ -677,17 +682,23 @@ fn last_config_is_stored() -> Result<()> {
     {
         // Read stored config
         let stored_content = fs::read_to_string(config_file_full_path(config_file.path()))
-            .expect("Should have been able to read the file");
+            .expect("Should have been able to read the file")
+            .trim()
+            .to_string();
 
         // If any stored config is equal to the generated then we are good.
         if stored_content.eq(&processed_generated_content) {
             return Ok(());
         }
     }
+
     Err(eyre!(
         "latest zebrad config is not being tested for compatibility.\n\
-        Run `zebrad generate -o zebrad/tests/common/configs/<next-release-tag>.toml`\n\
-        and commit the latest config to Zebra's git repository"
+         Run:\n\
+         zebrad generate |\n\
+         sed \"s/cache_dir = '.*'/cache_dir = 'cache_dir'/\" >\n\
+         zebrad/tests/common/configs/<next-release-tag>.toml\n\
+         and commit the latest config to Zebra's git repository"
     ))
 }
 

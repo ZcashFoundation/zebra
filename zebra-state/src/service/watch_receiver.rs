@@ -82,15 +82,17 @@ where
         // Without this change, an eager reader can repeatedly block the channel writer.
         // This seems to happen easily in RPC & ReadStateService futures.
         // (For example, when lightwalletd syncs from Zebra, while Zebra syncs from peers.)
-        let cloned_data = {
-            let borrow_guard = self.receiver.borrow();
-            let cloned_data = borrow_guard.clone();
-            std::mem::drop(borrow_guard);
-
-            cloned_data
-        };
+        let cloned_data = self.cloned_watch_data();
 
         f(cloned_data)
+    }
+
+    /// Returns a clone of the watch data in the channel.
+    /// This helps avoid deadlocks.
+    ///
+    /// See `with_watch_data()` for details.
+    pub fn cloned_watch_data(&self) -> T {
+        self.receiver.borrow().clone()
     }
 
     /// Calls [`watch::Receiver::changed`] and returns the result.
