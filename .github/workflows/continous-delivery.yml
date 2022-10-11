@@ -118,7 +118,7 @@ jobs:
           gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --boot-disk-type=pd-ssd \
           --container-image ${{ env.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=200GB,type=pd-ssd \
+          --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=300GB,type=pd-ssd \
           --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
@@ -189,12 +189,12 @@ jobs:
       - name: Manual deploy of a single instance running zebrad
         run: |
           gcloud compute instances create-with-container "zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 200GB \
+          --boot-disk-size 300GB \
           --boot-disk-type=pd-ssd \
           --container-stdin \
           --container-tty \
           --container-image ${{ env.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=200GB,type=pd-ssd \
+          --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=300GB,type=pd-ssd \
           --container-mount-disk mount-path='/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --zone ${{ env.ZONE }} \
