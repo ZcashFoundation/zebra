@@ -13,7 +13,7 @@ use tokio::time::timeout;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
-    block::Block,
+    block::{Block, Height},
     fmt::{humantime_seconds, SummaryDebug},
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade},
@@ -201,8 +201,10 @@ pub async fn populated_state(
         .into_iter()
         .map(|block| Request::CommitFinalizedBlock(block.into()));
 
+    // TODO: write a test that checks the finalized to non-finalized transition with UTXOs,
+    //       and set max_checkpoint_height and checkpoint_verify_concurrency_limit correctly.
     let (state, read_state, latest_chain_tip, mut chain_tip_change) =
-        StateService::new(Config::ephemeral(), network);
+        StateService::new(Config::ephemeral(), network, Height::MAX, 0);
     let mut state = Buffer::new(BoxService::new(state), 1);
 
     let mut responses = FuturesUnordered::new();

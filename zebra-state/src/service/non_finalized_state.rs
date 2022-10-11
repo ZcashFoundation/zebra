@@ -322,6 +322,7 @@ impl NonFinalizedState {
 
     /// Returns `true` if `hash` is contained in the non-finalized portion of any
     /// known chain.
+    #[allow(dead_code)]
     pub fn any_chain_contains(&self, hash: &block::Hash) -> bool {
         self.chain_set
             .iter()
@@ -377,6 +378,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the tip of the best chain.
+    #[allow(dead_code)]
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
         let best_chain = self.best_chain()?;
         let height = best_chain.non_finalized_tip_height();
@@ -478,9 +480,8 @@ impl NonFinalizedState {
                             )
                             .transpose()
                     })
-                    .expect(
-                        "commit_block is only called with blocks that are ready to be committed",
-                    )?;
+                    .transpose()?
+                    .ok_or(ValidateContextError::NotReadyToBeCommitted)?;
 
                 Ok(Arc::new(fork_chain))
             }

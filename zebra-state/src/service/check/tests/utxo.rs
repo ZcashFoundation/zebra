@@ -16,8 +16,10 @@ use zebra_chain::{
 use crate::{
     arbitrary::Prepare,
     constants::MIN_TRANSPARENT_COINBASE_MATURITY,
-    service::check,
-    service::StateService,
+    service::{
+        check, finalized_state::FinalizedState, non_finalized_state::NonFinalizedState, read,
+        write::validate_and_commit_non_finalized,
+    },
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
     FinalizedBlock,
     ValidateContextError::{
@@ -170,40 +172,41 @@ proptest! {
             .transactions
             .extend([output_transaction.into(), spend_transaction.into()]);
 
-        let (mut state, _genesis) = new_state_with_mainnet_genesis();
-        let previous_mem = state.mem.clone();
+        let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
+        let previous_non_finalized_state = non_finalized_state.clone();
 
         // randomly choose to commit the block to the finalized or non-finalized state
         if use_finalized_state {
             let block1 = FinalizedBlock::from(Arc::new(block1));
-            let commit_result = state.disk.commit_finalized_direct(block1.clone().into(), "test");
+            let commit_result = finalized_state.commit_finalized_direct(block1.clone().into(), "test");
 
             // the block was committed
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
             prop_assert!(commit_result.is_ok());
 
             // the non-finalized state didn't change
-            prop_assert!(state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
             // the finalized state added then spent the UTXO
-            prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+            prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
             // the non-finalized state does not have the UTXO
-            prop_assert!(state.mem.any_utxo(&expected_outpoint).is_none());
+            prop_assert!(non_finalized_state.any_utxo(&expected_outpoint).is_none());
         } else {
             let block1 = Arc::new(block1).prepare();
-            let commit_result = state.validate_and_commit(block1.clone());
+            let commit_result = validate_and_commit_non_finalized(
+            &finalized_state,
+            &mut non_finalized_state,  block1.clone());
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
-            prop_assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
 
             // the block data is in the non-finalized state
-            prop_assert!(!state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(!non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
             // the non-finalized state has created and spent the UTXO
-            prop_assert_eq!(state.mem.chain_set.len(), 1);
-            let chain = state
-                .mem
+            prop_assert_eq!(non_finalized_state.chain_set.len(), 1);
+            let chain = non_finalized_state
                 .chain_set
                 .iter()
                 .next()
@@ -213,7 +216,7 @@ proptest! {
             prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
 
             // the finalized state does not have the UTXO
-            prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+            prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
         }
     }
 
@@ -239,9 +242,9 @@ proptest! {
             .expect("block should deserialize");
 
         let TestState {
-            mut state, block1, ..
+            mut finalized_state, mut non_finalized_state, block1, ..
         } = new_state_with_mainnet_transparent_data([], [], [output.0.clone()], use_finalized_state_output);
-        let previous_mem = state.mem.clone();
+        let previous_non_finalized_state = non_finalized_state.clone();
 
         let expected_outpoint = transparent::OutPoint {
             hash: block1.transactions[1].hash(),
@@ -262,32 +265,33 @@ proptest! {
 
         if use_finalized_state_spend {
             let block2 = FinalizedBlock::from(Arc::new(block2));
-            let commit_result = state.disk.commit_finalized_direct(block2.clone().into(), "test");
+            let commit_result = finalized_state.commit_finalized_direct(block2.clone().into(), "test");
 
             // the block was committed
-            prop_assert_eq!(Some((Height(2), block2.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(2), block2.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
             prop_assert!(commit_result.is_ok());
 
             // the non-finalized state didn't change
-            prop_assert!(state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
             // the finalized state has spent the UTXO
-            prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+            prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
         } else {
             let block2 = Arc::new(block2).prepare();
-            let commit_result = state.validate_and_commit(block2.clone());
+            let commit_result = validate_and_commit_non_finalized(
+            &finalized_state,
+            &mut non_finalized_state,  block2.clone());
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
-            prop_assert_eq!(Some((Height(2), block2.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(2), block2.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
 
             // the block data is in the non-finalized state
-            prop_assert!(!state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(!non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
             // the UTXO is spent
-            prop_assert_eq!(state.mem.chain_set.len(), 1);
-            let chain = state
-                .mem
+            prop_assert_eq!(non_finalized_state.chain_set.len(), 1);
+            let chain = non_finalized_state
                 .chain_set
                 .iter()
                 .next()
@@ -299,14 +303,14 @@ proptest! {
                 prop_assert!(!chain.created_utxos.contains_key(&expected_outpoint));
                 prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
                 // the finalized state has the UTXO, but it will get deleted on commit
-                prop_assert!(state.disk.utxo(&expected_outpoint).is_some());
+                prop_assert!(finalized_state.utxo(&expected_outpoint).is_some());
             } else {
                 // the chain has spent its own UTXO
                 prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
                 prop_assert!(chain.created_utxos.contains_key(&expected_outpoint));
                 prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
                 // the finalized state does not have the UTXO
-                prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+                prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
             }
         }
     }
@@ -348,11 +352,13 @@ proptest! {
             .transactions
             .extend([output_transaction.into(), spend_transaction.into()]);
 
-        let (mut state, genesis) = new_state_with_mainnet_genesis();
-        let previous_mem = state.mem.clone();
+            let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
+            let previous_non_finalized_state = non_finalized_state.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result = state.validate_and_commit(block1);
+        let commit_result = validate_and_commit_non_finalized(
+            &finalized_state,
+            &mut non_finalized_state,  block1);
 
         // the block was rejected
         prop_assert_eq!(
@@ -363,13 +369,13 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
+        prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
 
         // the non-finalized state did not change
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
         // the finalized state does not have the UTXO
-        prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+        prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
     }
 
     /// Make sure a duplicate transparent spend, by two inputs in the same transaction,
@@ -389,9 +395,9 @@ proptest! {
             .expect("block should deserialize");
 
         let TestState {
-            mut state, block1, ..
+            finalized_state, mut non_finalized_state, block1, ..
         } = new_state_with_mainnet_transparent_data([], [], [output.0.clone()], use_finalized_state_output);
-        let previous_mem = state.mem.clone();
+        let previous_non_finalized_state = non_finalized_state.clone();
 
         let expected_outpoint = transparent::OutPoint {
             hash: block1.transactions[1].hash(),
@@ -412,7 +418,9 @@ proptest! {
         block2.transactions.push(spend_transaction.into());
 
         let block2 = Arc::new(block2).prepare();
-        let commit_result = state.validate_and_commit(block2);
+        let commit_result = validate_and_commit_non_finalized(
+            &finalized_state,
+            &mut non_finalized_state,  block2);
 
         // the block was rejected
         prop_assert_eq!(
@@ -423,19 +431,18 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(1), block1.hash())), state.best_tip());
+        prop_assert_eq!(Some((Height(1), block1.hash())), read::best_tip(&non_finalized_state, &finalized_state.db));
 
         // the non-finalized state did not change
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
         if use_finalized_state_output {
             // the finalized state has the UTXO
-            prop_assert!(state.disk.utxo(&expected_outpoint).is_some());
+            prop_assert!(finalized_state.utxo(&expected_outpoint).is_some());
             // the non-finalized state has no chains (so it can't have the UTXO)
-            prop_assert!(state.mem.chain_set.iter().next().is_none());
+            prop_assert!(non_finalized_state.chain_set.iter().next().is_none());
         } else {
-            let chain = state
-                .mem
+            let chain = non_finalized_state
                 .chain_set
                 .iter()
                 .next()
@@ -443,7 +450,7 @@ proptest! {
             // the non-finalized state has the UTXO
             prop_assert!(chain.unspent_utxos().contains_key(&expected_outpoint));
             // the finalized state does not have the UTXO
-            prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+            prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
         }
     }
 
@@ -465,9 +472,9 @@ proptest! {
             .expect("block should deserialize");
 
         let TestState {
-            mut state, block1, ..
+            finalized_state, mut non_finalized_state, block1, ..
         } = new_state_with_mainnet_transparent_data([], [], [output.0.clone()], use_finalized_state_output);
-        let previous_mem = state.mem.clone();
+        let previous_non_finalized_state = non_finalized_state.clone();
 
         let expected_outpoint = transparent::OutPoint {
             hash: block1.transactions[1].hash(),
@@ -495,7 +502,9 @@ proptest! {
             .extend([spend_transaction1.into(), spend_transaction2.into()]);
 
         let block2 = Arc::new(block2).prepare();
-        let commit_result = state.validate_and_commit(block2);
+        let commit_result = validate_and_commit_non_finalized(
+            &finalized_state,
+            &mut non_finalized_state,  block2);
 
         // the block was rejected
         prop_assert_eq!(
@@ -506,19 +515,18 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(1), block1.hash())), state.best_tip());
+        prop_assert_eq!(Some((Height(1), block1.hash())), read::best_tip(&non_finalized_state, &finalized_state.db));
 
         // the non-finalized state did not change
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
         if use_finalized_state_output {
             // the finalized state has the UTXO
-            prop_assert!(state.disk.utxo(&expected_outpoint).is_some());
+            prop_assert!(finalized_state.utxo(&expected_outpoint).is_some());
             // the non-finalized state has no chains (so it can't have the UTXO)
-            prop_assert!(state.mem.chain_set.iter().next().is_none());
+            prop_assert!(non_finalized_state.chain_set.iter().next().is_none());
         } else {
-            let chain = state
-                .mem
+            let chain = non_finalized_state
                 .chain_set
                 .iter()
                 .next()
@@ -526,7 +534,7 @@ proptest! {
             // the non-finalized state has the UTXO
             prop_assert!(chain.unspent_utxos().contains_key(&expected_outpoint));
             // the finalized state does not have the UTXO
-            prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+            prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
         }
     }
 
@@ -558,9 +566,9 @@ proptest! {
             .expect("block should deserialize");
 
         let TestState {
-            mut state, block1, ..
+            mut finalized_state, mut non_finalized_state, block1, ..
         } = new_state_with_mainnet_transparent_data([], [], [output.0.clone()], use_finalized_state_output);
-        let mut previous_mem = state.mem.clone();
+        let mut previous_non_finalized_state = non_finalized_state.clone();
 
         let expected_outpoint = transparent::OutPoint {
             hash: block1.transactions[1].hash(),
@@ -591,33 +599,34 @@ proptest! {
 
         if use_finalized_state_spend {
             let block2 = FinalizedBlock::from(block2.clone());
-            let commit_result = state.disk.commit_finalized_direct(block2.clone().into(), "test");
+            let commit_result = finalized_state.commit_finalized_direct(block2.clone().into(), "test");
 
             // the block was committed
-            prop_assert_eq!(Some((Height(2), block2.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(2), block2.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
             prop_assert!(commit_result.is_ok());
 
             // the non-finalized state didn't change
-            prop_assert!(state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
             // the finalized state has spent the UTXO
-            prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+            prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
             // the non-finalized state does not have the UTXO
-            prop_assert!(state.mem.any_utxo(&expected_outpoint).is_none());
+            prop_assert!(non_finalized_state.any_utxo(&expected_outpoint).is_none());
         } else {
             let block2 = block2.clone().prepare();
-            let commit_result = state.validate_and_commit(block2.clone());
+            let commit_result = validate_and_commit_non_finalized(
+            &finalized_state,
+            &mut non_finalized_state,  block2.clone());
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
-            prop_assert_eq!(Some((Height(2), block2.hash)), state.best_tip());
+            prop_assert_eq!(Some((Height(2), block2.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
 
             // the block data is in the non-finalized state
-            prop_assert!(!state.mem.eq_internal_state(&previous_mem));
+            prop_assert!(!non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
-            prop_assert_eq!(state.mem.chain_set.len(), 1);
-            let chain = state
-                .mem
+            prop_assert_eq!(non_finalized_state.chain_set.len(), 1);
+            let chain = non_finalized_state
                 .chain_set
                 .iter()
                 .next()
@@ -625,7 +634,7 @@ proptest! {
 
             if use_finalized_state_output {
                 // the finalized state has the unspent UTXO
-                prop_assert!(state.disk.utxo(&expected_outpoint).is_some());
+                prop_assert!(finalized_state.utxo(&expected_outpoint).is_some());
                 // the non-finalized state has spent the UTXO
                 prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
             } else {
@@ -634,14 +643,16 @@ proptest! {
                 prop_assert!(chain.created_utxos.contains_key(&expected_outpoint));
                 prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
                 // the finalized state does not have the UTXO
-                prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+                prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
             }
 
-            previous_mem = state.mem.clone();
+            previous_non_finalized_state = non_finalized_state.clone();
         }
 
         let block3 = Arc::new(block3).prepare();
-        let commit_result = state.validate_and_commit(block3);
+        let commit_result = validate_and_commit_non_finalized(
+            &finalized_state,
+            &mut non_finalized_state,  block3);
 
         // the block was rejected
         if use_finalized_state_spend {
@@ -663,23 +674,23 @@ proptest! {
                 .into())
             );
         }
-        prop_assert_eq!(Some((Height(2), block2.hash())), state.best_tip());
+        prop_assert_eq!(Some((Height(2), block2.hash())), read::best_tip(&non_finalized_state, &finalized_state.db));
 
         // the non-finalized state did not change
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
         // Since the non-finalized state has not changed, we don't need to check it again
         if use_finalized_state_spend {
             // the finalized state has spent the UTXO
-            prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+            prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
         } else if use_finalized_state_output {
             // the finalized state has the unspent UTXO
             // but the non-finalized state has spent it
-            prop_assert!(state.disk.utxo(&expected_outpoint).is_some());
+            prop_assert!(finalized_state.utxo(&expected_outpoint).is_some());
         } else {
             // the non-finalized state has created and spent the UTXO
             // and the finalized state does not have the UTXO
-            prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+            prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
         }
     }
 
@@ -709,11 +720,13 @@ proptest! {
 
         block1.transactions.push(spend_transaction.into());
 
-        let (mut state, genesis) = new_state_with_mainnet_genesis();
-        let previous_mem = state.mem.clone();
+        let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
+        let previous_non_finalized_state = non_finalized_state.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result = state.validate_and_commit(block1);
+        let commit_result = validate_and_commit_non_finalized(
+            &finalized_state,
+            &mut non_finalized_state,  block1);
 
         // the block was rejected
         prop_assert_eq!(
@@ -724,13 +737,13 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
+        prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
 
         // the non-finalized state did not change
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
         // the finalized state does not have the UTXO
-        prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+        prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
     }
 
     /// Make sure transparent output spends are rejected by state contextual validation,
@@ -772,11 +785,13 @@ proptest! {
             .transactions
             .extend([spend_transaction.into(), output_transaction.into()]);
 
-        let (mut state, genesis) = new_state_with_mainnet_genesis();
-        let previous_mem = state.mem.clone();
+            let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
+            let previous_non_finalized_state = non_finalized_state.clone();
 
         let block1 = Arc::new(block1).prepare();
-        let commit_result = state.validate_and_commit(block1);
+        let commit_result = validate_and_commit_non_finalized(
+            &finalized_state,
+            &mut non_finalized_state,  block1);
 
         // the block was rejected
         prop_assert_eq!(
@@ -786,20 +801,23 @@ proptest! {
             }
             .into())
         );
-        prop_assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
+        prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
 
         // the non-finalized state did not change
-        prop_assert!(state.mem.eq_internal_state(&previous_mem));
+        prop_assert!(non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
         // the finalized state does not have the UTXO
-        prop_assert!(state.disk.utxo(&expected_outpoint).is_none());
+        prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
     }
 }
 
 /// State associated with transparent UTXO tests.
 struct TestState {
-    /// The pre-populated state service.
-    state: StateService,
+    /// The pre-populated finalized state.
+    finalized_state: FinalizedState,
+
+    /// The pre-populated non-finalized state.
+    non_finalized_state: NonFinalizedState,
 
     /// The genesis block that has already been committed to the `state` service's
     /// finalized state.
@@ -818,8 +836,8 @@ fn new_state_with_mainnet_transparent_data(
     outputs: impl IntoIterator<Item = transparent::Output>,
     use_finalized_state: bool,
 ) -> TestState {
-    let (mut state, genesis) = new_state_with_mainnet_genesis();
-    let previous_mem = state.mem.clone();
+    let (mut finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
+    let previous_non_finalized_state = non_finalized_state.clone();
 
     let mut block1 = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into::<Block>()
@@ -846,26 +864,31 @@ fn new_state_with_mainnet_transparent_data(
 
     if use_finalized_state {
         let block1 = FinalizedBlock::from(block1.clone());
-        let commit_result = state
-            .disk
-            .commit_finalized_direct(block1.clone().into(), "test");
+        let commit_result = finalized_state.commit_finalized_direct(block1.clone().into(), "test");
 
         // the block was committed
-        assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+        assert_eq!(
+            Some((Height(1), block1.hash)),
+            read::best_tip(&non_finalized_state, &finalized_state.db)
+        );
         assert!(commit_result.is_ok());
 
         // the non-finalized state didn't change
-        assert!(state.mem.eq_internal_state(&previous_mem));
+        assert!(non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
         for expected_outpoint in expected_outpoints {
             // the finalized state has the UTXOs
-            assert!(state.disk.utxo(&expected_outpoint).is_some());
+            assert!(finalized_state.utxo(&expected_outpoint).is_some());
             // the non-finalized state does not have the UTXOs
-            assert!(state.mem.any_utxo(&expected_outpoint).is_none());
+            assert!(non_finalized_state.any_utxo(&expected_outpoint).is_none());
         }
     } else {
         let block1 = block1.clone().prepare();
-        let commit_result = state.validate_and_commit(block1.clone());
+        let commit_result = validate_and_commit_non_finalized(
+            &finalized_state,
+            &mut non_finalized_state,
+            block1.clone(),
+        );
 
         // the block was committed
         assert_eq!(
@@ -877,17 +900,19 @@ fn new_state_with_mainnet_transparent_data(
             block1.block.transactions[0],
             block1.block.transactions[1],
         );
-        assert_eq!(Some((Height(1), block1.hash)), state.best_tip());
+        assert_eq!(
+            Some((Height(1), block1.hash)),
+            read::best_tip(&non_finalized_state, &finalized_state.db)
+        );
 
         // the block data is in the non-finalized state
-        assert!(!state.mem.eq_internal_state(&previous_mem));
+        assert!(!non_finalized_state.eq_internal_state(&previous_non_finalized_state));
 
-        assert_eq!(state.mem.chain_set.len(), 1);
+        assert_eq!(non_finalized_state.chain_set.len(), 1);
 
         for expected_outpoint in expected_outpoints {
             // the non-finalized state has the unspent UTXOs
-            assert!(state
-                .mem
+            assert!(non_finalized_state
                 .chain_set
                 .iter()
                 .next()
@@ -895,12 +920,13 @@ fn new_state_with_mainnet_transparent_data(
                 .unspent_utxos()
                 .contains_key(&expected_outpoint));
             // the finalized state does not have the UTXOs
-            assert!(state.disk.utxo(&expected_outpoint).is_none());
+            assert!(finalized_state.utxo(&expected_outpoint).is_none());
         }
     }
 
     TestState {
-        state,
+        finalized_state,
+        non_finalized_state,
         genesis,
         block1,
     }

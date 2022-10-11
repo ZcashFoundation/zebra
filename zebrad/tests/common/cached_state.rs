@@ -12,7 +12,11 @@ use tempfile::TempDir;
 use tokio::fs;
 use tower::{util::BoxService, Service};
 
-use zebra_chain::{block, chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{
+    block::{self, Height},
+    chain_tip::ChainTip,
+    parameters::Network,
+};
 use zebra_state::{ChainTipChange, LatestChainTip};
 
 use crate::common::config::testdir;
@@ -44,7 +48,8 @@ pub async fn start_state_service_with_cache_dir(
         ..zebra_state::Config::default()
     };
 
-    Ok(zebra_state::init(config, network))
+    // These tests don't need UTXOs to be verified efficiently, because they use cached states.
+    Ok(zebra_state::init(config, network, Height::MAX, 0))
 }
 
 /// Loads the chain tip height from the state stored in a specified directory.

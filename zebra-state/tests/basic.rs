@@ -5,7 +5,11 @@ use std::sync::Arc;
 use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
 
-use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserialize};
+use zebra_chain::{
+    block::{Block, Height},
+    parameters::Network,
+    serialization::ZcashDeserialize,
+};
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
 use zebra_state::*;
@@ -73,7 +77,8 @@ async fn check_transcripts(network: Network) -> Result<(), Report> {
         Network::Mainnet => mainnet_transcript,
         Network::Testnet => testnet_transcript,
     } {
-        let (service, _, _, _) = zebra_state::init(Config::ephemeral(), network);
+        // We're not verifying UTXOs here.
+        let (service, _, _, _) = zebra_state::init(Config::ephemeral(), network, Height::MAX, 0);
         let transcript = Transcript::from(transcript_data.iter().cloned());
         /// SPANDOC: check the on disk service against the transcript
         transcript.check(service).await?;
