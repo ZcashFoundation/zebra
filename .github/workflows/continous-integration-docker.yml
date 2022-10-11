@@ -281,7 +281,6 @@ jobs:
       saves_to_disk: true
       disk_suffix: checkpoint
       height_grep_text: 'flushing database to disk .*height.*=.*Height.*\('
-    secrets: inherit
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached mandatory checkpoint disk
   #
@@ -300,7 +299,6 @@ jobs:
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: checkpoint
-    secrets: inherit
 
   # zebrad cached tip state tests
 
@@ -330,7 +328,6 @@ jobs:
       saves_to_disk: true
       disk_suffix: tip
       height_grep_text: 'current_height.*=.*Height.*\('
-    secrets: inherit
     # We don't want to cancel running full syncs on `main` if a new PR gets merged,
     # because we might never finish a full sync during busy weeks. Instead, we let the
     # first sync complete, then queue the latest pending sync, cancelling any syncs in between.
@@ -370,7 +367,6 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
       height_grep_text: 'current_height.*=.*Height.*\('
-    secrets: inherit
 
   # lightwalletd cached tip state tests
 
@@ -404,7 +400,6 @@ jobs:
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
       height_grep_text: '(current_height.*=.*Height.*\()|(Adding block to cache )'
-    secrets: inherit
 
   # Test update sync of lightwalletd with a lightwalletd and Zebra tip state
   # Runs:
@@ -433,7 +428,6 @@ jobs:
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
       height_grep_text: '(current_height.*=.*Height.*\()|(Adding block to cache )'
-    secrets: inherit
 
   # Test that Zebra can answer a synthetic RPC call, using a cached Zebra tip state
   #
@@ -458,7 +452,6 @@ jobs:
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
-    secrets: inherit
 
   # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
   #
@@ -486,7 +479,6 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
-    secrets: inherit
 
   # Test that Zebra can handle gRPC wallet calls, using a cached Zebra tip state
   #
@@ -513,4 +505,3 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
-    secrets: inherit

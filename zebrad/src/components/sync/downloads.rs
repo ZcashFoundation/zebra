@@ -2,20 +2,20 @@
 
 use std::{
     collections::HashMap,
-    convert::TryFrom,
+    convert::{self, TryFrom},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
 
 use futures::{
-    future::TryFutureExt,
+    future::{FutureExt, TryFutureExt},
     ready,
     stream::{FuturesUnordered, Stream},
 };
 use pin_project::pin_project;
 use thiserror::Error;
-use tokio::{sync::oneshot, task::JoinHandle};
+use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 use tower::{hedge, Service, ServiceExt};
 use tracing_futures::Instrument;
 
@@ -25,6 +25,10 @@ use zebra_chain::{
 };
 use zebra_network as zn;
 use zebra_state as zs;
+
+use crate::components::sync::{
+    FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
+};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -44,7 +48,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// the rest of the capacity is reserved for the other queues.
 /// There is no reserved capacity for the syncer queue:
 /// if the other queues stay full, the syncer will eventually time out and reset.
-const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 2;
+pub const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 3;
 
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
@@ -166,6 +170,9 @@ where
     /// The configured lookahead limit, after applying the minimum limit.
     lookahead_limit: usize,
 
+    /// The largest block height for the checkpoint verifier, based on the current config.
+    max_checkpoint_height: Height,
+
     // Internal downloads state
     /// A list of pending block download and verify tasks.
     #[pin]
@@ -238,18 +245,28 @@ where
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     /// Initialize a new download stream with the provided `network` and
-    /// `verifier` services. Uses the `latest_chain_tip` and `lookahead_limit`
-    /// to drop blocks that are too far ahead of the current state tip.
+    /// `verifier` services.
+    ///
+    /// Uses the `latest_chain_tip` and `lookahead_limit` to drop blocks
+    /// that are too far ahead of the current state tip.
+    /// Uses `max_checkpoint_height` to work around a known block timeout (#5125).
     ///
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
-    pub fn new(network: ZN, verifier: ZV, latest_chain_tip: ZSTip, lookahead_limit: usize) -> Self {
+    pub fn new(
+        network: ZN,
+        verifier: ZV,
+        latest_chain_tip: ZSTip,
+        lookahead_limit: usize,
+        max_checkpoint_height: Height,
+    ) -> Self {
         Self {
             network,
             verifier,
             latest_chain_tip,
             lookahead_limit,
+            max_checkpoint_height,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
         }
@@ -290,6 +307,7 @@ where
         let mut verifier = self.verifier.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
         let lookahead_limit = self.lookahead_limit;
+        let max_checkpoint_height = self.max_checkpoint_height;
 
         let task = tokio::spawn(
             async move {
@@ -418,9 +436,17 @@ where
                 };
 
                 // Verify the block.
-                let rsp = verifier
+                let mut rsp = verifier
                     .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?
-                    .call(block);
+                    .call(block).boxed();
+
+                // Add a shorter timeout to workaround a known bug (#5125)
+                let short_timeout_max = (max_checkpoint_height + FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT).expect("checkpoint block height is in valid range");
+                if block_height >= max_checkpoint_height && block_height <= short_timeout_max {
+                    rsp = timeout(FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, rsp)
+                        .map_err(|timeout| format!("initial fully verified block timed out: retrying: {:?}", timeout).into())
+                        .map(|nested_result| nested_result.and_then(convert::identity)).boxed();
+                }
 
                 let verification = tokio::select! {
                     biased;
