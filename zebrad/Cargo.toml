@@ -2,7 +2,7 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-beta.15"
+version = "1.0.0-rc.0"
 edition = "2021"
 # Zebra is only supported on the latest stable Rust version. Some earlier versions might work.
 # Zebra uses features introduced in Rust 1.58.
