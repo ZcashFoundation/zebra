@@ -151,6 +151,12 @@ After you have the version increments, the updated checkpoints and the updated c
 - [ ] Test the Docker image using `docker run zfnd/zebra:1.0.0-rc.<version>` <!-- TODO: replace with `docker run zfnd/zebra` when we release 1.0.0 -->
 - [ ] Turn off [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches) for the whole repository
 
+
+## Blog Post
+
+If the release contains new features (`major` or `minor`), or high-priority bug fixes:
+- [ ] Ask the team about doing a blog post
+
 If building or running fails after tagging:
 1. Fix the bug that caused the failure
 2. Increment versions again, following these instructions from the start
