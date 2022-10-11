@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.0) - 2022-10-12
 
-This is the first Zebra release candidate. Zebra's consensus rules, node sync, and `lightwalletd` RPCs are ready for final testing and experimental use. Zebra has not been audited yet.
+This is the first Zebra release candidate. Zebra's consensus rules, node sync, and `lightwalletd` RPCs are ready for user testing and experimental use. Zebra has not been audited yet.
 
 This release also makes significant performance improvements to RPCs, and temporarily removes support for Rust 1.64.
 
