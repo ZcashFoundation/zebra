@@ -545,6 +545,99 @@ proptest! {
     }
 }
 
+#[test]
+fn state_handles_error_correctly() -> Result<()> {
+    state_handles_error_correctly_for_network(Network::Mainnet)?;
+    state_handles_error_correctly_for_network(Network::Testnet)?;
+
+    Ok(())
+}
+
+fn state_handles_error_correctly_for_network(network: Network) -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (mut state_service, _, _, _) = StateService::new(Config::ephemeral(), network);
+    let finalized_empty_blocks: Vec<_> = empty_prepared_blocks(network)
+        .into_iter()
+        .map(|prepared_block| FinalizedBlock::from(prepared_block.block))
+        .collect();
+    let mut result_receivers = Vec::new();
+
+    for block in finalized_empty_blocks.iter() {
+        match block.height {
+            // Queue up and commit the genesis block to the finalized state.
+            // Await a success as the result.
+            block::Height(0) => {
+                let result = state_service
+                    .queue_and_commit_finalized(block.clone())
+                    .blocking_recv()
+                    .expect("Could not receive the result.");
+
+                assert!(
+                    result.is_ok(),
+                    "unexpected failed finalized block commit: {:?}",
+                    result
+                );
+            }
+            // Attempt to queue up and commit another block to the finalized
+            // state, but trigger an error when committing it. Await an error as
+            // the result.
+            block::Height(1) => {
+                let mut block = block.clone();
+                block.hash = block::Hash([0; 32]);
+
+                let result = state_service
+                    .queue_and_commit_finalized(block)
+                    .blocking_recv()
+                    .expect("Could not receive the result.");
+
+                assert!(
+                    result.is_err(),
+                    "unexpected successful finalized block commit: {:?}",
+                    result
+                );
+            }
+            // Queue up the rest of the blocks for committing to the finalized
+            // state. The blocks miss a parent block in the chain, so they can't
+            // be committed yet, and we don't await any results until we
+            // resubmit the parent block.
+            _ => {
+                let result_receiver = state_service.queue_and_commit_finalized(block.clone());
+                result_receivers.push(result_receiver);
+            }
+        }
+    }
+
+    // Resubmit the block that previously caused an error when the state service
+    // attempted to commit it to the finalized state. Await success this time.
+    let block = finalized_empty_blocks
+        .get(1)
+        .expect("Block with height 1 must be present.");
+    let result = state_service
+        .queue_and_commit_finalized(block.clone())
+        .blocking_recv()
+        .expect("Could not receive the result.");
+    assert!(
+        result.is_ok(),
+        "unexpected failed finalized block commit: {:?}",
+        result
+    );
+
+    // Await success on all the blocks that were waiting in the queue until
+    // their parent block was successfully committed to the finalized state.
+    for result_receiver in result_receivers {
+        let result = result_receiver
+            .blocking_recv()
+            .expect("Could not receive the result.");
+        assert!(
+            result.is_ok(),
+            "unexpected failed finalized block commit: {:?}",
+            result
+        );
+    }
+
+    Ok(())
+}
+
 /// Test strategy to generate a chain split in two from the test vectors.
 ///
 /// Selects either the mainnet or testnet chain test vector and randomly splits the chain in two
