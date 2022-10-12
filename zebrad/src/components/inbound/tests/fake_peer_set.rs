@@ -78,9 +78,13 @@ async fn mempool_requests_for_transactions() {
         .await;
     match response {
         Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
-        Ok(Response::Nil) => assert!(added_transaction_ids.is_empty(), "response to `MempoolTransactionIds` request should match added_transaction_ids"),
+        Ok(Response::Nil) => assert!(
+            added_transaction_ids.is_empty(),
+            "response to `MempoolTransactionIds` request should match added_transaction_ids {:?}",
+            added_transaction_ids
+        ),
         _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>) or Ok(Nil)`, got {:?}",
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`, got {:?}",
             response
         ),
     };
@@ -189,7 +193,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![test_transaction_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
     );
 
     // Make sure there is an additional request broadcasting the
@@ -292,7 +296,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![test_transaction_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
     );
 
     // Make sure there is an additional request broadcasting the
@@ -392,7 +396,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![tx1_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
     );
 
     // Add a new block to the state (make the chain tip advance)
@@ -458,8 +462,12 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         Ok(Response::TransactionIds(response)) => {
             assert_eq!(response, vec![tx1_id])
         }
+        Ok(Response::Nil) => panic!(
+            "response to `MempoolTransactionIds` request should match {:?}",
+            vec![tx1_id]
+        ),
         _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`"
         ),
     };
 
@@ -522,7 +530,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![tx2_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
     );
 
     // Check if tx1 was added to the rejected list as well
@@ -604,8 +612,12 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             Ok(Response::TransactionIds(response)) => {
                 assert_eq!(response, vec![tx2_id])
             }
+            Ok(Response::Nil) => panic!(
+                "response to `MempoolTransactionIds` request should match {:?}",
+                vec![tx2_id]
+            ),
             _ => unreachable!(
-                "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+                "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`"
             ),
         };
     }
