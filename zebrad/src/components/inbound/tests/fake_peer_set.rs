@@ -852,23 +852,6 @@ async fn setup(
     committed_blocks.push(block_one);
 
     // Don't wait for the chain tip update here, we wait for AdvertiseBlock below.
-    // Except when we're adding transactions from the mempool
-    if add_transactions {
-        // Wait for the chain tip update
-        if let Err(timeout_error) = timeout(
-            CHAIN_TIP_UPDATE_WAIT_LIMIT,
-            chain_tip_change.wait_for_tip_change(),
-        )
-        .await
-        .map(|change_result| change_result.expect("unexpected chain tip update failure"))
-        {
-            info!(
-                timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
-                ?timeout_error,
-                "timeout waiting for chain tip change after committing block"
-            );
-        }
-    }
 
     let (mut mempool_service, transaction_receiver) = Mempool::new(
         &MempoolConfig::default(),
@@ -882,6 +865,28 @@ async fn setup(
 
     // Enable the mempool
     mempool_service.enable(&mut recent_syncs).await;
+
+    let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
+        sync_status.clone(),
+        chain_tip_change.clone(),
+        peer_set.clone(),
+    ));
+
+    let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
+        transaction_receiver,
+        peer_set.clone(),
+    ));
+
+    // Make sure there is an additional request broadcasting the
+    // committed blocks to peers.
+    //
+    // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
+    for block in committed_blocks.iter().skip(1) {
+        peer_set
+            .expect_request(Request::AdvertiseBlock(block.hash()))
+            .await
+            .respond(Response::Nil);
+    }
 
     // Add transactions to the mempool, skipping verification and broadcast
     let mut added_transactions = Vec::new();
@@ -911,28 +916,6 @@ async fn setup(
     let r = setup_tx.send(setup_data);
     // We can't expect or unwrap because the returned Result does not implement Debug
     assert!(r.is_ok(), "unexpected setup channel send failure");
-
-    let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
-        sync_status.clone(),
-        chain_tip_change.clone(),
-        peer_set.clone(),
-    ));
-
-    let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
-        transaction_receiver,
-        peer_set.clone(),
-    ));
-
-    // Make sure there is an additional request broadcasting the
-    // committed blocks to peers.
-    //
-    // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
-    for block in committed_blocks.iter().skip(1) {
-        peer_set
-            .expect_request(Request::AdvertiseBlock(block.hash()))
-            .await
-            .respond(Response::Nil);
-    }
 
     (
         inbound_service,
