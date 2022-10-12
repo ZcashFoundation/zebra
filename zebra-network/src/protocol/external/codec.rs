@@ -468,10 +468,9 @@ impl Codec {
         Ok(VersionMessage {
             version: Version(reader.read_u32::<LittleEndian>()?),
             // Use from_bits_truncate to discard unknown service bits.
-            //
+            services: PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
             // Clippy 1.64 is wrong here, this lazy evaluation is necessary, constructors are functions. This is fixed in 1.66.
             #[allow(clippy::unnecessary_lazy_evaluations)]
-            services: PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
             timestamp: Utc
                 .timestamp_opt(reader.read_i64::<LittleEndian>()?, 0)
                 .single()
