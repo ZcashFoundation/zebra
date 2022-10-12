@@ -374,7 +374,6 @@ jobs:
   #
   # Runs:
   # - after every PR is merged to `main`
-  # - on every PR update
   #
   # If the state version has changed, waits for the new cached state to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
@@ -385,7 +384,7 @@ jobs:
     # to also run on Mergify head branches,
     # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if: ${{ (!cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) }}
+    if: ${{ (!cancelled() && !failure() && (github.event_name == 'push' && github.ref_name == 'main') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) }}
     with:
       app_name: lightwalletd
       test_id: lwd-full-sync
