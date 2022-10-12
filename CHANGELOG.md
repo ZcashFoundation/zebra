@@ -4,6 +4,55 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.0) - 2022-10-12
+
+This is the first Zebra release candidate. Zebra's consensus rules, node sync, and `lightwalletd` RPCs are ready for user testing and experimental use. Zebra has not been audited yet.
+
+This release also makes significant performance improvements to RPCs, and temporarily removes support for Rust 1.64.
+
+### Breaking Changes
+
+This release has the following breaking changes:
+- Rust 1.64 is unsupported due to a performance regression when downloading the Zcash parameters.
+  Zebra currently builds with Rust 1.63 ([#5251](https://github.com/ZcashFoundation/zebra/pull/5251)).
+- Use correct TOML syntax in Docker zebrad.toml ([#5320](https://github.com/ZcashFoundation/zebra/pull/5320))
+
+### Major RPC Performance Improvements
+
+This release improves RPC performance:
+- Initial `lightwalletd` sync is about twice as fast ([#5307](https://github.com/ZcashFoundation/zebra/pull/5307))
+- RPCs can run while a block is being committed to the state, previously they could be delayed by 5-15 seconds ([#5134](https://github.com/ZcashFoundation/zebra/pull/5134), [#5257](https://github.com/ZcashFoundation/zebra/pull/5257))
+
+### Security
+
+- Make default command work in docker images, disable optional listener ports ([#5313](https://github.com/ZcashFoundation/zebra/pull/5313))
+- Update yanked versions of cpufeatures (orchard/aes), ed25519 (tor), and quick-xml (flamegraph) ([#5308](https://github.com/ZcashFoundation/zebra/pull/5308))
+- Bump rand\_core from 0.6.3 to 0.6.4, fixes unsoundness bug ([#5175](https://github.com/ZcashFoundation/zebra/pull/5175))
+
+### Changed
+
+- Log git metadata and platform info when zebrad starts up ([#5200](https://github.com/ZcashFoundation/zebra/pull/5200))
+- Update mainnet and testnet checkpoints ([#5360](https://github.com/ZcashFoundation/zebra/pull/5360))
+- Update README for the release candidate ([#5314](https://github.com/ZcashFoundation/zebra/pull/5314))
+- change(docs): Add links to CI/CD docs in the zebra book's sidebar ([#5355](https://github.com/ZcashFoundation/zebra/pull/5355))
+
+### Fixed
+
+- Use correct TOML syntax in Docker zebrad.toml ([#5320](https://github.com/ZcashFoundation/zebra/pull/5320))
+- Look back up to 10,000 blocks on testnet for a legacy chain ([#5133](https://github.com/ZcashFoundation/zebra/pull/5133))
+
+#### Performance
+
+- Build zebrad with Rust 1.63 to avoid Zcash parameter download hangs ([#5251](https://github.com/ZcashFoundation/zebra/pull/5251))
+- Write blocks to the state in a separate thread, to avoid network and RPC hangs ([#5134](https://github.com/ZcashFoundation/zebra/pull/5134), [#5257](https://github.com/ZcashFoundation/zebra/pull/5257))
+- Fix slow getblock RPC (verbose=1) using transaction ID index ([#5307](https://github.com/ZcashFoundation/zebra/pull/5307))
+- Open the database in a blocking tokio thread, which allows tokio to run other tasks  ([#5228](https://github.com/ZcashFoundation/zebra/pull/5228))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @gustavovalverde, @oxarbitrage, @teor2345 and @upbqdn.
+
 ## [Zebra 1.0.0-beta.15](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.15) - 2022-09-20
 
 This release improves Zebra's sync and RPC performance, improves test coverage and reliability, and starts creating Docker Hub binaries for releases.
