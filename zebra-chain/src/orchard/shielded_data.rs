@@ -251,7 +251,7 @@ impl ZcashDeserialize for Flags {
         // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
         //
         // Clippy 1.64 is wrong here, this lazy evaluation is necessary, constructors are functions. This is fixed in 1.66.
-        #[allow(clippy::unnecessary-lazy-evaluations)]
+        #[allow(clippy::unnecessary_lazy_evaluations)]
         Flags::from_bits(reader.read_u8()?)
             .ok_or_else(|| SerializationError::Parse("invalid reserved orchard flags"))
     }

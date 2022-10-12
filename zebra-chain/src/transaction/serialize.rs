@@ -874,7 +874,7 @@ impl ZcashDeserialize for Transaction {
                 // Convert it to a NetworkUpgrade
                 //
                 // Clippy 1.64 is wrong here, this lazy evaluation is necessary, constructors are functions. This is fixed in 1.66.
-                #[allow(clippy::unnecessary-lazy-evaluations)]
+                #[allow(clippy::unnecessary_lazy_evaluations)]
                 let network_upgrade =
                     NetworkUpgrade::from_branch_id(limited_reader.read_u32::<LittleEndian>()?)
                         .ok_or_else(|| {
