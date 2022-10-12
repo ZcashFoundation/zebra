@@ -78,8 +78,9 @@ async fn mempool_requests_for_transactions() {
         .await;
     match response {
         Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
+        Ok(Response::Nil) => assert!(added_transaction_ids.is_empty(), "response to `MempoolTransactionIds` request should match added_transaction_ids"),
         _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`, got {:?}",
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>) or Ok(Nil)`, got {:?}",
             response
         ),
     };
@@ -838,7 +839,24 @@ async fn setup(
         .unwrap();
     committed_blocks.push(block_one);
 
-    // Don't wait for the chain tip update here, we wait for AdvertiseBlock below
+    // Don't wait for the chain tip update here, we wait for AdvertiseBlock below.
+    // Except when we're adding transactions from the mempool
+    if add_transactions {
+        // Wait for the chain tip update
+        if let Err(timeout_error) = timeout(
+            CHAIN_TIP_UPDATE_WAIT_LIMIT,
+            chain_tip_change.wait_for_tip_change(),
+        )
+        .await
+        .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+        {
+            info!(
+                timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
+                ?timeout_error,
+                "timeout waiting for chain tip change after committing block"
+            );
+        }
+    }
 
     let (mut mempool_service, transaction_receiver) = Mempool::new(
         &MempoolConfig::default(),
