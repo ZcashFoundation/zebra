@@ -425,7 +425,7 @@ proptest! {
             }
 
             let result_receiver = state_service.queue_and_commit_finalized(block.clone());
-            let result = result_receiver.blocking_recv();
+            let result = result_receiver.blocking_recv().expect("Could not receive the result.");
 
             prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
 
@@ -451,7 +451,7 @@ proptest! {
             expected_non_finalized_value_pool += *block_value_pool;
 
             let result_receiver = state_service.queue_and_commit_non_finalized(block.clone());
-            let result = result_receiver.blocking_recv();
+            let result = result_receiver.blocking_recv().expect("Could not receive the result.");
 
             prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
 
@@ -510,7 +510,7 @@ proptest! {
             };
 
             let result_receiver = state_service.queue_and_commit_finalized(block);
-            let result = result_receiver.blocking_recv();
+            let result = result_receiver.blocking_recv().expect("Could not receive the result.");
 
             prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
 
@@ -533,7 +533,7 @@ proptest! {
             };
 
             let result_receiver = state_service.queue_and_commit_non_finalized(block);
-            let result = result_receiver.blocking_recv();
+            let result = result_receiver.blocking_recv().expect("Could not receive the result.");
 
             prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
 
