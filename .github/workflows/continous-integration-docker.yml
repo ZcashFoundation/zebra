@@ -287,6 +287,14 @@ jobs:
       saves_to_disk: true
       disk_suffix: checkpoint
       height_grep_text: 'flushing database to disk .*height.*=.*Height.*\('
+    # We want to prevent multiple checkpoint syncs running at the same time,
+    # but we don't want to cancel running syncs on `main` if a new PR gets merged,
+    # because we might never get a finished sync.
+    #
+    # See the concurrency comment on the zebrad test-full-sync job for details.
+    concurrency: 
+      group: ${{ github.workflow }}−${{ github.ref }}-regenerate-stateful-disks
+      cancel-in-progress: false
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached mandatory checkpoint disk
   #
@@ -334,9 +342,11 @@ jobs:
       saves_to_disk: true
       disk_suffix: tip
       height_grep_text: 'current_height.*=.*Height.*\('
-    # We don't want to cancel running full syncs on `main` if a new PR gets merged,
-    # because we might never finish a full sync during busy weeks. Instead, we let the
-    # first sync complete, then queue the latest pending sync, cancelling any syncs in between.
+    # We want to prevent multiple full zebrad syncs running at the same time,
+    # but we don't want to cancel running syncs on `main` if a new PR gets merged,
+    # because we might never get a finished sync.
+    # 
+    # Instead, we let the first sync complete, then queue the latest pending sync, cancelling any syncs in between.
     # (As the general workflow concurrency group just gets matched in Pull Requests,
     # it has no impact on this job.)
     #
@@ -344,7 +354,7 @@ jobs:
     # - allow multiple manual syncs on a branch, and isolate manual syncs from automatic syncs, by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
     # - stop multiple automatic full syncs across different PRs by removing '−${{ github.ref }}' when needs.get-available-disks.outputs.zebra_tip_disk is true
     concurrency: 
-      group: ${{ github.workflow }}−${{ github.ref }}
+      group: ${{ github.workflow }}−${{ github.ref }}-test-full-sync
       cancel-in-progress: false
 
   # Test that Zebra can sync to the chain tip, using a cached Zebra tip state,
@@ -405,6 +415,14 @@ jobs:
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
       height_grep_text: '(current_height.*=.*Height.*\()|(Adding block to cache )'
+    # We want to prevent multiple lightwalletd full syncs running at the same time,
+    # but we don't want to cancel running syncs on `main` if a new PR gets merged,
+    # because we might never get a finished sync.
+    #
+    # See the concurrency comment on the zebrad test-full-sync job for details.
+    concurrency: 
+      group: ${{ github.workflow }}−${{ github.ref }}-lightwalletd-full-sync
+      cancel-in-progress: false
 
   # Test update sync of lightwalletd with a lightwalletd and Zebra tip state
   # Runs:
