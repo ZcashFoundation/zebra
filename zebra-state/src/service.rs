@@ -485,7 +485,7 @@ impl StateService {
 
         metrics::gauge!(
             "state.checkpoint.queued.max.height",
-            self.max_queued_finalized_height
+            self.max_queued_finalized_height,
         );
         metrics::gauge!(
             "state.checkpoint.queued.block.count",
