@@ -6,8 +6,8 @@ merging PRs and publishing releases. Before reading, you should understand
 
 ## Distribution tags
 
-Zebras's branching relates directly to versions published on Rust. We will reference these [Docker Hub
-distribution tags](https://docs.Docker Hubjs.com/cli/v6/commands/Docker Hub-dist-tag#purpose) throughout:
+Zebras's branching relates directly to versions published on Docker. We will reference these [Docker Hub
+distribution tags](https://hub.docker.com/r/zfnd/zebra/tags) throughout:
 
 | Tag    | Description                                                                       |
 |--------|-----------------------------------------------------------------------------------|
@@ -26,25 +26,6 @@ example, the `10.2.x` branch represents the latest patch changes for subsequent 
 with `10.2.`. The version tagged on Docker Hub as `latest` will always correspond to such a branch,
 referred to as the **active patch branch**.
 
-## Major releases lifecycle
-
-Angular releases a major version roughly every six months. Following a major release, we move
-through a consistent lifecycle to the next major release, and repeat. At a high level, this
-process proceeds as follows:
-
-* A major release occurs. The `main` branch now represents the next minor version.
-* Six weeks later, a minor release occurs. The `main` branch now represents the next minor
-  version.
-* Six weeks later, a second minor release occurs. The `main` branch now represents the next major
-  version.
-* Three months later, a major release occurs and the process repeats.
-
-### Example
-* Angular publishes `11.0.0`. At this point in time, the `main` branch represents `11.1.0`.
-* Six weeks later, we publish `11.1.0` and `main` represents `11.2.0`.
-* Six weeks later, we publish `11.2.0` and `main` represents `12.0.0`.
-* Three months later, this cycle repeats with the publication of `12.0.0`.
-
 ### Feature freeze and release candidates
 
 Before publishing minor and major versions as `latest` on Docker Hub, they go through a feature freeze and
@@ -60,49 +41,3 @@ the active patch branch during this entire period.
 One to three weeks after publishing the first RC, the active RC branch is published as `latest` on
 Docker Hub and the branch becomes the active patch branch. At this point there is no active RC branch until
 the next minor or major release.
-
-## Targeting pull requests
-
-Every pull request has a **base branch**:
-
-![Screenshot of a GitHub PR with the base branch highlighted](./images/pr-base-branch-screenshot.png)
-
-This base branch represents the latest branch that will receive the change. Most pull requests
-should specify `main`. However, some changes will explicitly use an earlier branch, such as
-`11.1.x`, in order to patch an older version. Specific GitHub labels, described below, control the
-additional branches into which a pull request will be cherry-picked.
-
-### Labelling pull requests
-
-There are five labels that target PRs to versions:
-
-| Label         | Description                                                                 |
-|---------------|-----------------------------------------------------------------------------|
-| target: major | A change that includes a backwards-incompatible behavior or API change.     |
-| target: minor | A change that introduces a new, backwards-compatible functionality.         |
-| target: patch | A backwards-compatible bug fix.                                             |
-| target: rc    | A change that should be explicitly included in an active release candidate. |
-| target: lts   | A critical security or browser compatibility fix for LTS releases.          |
-
-Every PR must have exactly one `target: *` label. Angular's dev tooling will merge the pull request
-into its base branch and then cherry-pick the commits to the appropriate branches based on the
-specified target label.
-
-The vast majority of pull requests will target `major`, `minor`, or `patch` based on the contents of
-the code change. In rare cases, a pull request will specify `target: rc` or `target: lts` to
-explicitly target a special branch.
-
-Breaking changes, marked with `target: major`, can only be merged when `main` represents the next
-major version.
-
-### Pull request examples
-
-| I want to...                                                | Target branch           | Target label | Your change will land in...                                                                                                |
-| ----------------------------------------------------------- | ----------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| Make a non-breaking bug fix                                 | `main`                  | `patch`      | `main`, the active patch branch, and the active RC branch if there is one                                                  |
-| Introduce a new feature                                     | `main`                  | `minor`      | `main` (any time)                                                                                                          |
-| Make a breaking change                                      | `main`                  | `major`      | `main` (only when `main` represents the next major version)                                                                |
-| Make a critical security fix                                | `main`                  | `lts`        | `main`, the active patch branch, the active RC branch if there is one, and all branches for versions within the LTS window |
-| Bump the version of an RC                                   | the active RC branch    | `rc`         | The active RC branch                                                                                                       |
-| Fix an RC bug for a major release feature                   | `main`                  | `rc`         | `main` and the active RC branch                                                                                            |
-| Backport a bug fix to the `latest` Docker Hub version during an RC | the active patch branch | `patch`      | the active patch branch only                                                                                               |
