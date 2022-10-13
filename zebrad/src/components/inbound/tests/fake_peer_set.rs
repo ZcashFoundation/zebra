@@ -78,8 +78,13 @@ async fn mempool_requests_for_transactions() {
         .await;
     match response {
         Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
+        Ok(Response::Nil) => assert!(
+            added_transaction_ids.is_empty(),
+            "response to `MempoolTransactionIds` request should match added_transaction_ids {:?}",
+            added_transaction_ids
+        ),
         _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`, got {:?}",
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`, got {:?}",
             response
         ),
     };
@@ -188,7 +193,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![test_transaction_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
     );
 
     // Make sure there is an additional request broadcasting the
@@ -291,7 +296,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![test_transaction_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
     );
 
     // Make sure there is an additional request broadcasting the
@@ -391,7 +396,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![tx1_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
     );
 
     // Add a new block to the state (make the chain tip advance)
@@ -457,8 +462,12 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         Ok(Response::TransactionIds(response)) => {
             assert_eq!(response, vec![tx1_id])
         }
+        Ok(Response::Nil) => panic!(
+            "response to `MempoolTransactionIds` request should match {:?}",
+            vec![tx1_id]
+        ),
         _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`"
         ),
     };
 
@@ -521,7 +530,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![tx2_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`",
+        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
     );
 
     // Check if tx1 was added to the rejected list as well
@@ -603,8 +612,12 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             Ok(Response::TransactionIds(response)) => {
                 assert_eq!(response, vec![tx2_id])
             }
+            Ok(Response::Nil) => panic!(
+                "response to `MempoolTransactionIds` request should match {:?}",
+                vec![tx2_id]
+            ),
             _ => unreachable!(
-                "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId>)`"
+                "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`"
             ),
         };
     }
@@ -838,7 +851,7 @@ async fn setup(
         .unwrap();
     committed_blocks.push(block_one);
 
-    // Don't wait for the chain tip update here, we wait for AdvertiseBlock below
+    // Don't wait for the chain tip update here, we wait for AdvertiseBlock below.
 
     let (mut mempool_service, transaction_receiver) = Mempool::new(
         &MempoolConfig::default(),
@@ -852,6 +865,28 @@ async fn setup(
 
     // Enable the mempool
     mempool_service.enable(&mut recent_syncs).await;
+
+    let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
+        sync_status.clone(),
+        chain_tip_change.clone(),
+        peer_set.clone(),
+    ));
+
+    let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
+        transaction_receiver,
+        peer_set.clone(),
+    ));
+
+    // Make sure there is an additional request broadcasting the
+    // committed blocks to peers.
+    //
+    // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
+    for block in committed_blocks.iter().skip(1) {
+        peer_set
+            .expect_request(Request::AdvertiseBlock(block.hash()))
+            .await
+            .respond(Response::Nil);
+    }
 
     // Add transactions to the mempool, skipping verification and broadcast
     let mut added_transactions = Vec::new();
@@ -881,28 +916,6 @@ async fn setup(
     let r = setup_tx.send(setup_data);
     // We can't expect or unwrap because the returned Result does not implement Debug
     assert!(r.is_ok(), "unexpected setup channel send failure");
-
-    let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
-        sync_status.clone(),
-        chain_tip_change.clone(),
-        peer_set.clone(),
-    ));
-
-    let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
-        transaction_receiver,
-        peer_set.clone(),
-    ));
-
-    // Make sure there is an additional request broadcasting the
-    // committed blocks to peers.
-    //
-    // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
-    for block in committed_blocks.iter().skip(1) {
-        peer_set
-            .expect_request(Request::AdvertiseBlock(block.hash()))
-            .await
-            .respond(Response::Nil);
-    }
 
     (
         inbound_service,
