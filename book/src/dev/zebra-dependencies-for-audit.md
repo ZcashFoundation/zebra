@@ -1,5 +1,6 @@
 # Zebra dependencies
 
+This is a list of Rust code that is in scope and out of scope for Zebra's first audit:
 <span style="color:red">red</span>: Crates that we want to be audited fully.
 <span style="color:yellow">red</span>: Crates we want to be audited with conditions.
 
