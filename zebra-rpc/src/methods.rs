@@ -38,7 +38,7 @@ use crate::queue::Queue;
 mod tests;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-mod getblocktemplate;
+pub mod getblocktemplate;
 
 /// The RPC error code used by `zcashd` for missing blocks.
 ///

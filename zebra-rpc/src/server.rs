@@ -28,6 +28,9 @@ use crate::{
 pub mod compatibility;
 mod tracing_middleware;
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use crate::methods::getblocktemplate::GetBlockTemplateRpc;
+
 #[cfg(test)]
 mod tests;
 
@@ -77,7 +80,13 @@ impl RpcServer {
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io: MetaIoHandler<(), _> =
                 MetaIoHandler::new(Compatibility::Both, TracingMiddleware);
-            io.extend_with(rpc_impl.to_delegate());
+            if cfg!(feature = "getblocktemplate-rpcs") {
+                #[cfg(feature = "getblocktemplate-rpcs")]
+                //io.extend_with(Rpc::to_delegate(rpc_impl));
+                io.extend_with(GetBlockTemplateRpc::to_delegate(rpc_impl));
+            } else {
+                io.extend_with(Rpc::to_delegate(rpc_impl));
+            }
 
             // If zero, automatically scale threads to the number of CPU cores
             let mut parallel_cpu_threads = config.parallel_cpu_threads;

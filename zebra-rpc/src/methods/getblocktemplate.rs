@@ -8,6 +8,7 @@ use zebra_chain::chain_tip::ChainTip;
 use zebra_node_services::{mempool, BoxError};
 
 #[rpc(server)]
+/// Additional RPC methods for mining pools.
 pub trait GetBlockTemplateRpc: Rpc {
     /// Add documentation
     #[rpc(name = "getblockcount")]
