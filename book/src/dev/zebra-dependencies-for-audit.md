@@ -2,7 +2,7 @@
 
 This is a list of Rust code that is in scope and out of scope for Zebra's first audit:
 <span style="color:red">red</span>: Crates that we want to be audited fully.
-<span style="color:yellow">red</span>: Crates we want to be audited with conditions.
+<span style="color:yellow">yellow</span>: Crates we want to be audited with conditions.
 
 ## Crates
 
@@ -18,6 +18,7 @@ This is a list of Rust code that is in scope and out of scope for Zebra's first 
 | [<span style="color:red">zebra-script</span>](https://github.com/ZcashFoundation/zebra/tree/main/zebra-script) | [1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-script) |
 | [<span style="color:red">zebra-state</span>](https://github.com/ZcashFoundation/zebra/tree/main/zebra-state) | [1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-state) |
 | [<span style="color:red">zebrad</span>](https://github.com/ZcashFoundation/zebra/tree/main/zebrad) | [1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebrad) |
+| [<span style="color:yellow">zebra-utils</span>](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils) | [1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-utils) | Only [zebra-checkpoints](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-utils/src/bin/zebra-checkpoints) utility needs to be audited.
 
 ## Zcash/ZF dependencies
 
