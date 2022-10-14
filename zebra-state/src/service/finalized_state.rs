@@ -16,16 +16,16 @@
 //! be incremented each time the database format (column, serialization, etc) changes.
 
 use std::{
-    collections::HashMap,
     io::{stderr, stdout, Write},
-    path::Path,
+    sync::Arc,
 };
 
 use zebra_chain::{block, parameters::Network};
 
 use crate::{
+    request::FinalizedWithTrees,
     service::{check, QueuedFinalized},
-    BoxError, Config, FinalizedBlock,
+    BoxError, CloneError, Config, FinalizedBlock,
 };
 
 mod disk_db;
@@ -43,39 +43,50 @@ pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation};
 pub(super) use zebra_db::ZebraDb;
 
 /// The finalized part of the chain state, stored in the db.
-#[derive(Debug)]
+///
+/// `rocksdb` allows concurrent writes through a shared reference,
+/// so clones of the finalized state represent the same database instance.
+/// When the final clone is dropped, the database is closed.
+///
+/// This is different from `NonFinalizedState::clone()`,
+/// which returns an independent copy of the chains.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FinalizedState {
-    /// The underlying database.
-    db: ZebraDb,
-
-    /// Queued blocks that arrived out of order, indexed by their parent block hash.
-    queued_by_prev_hash: HashMap<block::Hash, QueuedFinalized>,
-
-    /// A metric tracking the maximum height that's currently in `queued_by_prev_hash`
-    ///
-    /// Set to `f64::NAN` if `queued_by_prev_hash` is empty, because grafana shows NaNs
-    /// as a break in the graph.
-    max_queued_height: f64,
+    // Configuration
+    //
+    // This configuration cannot be modified after the database is initialized,
+    // because some clones would have different values.
+    //
+    /// The configured network.
+    network: Network,
 
     /// The configured stop height.
     ///
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
     debug_stop_at_height: Option<block::Height>,
 
-    /// The configured network.
-    network: Network,
+    // Owned State
+    //
+    // Everything contained in this state must be shared by all clones, or read-only.
+    //
+    /// The underlying database.
+    ///
+    /// `rocksdb` allows reads and writes via a shared reference,
+    /// so this database object can be freely cloned.
+    /// The last instance that is dropped will close the underlying database.
+    pub db: ZebraDb,
 }
 
 impl FinalizedState {
+    /// Returns an on-disk database instance for `config` and `network`.
+    /// If there is no existing database, creates a new database on disk.
     pub fn new(config: &Config, network: Network) -> Self {
         let db = ZebraDb::new(config, network);
 
         let new_state = Self {
-            queued_by_prev_hash: HashMap::new(),
-            max_queued_height: f64::NAN,
-            db,
-            debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
             network,
+            debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
+            db,
         };
 
         // TODO: move debug_stop_at_height into a task in the start command (#3442)
@@ -106,6 +117,11 @@ impl FinalizedState {
                 // So we want to drop it before we exit.
                 std::mem::drop(new_state);
 
+                // Drops tracing log output that's hasn't already been written to stdout
+                // since this exits before calling drop on the WorkerGuard for the logger thread.
+                // This is okay for now because this is test-only code
+                //
+                // TODO: Call ZebradApp.shutdown or drop its Tracing component before calling exit_process to flush logs to stdout
                 Self::exit_process();
             }
         }
@@ -120,77 +136,19 @@ impl FinalizedState {
         self.network
     }
 
-    /// Returns the `Path` where the files used by this database are located.
-    pub fn path(&self) -> &Path {
-        self.db.path()
-    }
-
-    /// Returns a reference to the inner database instance.
-    pub(crate) fn db(&self) -> &ZebraDb {
-        &self.db
-    }
-
-    /// Queue a finalized block to be committed to the state.
-    ///
-    /// After queueing a finalized block, this method checks whether the newly
-    /// queued block (and any of its descendants) can be committed to the state.
-    ///
-    /// Returns the highest finalized tip block committed from the queue,
-    /// or `None` if no blocks were committed in this call.
-    /// (Use `tip_block` to get the finalized tip, regardless of when it was committed.)
-    pub fn queue_and_commit_finalized(
-        &mut self,
-        queued: QueuedFinalized,
-    ) -> Option<FinalizedBlock> {
-        let mut highest_queue_commit = None;
-
-        let prev_hash = queued.0.block.header.previous_block_hash;
-        let height = queued.0.height;
-        self.queued_by_prev_hash.insert(prev_hash, queued);
-
-        while let Some(queued_block) = self
-            .queued_by_prev_hash
-            .remove(&self.db.finalized_tip_hash())
-        {
-            if let Ok(finalized) = self.commit_finalized(queued_block) {
-                highest_queue_commit = Some(finalized);
-            } else {
-                // the last block in the queue failed, so we can't commit the next block
-                break;
-            }
-        }
-
-        if self.queued_by_prev_hash.is_empty() {
-            self.max_queued_height = f64::NAN;
-        } else if self.max_queued_height.is_nan() || self.max_queued_height < height.0 as f64 {
-            // if there are still blocks in the queue, then either:
-            //   - the new block was lower than the old maximum, and there was a gap before it,
-            //     so the maximum is still the same (and we skip this code), or
-            //   - the new block is higher than the old maximum, and there is at least one gap
-            //     between the finalized tip and the new maximum
-            self.max_queued_height = height.0 as f64;
-        }
-
-        metrics::gauge!("state.checkpoint.queued.max.height", self.max_queued_height);
-        metrics::gauge!(
-            "state.checkpoint.queued.block.count",
-            self.queued_by_prev_hash.len() as f64,
-        );
-
-        highest_queue_commit
-    }
-
     /// Commit a finalized block to the state.
     ///
     /// It's the caller's responsibility to ensure that blocks are committed in
-    /// order. This function is called by [`Self::queue_and_commit_finalized`],
-    /// which ensures order. It is intentionally not exposed as part of the
-    /// public API of the [`FinalizedState`].
-    fn commit_finalized(&mut self, queued_block: QueuedFinalized) -> Result<FinalizedBlock, ()> {
-        let (finalized, rsp_tx) = queued_block;
-        let result = self.commit_finalized_direct(finalized.clone(), "CommitFinalized request");
+    /// order.
+    pub fn commit_finalized(
+        &mut self,
+        ordered_block: QueuedFinalized,
+    ) -> Result<FinalizedBlock, BoxError> {
+        let (finalized, rsp_tx) = ordered_block;
+        let result =
+            self.commit_finalized_direct(finalized.clone().into(), "CommitFinalized request");
 
-        let block_result = if result.is_ok() {
+        if result.is_ok() {
             metrics::counter!("state.checkpoint.finalized.block.count", 1);
             metrics::gauge!(
                 "state.checkpoint.finalized.block.height",
@@ -205,21 +163,21 @@ impl FinalizedState {
                 finalized.height.0 as f64,
             );
             metrics::counter!("zcash.chain.verified.block.total", 1);
-
-            Ok(finalized)
         } else {
             metrics::counter!("state.checkpoint.error.block.count", 1);
             metrics::gauge!(
                 "state.checkpoint.error.block.height",
                 finalized.height.0 as f64,
             );
-
-            Err(())
         };
 
-        let _ = rsp_tx.send(result.map_err(Into::into));
+        // Make the error cloneable, so we can send it to the block verify future,
+        // and the block write task.
+        let result = result.map_err(CloneError::from);
 
-        block_result
+        let _ = rsp_tx.send(result.clone().map_err(BoxError::from));
+
+        result.map(|_hash| finalized).map_err(BoxError::from)
     }
 
     /// Immediately commit a `finalized` block to the finalized state.
@@ -238,9 +196,10 @@ impl FinalizedState {
     #[allow(clippy::unwrap_in_result)]
     pub fn commit_finalized_direct(
         &mut self,
-        finalized: FinalizedBlock,
+        finalized_with_trees: FinalizedWithTrees,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
+        let finalized = finalized_with_trees.finalized;
         let committed_tip_hash = self.db.finalized_tip_hash();
         let committed_tip_height = self.db.finalized_tip_height();
 
@@ -272,28 +231,73 @@ impl FinalizedState {
             );
         }
 
-        // Check the block commitment. For Nu5-onward, the block hash commits only
-        // to non-authorizing data (see ZIP-244). This checks the authorizing data
-        // commitment, making sure the entire block contents were committed to.
-        // The test is done here (and not during semantic validation) because it needs
-        // the history tree root. While it _is_ checked during contextual validation,
-        // that is not called by the checkpoint verifier, and keeping a history tree there
-        // would be harder to implement.
-        //
-        // TODO: run this CPU-intensive cryptography in a parallel rayon thread, if it shows up in profiles
-        let history_tree = self.db.history_tree();
-        check::block_commitment_is_valid_for_chain_history(
-            finalized.block.clone(),
-            self.network,
-            &history_tree,
-        )?;
+        let (history_tree, note_commitment_trees) = match finalized_with_trees.treestate {
+            // If the treestate associated with the block was supplied, use it
+            // without recomputing it.
+            Some(ref treestate) => (
+                treestate.history_tree.clone(),
+                treestate.note_commitment_trees.clone(),
+            ),
+            // If the treestate was not supplied, retrieve a previous treestate
+            // from the database, and update it for the block being committed.
+            None => {
+                let mut history_tree = self.db.history_tree();
+                let mut note_commitment_trees = self.db.note_commitment_trees();
+
+                // Update the note commitment trees.
+                note_commitment_trees.update_trees_parallel(&finalized.block)?;
+
+                // Check the block commitment if the history tree was not
+                // supplied by the non-finalized state. Note that we don't do
+                // this check for history trees supplied by the non-finalized
+                // state because the non-finalized state checks the block
+                // commitment.
+                //
+                // For Nu5-onward, the block hash commits only to
+                // non-authorizing data (see ZIP-244). This checks the
+                // authorizing data commitment, making sure the entire block
+                // contents were committed to. The test is done here (and not
+                // during semantic validation) because it needs the history tree
+                // root. While it _is_ checked during contextual validation,
+                // that is not called by the checkpoint verifier, and keeping a
+                // history tree there would be harder to implement.
+                //
+                // TODO: run this CPU-intensive cryptography in a parallel rayon
+                // thread, if it shows up in profiles
+                check::block_commitment_is_valid_for_chain_history(
+                    finalized.block.clone(),
+                    self.network,
+                    &history_tree,
+                )?;
+
+                // Update the history tree.
+                //
+                // TODO: run this CPU-intensive cryptography in a parallel rayon
+                // thread, if it shows up in profiles
+                let history_tree_mut = Arc::make_mut(&mut history_tree);
+                let sapling_root = note_commitment_trees.sapling.root();
+                let orchard_root = note_commitment_trees.orchard.root();
+                history_tree_mut.push(
+                    self.network(),
+                    finalized.block.clone(),
+                    sapling_root,
+                    orchard_root,
+                )?;
+
+                (history_tree, note_commitment_trees)
+            }
+        };
 
         let finalized_height = finalized.height;
         let finalized_hash = finalized.hash;
 
-        let result = self
-            .db
-            .write_block(finalized, history_tree, self.network, source);
+        let result = self.db.write_block(
+            finalized,
+            history_tree,
+            note_commitment_trees,
+            self.network,
+            source,
+        );
 
         // TODO: move the stop height check to the syncer (#3442)
         if result.is_ok() && self.is_at_stop_height(finalized_height) {
@@ -307,6 +311,11 @@ impl FinalizedState {
             // We're just about to do a forced exit, so it's ok to do a forced db shutdown
             self.db.shutdown(true);
 
+            // Drops tracing log output that's hasn't already been written to stdout
+            // since this exits before calling drop on the WorkerGuard for the logger thread.
+            // This is okay for now because this is test-only code
+            //
+            // TODO: Call ZebradApp.shutdown or drop its Tracing component before calling exit_process to flush logs to stdout
             Self::exit_process();
         }
 
@@ -343,6 +352,13 @@ impl FinalizedState {
         let _ = stdout().lock().flush();
         let _ = stderr().lock().flush();
 
+        // Give some time to logger thread to flush out any remaining lines to stdout
+        // and yield so that tests pass on MacOS
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
+        // Exits before calling drop on the WorkerGuard for the logger thread,
+        // dropping any lines that haven't already been written to stdout.
+        // This is okay for now because this is test-only code
         std::process::exit(0);
     }
 }

@@ -102,8 +102,23 @@
 //! ```
 //!
 //! Please refer to the documentation of each test for more information.
+//!
+//! ## Disk Space for Testing
+//!
+//! The full sync and lightwalletd tests with cached state expect a temporary directory with
+//! at least 300 GB of disk space (2 copies of the full chain). To use another disk for the
+//! temporary test files:
+//!
+//! ```sh
+//! export TMPDIR=/path/to/disk/directory
+//! ```
 
-use std::{collections::HashSet, env, fs, panic, path::PathBuf, time::Duration};
+use std::{
+    collections::HashSet,
+    env, fs, panic,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use color_eyre::{
     eyre::{eyre, Result, WrapErr},
@@ -111,7 +126,7 @@ use color_eyre::{
 };
 
 use zebra_chain::{
-    block,
+    block::{self, Height},
     parameters::Network::{self, *},
 };
 use zebra_network::constants::PORT_IN_USE_ERROR;
@@ -123,22 +138,28 @@ mod common;
 
 use common::{
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
-    config::{default_test_config, persistent_test_config, stored_config_path, testdir},
-    launch::{
-        spawn_zebrad_for_rpc_without_initial_peers, ZebradTestDirExt, BETWEEN_NODES_DELAY,
-        LAUNCH_DELAY,
+    config::{
+        config_file_full_path, configs_dir, default_test_config, persistent_test_config, testdir,
     },
+    launch::{spawn_zebrad_for_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY},
     lightwalletd::{
-        random_known_rpc_port_config, zebra_skip_lightwalletd_tests, LightWalletdTestDirExt,
+        can_spawn_lightwalletd_for_rpc, random_known_rpc_port_config, spawn_lightwalletd_for_rpc,
         LightwalletdTestType::{self, *},
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
-        LARGE_CHECKPOINT_TIMEOUT, LIGHTWALLETD_SYNC_FINISHED_REGEX, MEDIUM_CHECKPOINT_TEST_HEIGHT,
-        STOP_AT_HEIGHT_REGEX, STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX,
-        TINY_CHECKPOINT_TEST_HEIGHT, TINY_CHECKPOINT_TIMEOUT,
+        LARGE_CHECKPOINT_TIMEOUT, MEDIUM_CHECKPOINT_TEST_HEIGHT, STOP_AT_HEIGHT_REGEX,
+        STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX, TINY_CHECKPOINT_TEST_HEIGHT,
+        TINY_CHECKPOINT_TIMEOUT,
     },
 };
+
+/// The maximum amount of time that we allow the creation of a future to block the `tokio` executor.
+///
+/// This should be larger than the amount of time between thread time slices on a busy test VM.
+///
+/// This limit only applies to some tests.
+pub const MAX_ASYNC_BLOCKING_TIME: Duration = zebra_test::mock_service::DEFAULT_MAX_REQUEST_DELAY;
 
 #[test]
 fn generate_no_args() -> Result<()> {
@@ -258,7 +279,7 @@ fn start_no_args() -> Result<()> {
 
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
+    child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
@@ -285,7 +306,7 @@ fn start_args() -> Result<()> {
     let mut child = testdir.spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
+    child.kill(false)?;
     let output = child.wait_with_output()?;
 
     // Make sure the command was killed
@@ -301,6 +322,31 @@ fn start_args() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn db_init_outside_future_executor() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let config = default_test_config()?;
+
+    let start = Instant::now();
+
+    // This test doesn't need UTXOs to be verified efficiently, because it uses an empty state.
+    let db_init_handle =
+        zebra_state::spawn_init(config.state.clone(), config.network.network, Height::MAX, 0);
+
+    // it's faster to panic if it takes longer than expected, since the executor
+    // will wait indefinitely for blocking operation to finish once started
+    let block_duration = start.elapsed();
+    assert!(
+        block_duration <= MAX_ASYNC_BLOCKING_TIME,
+        "futures executor was blocked longer than expected ({:?})",
+        block_duration,
+    );
+
+    db_init_handle.await?;
+
+    Ok(())
+}
+
 #[test]
 fn persistent_mode() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -312,7 +358,7 @@ fn persistent_mode() -> Result<()> {
 
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
+    child.kill(false)?;
     let output = child.wait_with_output()?;
 
     // Make sure the command was killed
@@ -354,6 +400,7 @@ fn misconfigured_ephemeral_missing_directory() -> Result<()> {
     )
 }
 
+#[tracing::instrument]
 fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck) -> Result<()> {
     use std::io::ErrorKind;
 
@@ -379,7 +426,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
         .spawn_child(args!["start"])?;
     // Run the program and kill it after a few seconds
     std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
+    child.kill(false)?;
     let output = child.wait_with_output()?;
 
     // Make sure the command was killed
@@ -446,21 +493,6 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 }
 
 #[test]
-fn app_no_args() -> Result<()> {
-    let _init_guard = zebra_test::init();
-
-    let testdir = testdir()?.with_config(&mut default_test_config()?)?;
-
-    let child = testdir.spawn_child(args![])?;
-    let output = child.wait_with_output()?;
-    let output = output.assert_success()?;
-
-    output.stdout_line_contains("USAGE:")?;
-
-    Ok(())
-}
-
-#[test]
 fn version_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -507,19 +539,54 @@ fn version_args() -> Result<()> {
 /// they use the generated config. So parallel execution can cause port and
 /// cache conflicts.
 #[test]
-fn config_test() -> Result<()> {
+fn config_tests() -> Result<()> {
     valid_generated_config("start", "Starting zebrad")?;
 
     // Check what happens when Zebra parses an invalid config
     invalid_generated_config()?;
 
-    // Check that an older stored configuration we have for Zebra works
-    stored_config_works()?;
+    // Check that we have a current version of the config stored
+    last_config_is_stored()?;
+
+    // Check that Zebra stored configuration works
+    stored_configs_works()?;
+
+    // Runs `zebrad` serially to avoid potential port conflicts
+    app_no_args()?;
+
+    Ok(())
+}
+
+/// Test that `zebrad` runs the start command with no args
+fn app_no_args() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // start caches state, so run one of the start tests with persistent state
+    let testdir = testdir()?.with_config(&mut persistent_test_config()?)?;
+
+    let mut child = testdir.spawn_child(args![])?;
+
+    // Run the program and kill it after a few seconds
+    std::thread::sleep(LAUNCH_DELAY);
+    child.kill(true)?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    output.stdout_line_contains("Starting zebrad")?;
+
+    // Make sure the command passed the legacy chain check
+    output.stdout_line_contains("starting legacy chain check")?;
+    output.stdout_line_contains("no legacy chain found")?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
 
     Ok(())
 }
 
 /// Test that `zebrad start` can parse the output from `zebrad generate`.
+#[tracing::instrument]
 fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -545,7 +612,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
     // Run command using temp dir and kill it after a few seconds
     let mut child = testdir.spawn_child(args![command])?;
     std::thread::sleep(LAUNCH_DELAY);
-    child.kill()?;
+    child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
@@ -567,6 +634,72 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
     );
 
     Ok(())
+}
+
+/// Check if the config produced by current zebrad is stored.
+fn last_config_is_stored() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let testdir = testdir()?;
+
+    // Add a config file name to tempdir path
+    let generated_config_path = testdir.path().join("zebrad.toml");
+
+    // Generate configuration in temp dir path
+    let child =
+        testdir.spawn_child(args!["generate", "-o": generated_config_path.to_str().unwrap()])?;
+
+    let output = child.wait_with_output()?;
+    let output = output.assert_success()?;
+
+    assert_with_context!(
+        generated_config_path.exists(),
+        &output,
+        "generated config file not found"
+    );
+
+    // Get the contents of the generated config file
+    let generated_content =
+        fs::read_to_string(generated_config_path).expect("Should have been able to read the file");
+
+    // We need to replace the cache dir path as stored configs has a dummy `cache_dir` string there.
+    let processed_generated_content = generated_content
+        .replace(
+            zebra_state::Config::default()
+                .cache_dir
+                .to_str()
+                .expect("a valid cache dir"),
+            "cache_dir",
+        )
+        .trim()
+        .to_string();
+
+    // Loop all the stored configs
+    for config_file in configs_dir()
+        .read_dir()
+        .expect("read_dir call failed")
+        .flatten()
+    {
+        // Read stored config
+        let stored_content = fs::read_to_string(config_file_full_path(config_file.path()))
+            .expect("Should have been able to read the file")
+            .trim()
+            .to_string();
+
+        // If any stored config is equal to the generated then we are good.
+        if stored_content.eq(&processed_generated_content) {
+            return Ok(());
+        }
+    }
+
+    Err(eyre!(
+        "latest zebrad config is not being tested for compatibility.\n\
+         Run:\n\
+         zebrad generate |\n\
+         sed \"s/cache_dir = '.*'/cache_dir = 'cache_dir'/\" >\n\
+         zebrad/tests/common/configs/<next-release-tag>.toml\n\
+         and commit the latest config to Zebra's git repository"
+    ))
 }
 
 /// Checks that Zebra prints an informative message when it cannot parse the
@@ -627,8 +760,11 @@ fn invalid_generated_config() -> Result<()> {
     // and terminate.
     std::thread::sleep(Duration::from_secs(2));
     if child.is_running() {
-        child.kill()?;
-        return Err(eyre!("Zebra should not be running anymore."));
+        // We're going to error anyway, so return an error that makes sense to the developer.
+        child.kill(true)?;
+        return Err(eyre!(
+            "Zebra should have exited after reading the invalid config"
+        ));
     }
 
     let output = child.wait_with_output()?;
@@ -639,28 +775,36 @@ fn invalid_generated_config() -> Result<()> {
     Ok(())
 }
 
-/// Test that an older `zebrad.toml` can still be parsed by the latest `zebrad`.
-fn stored_config_works() -> Result<()> {
-    let stored_config_path = stored_config_path();
-    let run_dir = testdir()?;
+/// Test all versions of `zebrad.toml` we have stored can be parsed by the latest `zebrad`.
+fn stored_configs_works() -> Result<()> {
+    let old_configs_dir = configs_dir();
 
-    // run zebra with stored config
-    let mut child =
-        run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
+    for config_file in old_configs_dir
+        .read_dir()
+        .expect("read_dir call failed")
+        .flatten()
+    {
+        let run_dir = testdir()?;
+        let stored_config_path = config_file_full_path(config_file.path());
 
-    // zebra was able to start with the stored config
-    child.expect_stdout_line_matches("Starting zebrad".to_string())?;
+        // run zebra with stored config
+        let mut child =
+            run_dir.spawn_child(args!["-c", stored_config_path.to_str().unwrap(), "start"])?;
 
-    // finish
-    child.kill()?;
+        // zebra was able to start with the stored config
+        child.expect_stdout_line_matches("Starting zebrad".to_string())?;
 
-    let output = child.wait_with_output()?;
-    let output = output.assert_failure()?;
+        // finish
+        child.kill(false)?;
 
-    // [Note on port conflict](#Note on port conflict)
-    output
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        let output = child.wait_with_output()?;
+        let output = output.assert_failure()?;
+
+        // [Note on port conflict](#Note on port conflict)
+        output
+            .assert_was_killed()
+            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+    }
 
     Ok(())
 }
@@ -823,6 +967,7 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
     .map(|_tempdir| ())
 }
 
+#[tracing::instrument]
 fn create_cached_database(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height();
     let checkpoint_stop_regex = format!("{}.*CommitFinalized request", STOP_AT_HEIGHT_REGEX);
@@ -839,6 +984,7 @@ fn create_cached_database(network: Network) -> Result<()> {
     )
 }
 
+#[tracing::instrument]
 fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height() + 1200;
     let full_validation_stop_regex =
@@ -862,6 +1008,7 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
 /// `timeout_argument_name` parameter. The value of the environment variable must the number of
 /// minutes specified as an integer.
 #[allow(clippy::print_stderr)]
+#[tracing::instrument]
 fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
     let timeout_argument: Option<u64> = env::var(timeout_argument_name)
         .ok()
@@ -1002,7 +1149,7 @@ async fn metrics_endpoint() -> Result<()> {
     assert!(res.status().is_success());
     let body = hyper::body::to_bytes(res).await;
     let (body, mut child) = child.kill_on_error(body)?;
-    child.kill()?;
+    child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
@@ -1077,7 +1224,7 @@ async fn tracing_endpoint() -> Result<()> {
     let tracing_body = hyper::body::to_bytes(tracing_res).await;
     let (tracing_body, mut child) = child.kill_on_error(tracing_body)?;
 
-    child.kill()?;
+    child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
@@ -1121,8 +1268,25 @@ async fn tracing_endpoint() -> Result<()> {
     Ok(())
 }
 
+/// Test that the JSON-RPC endpoint responds to a request,
+/// when configured with a single thread.
 #[tokio::test]
-async fn rpc_endpoint() -> Result<()> {
+async fn rpc_endpoint_single_thread() -> Result<()> {
+    rpc_endpoint(false).await
+}
+
+/// Test that the JSON-RPC endpoint responds to a request,
+/// when configured with multiple threads.
+#[tokio::test]
+async fn rpc_endpoint_parallel_threads() -> Result<()> {
+    rpc_endpoint(true).await
+}
+
+/// Test that the JSON-RPC endpoint responds to a request.
+///
+/// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
+#[tracing::instrument]
+async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     use hyper::{body::to_bytes, Body, Client, Method, Request};
     use serde_json::Value;
 
@@ -1133,7 +1297,7 @@ async fn rpc_endpoint() -> Result<()> {
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = random_known_rpc_port_config()?;
+    let mut config = random_known_rpc_port_config(parallel_cpu_threads)?;
     let url = format!("http://{}", config.rpc.listen_addr.unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
@@ -1175,7 +1339,7 @@ async fn rpc_endpoint() -> Result<()> {
     let subversion = parsed["result"]["subversion"].as_str().unwrap();
     assert!(subversion.contains("Zebra"), "Got {}", subversion);
 
-    child.kill()?;
+    child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
@@ -1186,6 +1350,80 @@ async fn rpc_endpoint() -> Result<()> {
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
     Ok(())
+}
+
+#[test]
+fn non_blocking_logger() -> Result<()> {
+    use futures::FutureExt;
+    use std::{sync::mpsc, time::Duration};
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+
+    let test_task_handle: tokio::task::JoinHandle<Result<()>> = rt.spawn(async move {
+        let _init_guard = zebra_test::init();
+
+        // Write a configuration that has RPC listen_addr set
+        // [Note on port conflict](#Note on port conflict)
+        let mut config = random_known_rpc_port_config(false)?;
+        config.tracing.filter = Some("trace".to_string());
+        config.tracing.buffer_limit = 100;
+        let zebra_rpc_address = config.rpc.listen_addr.unwrap();
+
+        let dir = testdir()?.with_config(&mut config)?;
+        let mut child = dir
+            .spawn_child(args!["start"])?
+            .with_timeout(TINY_CHECKPOINT_TIMEOUT);
+
+        // Wait until port is open.
+        child.expect_stdout_line_matches(
+            format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
+        )?;
+
+        // Create an http client
+        let client = reqwest::Client::new();
+
+        // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
+        // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
+        for _ in 0..500 {
+            let res = client
+                .post(format!("http://{}", &zebra_rpc_address))
+                .body(r#"{"jsonrpc":"1.0","method":"getinfo","params":[],"id":123}"#)
+                .header("Content-Type", "application/json")
+                .send()
+                .await?;
+
+            // Test that zebrad rpc endpoint is still responding to requests
+            assert!(res.status().is_success());
+        }
+
+        child.kill(false)?;
+
+        let output = child.wait_with_output()?;
+        let output = output.assert_failure()?;
+
+        // [Note on port conflict](#Note on port conflict)
+        output
+            .assert_was_killed()
+            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+        done_tx.send(())?;
+
+        Ok(())
+    });
+
+    // Wait until the spawned task finishes or return an error in 45 seconds
+    if done_rx.recv_timeout(Duration::from_secs(45)).is_err() {
+        return Err(eyre!("unexpected test task hang"));
+    }
+
+    rt.shutdown_timeout(Duration::from_secs(3));
+
+    match test_task_handle.now_or_never() {
+        Some(Ok(result)) => result,
+        Some(Err(error)) => Err(eyre!("join error: {:?}", error)),
+        None => Err(eyre!("unexpected test task hang")),
+    }
 }
 
 /// Make sure `lightwalletd` works with Zebra, when both their states are empty.
@@ -1211,25 +1449,31 @@ fn zebrad_update_sync() -> Result<()> {
 
 /// Make sure `lightwalletd` can sync from Zebra, in update sync mode.
 ///
-/// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD`,
-/// `ZEBRA_CACHED_STATE_DIR`, and `LIGHTWALLETD_DATA_DIR` env vars are set.
+/// This test only runs when:
+/// - the `ZEBRA_TEST_LIGHTWALLETD`, `ZEBRA_CACHED_STATE_DIR`, and
+///   `LIGHTWALLETD_DATA_DIR` env vars are set, and
+/// - Zebra is compiled with `--features=lightwalletd-grpc-tests`.
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
 #[cfg(not(target_os = "windows"))]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 fn lightwalletd_update_sync() -> Result<()> {
     lightwalletd_integration_test(UpdateCachedState)
 }
 
 /// Make sure `lightwalletd` can fully sync from genesis using Zebra.
 ///
-/// This test only runs when the `ZEBRA_TEST_LIGHTWALLETD` and
-/// `ZEBRA_CACHED_STATE_DIR` env vars are set.
+/// This test only runs when:
+/// - the `ZEBRA_TEST_LIGHTWALLETD` and `ZEBRA_CACHED_STATE_DIR` env vars are set, and
+/// - Zebra is compiled with `--features=lightwalletd-grpc-tests`.
+///
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
 #[ignore]
 #[cfg(not(target_os = "windows"))]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 fn lightwalletd_full_sync() -> Result<()> {
     lightwalletd_integration_test(FullSyncFromGenesis {
         allow_lightwalletd_cached_state: false,
@@ -1247,7 +1491,7 @@ fn lightwalletd_full_sync() -> Result<()> {
 ///   - run a send transaction gRPC test,
 ///   - run read-only gRPC tests.
 ///
-/// The gRPC tests only run when the `lightwalletd-grpc-tests` is on.
+/// The lightwalletd full, update, and gRPC tests only run with `--features=lightwalletd-grpc-tests`.
 ///
 /// These tests don't work on Windows, so they are always skipped on that platform.
 #[tokio::test]
@@ -1259,21 +1503,27 @@ async fn lightwalletd_test_suite() -> Result<()> {
     // Only runs when ZEBRA_CACHED_STATE_DIR is set.
     lightwalletd_integration_test(UpdateZebraCachedStateNoRpc)?;
 
-    // Only runs when ZEBRA_CACHED_STATE_DIR is set.
-    // When manually running the test suite, allow cached state in the full sync test.
-    lightwalletd_integration_test(FullSyncFromGenesis {
-        allow_lightwalletd_cached_state: true,
-    })?;
-
-    // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
-    lightwalletd_integration_test(UpdateCachedState)?;
-
-    // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set,
-    // and the compile-time gRPC feature is on.
+    // These tests need the compile-time gRPC feature
     #[cfg(feature = "lightwalletd-grpc-tests")]
     {
-        common::lightwalletd::send_transaction_test::run().await?;
+        // Do the quick tests first
+
+        // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
+        lightwalletd_integration_test(UpdateCachedState)?;
+
+        // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
         common::lightwalletd::wallet_grpc_test::run().await?;
+
+        // Then do the slow tests
+
+        // Only runs when ZEBRA_CACHED_STATE_DIR is set.
+        // When manually running the test suite, allow cached state in the full sync test.
+        lightwalletd_integration_test(FullSyncFromGenesis {
+            allow_lightwalletd_cached_state: true,
+        })?;
+
+        // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHED_STATE_DIR are set
+        common::lightwalletd::send_transaction_test::run().await?;
     }
 
     Ok(())
@@ -1281,69 +1531,48 @@ async fn lightwalletd_test_suite() -> Result<()> {
 
 /// Run a lightwalletd integration test with a configuration for `test_type`.
 ///
+/// Tests that sync `lightwalletd` to the chain tip require the `lightwalletd-grpc-tests` feature`:
+/// - [`FullSyncFromGenesis`]
+/// - [`UpdateCachedState`]
+///
 /// Set `FullSyncFromGenesis { allow_lightwalletd_cached_state: true }` to speed up manual full sync tests.
 ///
+/// # Relibility
+///
 /// The random ports in this test can cause [rare port conflicts.](#Note on port conflict)
+///
+/// # Panics
+///
+/// If the `test_type` requires `--features=lightwalletd-grpc-tests`,
+/// but Zebra was not compiled with that feature.
+#[tracing::instrument]
 fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    if zebra_test::net::zebra_skip_network_tests() {
+    // We run these sync tests with a network connection, for better test coverage.
+    let use_internet_connection = true;
+    let network = Mainnet;
+    let test_name = "lightwalletd_integration_test";
+
+    if test_type.launches_lightwalletd() && !can_spawn_lightwalletd_for_rpc(test_name, test_type) {
+        tracing::info!("skipping test due to missing lightwalletd network or cached state");
         return Ok(());
     }
 
-    // Skip the test unless the user specifically asked for it
-    //
-    // TODO: pass test_type to zebra_skip_lightwalletd_tests() and check for lightwalletd launch in there
-    if test_type.launches_lightwalletd() && zebra_skip_lightwalletd_tests() {
-        return Ok(());
-    }
-
-    // TODO: split the zebrad and lightwalletd launches and checks into separate functions?
-
-    // Get the zebrad config
-
-    // Handle the Zebra state directory based on the test type:
-    // - LaunchWithEmptyState: ignore the state directory
-    // - FullSyncFromGenesis, UpdateCachedState, UpdateZebraCachedStateNoRpc:
-    //   skip the test if it is not available, timeout if it is not populated
-
-    // Write a configuration that has RPC listen_addr set (if needed).
-    // If the state path env var is set, use it in the config.
-    let config = if let Some(config) =
-        test_type.zebrad_config("lightwalletd_integration_test".to_string())
+    // Launch zebra with peers and using a predefined zebrad state path.
+    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
+        spawn_zebrad_for_rpc(network, test_name, test_type, use_internet_connection)?
     {
-        config?
+        tracing::info!(
+            ?test_type,
+            "running lightwalletd & zebrad integration test, launching zebrad...",
+        );
+
+        zebrad_and_address
     } else {
+        // Skip the test, we don't have the required cached state
         return Ok(());
     };
-
-    // Handle the lightwalletd state directory based on the test type:
-    // - LaunchWithEmptyState, UpdateZebraCachedStateNoRpc: ignore the state directory
-    // - FullSyncFromGenesis: use it if available, timeout if it is already populated
-    // - UpdateCachedState: skip the test if it is not available, timeout if it is not populated
-    let lightwalletd_state_path =
-        test_type.lightwalletd_state_path("lightwalletd_integration_test".to_string());
-
-    if test_type.needs_lightwalletd_cached_state() && lightwalletd_state_path.is_none() {
-        return Ok(());
-    }
-
-    tracing::info!(
-        ?test_type,
-        ?config,
-        ?lightwalletd_state_path,
-        "running lightwalletd & zebrad integration test",
-    );
-
-    // Get the lists of process failure logs
-    let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
-
-    // Launch zebrad
-    let zdir = testdir()?.with_exact_config(&config)?;
-    let mut zebrad = zdir
-        .spawn_child(args!["start"])?
-        .with_timeout(test_type.zebrad_timeout())
-        .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
     if test_type.needs_zebra_cached_state() {
         zebrad
@@ -1354,32 +1583,35 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     }
 
     // Launch lightwalletd, if needed
-    let lightwalletd = if test_type.launches_lightwalletd() {
-        // Wait until `zebrad` has opened the RPC endpoint
-        zebrad.expect_stdout_line_matches(regex::escape(
-            format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
+    let lightwalletd_and_port = if test_type.launches_lightwalletd() {
+        tracing::info!(
+            ?test_type,
+            ?zebra_rpc_address,
+            "waiting for zebrad to open its RPC port..."
+        );
+        zebrad.expect_stdout_line_matches(&format!(
+            "Opened RPC endpoint at {}",
+            zebra_rpc_address.expect("lightwalletd test must have RPC port")
         ))?;
 
-        // Write a fake zcashd configuration that has the rpcbind and rpcport options set
-        let ldir = testdir()?;
-        let ldir = ldir.with_lightwalletd_config(config.rpc.listen_addr.unwrap())?;
+        tracing::info!(
+            ?zebra_rpc_address,
+            "launching lightwalletd connected to zebrad",
+        );
 
-        let (lightwalletd_failure_messages, lightwalletd_ignore_messages) =
-            test_type.lightwalletd_failure_messages();
+        // Launch lightwalletd
+        let (mut lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_for_rpc(
+            network,
+            test_name,
+            test_type,
+            zebra_rpc_address.expect("lightwalletd test must have RPC port"),
+        )?
+        .expect("already checked for lightwalletd cached state and network");
 
-        // Launch the lightwalletd process
-        let lightwalletd = if test_type == LaunchWithEmptyState {
-            ldir.spawn_lightwalletd_child(None, args![])?
-        } else {
-            ldir.spawn_lightwalletd_child(lightwalletd_state_path, args![])?
-        };
-
-        let mut lightwalletd = lightwalletd
-            .with_timeout(test_type.lightwalletd_timeout())
-            .with_failure_regex_iter(lightwalletd_failure_messages, lightwalletd_ignore_messages);
-
-        // Wait until `lightwalletd` has launched
-        lightwalletd.expect_stdout_line_matches(regex::escape("Starting gRPC server"))?;
+        tracing::info!(
+            ?lightwalletd_rpc_port,
+            "spawned lightwalletd connected to zebrad",
+        );
 
         // Check that `lightwalletd` is calling the expected Zebra RPCs
 
@@ -1431,49 +1663,43 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
             }
         }
 
-        Some(lightwalletd)
+        Some((lightwalletd, lightwalletd_rpc_port))
     } else {
         None
     };
 
     let (mut zebrad, lightwalletd) = if test_type.needs_zebra_cached_state() {
-        if let Some(mut lightwalletd) = lightwalletd {
-            // Wait for lightwalletd to sync to Zebra's tip.
-            //
-            // "Adding block" and "Waiting for block" logs stop when `lightwalletd` reaches the tip.
-            // But if the logs just stop, we can't tell the difference between a hang and fully synced.
-            // So we assume `lightwalletd` will sync and log large groups of blocks,
-            // and check for logs with heights near the mainnet tip height.
-            let lightwalletd_thread = std::thread::spawn(move || -> Result<_> {
-                tracing::info!(?test_type, "waiting for lightwalletd to sync to the tip");
+        if let Some((lightwalletd, lightwalletd_rpc_port)) = lightwalletd_and_port {
+            #[cfg(feature = "lightwalletd-grpc-tests")]
+            {
+                use common::lightwalletd::sync::wait_for_zebrad_and_lightwalletd_sync;
 
-                lightwalletd.expect_stdout_line_matches(LIGHTWALLETD_SYNC_FINISHED_REGEX)?;
+                tracing::info!(
+                    ?lightwalletd_rpc_port,
+                    "waiting for zebrad and lightwalletd to sync...",
+                );
 
-                Ok(lightwalletd)
-            });
+                let (lightwalletd, zebrad) = wait_for_zebrad_and_lightwalletd_sync(
+                    lightwalletd,
+                    lightwalletd_rpc_port,
+                    zebrad,
+                    zebra_rpc_address.expect("lightwalletd test must have RPC port"),
+                    test_type,
+                    // We want to wait for the mempool and network for better coverage
+                    true,
+                    use_internet_connection,
+                )?;
 
-            // `lightwalletd` syncs can take a long time,
-            // so we need to check that `zebrad` has synced to the tip in parallel.
-            let lightwalletd_thread_and_zebrad = std::thread::spawn(move || -> Result<_> {
-                tracing::info!(?test_type, "waiting for zebrad to sync to the tip");
+                (zebrad, Some(lightwalletd))
+            }
 
-                while !lightwalletd_thread.is_finished() {
-                    zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
-                }
-
-                Ok((lightwalletd_thread, zebrad))
-            });
-
-            // Retrieve the child process handles from the threads
-            let (lightwalletd_thread, zebrad) = lightwalletd_thread_and_zebrad
-                .join()
-                .unwrap_or_else(|panic_object| panic::resume_unwind(panic_object))?;
-
-            let lightwalletd = lightwalletd_thread
-                .join()
-                .unwrap_or_else(|panic_object| panic::resume_unwind(panic_object))?;
-
-            (zebrad, Some(lightwalletd))
+            #[cfg(not(feature = "lightwalletd-grpc-tests"))]
+            panic!(
+                "the {test_type:?} test requires `cargo test --feature lightwalletd-grpc-tests`\n\
+                 zebrad: {zebrad:?}\n\
+                 lightwalletd: {lightwalletd:?}\n\
+                 lightwalletd_rpc_port: {lightwalletd_rpc_port:?}"
+            );
         } else {
             // We're just syncing Zebra, so there's no lightwalletd to check
             tracing::info!(?test_type, "waiting for zebrad to sync to the tip");
@@ -1482,6 +1708,8 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
             (zebrad, None)
         }
     } else {
+        let lightwalletd = lightwalletd_and_port.map(|(lightwalletd, _port)| lightwalletd);
+
         // We don't have a cached state, so we don't do any tip checks for Zebra or lightwalletd
         (zebrad, lightwalletd)
     };
@@ -1497,10 +1725,10 @@ fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> 
     //
     // zcash/lightwalletd exits by itself, but
     // adityapk00/lightwalletd keeps on going, so it gets killed by the test harness.
-    zebrad.kill()?;
+    zebrad.kill(false)?;
 
     if let Some(mut lightwalletd) = lightwalletd {
-        lightwalletd.kill()?;
+        lightwalletd.kill(false)?;
 
         let lightwalletd_output = lightwalletd.wait_with_output()?.assert_failure()?;
 
@@ -1623,7 +1851,9 @@ fn zebra_rpc_conflict() -> Result<()> {
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = random_known_rpc_port_config()?;
+    //
+    // This is the required setting to detect port conflicts.
+    let mut config = random_known_rpc_port_config(false)?;
 
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(
@@ -1686,6 +1916,7 @@ fn zebra_state_conflict() -> Result<()> {
 /// `second_dir`. Check that the first node's stdout contains
 /// `first_stdout_regex`, and the second node's stderr contains
 /// `second_stderr_regex`.
+#[tracing::instrument]
 fn check_config_conflict<T, U>(
     first_dir: T,
     first_stdout_regex: &str,
@@ -1693,8 +1924,8 @@ fn check_config_conflict<T, U>(
     second_stderr_regex: &str,
 ) -> Result<()>
 where
-    T: ZebradTestDirExt,
-    U: ZebradTestDirExt,
+    T: ZebradTestDirExt + std::fmt::Debug,
+    U: ZebradTestDirExt + std::fmt::Debug,
 {
     // Start the first node
     let mut node1 = first_dir.spawn_child(args!["start"])?;
@@ -1712,7 +1943,7 @@ where
     // Wait a few seconds and kill first node.
     // Second node is terminated by panic, no need to kill.
     std::thread::sleep(LAUNCH_DELAY);
-    let node1_kill_res = node1.kill();
+    let node1_kill_res = node1.kill(false);
     let (_, mut node2) = node2.kill_on_error(node1_kill_res)?;
 
     // node2 should have panicked due to a conflict. Kill it here anyway, so it
@@ -1759,30 +1990,36 @@ async fn fully_synced_rpc_test() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // We're only using cached Zebra state here, so this test type is the most similar
-    let test_type = LightwalletdTestType::FullSyncFromGenesis {
-        allow_lightwalletd_cached_state: false,
-    };
+    let test_type = LightwalletdTestType::UpdateCachedState;
+    let network = Network::Mainnet;
 
-    // Handle the Zebra state directory
-    let cached_state_path = test_type.zebrad_state_path("fully_synced_rpc_test".to_string());
+    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
+        spawn_zebrad_for_rpc(network, "fully_synced_rpc_test", test_type, false)?
+    {
+        tracing::info!("running fully synced zebrad RPC test");
 
-    if cached_state_path.is_none() {
+        zebrad_and_address
+    } else {
+        // Skip the test, we don't have the required cached state
         return Ok(());
     };
 
-    tracing::info!("running fully synced zebrad RPC test");
-
-    let network = Network::Mainnet;
-
-    let (_zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc_without_initial_peers(network, cached_state_path.unwrap(), test_type)?;
+    zebrad.expect_stdout_line_matches(&format!(
+        "Opened RPC endpoint at {}",
+        zebra_rpc_address.expect("lightwalletd test must have RPC port"),
+    ))?;
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
     // if desired.
     let client = reqwest::Client::new();
     let res = client
-        .post(format!("http://{}", &zebra_rpc_address.to_string()))
+        .post(format!(
+            "http://{}",
+            &zebra_rpc_address
+                .expect("lightwalletd test must have RPC port")
+                .to_string()
+        ))
         // Manually constructed request to avoid encoding it, for simplicity
         .body(r#"{"jsonrpc": "2.0", "method": "getblock", "params": ["1180900", 0], "id":123 }"#)
         .header("Content-Type", "application/json")
@@ -1865,7 +2102,7 @@ async fn delete_old_databases() -> Result<()> {
     assert!(outside_dir.as_path().exists());
 
     // finish
-    child.kill()?;
+    child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
@@ -1883,9 +2120,9 @@ async fn delete_old_databases() -> Result<()> {
 /// See [`common::lightwalletd::send_transaction_test`] for more information.
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
-#[cfg(feature = "lightwalletd-grpc-tests")]
 #[tokio::test]
 #[ignore]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 #[cfg(not(target_os = "windows"))]
 async fn sending_transactions_using_lightwalletd() -> Result<()> {
     common::lightwalletd::send_transaction_test::run().await
@@ -1896,9 +2133,9 @@ async fn sending_transactions_using_lightwalletd() -> Result<()> {
 /// See [`common::lightwalletd::wallet_grpc_test`] for more information.
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
-#[cfg(feature = "lightwalletd-grpc-tests")]
 #[tokio::test]
 #[ignore]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 #[cfg(not(target_os = "windows"))]
 async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
     common::lightwalletd::wallet_grpc_test::run().await

@@ -3,14 +3,12 @@
 use std::{mem, sync::Arc};
 
 use zebra_chain::{
-    block::{self, Block},
+    block::Block,
     transaction::Transaction,
     transparent,
     work::difficulty::ExpandedDifficulty,
     work::difficulty::{Work, U256},
 };
-
-use super::*;
 
 pub mod setup;
 
@@ -77,23 +75,10 @@ fn work_to_expanded(work: U256) -> ExpandedDifficulty {
     ExpandedDifficulty::from(expanded)
 }
 
-/// Block heights, and the expected minimum block locator height
-static BLOCK_LOCATOR_CASES: &[(u32, u32)] = &[
-    (0, 0),
-    (1, 0),
-    (10, 0),
-    (98, 0),
-    (99, 0),
-    (100, 1),
-    (101, 2),
-    (1000, 901),
-    (10000, 9901),
-];
-
-use proptest::prelude::*;
-
 #[test]
 fn round_trip_work_expanded() {
+    use proptest::prelude::*;
+
     let _init_guard = zebra_test::init();
 
     proptest!(|(work_before in any::<Work>())| {
@@ -102,48 +87,4 @@ fn round_trip_work_expanded() {
         let work_after = Work::try_from(expanded).unwrap();
         prop_assert_eq!(work_before, work_after);
     });
-}
-
-/// Check that the block locator heights are sensible.
-#[test]
-fn test_block_locator_heights() {
-    let _init_guard = zebra_test::init();
-
-    for (height, min_height) in BLOCK_LOCATOR_CASES.iter().cloned() {
-        let locator = util::block_locator_heights(block::Height(height));
-
-        assert!(!locator.is_empty(), "locators must not be empty");
-        if (height - min_height) > 1 {
-            assert!(
-                locator.len() > 2,
-                "non-trivial locators must have some intermediate heights"
-            );
-        }
-
-        assert_eq!(
-            locator[0],
-            block::Height(height),
-            "locators must start with the tip height"
-        );
-
-        // Check that the locator is sorted, and that it has no duplicates
-        // TODO: replace with dedup() and is_sorted_by() when sorting stabilises.
-        assert!(locator.windows(2).all(|v| match v {
-            [a, b] => a.0 > b.0,
-            _ => unreachable!("windows returns exact sized slices"),
-        }));
-
-        let final_height = locator[locator.len() - 1];
-        assert_eq!(
-            final_height,
-            block::Height(min_height),
-            "locators must end with the specified final height"
-        );
-        assert!(height - final_height.0 <= constants::MAX_BLOCK_REORG_HEIGHT,
-                    "locator for {} must not be more than the maximum reorg height {} below the tip, but {} is {} blocks below the tip",
-                    height,
-                    constants::MAX_BLOCK_REORG_HEIGHT,
-                    final_height.0,
-                    height - final_height.0);
-    }
 }

@@ -10,6 +10,9 @@ on:
       # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
       # workflow definitions
       - '.github/workflows/build-crates-individually.yml'
 
@@ -20,7 +23,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v3.0.2
+      - uses: actions/checkout@v3.1.0
 
       - uses: actions-rs/toolchain@v1
         with:

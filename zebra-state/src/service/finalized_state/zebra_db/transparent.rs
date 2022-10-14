@@ -313,7 +313,7 @@ impl ZebraDb {
     ///
     /// Specifically, a block in the partial chain must be a child block of the finalized tip.
     /// (But the child block does not have to be the partial chain root.)
-    pub fn partial_finalized_transparent_utxos(
+    pub fn partial_finalized_address_utxos(
         &self,
         addresses: &HashSet<transparent::Address>,
     ) -> BTreeMap<OutputLocation, transparent::Output> {

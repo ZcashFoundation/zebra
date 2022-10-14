@@ -1,4 +1,15 @@
 //! Reading note commitment trees.
+//!
+//! In the functions in this module:
+//!
+//! The block write task commits blocks to the finalized state before updating
+//! `chain` with a cached copy of the best non-finalized chain from
+//! `NonFinalizedState.chain_set`. Then the block commit task can commit additional blocks to
+//! the finalized state after we've cloned the `chain`.
+//!
+//! This means that some blocks can be in both:
+//! - the cached [`Chain`], and
+//! - the shared finalized [`ZebraDb`] reference.
 
 use std::sync::Arc;
 
@@ -22,10 +33,6 @@ where
 {
     // # Correctness
     //
-    // The StateService commits blocks to the finalized state before updating
-    // the latest chain, and it can commit additional blocks after we've cloned
-    // this `chain` variable.
-    //
     // Since sapling treestates are the same in the finalized and non-finalized
     // state, we check the most efficient alternative first. (`chain` is always
     // in memory, but `db` stores blocks on disk, with a memory cache.)
@@ -46,10 +53,6 @@ where
     C: AsRef<Chain>,
 {
     // # Correctness
-    //
-    // The StateService commits blocks to the finalized state before updating
-    // the latest chain, and it can commit additional blocks after we've cloned
-    // this `chain` variable.
     //
     // Since orchard treestates are the same in the finalized and non-finalized
     // state, we check the most efficient alternative first. (`chain` is always

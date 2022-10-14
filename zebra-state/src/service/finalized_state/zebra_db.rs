@@ -28,10 +28,17 @@ pub mod transparent;
 pub mod arbitrary;
 
 /// Wrapper struct to ensure high-level typed database access goes through the correct API.
-#[derive(Clone, Debug)]
+///
+/// `rocksdb` allows concurrent writes through a shared reference,
+/// so database instances are cloneable. When the final clone is dropped,
+/// the database is closed.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ZebraDb {
+    // Owned State
+    //
+    // Everything contained in this state must be shared by all clones, or read-only.
+    //
     /// The inner low-level database wrapper for the RocksDB database.
-    /// This wrapper can be cloned and shared.
     db: DiskDb,
 }
 

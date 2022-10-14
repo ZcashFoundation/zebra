@@ -275,7 +275,7 @@ impl NonEmptyHistoryTree {
         // /\ /\ /\ /\ /\ /\ /\ 0
         //
         // We start by determining the altitude of the highest peak (A).
-        let mut alt = (32 - ((self.size + 1) as u32).leading_zeros() - 1) - 1;
+        let mut alt = (32 - (self.size + 1).leading_zeros() - 1) - 1;
 
         // We determine the position of the highest peak (A) by pretending it is the right
         // sibling in a tree, and its left-most leaf has position 0. Then the left sibling
@@ -507,3 +507,11 @@ impl Deref for HistoryTree {
         &self.0
     }
 }
+
+impl PartialEq for HistoryTree {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref().map(|tree| tree.hash()) == other.as_ref().map(|other_tree| other_tree.hash())
+    }
+}
+
+impl Eq for HistoryTree {}

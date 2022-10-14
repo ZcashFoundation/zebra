@@ -45,13 +45,11 @@ pub const STOP_AT_HEIGHT_REGEX: &str = "stopping at configured height";
 pub const SYNC_FINISHED_REGEX: &str =
     r"finished initial sync to chain tip, using gossiped blocks .*sync_percent.*=.*100\.";
 
-/// The text that should be logged when `lightwalletd`'s initial sync is near the chain tip.
-///
-/// We can't guarantee a "Waiting for block" log, so we just check for a block near the tip height.
-///
-/// TODO: update the regex to `1[8-9][0-9]{5}` when mainnet reaches block 1_800_000
-pub const LIGHTWALLETD_SYNC_FINISHED_REGEX: &str =
-    r"([Aa]dding block to cache 1[7-9][0-9]{5})|([Ww]aiting for block: 1[7-9][0-9]{5})";
+/// The text that should be logged every time Zebra checks the sync progress.
+//
+// This is only used with `--feature lightwalletd-grpc-tests`
+#[allow(dead_code)]
+pub const SYNC_PROGRESS_REGEX: &str = r"sync_percent";
 
 /// The maximum amount of time Zebra should take to reload after shutting down.
 ///
@@ -72,8 +70,11 @@ pub const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(180);
 /// The partially synchronized state is expected to be close to the tip, so this timeout can be
 /// lower than what's expected for a full synchronization. However, a value that's too short may
 /// cause the test to fail.
-#[allow(dead_code)]
-pub const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+pub const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(11 * 60 * 60);
+
+/// The maximum time to wait for Zebrad to synchronize up to the chain tip starting from the
+/// genesis block.
+pub const FINISH_FULL_SYNC_TIMEOUT: Duration = Duration::from_secs(32 * 60 * 60);
 
 /// The test sync height where we switch to using the default lookahead limit.
 ///
@@ -86,6 +87,7 @@ pub const MIN_HEIGHT_FOR_DEFAULT_LOOKAHEAD: Height =
     Height(3 * sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT as u32);
 
 /// What the expected behavior of the mempool is for a test that uses [`sync_until`].
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MempoolBehavior {
     /// The mempool should be forced to activate at a certain height, for debug purposes.
     ///
@@ -177,6 +179,7 @@ impl MempoolBehavior {
 /// On success, returns the associated `TempDir`. Returns an error if
 /// the child exits or `timeout` elapses before `stop_regex` is found.
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip(reuse_tempdir))]
 pub fn sync_until(
     height: Height,
     network: Network,
@@ -248,7 +251,7 @@ pub fn sync_until(
 
         // make sure the child process is dead
         // if it has already exited, ignore that error
-        let _ = child.kill();
+        child.kill(true)?;
 
         Ok(child.dir.take().expect("dir was not already taken"))
     } else {
@@ -297,11 +300,12 @@ pub fn sync_until(
 /// The zebrad instance is executed on a copy of the partially synchronized chain state. This copy
 /// is returned afterwards, containing the fully synchronized chain state.
 #[allow(dead_code)]
-pub async fn perform_full_sync_starting_from(
+#[tracing::instrument]
+pub async fn copy_state_and_perform_full_sync(
     network: Network,
     partial_sync_path: &Path,
 ) -> Result<TempDir> {
-    let fully_synced_path = copy_state_directory(&partial_sync_path).await?;
+    let fully_synced_path = copy_state_directory(network, &partial_sync_path).await?;
 
     sync_until(
         Height::MAX,
@@ -354,6 +358,7 @@ pub fn cached_mandatory_checkpoint_test_config() -> Result<ZebradConfig> {
 /// Returns an error if the child exits or the fixed timeout elapses
 /// before `STOP_AT_HEIGHT_REGEX` is found.
 #[allow(clippy::print_stderr)]
+#[tracing::instrument]
 pub fn create_cached_database_height(
     network: Network,
     height: Height,
@@ -362,9 +367,6 @@ pub fn create_cached_database_height(
     stop_regex: &str,
 ) -> Result<()> {
     eprintln!("creating cached database");
-
-    // 20 hours
-    let timeout = Duration::from_secs(60 * 60 * 20);
 
     // Use a persistent state, so we can handle large syncs
     let mut config = cached_mandatory_checkpoint_test_config()?;
@@ -378,7 +380,7 @@ pub fn create_cached_database_height(
     let mut child = dir
         .with_exact_config(&config)?
         .spawn_child(args!["start"])?
-        .with_timeout(timeout)
+        .with_timeout(FINISH_FULL_SYNC_TIMEOUT)
         .bypass_test_capture(true);
 
     let network = format!("network: {},", network);
@@ -389,7 +391,9 @@ pub fn create_cached_database_height(
 
     child.expect_stdout_line_matches(stop_regex)?;
 
-    child.kill()?;
+    // make sure the child process is dead
+    // if it has already exited, ignore that error
+    child.kill(true)?;
 
     Ok(())
 }

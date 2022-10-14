@@ -29,10 +29,11 @@ async fn rpc_getinfo() {
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        Mainnet,
+        false,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
-        Mainnet,
     );
 
     let get_info = rpc.get_info().expect("We should have a GetInfo struct");
@@ -71,10 +72,11 @@ async fn rpc_getblock() {
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        Mainnet,
+        false,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
-        Mainnet,
     );
 
     // Make calls with verbosity=0 and check response
@@ -123,10 +125,11 @@ async fn rpc_getblock_parse_error() {
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        Mainnet,
+        false,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
-        Mainnet,
     );
 
     // Make sure we get an error if Zebra can't parse the block height.
@@ -153,10 +156,11 @@ async fn rpc_getblock_missing_error() {
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        Mainnet,
+        false,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
-        Mainnet,
     );
 
     // Make sure Zebra returns the correct error code `-8` for missing blocks
@@ -219,10 +223,11 @@ async fn rpc_getbestblockhash() {
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        Mainnet,
+        false,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
-        Mainnet,
     );
 
     // Get the tip hash using RPC method `get_best_block_hash`
@@ -259,10 +264,11 @@ async fn rpc_getrawtransaction() {
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        Mainnet,
+        false,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
-        Mainnet,
     );
 
     // Test case where transaction is in mempool.
@@ -344,10 +350,11 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        Mainnet,
+        false,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip,
-        Mainnet,
     );
 
     // call the method with an invalid address string
@@ -388,7 +395,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         .unwrap_err();
     assert_eq!(
         error.message,
-        "End value is expected to be greater than or equal to start".to_string()
+        "start Height(2) must be less than or equal to end Height(1)".to_string()
     );
 
     // call the method with start equal zero
@@ -404,7 +411,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         .unwrap_err();
     assert_eq!(
         error.message,
-        "Start and end are expected to be greater than zero".to_string()
+        "start Height(0) and end Height(1) must both be greater than zero".to_string()
     );
 
     // call the method outside the chain tip height
@@ -420,7 +427,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         .unwrap_err();
     assert_eq!(
         error.message,
-        "Start or end is outside chain range".to_string()
+        "start Height(1) and end Height(11) must both be less than or equal to the chain tip Height(10)".to_string()
     );
 
     mempool.expect_no_requests().await;
@@ -485,10 +492,11 @@ async fn rpc_getaddresstxids_response_with(
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
+        network,
+        false,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip,
-        network,
     );
 
     // call the method with valid arguments
@@ -534,10 +542,11 @@ async fn rpc_getaddressutxos_invalid_arguments() {
 
     let rpc = RpcImpl::new(
         "RPC test",
+        Mainnet,
+        false,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
-        Mainnet,
     );
 
     // call the method with an invalid address string
@@ -583,10 +592,11 @@ async fn rpc_getaddressutxos_response() {
 
     let rpc = RpcImpl::new(
         "RPC test",
+        Mainnet,
+        false,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip,
-        Mainnet,
     );
 
     // call the method with a valid address

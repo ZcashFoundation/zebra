@@ -93,6 +93,12 @@ pub struct TracingSection {
     /// verification of every 1000th block.
     pub filter: Option<String>,
 
+    /// The buffer_limit size sets the number of log lines that can be queued by the tracing subscriber
+    /// to be written to stdout before logs are dropped.
+    ///
+    /// Defaults to 128,000 with a minimum of 100.
+    pub buffer_limit: usize,
+
     /// The address used for an ad-hoc RPC endpoint allowing dynamic control of the tracing filter.
     ///
     /// Install Zebra using `cargo install --features=filter-reload` to enable this config.
@@ -140,6 +146,7 @@ impl Default for TracingSection {
             use_color: true,
             force_use_color: false,
             filter: None,
+            buffer_limit: 128_000,
             endpoint_addr: None,
             flamegraph: None,
             use_journald: false,
@@ -213,7 +220,7 @@ pub struct SyncSection {
     /// The number of threads used to verify signatures, proofs, and other CPU-intensive code.
     ///
     /// Set to `0` by default, which uses one thread per available CPU core.
-    /// For details, see [the rayon documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
+    /// For details, see [the `rayon` documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
     pub parallel_cpu_threads: usize,
 }
 

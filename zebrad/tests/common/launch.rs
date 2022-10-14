@@ -14,6 +14,7 @@ use std::{
 
 use color_eyre::eyre::Result;
 use indexmap::IndexSet;
+use tempfile::TempDir;
 
 use zebra_chain::parameters::Network;
 use zebra_test::{
@@ -23,7 +24,11 @@ use zebra_test::{
 };
 use zebrad::config::ZebradConfig;
 
-use crate::common::lightwalletd::{random_known_rpc_port_config, LightwalletdTestType};
+use crate::common::{
+    config::testdir,
+    lightwalletd::{zebra_skip_lightwalletd_tests, LightwalletdTestType},
+    sync::FINISH_PARTIAL_SYNC_TIMEOUT,
+};
 
 /// After we launch `zebrad`, wait this long for the command to start up,
 /// take the actions expected by the tests, and log the expected logs.
@@ -33,38 +38,28 @@ use crate::common::lightwalletd::{random_known_rpc_port_config, LightwalletdTest
 pub const LAUNCH_DELAY: Duration = Duration::from_secs(15);
 
 /// After we launch `lightwalletd`, wait this long for the command to start up,
-/// take the actions expected by the tests, and log the expected logs.
+/// take the actions expected by the quick tests, and log the expected logs.
 ///
 /// `lightwalletd`'s actions also depend on the actions of the `zebrad` instance
 /// it is using for its RPCs.
 pub const LIGHTWALLETD_DELAY: Duration = Duration::from_secs(60);
 
 /// The amount of time we wait between launching two conflicting nodes.
-pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(2);
+///
+/// We use a longer time to make sure the first node has launched before the second starts,
+/// even if CI is under load.
+pub const BETWEEN_NODES_DELAY: Duration = Duration::from_secs(5);
 
 /// The amount of time we wait for lightwalletd to update to the tip.
 ///
-/// `lightwalletd` takes about 90 minutes to fully sync,
-/// and `zebrad` takes about 30 minutes to update to the tip.
-///
-/// TODO: reduce to 20 minutes when `zebrad` sync performance improves
-pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = Duration::from_secs(11 * 60 * 60);
+/// `lightwalletd` takes about 60-120 minutes to fully sync,
+/// and `zebrad` can take hours to update to the tip under load.
+pub const LIGHTWALLETD_UPDATE_TIP_DELAY: Duration = FINISH_PARTIAL_SYNC_TIMEOUT;
 
 /// The amount of time we wait for lightwalletd to do a full sync to the tip.
 ///
 /// See [`LIGHTWALLETD_UPDATE_TIP_DELAY`] for details.
-pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = Duration::from_secs(11 * 60 * 60);
-
-/// The amount of extra time we wait for Zebra to sync to the tip,
-/// after we ignore a lightwalletd failure.
-///
-/// Since we restart `lightwalletd` after a hang, we allow time for another full `lightwalletd` sync.
-///
-/// See [`LIGHTWALLETD_UPDATE_TIP_DELAY`] for details.
-///
-/// TODO: remove this extra time when lightwalletd hangs are fixed
-pub const ZEBRAD_EXTRA_DELAY_FOR_LIGHTWALLETD_WORKAROUND: Duration =
-    LIGHTWALLETD_FULL_SYNC_TIP_DELAY;
+pub const LIGHTWALLETD_FULL_SYNC_TIP_DELAY: Duration = FINISH_PARTIAL_SYNC_TIMEOUT;
 
 /// Extension trait for methods on `tempfile::TempDir` for using it as a test
 /// directory for `zebrad`.
@@ -192,7 +187,7 @@ where
             let cache_dir = dir.join("state");
             fs::create_dir_all(&cache_dir)?;
         } else {
-            fs::create_dir_all(&dir)?;
+            fs::create_dir_all(dir)?;
         }
 
         let config_file = dir.join("zebrad.toml");
@@ -202,39 +197,79 @@ where
     }
 }
 
-/// Spawns a zebrad instance to interact with lightwalletd, but without an internet connection.
+/// Spawns a zebrad instance on `network` to test lightwalletd with `test_type`.
 ///
-/// This prevents it from downloading blocks. Instead, the `zebra_directory` parameter allows
-/// providing an initial state to the zebrad instance.
-pub fn spawn_zebrad_for_rpc_without_initial_peers<P: ZebradTestDirExt>(
+/// If `use_internet_connection` is `false` then spawn, but without any peers.
+/// This prevents it from downloading blocks. Instead, use the `ZEBRA_CACHED_STATE_DIR`
+/// environmental variable to provide an initial state to the zebrad instance.
+///
+/// Returns:
+/// - `Ok(Some(zebrad, zebra_rpc_address))` on success,
+/// - `Ok(None)` if the test doesn't have the required network or cached state, and
+/// - `Err(_)` if spawning zebrad fails.
+///
+/// `zebra_rpc_address` is `None` if the test type doesn't need an RPC port.
+#[tracing::instrument]
+pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     network: Network,
-    zebra_directory: P,
+    test_name: S,
     test_type: LightwalletdTestType,
-) -> Result<(TestChild<P>, SocketAddr)> {
-    let mut config = random_known_rpc_port_config()
-        .expect("Failed to create a config file with a known RPC listener port");
+    use_internet_connection: bool,
+) -> Result<Option<(TestChild<TempDir>, Option<SocketAddr>)>> {
+    let test_name = test_name.as_ref();
 
-    config.state.ephemeral = false;
-    config.network.initial_mainnet_peers = IndexSet::new();
-    config.network.initial_testnet_peers = IndexSet::new();
+    // Skip the test unless the user specifically asked for it
+    if !can_spawn_zebrad_for_rpc(test_name, test_type) {
+        return Ok(None);
+    }
+
+    // Get the zebrad config
+    let mut config = test_type
+        .zebrad_config(test_name)
+        .expect("already checked config")?;
+
+    // TODO: move this into zebrad_config()
     config.network.network = network;
-    config.mempool.debug_enable_at_height = Some(0);
+    if !use_internet_connection {
+        config.network.initial_mainnet_peers = IndexSet::new();
+        config.network.initial_testnet_peers = IndexSet::new();
+
+        config.mempool.debug_enable_at_height = Some(0);
+    }
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 
-    let mut zebrad = zebra_directory
-        .with_config(&mut config)?
+    // Writes a configuration that has RPC listen_addr set (if needed).
+    // If the state path env var is set, uses it in the config.
+    let zebrad = testdir()?
+        .with_exact_config(&config)?
         .spawn_child(args!["start"])?
         .bypass_test_capture(true)
         .with_timeout(test_type.zebrad_timeout())
         .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
-    let rpc_address = config.rpc.listen_addr.unwrap();
+    Ok(Some((zebrad, config.rpc.listen_addr)))
+}
 
-    zebrad.expect_stdout_line_matches("activating mempool")?;
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", rpc_address))?;
+/// Returns `true` if a zebrad test for `test_type` has everything it needs to run.
+#[tracing::instrument]
+pub fn can_spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
+    test_name: S,
+    test_type: LightwalletdTestType,
+) -> bool {
+    if zebra_test::net::zebra_skip_network_tests() {
+        return false;
+    }
 
-    Ok((zebrad, rpc_address))
+    // Skip the test unless the user specifically asked for it
+    //
+    // TODO: pass test_type to zebra_skip_lightwalletd_tests() and check for lightwalletd launch in there
+    if test_type.launches_lightwalletd() && zebra_skip_lightwalletd_tests() {
+        return false;
+    }
+
+    // Check if we have any necessary cached states for the zebrad config
+    test_type.zebrad_config(test_name).is_some()
 }
 
 /// Panics if `$pred` is false, with an error report containing:

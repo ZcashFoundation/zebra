@@ -9,6 +9,8 @@ on:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - '**/deny.toml'
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
       - '.github/workflows/continous-integration-os.yml'
 
 jobs:
@@ -19,7 +21,7 @@ jobs:
       matrix:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
         os: [ubuntu-latest, macos-latest]
-        rust: [stable, beta]
+        rust: [1.63, beta]
         exclude:
           - os: macos-latest
             rust: beta

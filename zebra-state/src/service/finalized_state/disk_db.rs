@@ -34,6 +34,10 @@ pub type DB = rocksdb::DBWithThreadMode<DBThreadMode>;
 
 /// Wrapper struct to ensure low-level database access goes through the correct API.
 ///
+/// `rocksdb` allows concurrent writes through a shared reference,
+/// so database instances are cloneable. When the final clone is dropped,
+/// the database is closed.
+///
 /// # Correctness
 ///
 /// Reading transactions from the database using RocksDB iterators causes hangs.
@@ -48,6 +52,20 @@ pub type DB = rocksdb::DBWithThreadMode<DBThreadMode>;
 /// (Or it might be fixed by future RocksDB upgrades.)
 #[derive(Clone, Debug)]
 pub struct DiskDb {
+    // Configuration
+    //
+    // This configuration cannot be modified after the database is initialized,
+    // because some clones would have different values.
+    //
+    /// The configured temporary database setting.
+    ///
+    /// If true, the database files are deleted on drop.
+    ephemeral: bool,
+
+    // Owned State
+    //
+    // Everything contained in this state must be shared by all clones, or read-only.
+    //
     /// The shared inner RocksDB database.
     ///
     /// RocksDB allows reads and writes via a shared reference.
@@ -58,11 +76,6 @@ pub struct DiskDb {
     /// In [`MultiThreaded`](rocksdb::MultiThreaded) mode,
     /// only [`Drop`] requires exclusive access.
     db: Arc<DB>,
-
-    /// The configured temporary database setting.
-    ///
-    /// If true, the database files are deleted on drop.
-    ephemeral: bool,
 }
 
 /// Wrapper struct to ensure low-level database writes go through the correct API.
@@ -210,10 +223,10 @@ impl ReadDisk for DiskDb {
         // Empty column families return invalid forward iterators.
         //
         // Checking iterator validity does not seem to cause database hangs.
-        !self
-            .db
-            .iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .valid()
+        let iterator = self.db.iterator_cf(cf, rocksdb::IteratorMode::Start);
+        let raw_iterator: rocksdb::DBRawIteratorWithThreadMode<DB> = iterator.into();
+
+        !raw_iterator.valid()
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -228,12 +241,10 @@ impl ReadDisk for DiskDb {
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
         // value, because we're going to deserialize it anyways, which avoids an
         // extra copy
-        //
-        // TODO: move disk reads to a blocking thread (#2188)
         let value_bytes = self
             .db
             .get_pinned_cf(cf, key_bytes)
-            .expect("expected that disk errors would not occur");
+            .expect("unexpected database failure");
 
         value_bytes.map(V::from_bytes)
     }
@@ -247,14 +258,13 @@ impl ReadDisk for DiskDb {
 
         // We use `get_pinned_cf` to avoid taking ownership of the serialized
         // value, because we don't use the value at all. This avoids an extra copy.
-        //
-        // TODO: move disk reads to a blocking thread (#2188)
         self.db
             .get_pinned_cf(cf, key_bytes)
-            .expect("expected that disk errors would not occur")
+            .expect("unexpected database failure")
             .is_some()
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn zs_first_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -264,10 +274,14 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .next()
-            .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .next()?
+            .map(|(key_bytes, value_bytes)| {
+                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            })
+            .expect("unexpected database failure")
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn zs_last_key_value<C, K, V>(&self, cf: &C) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -277,10 +291,14 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, rocksdb::IteratorMode::End)
-            .next()
-            .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .next()?
+            .map(|(key_bytes, value_bytes)| {
+                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            })
+            .expect("unexpected database failure")
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn zs_next_key_value_from<C, K, V>(&self, cf: &C, lower_bound: &K) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -293,10 +311,14 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, from)
-            .next()
-            .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .next()?
+            .map(|(key_bytes, value_bytes)| {
+                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            })
+            .expect("unexpected database failure")
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn zs_prev_key_value_back_from<C, K, V>(&self, cf: &C, upper_bound: &K) -> Option<(K, V)>
     where
         C: rocksdb::AsColumnFamilyRef,
@@ -309,8 +331,11 @@ impl ReadDisk for DiskDb {
         // Reading individual values from iterators does not seem to cause database hangs.
         self.db
             .iterator_cf(cf, from)
-            .next()
-            .map(|(key_bytes, value_bytes)| (K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            .next()?
+            .map(|(key_bytes, value_bytes)| {
+                Some((K::from_bytes(key_bytes), V::from_bytes(value_bytes)))
+            })
+            .expect("unexpected database failure")
     }
 }
 
@@ -422,8 +447,8 @@ impl DiskDb {
                 info!("Opened Zebra state cache at {}", path.display());
 
                 let db = DiskDb {
-                    db: Arc::new(db),
                     ephemeral: config.ephemeral,
+                    db: Arc::new(db),
                 };
 
                 db.assert_default_cf_is_empty();
@@ -618,23 +643,49 @@ impl DiskDb {
     /// It should only be used in debugging or test code, immediately before a manual shutdown.
     ///
     /// TODO: make private after the stop height check has moved to the syncer (#3442)
-    ///       move shutting down the database to a blocking thread (#2188),
-    ///            and remove `force` and the manual flush
+    ///       move shutting down the database to a blocking thread (#2188)
     pub(crate) fn shutdown(&mut self, force: bool) {
-        // Prevent a race condition where another thread clones the Arc,
-        // right after we've checked we're the only holder of the Arc.
+        // # Correctness
         //
-        // There is still a small race window after the guard is dropped,
-        // but if the race happens, it will only cause database errors during shutdown.
-        let clone_prevention_guard = Arc::get_mut(&mut self.db);
+        // If we're the only owner of the shared database instance,
+        // then there are no other threads that can increase the strong or weak count.
+        //
+        // ## Implementation Requirements
+        //
+        // This function and all functions that it calls should avoid cloning the shared database
+        // instance. If they do, they must drop it before:
+        // - shutting down database threads, or
+        // - deleting database files.
+        let shared_database_owners = Arc::strong_count(&self.db) + Arc::weak_count(&self.db);
 
-        if clone_prevention_guard.is_none() && !force {
-            debug!(
-                "dropping cloned DiskDb, \
-                 but keeping shared database until the last reference is dropped",
-            );
+        if shared_database_owners > 1 {
+            let path = self.path();
 
-            return;
+            let mut ephemeral_note = "";
+
+            if force {
+                if self.ephemeral {
+                    ephemeral_note = " and removing ephemeral files";
+                }
+
+                info!(
+                    ?path,
+                    "forcing shutdown{} of a state database with multiple active instances",
+                    ephemeral_note,
+                );
+            } else {
+                if self.ephemeral {
+                    ephemeral_note = " and files";
+                }
+
+                debug!(
+                    ?path,
+                    "dropping DiskDb clone, \
+                     but keeping shared database instance{} until the last reference is dropped",
+                    ephemeral_note,
+                );
+                return;
+            }
         }
 
         self.assert_default_cf_is_empty();
@@ -645,17 +696,29 @@ impl DiskDb {
         // - the database flushes regularly anyway
         // - Zebra commits each block in a database transaction, any incomplete blocks get rolled back
         // - ephemeral files are placed in the os temp dir and should be cleaned up automatically eventually
-        info!("flushing database to disk");
-        self.db.flush().expect("flush is successful");
+        let path = self.path();
+        info!(?path, "flushing database to disk");
+        self.db
+            .flush()
+            .expect("unexpected failure flushing SST data to disk");
+        self.db
+            .flush_wal(true)
+            .expect("unexpected failure flushing WAL data to disk");
 
-        // But we should call `cancel_all_background_work` before Zebra exits.
-        // If we don't, we see these kinds of errors:
+        // We'd like to call `cancel_all_background_work()` before Zebra exits,
+        // but when we call it, we get memory, thread, or C++ errors when the process exits.
+        // (This seems to be a bug in RocksDB: cancel_all_background_work() should wait until
+        // all the threads have cleaned up.)
+        //
+        // We see these kinds of errors:
         // ```
         // pthread lock: Invalid argument
         // pure virtual method called
         // terminate called without an active exception
         // pthread destroy mutex: Device or resource busy
         // Aborted (core dumped)
+        // signal: 6, SIGABRT: process abort signal
+        // signal: 11, SIGSEGV: invalid memory reference
         // ```
         //
         // The RocksDB wiki says:
@@ -665,8 +728,8 @@ impl DiskDb {
         // > You can speed up the waiting by calling CancelAllBackgroundWork().
         //
         // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
-        info!("stopping background database tasks");
-        self.db.cancel_all_background_work(true);
+        //info!(?path, "stopping background database tasks");
+        //self.db.cancel_all_background_work(true);
 
         // We'd like to drop the database before deleting its files,
         // because that closes the column families and the database correctly.
@@ -680,57 +743,52 @@ impl DiskDb {
         //
         // https://github.com/facebook/rocksdb/wiki/Known-Issues
         //
-        // But our current code doesn't seem to cause any issues.
-        // We might want to explicitly drop the database as part of graceful shutdown (#1678).
-        self.delete_ephemeral(force);
+        // But this implementation doesn't seem to cause any issues,
+        // and the RocksDB Drop implementation handles any cleanup.
+        self.delete_ephemeral();
     }
 
-    /// If the database is `ephemeral`, delete it.
-    ///
-    /// If `force` is true, clean up regardless of any shared references.
-    /// `force` can cause errors accessing the database from other shared references.
-    /// It should only be used in debugging or test code, immediately before a manual shutdown.
-    fn delete_ephemeral(&mut self, force: bool) {
+    /// If the database is `ephemeral`, delete its files.
+    fn delete_ephemeral(&mut self) {
+        // # Correctness
+        //
+        // This function and all functions that it calls should avoid cloning the shared database
+        // instance. See `shutdown()` for details.
+
         if !self.ephemeral {
             return;
         }
 
-        // Prevent a race condition where another thread clones the Arc,
-        // right after we've checked we're the only holder of the Arc.
-        //
-        // There is still a small race window after the guard is dropped,
-        // but if the race happens, it will only cause database errors during shutdown.
-        let clone_prevention_guard = Arc::get_mut(&mut self.db);
-
-        if clone_prevention_guard.is_none() && !force {
-            debug!(
-                "dropping cloned DiskDb, \
-                 but keeping shared database files until the last reference is dropped",
-            );
-
-            return;
-        }
-
         let path = self.path();
-        info!(cache_path = ?path, "removing temporary database files");
+        info!(?path, "removing temporary database files");
 
         // We'd like to use `rocksdb::Env::mem_env` for ephemeral databases,
         // but the Zcash blockchain might not fit in memory. So we just
         // delete the database files instead.
         //
-        // We'd like to call `DB::destroy` here, but calling destroy on a
+        // We'd also like to call `DB::destroy` here, but calling destroy on a
         // live DB is undefined behaviour:
         // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#basic-readwrite
         //
         // So we assume that all the database files are under `path`, and
         // delete them using standard filesystem APIs. Deleting open files
         // might cause errors on non-Unix platforms, so we ignore the result.
-        // (The OS will delete them eventually anyway.)
-        let res = std::fs::remove_dir_all(path);
+        // (The OS will delete them eventually anyway, if they are in a temporary directory.)
+        let result = std::fs::remove_dir_all(path);
 
-        // TODO: downgrade to debug once bugs like #2905 are fixed
-        //       but leave any errors at "info" level
-        info!(?res, "removed temporary database files");
+        if result.is_err() {
+            info!(
+                ?result,
+                ?path,
+                "removing temporary database files caused an error",
+            );
+        } else {
+            debug!(
+                ?result,
+                ?path,
+                "successfully removed temporary database files",
+            );
+        }
     }
 
     /// Check that the "default" column family is empty.
@@ -739,6 +797,11 @@ impl DiskDb {
     ///
     /// If Zebra has a bug where it is storing data in the wrong column family.
     fn assert_default_cf_is_empty(&self) {
+        // # Correctness
+        //
+        // This function and all functions that it calls should avoid cloning the shared database
+        // instance. See `shutdown()` for details.
+
         if let Some(default_cf) = self.cf_handle("default") {
             assert!(
                 self.zs_is_empty(&default_cf),
@@ -750,6 +813,9 @@ impl DiskDb {
 
 impl Drop for DiskDb {
     fn drop(&mut self) {
+        let path = self.path();
+        debug!(?path, "dropping DiskDb instance");
+
         self.shutdown(false);
     }
 }

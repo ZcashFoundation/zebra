@@ -1,5 +1,12 @@
 name: CI OSes
 
+# Ensures that only one workflow task will run at a time. Previous builds, if
+# already in process, will get cancelled. Only the latest commit will be allowed
+# to run, cancelling any workflows in between
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   # we build Rust and Zcash parameter caches on main,
@@ -17,6 +24,9 @@ on:
       # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
       # workflow definitions
       - '.github/workflows/ci.yml'
   pull_request:
@@ -54,7 +64,8 @@ jobs:
       matrix:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
         os: [ubuntu-latest, macos-latest]
-        rust: [stable, beta]
+        # Rust 1.64 hangs when downloading the Zcash Parameters on GitHub Actions runners
+        rust: [1.63, beta]
         exclude:
         # TODO: re-enable beta Rust tests on ubuntu (#4929)
           - os: ubuntu-latest
@@ -67,9 +78,15 @@ jobs:
             rust: beta
 
     steps:
-      - uses: actions/checkout@v3.0.2
+      - uses: actions/checkout@v3.1.0
         with:
           persist-credentials: false
+
+      - name: Install last version of Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions-rs/toolchain@v1
         with:
@@ -78,6 +95,19 @@ jobs:
           override: true
 
       - uses: Swatinem/rust-cache@v1
+        # TODO: change Rust cache target directory on Windows,
+        #       or remove this workaround once the build is more efficient (#3005).
+        #with:
+        #  workspaces: ". -> C:\\zebra-target"
+
+      - name: Change target output directory on Windows
+        # Windows doesn't have enough space on the D: drive, so we redirect the build output to the
+        # larger C: drive.
+        # TODO: Remove this workaround once the build is more efficient (#3005).
+        if: matrix.os == 'windows-latest'
+        run: |
+          mkdir "C:\\zebra-target"
+          echo "CARGO_TARGET_DIR=C:\\zebra-target" | Out-File -FilePath "$env:GITHUB_ENV" -Encoding utf8 -Append
 
       - name: cargo fetch
         uses: actions-rs/cargo@v1.0.3
@@ -109,15 +139,6 @@ jobs:
         run: |
           echo "PROPTEST_CASES=1" >> $GITHUB_ENV
           echo "PROPTEST_MAX_SHRINK_ITERS=1024" >> $GITHUB_ENV
-
-      - name: Change target output directory on Windows
-        # Windows doesn't have enough space on the D: drive, so we redirect the build output to the
-        # larger C: drive.
-        # TODO: Remove this workaround once the build is more efficient (#3005).
-        if: matrix.os == 'windows-latest'
-        run: |
-          mkdir C:\zebra-target
-          echo "CARGO_TARGET_DIR=C:\zebra-target" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       # Modified from:
       # https://github.com/zcash/librustzcash/blob/c48bb4def2e122289843ddb3cb2984c325c03ca0/.github/workflows/ci.yml#L20-L33
@@ -164,7 +185,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3.0.2
+      - uses: actions/checkout@v3.1.0
         with:
           persist-credentials: false
 
@@ -188,9 +209,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3.0.2
+      - uses: actions/checkout@v3.1.0
         with:
           persist-credentials: false
+
+      - name: Install last version of Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions-rs/toolchain@v1
         with:
@@ -199,6 +226,9 @@ jobs:
           override: true
 
       - uses: Swatinem/rust-cache@v1
+        with:
+          # TODO: change to shared-key when we switch to Swatinem/rust-cache@v2
+          sharedKey: "clippy-cargo-lock"
 
       - name: Check Cargo.lock is up to date
         uses: actions-rs/cargo@v1.0.3
@@ -220,7 +250,7 @@ jobs:
     continue-on-error: ${{ matrix.checks == 'advisories' }}
 
     steps:
-      - uses: actions/checkout@v3.0.2
+      - uses: actions/checkout@v3.1.0
         with:
           persist-credentials: false
 

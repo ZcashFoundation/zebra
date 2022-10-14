@@ -752,7 +752,7 @@ fn test_vec243_2() -> Result<()> {
 
     let lock_script = Script::new(&[]);
     let prevout = transparent::Output { value, lock_script };
-    let index = input_ind as usize;
+    let index = input_ind;
     let all_previous_outputs = mock_pre_v5_output_list(prevout, input_ind);
 
     let alt_sighash = crate::primitives::zcash_primitives::sighash(
@@ -805,7 +805,7 @@ fn test_vec243_3() -> Result<()> {
         "76a914507173527b4c3318a2aecd793bf1cfed705950cf88ac",
     )?);
     let prevout = transparent::Output { value, lock_script };
-    let index = input_ind as usize;
+    let index = input_ind;
 
     let alt_sighash = crate::primitives::zcash_primitives::sighash(
         &transaction,

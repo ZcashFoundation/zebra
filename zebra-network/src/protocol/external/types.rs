@@ -20,7 +20,7 @@ pub struct Magic(pub [u8; 4]);
 
 impl fmt::Debug for Magic {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Magic").field(&hex::encode(&self.0)).finish()
+        f.debug_tuple("Magic").field(&hex::encode(self.0)).finish()
     }
 }
 

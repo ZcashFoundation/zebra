@@ -12,7 +12,11 @@ use tempfile::TempDir;
 use tokio::fs;
 use tower::{util::BoxService, Service};
 
-use zebra_chain::{block, chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{
+    block::{self, Height},
+    chain_tip::ChainTip,
+    parameters::Network,
+};
 use zebra_state::{ChainTipChange, LatestChainTip};
 
 use crate::common::config::testdir;
@@ -25,6 +29,7 @@ pub type BoxStateService =
     BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>;
 
 /// Starts a state service using the provided `cache_dir` as the directory with the chain state.
+#[tracing::instrument(skip(cache_dir))]
 pub async fn start_state_service_with_cache_dir(
     network: Network,
     cache_dir: impl Into<PathBuf>,
@@ -43,10 +48,12 @@ pub async fn start_state_service_with_cache_dir(
         ..zebra_state::Config::default()
     };
 
-    Ok(zebra_state::init(config, network))
+    // These tests don't need UTXOs to be verified efficiently, because they use cached states.
+    Ok(zebra_state::init(config, network, Height::MAX, 0))
 }
 
 /// Loads the chain tip height from the state stored in a specified directory.
+#[tracing::instrument]
 pub async fn load_tip_height_from_state_directory(
     network: Network,
     state_path: &Path,
@@ -61,21 +68,37 @@ pub async fn load_tip_height_from_state_directory(
     Ok(chain_tip_height)
 }
 
-/// Recursively copy a chain state directory into a new temporary directory.
-pub async fn copy_state_directory(source: impl AsRef<Path>) -> Result<TempDir> {
+/// Recursively copy a chain state database directory into a new temporary directory.
+pub async fn copy_state_directory(network: Network, source: impl AsRef<Path>) -> Result<TempDir> {
+    // Copy the database files for this state and network, excluding testnet and other state versions
     let source = source.as_ref();
+    let state_config = zebra_state::Config {
+        cache_dir: source.into(),
+        ..Default::default()
+    };
+    let source_net_dir = state_config.db_path(network);
+    let source_net_dir = source_net_dir.as_path();
+    let state_suffix = source_net_dir
+        .strip_prefix(source)
+        .expect("db_path() is a subdirectory");
+
     let destination = testdir()?;
+    let destination_net_dir = destination.path().join(state_suffix);
 
     tracing::info!(
         ?source,
+        ?source_net_dir,
+        ?state_suffix,
         ?destination,
+        ?destination_net_dir,
         "copying cached state files (this may take some time)...",
     );
 
-    let mut remaining_directories = vec![PathBuf::from(source)];
+    let mut remaining_directories = vec![PathBuf::from(source_net_dir)];
 
     while let Some(directory) = remaining_directories.pop() {
-        let sub_directories = copy_directory(&directory, source, destination.as_ref()).await?;
+        let sub_directories =
+            copy_directory(&directory, source_net_dir, destination_net_dir.as_ref()).await?;
 
         remaining_directories.extend(sub_directories);
     }
@@ -87,6 +110,7 @@ pub async fn copy_state_directory(source: impl AsRef<Path>) -> Result<TempDir> {
 ///
 /// Copies all files from the `directory` into the destination specified by the concatenation of
 /// the `base_destination_path` and `directory` stripped of its `prefix`.
+#[tracing::instrument]
 async fn copy_directory(
     directory: &Path,
     prefix: &Path,

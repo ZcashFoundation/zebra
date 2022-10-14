@@ -36,7 +36,11 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::finalized_state::{disk_db::DiskDb, disk_format::tests::KV, FinalizedState},
+    service::finalized_state::{
+        disk_db::{DiskDb, DB},
+        disk_format::tests::KV,
+        FinalizedState,
+    },
     Config,
 };
 
@@ -129,6 +133,7 @@ fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[Str
         // The default raw data serialization is very verbose, so we hex-encode the bytes.
         let cf_data: Vec<KV> = cf_iter
             .by_ref()
+            .map(|result| result.expect("unexpected database error"))
             .map(|(key, value)| KV::new(key, value))
             .collect();
 
@@ -144,8 +149,10 @@ fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[Str
             insta::assert_ron_snapshot!(format!("{}_raw_data", cf_name), cf_data);
         }
 
+        let raw_cf_iter: rocksdb::DBRawIteratorWithThreadMode<DB> = cf_iter.into();
+
         assert_eq!(
-            cf_iter.status(),
+            raw_cf_iter.status(),
             Ok(()),
             "unexpected column family iterator error",
         );

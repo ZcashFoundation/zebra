@@ -55,8 +55,10 @@ delete_old_database = true
 ephemeral = false
 
 [sync]
-lookahead_limit = 400
-max_concurrent_block_requests = 25
+checkpoint_verify_concurrency_limit = 1200
+download_concurrency_limit = 50
+full_verify_concurrency_limit = 20
+parallel_cpu_threads = 0
 
 [tracing]
 force_use_color = false

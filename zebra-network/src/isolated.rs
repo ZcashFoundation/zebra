@@ -4,15 +4,12 @@ use std::{future::Future, net::SocketAddr};
 
 use futures::future::TryFutureExt;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tower::{
-    util::{BoxService, Oneshot},
-    Service, ServiceExt,
-};
+use tower::{util::Oneshot, Service};
 
 use zebra_chain::{chain_tip::NoChainTip, parameters::Network};
 
 use crate::{
-    peer::{self, ConnectedAddr, HandshakeRequest},
+    peer::{self, Client, ConnectedAddr, HandshakeRequest},
     peer_set::ActiveConnectionCounter,
     BoxError, Config, Request, Response,
 };
@@ -51,7 +48,7 @@ pub fn connect_isolated<PeerTransport>(
     network: Network,
     data_stream: PeerTransport,
     user_agent: String,
-) -> impl Future<Output = Result<BoxService<Request, Response, BoxError>, BoxError>>
+) -> impl Future<Output = Result<Client, BoxError>>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -79,7 +76,7 @@ pub fn connect_isolated_with_inbound<PeerTransport, InboundService>(
     data_stream: PeerTransport,
     user_agent: String,
     inbound_service: InboundService,
-) -> impl Future<Output = Result<BoxService<Request, Response, BoxError>, BoxError>>
+) -> impl Future<Output = Result<Client, BoxError>>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     InboundService:
@@ -111,7 +108,6 @@ where
             connection_tracker,
         },
     )
-    .map_ok(|client| BoxService::new(client.map_err(Into::into)))
 }
 
 /// Creates a direct TCP Zcash peer connection to `addr`.
@@ -129,7 +125,7 @@ pub fn connect_isolated_tcp_direct(
     network: Network,
     addr: SocketAddr,
     user_agent: String,
-) -> impl Future<Output = Result<BoxService<Request, Response, BoxError>, BoxError>> {
+) -> impl Future<Output = Result<Client, BoxError>> {
     let nil_inbound_service =
         tower::service_fn(|_req| async move { Ok::<Response, BoxError>(Response::Nil) });
 
@@ -150,7 +146,7 @@ pub fn connect_isolated_tcp_direct_with_inbound<InboundService>(
     addr: SocketAddr,
     user_agent: String,
     inbound_service: InboundService,
-) -> impl Future<Output = Result<BoxService<Request, Response, BoxError>, BoxError>>
+) -> impl Future<Output = Result<Client, BoxError>>
 where
     InboundService:
         Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,

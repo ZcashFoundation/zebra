@@ -1,19 +1,178 @@
-prerelease: true
-categories:
-  - title: 'Features'
-    labels:
-      - 'feature'
-      - 'enhancement'
-  - title: 'Bug Fixes'
-    labels:
-      - 'fix'
-      - 'bugfix'
-      - 'bug'
-  - title: 'Maintenance'
-    label: 'chore'
-change-template: '- $TITLE (#$NUMBER)'
-change-title-escapes: '\<*_&' # You can add # and @ to disable mentions, and add ` to disable code blocks.
-template: |
-  ## Changes
+# Configuration for automatic Zebra CHANGELOGs and PR tagging
+#
+# Based on:
+# https://github.com/marketplace/actions/release-drafter#example
 
+# Automatically label PRs based on their branch, title, or changed files.
+# This helps categorise PRs in the CHANGELOG.
+autolabeler:
+  - label: 'C-security'
+    branch:
+      - '/secur/i'
+    title:
+      - '/secur/i'
+  - label: 'C-removed'
+    branch:
+      - '/remov/i'
+    title:
+      - '/remov/i'
+  - label: 'C-deprecated'
+    branch:
+      - '/deprecat/i'
+    title:
+      - '/deprecat/i'
+  - label: 'C-feature'
+    branch:
+      - '/add/i'
+      - '/feat/i'
+    title:
+      - '/add/i'
+      - '/feat/i'
+  - label: 'C-enhancement'
+    branch:
+      - '/chang/i'
+    title:
+      - '/chang/i'
+  - label: 'C-bug'
+    branch:
+      - '/fix/i'
+      - '/bug/i'
+    title:
+      - '/fix/i'
+      - '/bug/i'
+  # Changes that are almost always trivial for users
+  - label: 'C-trivial'
+    branch:
+      - '/clean/i'
+      - '/chore/i'
+      - '/clippy/i'
+    title:
+      - '/clean/i'
+      - '/chore/i'
+      - '/clippy/i'
+    files:
+      # Regular changes that don't need to go in the CHANGELOG
+      - 'CHANGELOG.md'
+      - 'zebra-consensus/src/checkpoint/*-checkpoints.txt'
+      # Developer-only changes
+      - '.gitignore'
+      # Test-only changes
+      - 'zebra-test'
+      - '.cargo/config.toml'
+      - 'clippy.toml'
+      # CI-only changes
+      - '.github'
+      - '.codespellrc'
+      - 'codecov.yml'
+      - 'deny.toml'
+
+# The release name, tag, and settings for the draft CHANGELOG.
+name-template: 'Zebra $RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+tag-prefix: 'v'
+prerelease: true
+
+# Categories in rough order of importance to users.
+# Based on https://keepachangelog.com/en/1.0.0/
+category-template: '### $TITLE'
+categories:
+  - title: 'Security'
+    labels:
+      - 'C-security'
+      # Other labels that are usually security issues
+      - 'I-bad-code'
+      - 'I-bad-data'
+      - 'I-consensus'
+      - 'I-crash'
+      - 'I-destructive'
+      - 'I-hang'
+      - 'I-lose-funds'
+      - 'I-privacy'
+      - 'I-remote-node-overload'
+      - 'I-unbounded-growth'
+      - 'I-unsound'
+  - title: 'Removed'
+    labels:
+      - 'C-removal'
+      - 'C-breaking'
+  - title: 'Deprecated'
+    labels:
+      - 'C-deprecation'
+      # TODO: when release drafter has per-category templates, add this to the Deprecated category template:
+      # 'These features might be removed in Zebra $NEXT_MINOR_VERSION'
+  - title: 'Added'
+    labels:
+      - 'C-feature'
+  - title: 'Changed'
+    labels:
+      - 'C-enhancement'
+  - title: 'Fixed'  
+    labels:
+      - 'C-bug'
+      # Other labels that are usually bugs
+      - 'I-build-fail'
+      - 'I-integration-fail'
+      - 'I-panic'
+  # TODO: if we're happy with the trivial PRs, use "exclude-labels:" instead
+  - title: 'Trivial *TODO:* put this in a PR comment, not the CHANGELOG'
+    labels:
+      - 'C-trivial'
+      - 'C-cleanup'
+
+# The next release's $RESOLVED_VERSION, based on the labels of the PRs in the release.
+#
+# In Zebra, we use major versions for mainnet network upgrades,
+# and minor versions for less significant breaking changes.
+version-resolver:
+  # We increment the major release version manually
+  #major:
+  #  labels:
+  #labels can not be an empty list, or empty strings
+  #    - # network upgrade release PRs
+  minor:
+    labels:
+      - 'C-feature'
+      - 'C-breaking'
+      - 'C-removal'
+      - 'C-deprecation'
+  # We increment the patch version for every release
+  default: patch
+
+# How PR names get turned into CHANGELOG entries.
+change-template: '- $TITLE ([#$NUMBER]($URL))'
+sort-by: title
+sort-direction: ascending
+# Characters escaped when converting PR titles to CHANGELOG entries.
+# Add ` to disable code blocks.
+change-title-escapes: '\<*_&#@'
+# Strip PR series numbers, leading spaces, and conventional commit prefixes from PR titles.
+replacers:
+  - search: '/- [0-9\. ]*([a-zA-Z0-9\(\)!]+:)?/'
+    replace: '- '
+
+# The list of contributors to each release.
+exclude-contributors:
+  - 'dependabot' # 'dependabot[bot]'
+  - 'mergifyio' # 'mergify[bot]'
+
+# The template for the draft CHANGELOG.
+template: |
+  ## [Zebra $RESOLVED_VERSION](https://github.com/ZcashFoundation/zebra/releases/tag/v$RESOLVED_VERSION) - *TODO*: date
+  
+  This release *TODO*: a summary of the significant user-visible changes in the release
+  
+  ### Breaking Changes
+  
+  This release has the following breaking changes:
+  - *TODO*: Check the `Removed` section for any breaking changes
+  - *TODO*: Add a short description of the user impact of each breaking change, and any actions users need to take
+    
   $CHANGES
+  
+  ### Contributors
+  
+  Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+  $CONTRIBUTORS
+  
+  
+# the trailing newlines in the template are deliberate

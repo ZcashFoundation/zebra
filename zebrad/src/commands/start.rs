@@ -81,7 +81,7 @@ use crate::{
     components::{
         inbound::{self, InboundSetupData},
         mempool::{self, Mempool},
-        sync::{self, show_block_chain_progress},
+        sync::{self, show_block_chain_progress, VERIFICATION_PIPELINE_SCALING_MULTIPLIER},
         tokio::{RuntimeRun, TokioComponent},
         ChainSync, Inbound,
     },
@@ -90,7 +90,7 @@ use crate::{
 };
 
 /// `start` subcommand
-#[derive(Command, Debug, Options)]
+#[derive(Command, Debug, Options, Default)]
 pub struct StartCmd {
     /// Filter strings which override the config file and defaults
     #[options(free, help = "tracing filters which override the zebrad.toml config")]
@@ -103,8 +103,23 @@ impl StartCmd {
         info!(?config);
 
         info!("initializing node state");
+        let (_, max_checkpoint_height) = zebra_consensus::chain::init_checkpoint_list(
+            config.consensus.clone(),
+            config.network.network,
+        );
+
+        info!("opening database, this may take a few minutes");
+
         let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
-            zebra_state::init(config.state.clone(), config.network.network);
+            zebra_state::spawn_init(
+                config.state.clone(),
+                config.network.network,
+                max_checkpoint_height,
+                config.sync.checkpoint_verify_concurrency_limit
+                    * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1),
+            )
+            .await?;
+
         let state = ServiceBuilder::new()
             .buffer(Self::state_buffer_bound())
             .service(state_service);

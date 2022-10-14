@@ -1,6 +1,6 @@
 //! Arbitrary data generation and test setup for Zebra's state.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use proptest::{
@@ -9,11 +9,12 @@ use proptest::{
     strategy::{NewTree, ValueTree},
     test_runner::TestRunner,
 };
+use tokio::time::timeout;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use zebra_chain::{
-    block::Block,
-    fmt::SummaryDebug,
+    block::{Block, Height},
+    fmt::{humantime_seconds, SummaryDebug},
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade},
     LedgerState,
@@ -26,6 +27,9 @@ use crate::{
 };
 
 pub use zebra_chain::block::arbitrary::MAX_PARTIAL_CHAIN_BLOCKS;
+
+/// How long we wait for chain tip updates before skipping them.
+pub const CHAIN_TIP_UPDATE_WAIT_LIMIT: Duration = Duration::from_secs(2);
 
 #[derive(Debug)]
 pub struct PreparedChainTree {
@@ -197,8 +201,10 @@ pub async fn populated_state(
         .into_iter()
         .map(|block| Request::CommitFinalizedBlock(block.into()));
 
-    let (state, read_state, latest_chain_tip, chain_tip_change) =
-        StateService::new(Config::ephemeral(), network);
+    // TODO: write a test that checks the finalized to non-finalized transition with UTXOs,
+    //       and set max_checkpoint_height and checkpoint_verify_concurrency_limit correctly.
+    let (state, read_state, latest_chain_tip, mut chain_tip_change) =
+        StateService::new(Config::ephemeral(), network, Height::MAX, 0);
     let mut state = Buffer::new(BoxService::new(state), 1);
 
     let mut responses = FuturesUnordered::new();
@@ -209,7 +215,24 @@ pub async fn populated_state(
     }
 
     while let Some(rsp) = responses.next().await {
-        rsp.expect("blocks should commit just fine");
+        // Wait for the block result and the chain tip update,
+        // which both happen in a separate thread from this one.
+        rsp.expect("unexpected block commit failure");
+
+        // Wait for the chain tip update
+        if let Err(timeout_error) = timeout(
+            CHAIN_TIP_UPDATE_WAIT_LIMIT,
+            chain_tip_change.wait_for_tip_change(),
+        )
+        .await
+        .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+        {
+            info!(
+                timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
+                ?timeout_error,
+                "timeout waiting for chain tip change after committing block"
+            );
+        }
     }
 
     (state, read_state, latest_chain_tip, chain_tip_change)

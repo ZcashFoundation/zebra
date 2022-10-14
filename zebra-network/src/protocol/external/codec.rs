@@ -2,7 +2,6 @@
 
 use std::{
     cmp::min,
-    convert::TryInto,
     fmt,
     io::{Cursor, Read, Write},
 };
@@ -27,7 +26,7 @@ use crate::constants;
 
 use super::{
     addr::{AddrInVersion, AddrV1, AddrV2},
-    message::{Message, RejectReason},
+    message::{Message, RejectReason, VersionMessage},
     types::*,
 };
 
@@ -196,7 +195,7 @@ impl Codec {
     /// contain a checksum of the message body.
     fn write_body<W: Write>(&self, msg: &Message, mut writer: W) -> Result<(), Error> {
         match msg {
-            Message::Version {
+            Message::Version(VersionMessage {
                 version,
                 services,
                 timestamp,
@@ -206,7 +205,7 @@ impl Codec {
                 user_agent,
                 start_height,
                 relay,
-            } => {
+            }) => {
                 writer.write_u32::<LittleEndian>(version.0)?;
                 writer.write_u64::<LittleEndian>(services.bits())?;
                 // # Security
@@ -466,16 +465,16 @@ impl Decoder for Codec {
 
 impl Codec {
     fn read_version<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        Ok(Message::Version {
+        // Clippy 1.64 is wrong here, this lazy evaluation is necessary, constructors are functions. This is fixed in 1.66.
+        #[allow(clippy::unnecessary_lazy_evaluations)]
+        Ok(VersionMessage {
             version: Version(reader.read_u32::<LittleEndian>()?),
             // Use from_bits_truncate to discard unknown service bits.
             services: PeerServices::from_bits_truncate(reader.read_u64::<LittleEndian>()?),
             timestamp: Utc
                 .timestamp_opt(reader.read_i64::<LittleEndian>()?, 0)
                 .single()
-                .ok_or(Error::Parse(
-                    "version timestamp is out of range for DateTime",
-                ))?,
+                .ok_or_else(|| Error::Parse("version timestamp is out of range for DateTime"))?,
             address_recv: AddrInVersion::zcash_deserialize(&mut reader)?,
             address_from: AddrInVersion::zcash_deserialize(&mut reader)?,
             nonce: Nonce(reader.read_u64::<LittleEndian>()?),
@@ -486,7 +485,8 @@ impl Codec {
                 1 => true,
                 _ => return Err(Error::Parse("non-bool value supplied in relay field")),
             },
-        })
+        }
+        .into())
     }
 
     fn read_verack<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
@@ -724,21 +724,23 @@ impl Codec {
     }
 }
 
-// XXX replace these interior unit tests with exterior integration tests + proptest
+// TODO: move these tests to their own module
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-    use chrono::{MAX_DATETIME, MIN_DATETIME};
+    use chrono::DateTime;
     use futures::prelude::*;
     use lazy_static::lazy_static;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    use super::*;
 
     lazy_static! {
         static ref VERSION_TEST_VECTOR: Message = {
             let services = PeerServices::NODE_NETWORK;
             let timestamp = Utc.timestamp(1_568_000_000, 0);
-            Message::Version {
+
+            VersionMessage {
                 version: crate::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
                 services,
                 timestamp,
@@ -755,6 +757,7 @@ mod tests {
                 start_height: block::Height(540_000),
                 relay: true,
             }
+            .into()
         };
     }
 
@@ -808,8 +811,10 @@ mod tests {
 
         deserialize_version_with_time(1620777600).expect("recent time is valid");
         deserialize_version_with_time(0).expect("zero time is valid");
-        deserialize_version_with_time(MIN_DATETIME.timestamp()).expect("min time is valid");
-        deserialize_version_with_time(MAX_DATETIME.timestamp()).expect("max time is valid");
+        deserialize_version_with_time(DateTime::<Utc>::MIN_UTC.timestamp())
+            .expect("min time is valid");
+        deserialize_version_with_time(DateTime::<Utc>::MAX_UTC.timestamp())
+            .expect("max time is valid");
     }
 
     /// Deserialize a `Version` message containing `time`, and return the result.

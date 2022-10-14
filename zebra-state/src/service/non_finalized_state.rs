@@ -17,23 +17,26 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyValidBlock,
+    request::{ContextuallyValidBlock, FinalizedWithTrees},
     service::{check, finalized_state::ZebraDb},
-    FinalizedBlock, PreparedBlock, ValidateContextError,
+    PreparedBlock, ValidateContextError,
 };
 
 mod chain;
-mod queued_blocks;
 
 #[cfg(test)]
 mod tests;
 
-pub use queued_blocks::QueuedBlocks;
-
 pub(crate) use chain::Chain;
 
 /// The state of the chains in memory, including queued blocks.
-#[derive(Debug, Clone)]
+///
+/// Clones of the non-finalized state contain independent copies of the chains.
+/// This is different from `FinalizedState::clone()`,
+/// which returns a shared reference to the database.
+///
+/// Most chain data is clone-on-write using [`Arc`].
+#[derive(Clone, Debug)]
 pub struct NonFinalizedState {
     /// Verified, non-finalized chains, in ascending order.
     ///
@@ -80,7 +83,7 @@ impl NonFinalizedState {
 
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
-    pub fn finalize(&mut self) -> FinalizedBlock {
+    pub fn finalize(&mut self) -> FinalizedWithTrees {
         // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
         // Neither of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
@@ -90,14 +93,16 @@ impl NonFinalizedState {
 
         // extract best chain
         let mut best_chain = chains.next_back().expect("there's at least one chain");
+
         // clone if required
-        let write_best_chain = Arc::make_mut(&mut best_chain);
+        let mut_best_chain = Arc::make_mut(&mut best_chain);
 
         // extract the rest into side_chains so they can be mutated
         let side_chains = chains;
 
-        // remove the lowest height block from the best_chain to be finalized
-        let finalizing = write_best_chain.pop_root();
+        // Pop the lowest height block from the best chain to be finalized, and
+        // also obtain its associated treestate.
+        let (best_chain_root, root_treestate) = mut_best_chain.pop_root();
 
         // add best_chain back to `self.chain_set`
         if !best_chain.is_empty() {
@@ -105,11 +110,11 @@ impl NonFinalizedState {
         }
 
         // for each remaining chain in side_chains
-        for mut chain in side_chains {
-            if chain.non_finalized_root_hash() != finalizing.hash {
+        for mut side_chain in side_chains {
+            if side_chain.non_finalized_root_hash() != best_chain_root.hash {
                 // If we popped the root, the chain would be empty or orphaned,
                 // so just drop it now.
-                drop(chain);
+                drop(side_chain);
 
                 continue;
             }
@@ -117,19 +122,20 @@ impl NonFinalizedState {
             // otherwise, the popped root block is the same as the finalizing block
 
             // clone if required
-            let write_chain = Arc::make_mut(&mut chain);
+            let mut_side_chain = Arc::make_mut(&mut side_chain);
 
             // remove the first block from `chain`
-            let chain_start = write_chain.pop_root();
-            assert_eq!(chain_start.hash, finalizing.hash);
+            let (side_chain_root, _treestate) = mut_side_chain.pop_root();
+            assert_eq!(side_chain_root.hash, best_chain_root.hash);
 
             // add the chain back to `self.chain_set`
-            self.chain_set.insert(chain);
+            self.chain_set.insert(side_chain);
         }
 
         self.update_metrics_for_chains();
 
-        finalizing.into()
+        // Add the treestate to the finalized block.
+        FinalizedWithTrees::new(best_chain_root, root_treestate)
     }
 
     /// Commit block to the non-finalized state, on top of:
@@ -316,6 +322,7 @@ impl NonFinalizedState {
 
     /// Returns `true` if `hash` is contained in the non-finalized portion of any
     /// known chain.
+    #[allow(dead_code)]
     pub fn any_chain_contains(&self, hash: &block::Hash) -> bool {
         self.chain_set
             .iter()
@@ -337,14 +344,13 @@ impl NonFinalizedState {
 
     /// Returns the [`transparent::Utxo`] pointed to by the given
     /// [`transparent::OutPoint`] if it is present in any chain.
+    ///
+    /// UTXOs are returned regardless of whether they have been spent.
     pub fn any_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        for chain in self.chain_set.iter().rev() {
-            if let Some(utxo) = chain.created_utxos.get(outpoint) {
-                return Some(utxo.utxo.clone());
-            }
-        }
-
-        None
+        self.chain_set
+            .iter()
+            .rev()
+            .find_map(|chain| chain.created_utxo(outpoint))
     }
 
     /// Returns the `block` with the given hash in any chain.
@@ -363,6 +369,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the hash for a given `block::Height` if it is present in the best chain.
+    #[allow(dead_code)]
     pub fn best_hash(&self, height: block::Height) -> Option<block::Hash> {
         self.best_chain()?
             .blocks
@@ -371,6 +378,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the tip of the best chain.
+    #[allow(dead_code)]
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
         let best_chain = self.best_chain()?;
         let height = best_chain.non_finalized_tip_height();
@@ -388,6 +396,7 @@ impl NonFinalizedState {
     }
 
     /// Returns the height of `hash` in the best chain.
+    #[allow(dead_code)]
     pub fn best_height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
         let best_chain = self.best_chain()?;
         let height = *best_chain.height_by_hash.get(&hash)?;
@@ -471,9 +480,8 @@ impl NonFinalizedState {
                             )
                             .transpose()
                     })
-                    .expect(
-                        "commit_block is only called with blocks that are ready to be committed",
-                    )?;
+                    .transpose()?
+                    .ok_or(ValidateContextError::NotReadyToBeCommitted)?;
 
                 Ok(Arc::new(fork_chain))
             }

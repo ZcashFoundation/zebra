@@ -98,7 +98,7 @@ pub struct Root([u8; 32]);
 
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Root").field(&hex::encode(&self.0)).finish()
+        f.debug_tuple("Root").field(&hex::encode(self.0)).finish()
     }
 }
 

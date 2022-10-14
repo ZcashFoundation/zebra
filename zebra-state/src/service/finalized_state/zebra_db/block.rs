@@ -59,11 +59,20 @@ impl ZebraDb {
 
     /// Returns the tip height and hash, if there is one.
     //
-    // TODO: move this method to the tip section
+    // TODO: rename to finalized_tip()
+    //       move this method to the tip section
     #[allow(clippy::unwrap_in_result)]
     pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         self.db.zs_last_key_value(&hash_by_height)
+    }
+
+    /// Returns `true` if `height` is present in the finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn contains_height(&self, height: block::Height) -> bool {
+        let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
+
+        self.db.zs_contains(&hash_by_height, &height)
     }
 
     /// Returns the finalized hash for a given `block::Height` if it is present.
@@ -225,6 +234,39 @@ impl ZebraDb {
             .map(|tx| (tx, transaction_location.height))
     }
 
+    /// Returns the [`transaction::Hash`]es in the block with `hash_or_height`,
+    /// if it exists in this chain.
+    ///
+    /// Hashes are returned in block order.
+    ///
+    /// Returns `None` if the block is not found.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn transaction_hashes_for_block(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Option<Arc<[transaction::Hash]>> {
+        // Block
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+
+        // Transaction hashes
+        let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
+
+        // Manually fetch the entire block's transaction hashes
+        let mut transaction_hashes = Vec::new();
+
+        for tx_index in 0..=Transaction::max_allocation() {
+            let tx_loc = TransactionLocation::from_u64(height, tx_index);
+
+            if let Some(tx_hash) = self.db.zs_get(&hash_by_tx_loc, &tx_loc) {
+                transaction_hashes.push(tx_hash);
+            } else {
+                break;
+            }
+        }
+
+        Some(transaction_hashes.into())
+    }
+
     // Write block methods
 
     /// Write `finalized` to the finalized state.
@@ -242,6 +284,7 @@ impl ZebraDb {
         &mut self,
         finalized: FinalizedBlock,
         history_tree: Arc<HistoryTree>,
+        note_commitment_trees: NoteCommitmentTrees,
         network: Network,
         source: &str,
     ) -> Result<block::Hash, BoxError> {
@@ -329,8 +372,8 @@ impl ZebraDb {
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
             address_balances,
-            self.note_commitment_trees(),
             history_tree,
+            note_commitment_trees,
             self.finalized_value_pool(),
         )?;
 
@@ -382,8 +425,8 @@ impl DiskWriteBatch {
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
-        mut note_commitment_trees: NoteCommitmentTrees,
         history_tree: Arc<HistoryTree>,
+        note_commitment_trees: NoteCommitmentTrees,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
         let FinalizedBlock {
@@ -395,7 +438,7 @@ impl DiskWriteBatch {
 
         // Commit block and transaction data.
         // (Transaction indexes, note commitments, and UTXOs are committed later.)
-        self.prepare_block_header_transactions_batch(db, &finalized)?;
+        self.prepare_block_header_and_transaction_data_batch(db, &finalized)?;
 
         // # Consensus
         //
@@ -419,7 +462,7 @@ impl DiskWriteBatch {
             &spent_utxos_by_out_loc,
             address_balances,
         )?;
-        self.prepare_shielded_transaction_batch(db, &finalized, &mut note_commitment_trees)?;
+        self.prepare_shielded_transaction_batch(db, &finalized)?;
 
         self.prepare_note_commitment_batch(db, &finalized, note_commitment_trees, history_tree)?;
 
@@ -432,14 +475,14 @@ impl DiskWriteBatch {
         Ok(())
     }
 
-    /// Prepare a database batch containing the block header and transactions
+    /// Prepare a database batch containing the block header and transaction data
     /// from `finalized.block`, and return it (without actually writing anything).
     ///
     /// # Errors
     ///
     /// - This method does not currently return any errors.
     #[allow(clippy::unwrap_in_result)]
-    pub fn prepare_block_header_transactions_batch(
+    pub fn prepare_block_header_and_transaction_data_batch(
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,

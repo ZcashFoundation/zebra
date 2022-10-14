@@ -1,23 +1,23 @@
 [package]
 name = "tower-batch"
-version = "0.2.28"
+version = "0.2.31"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT"
 edition = "2021"
 
 [dependencies]
-futures = "0.3.21"
-futures-core = "0.3.21"
-pin-project = "1.0.10"
+futures = "0.3.24"
+futures-core = "0.3.24"
+pin-project = "1.0.12"
 rayon = "1.5.3"
-tokio = { version = "1.20.1", features = ["time", "sync", "tracing", "macros"] }
-tokio-util = "0.7.3"
+tokio = { version = "1.21.2", features = ["time", "sync", "tracing", "macros"] }
+tokio-util = "0.7.4"
 tower = { version = "0.4.13", features = ["util", "buffer"] }
-tracing = "0.1.31"
+tracing = "0.1.37"
 tracing-futures = "0.2.5"
 
 [dev-dependencies]
-color-eyre = "0.6.1"
+color-eyre = "0.6.2"
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
@@ -25,7 +25,7 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 ed25519-zebra = "3.0.0"
 rand = { version = "0.8.5", package = "rand" }
 
-tokio = { version = "1.20.1", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.21.2", features = ["full", "tracing", "test-util"] }
 tokio-test = "0.4.2"
 tower-fallback = { path = "../tower-fallback/" }
 tower-test = "0.4.0"

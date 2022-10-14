@@ -259,9 +259,20 @@ where
     >,
     Tip: ChainTip,
 {
+    // Configuration
+    //
     /// Zebra's application version.
     app_version: String,
 
+    /// The configured network for this RPC service.
+    network: Network,
+
+    /// Test-only option that makes Zebra say it is at the chain tip,
+    /// no matter what the estimated height or local clock is.
+    debug_force_finished_sync: bool,
+
+    // Services
+    //
     /// A handle to the mempool service.
     mempool: Buffer<Mempool, mempool::Request>,
 
@@ -271,10 +282,8 @@ where
     /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: Tip,
 
-    /// The configured network for this RPC service.
-    #[allow(dead_code)]
-    network: Network,
-
+    // Tasks
+    //
     /// A sender component of a channel used to send transactions to the queue.
     queue_sender: Sender<Option<UnminedTx>>,
 }
@@ -295,10 +304,11 @@ where
     /// Create a new instance of the RPC handler.
     pub fn new<Version>(
         app_version: Version,
+        network: Network,
+        debug_force_finished_sync: bool,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
-        network: Network,
     ) -> (Self, JoinHandle<()>)
     where
         Version: ToString,
@@ -316,10 +326,11 @@ where
 
         let rpc_impl = RpcImpl {
             app_version,
+            network,
+            debug_force_finished_sync,
             mempool: mempool.clone(),
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
-            network,
             queue_sender: runner.sender(),
         };
 
@@ -395,12 +406,17 @@ where
                 data: None,
             })?;
 
-        let estimated_height =
+        let mut estimated_height =
             if current_block_time > Utc::now() || zebra_estimated_height < tip_height {
                 tip_height
             } else {
                 zebra_estimated_height
             };
+
+        // If we're testing the mempool, force the estimated height to be the actual tip height.
+        if self.debug_force_finished_sync {
+            estimated_height = tip_height;
+        }
 
         // `upgrades` object
         //
@@ -522,6 +538,8 @@ where
                 "mempool service returned more results than expected"
             );
 
+            tracing::debug!("sent transaction to mempool: {:?}", &queue_results[0]);
+
             match &queue_results[0] {
                 Ok(()) => Ok(SentTransactionHash(transaction_hash)),
                 Err(error) => Err(Error {
@@ -538,46 +556,65 @@ where
         let mut state = self.state.clone();
 
         async move {
-            let height = height.parse().map_err(|error: SerializationError| Error {
+            let height: Height = height.parse().map_err(|error: SerializationError| Error {
                 code: ErrorCode::ServerError(0),
                 message: error.to_string(),
                 data: None,
             })?;
 
-            let request =
-                zebra_state::ReadRequest::Block(zebra_state::HashOrHeight::Height(height));
-            let response = state
-                .ready()
-                .and_then(|service| service.call(request))
-                .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
+            if verbosity == 0 {
+                let request = zebra_state::ReadRequest::Block(height.into());
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
 
-            match response {
-                zebra_state::ReadResponse::Block(Some(block)) => match verbosity {
-                    0 => Ok(GetBlock::Raw(block.into())),
-                    1 => Ok(GetBlock::Object {
-                        tx: block
-                            .transactions
-                            .iter()
-                            .map(|tx| tx.hash().encode_hex())
-                            .collect(),
-                    }),
-                    _ => Err(Error {
-                        code: ErrorCode::InvalidParams,
-                        message: "Invalid verbosity value".to_string(),
+                match response {
+                    zebra_state::ReadResponse::Block(Some(block)) => {
+                        Ok(GetBlock::Raw(block.into()))
+                    }
+                    zebra_state::ReadResponse::Block(None) => Err(Error {
+                        code: MISSING_BLOCK_ERROR_CODE,
+                        message: "Block not found".to_string(),
                         data: None,
                     }),
-                },
-                zebra_state::ReadResponse::Block(None) => Err(Error {
-                    code: MISSING_BLOCK_ERROR_CODE,
-                    message: "Block not found".to_string(),
+                    _ => unreachable!("unmatched response to a block request"),
+                }
+            } else if verbosity == 1 {
+                let request = zebra_state::ReadRequest::TransactionIdsForBlock(height.into());
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
+
+                match response {
+                    zebra_state::ReadResponse::TransactionIdsForBlock(Some(tx_ids)) => {
+                        let tx_ids = tx_ids.iter().map(|tx_id| tx_id.encode_hex()).collect();
+                        Ok(GetBlock::Object { tx: tx_ids })
+                    }
+                    zebra_state::ReadResponse::TransactionIdsForBlock(None) => Err(Error {
+                        code: MISSING_BLOCK_ERROR_CODE,
+                        message: "Block not found".to_string(),
+                        data: None,
+                    }),
+                    _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
+                }
+            } else {
+                Err(Error {
+                    code: ErrorCode::InvalidParams,
+                    message: "Invalid verbosity value".to_string(),
                     data: None,
-                }),
-                _ => unreachable!("unmatched response to a block request"),
+                })
             }
         }
         .boxed()
@@ -870,7 +907,7 @@ where
                     hashes
                         .iter()
                         .map(|(tx_loc, tx_id)| {
-                            // TODO: downgrade to debug, because there's nothing the user can do
+                            // Check that the returned transactions are in chain order.
                             assert!(
                                 *tx_loc > last_tx_location,
                                 "Transactions were not in chain order:\n\
@@ -914,7 +951,7 @@ where
                     data: None,
                 })?;
             let utxos = match response {
-                zebra_state::ReadResponse::Utxos(utxos) => utxos,
+                zebra_state::ReadResponse::AddressUtxos(utxos) => utxos,
                 _ => unreachable!("unmatched response to a UtxosByAddresses request"),
             };
 
@@ -929,7 +966,7 @@ where
                 let satoshis = u64::from(utxo_data.3.value);
 
                 let output_location = *utxo_data.2;
-                // TODO: downgrade to debug, because there's nothing the user can do
+                // Check that the returned UTXOs are in chain order.
                 assert!(
                     output_location > last_output_location,
                     "UTXOs were not in chain order:\n\
@@ -1147,7 +1184,7 @@ pub enum GetBlock {
     Raw(#[serde(with = "hex")] SerializedBlock),
     /// The block object.
     Object {
-        /// Vector of hex-encoded TXIDs of the transactions of the block
+        /// List of transaction IDs in block order, hex-encoded.
         tx: Vec<String>,
     },
 }
@@ -1308,17 +1345,19 @@ impl GetRawTransaction {
 /// Check if provided height range is valid for address indexes.
 fn check_height_range(start: Height, end: Height, chain_height: Height) -> Result<()> {
     if start == Height(0) || end == Height(0) {
-        return Err(Error::invalid_params(
-            "Start and end are expected to be greater than zero",
-        ));
+        return Err(Error::invalid_params(format!(
+            "start {start:?} and end {end:?} must both be greater than zero"
+        )));
     }
-    if end < start {
-        return Err(Error::invalid_params(
-            "End value is expected to be greater than or equal to start",
-        ));
+    if start > end {
+        return Err(Error::invalid_params(format!(
+            "start {start:?} must be less than or equal to end {end:?}"
+        )));
     }
     if start > chain_height || end > chain_height {
-        return Err(Error::invalid_params("Start or end is outside chain range"));
+        return Err(Error::invalid_params(format!(
+            "start {start:?} and end {end:?} must both be less than or equal to the chain tip {chain_height:?}"
+        )));
     }
 
     Ok(())

@@ -3,8 +3,14 @@
 use abscissa_core::{Component, FrameworkError, Shutdown};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
-    fmt::Formatter, layer::SubscriberExt, reload::Handle, util::SubscriberInitExt, EnvFilter,
+    fmt::{format, Formatter},
+    layer::SubscriberExt,
+    reload::Handle,
+    util::SubscriberInitExt,
+    EnvFilter,
 };
+
+use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
 
 use crate::{application::app_version, config::TracingSection};
 
@@ -16,7 +22,12 @@ pub struct Tracing {
     /// The installed filter reloading handle, if enabled.
     //
     // TODO: when fmt::Subscriber supports per-layer filtering, remove the Option
-    filter_handle: Option<Handle<EnvFilter, Formatter>>,
+    filter_handle: Option<
+        Handle<
+            EnvFilter,
+            Formatter<format::DefaultFields, format::Format<format::Full>, NonBlocking>,
+        >,
+    >,
 
     /// The originally configured filter.
     initial_filter: String,
@@ -24,13 +35,24 @@ pub struct Tracing {
     /// The installed flame graph collector, if enabled.
     #[cfg(feature = "flamegraph")]
     flamegrapher: Option<flame::Grapher>,
+
+    /// Drop guard for worker thread of non-blocking logger,
+    /// responsible for flushing any remaining logs when the program terminates
+    _guard: WorkerGuard,
 }
 
 impl Tracing {
     /// Try to create a new [`Tracing`] component with the given `filter`.
     pub fn new(config: TracingSection) -> Result<Self, FrameworkError> {
-        let filter = config.filter.unwrap_or_else(|| "".to_string());
+        let filter = config.filter.unwrap_or_default();
         let flame_root = &config.flamegraph;
+
+        // Builds a lossy NonBlocking logger with a default line limit of 128_000 or an explicit buffer_limit.
+        // The write method queues lines down a bounded channel with this capacity to a worker thread that writes to stdout.
+        // Increments error_counter and drops lines when the buffer is full.
+        let (non_blocking, _guard) = NonBlockingBuilder::default()
+            .buffered_lines_limit(config.buffer_limit.max(100))
+            .finish(std::io::stdout());
 
         // Only use color if tracing output is being sent to a terminal or if it was explicitly
         // forced to.
@@ -47,6 +69,7 @@ impl Tracing {
 
             let logger = FmtSubscriber::builder()
                 .with_ansi(use_color)
+                .with_writer(non_blocking)
                 .with_env_filter(&filter);
 
             // Enable reloading if that feature is selected.
@@ -76,12 +99,14 @@ impl Tracing {
 
             let subscriber = tracing_subscriber::registry();
             // TODO: find out why crawl_and_dial and try_to_sync evade this filter,
-            //       and why they also don't get the global net/commit span
+            //       and why they also don't get the global net/commit span.
+            // Note: this might have been fixed by tracing 0.3.15, or by recent Zebra refactors.
             //
             // Using `registry` as the base subscriber, the logs from most other functions get filtered.
             // Using `FmtSubscriber` as the base subscriber, all the logs get filtered.
             let logger = fmt::Layer::new()
                 .with_ansi(use_color)
+                .with_writer(non_blocking)
                 .with_filter(EnvFilter::from(&filter));
 
             let subscriber = subscriber.with(logger);
@@ -185,6 +210,7 @@ impl Tracing {
             initial_filter: filter,
             #[cfg(feature = "flamegraph")]
             flamegrapher,
+            _guard,
         })
     }
 

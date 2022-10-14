@@ -102,7 +102,7 @@ fn main() -> Result<()> {
         let mut cmd = passthrough_cmd();
 
         // get block data
-        cmd.args(&["getblock", &x.to_string()]);
+        cmd.args(["getblock", &x.to_string()]);
         let output = cmd_output(&mut cmd)?;
         // parse json
         let v: Value = serde_json::from_str(&output)?;

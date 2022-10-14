@@ -16,14 +16,14 @@
 extern crate tracing;
 
 #[cfg(any(test, feature = "proptest-impl"))]
-mod arbitrary;
+pub mod arbitrary;
+
 mod config;
 pub mod constants;
 mod error;
 mod request;
 mod response;
 mod service;
-mod util;
 
 #[cfg(test)]
 mod tests;
@@ -35,12 +35,12 @@ pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, ReadRequest, Requ
 pub use response::{ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipChange, LatestChainTip, TipAction},
-    init, OutputIndex, OutputLocation, TransactionLocation,
+    init, spawn_init, OutputIndex, OutputLocation, TransactionLocation,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::{
-    arbitrary::populated_state,
+    arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
     chain_tip::{ChainTipBlock, ChainTipSender},
     init_test, init_test_services,
 };

@@ -305,7 +305,7 @@ where
         let span = tracing::debug_span!("tx", ?tx_id);
 
         async move {
-            tracing::trace!(?req);
+            tracing::trace!(?tx_id, ?req, "got tx verify request");
 
             // Do basic checks first
             if let Some(block_time) = req.block_time() {
@@ -344,6 +344,8 @@ where
 
             check::spend_conflicts(&tx)?;
 
+            tracing::trace!(?tx_id, "passed quick checks");
+
             // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
             // in non-coinbase transactions MUST also be applied to coinbase transactions."
             //
@@ -360,6 +362,9 @@ where
 
             let cached_ffi_transaction =
                 Arc::new(CachedFfiTransaction::new(tx.clone(), spent_outputs));
+
+            tracing::trace!(?tx_id, "got state UTXOs");
+
             let async_checks = match tx.as_ref() {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");
@@ -391,9 +396,13 @@ where
                 )?,
             };
 
+            tracing::trace!(?tx_id, "awaiting async checks...");
+
             // If the Groth16 parameter download hangs,
             // Zebra will timeout here, waiting for the async checks.
             async_checks.check().await?;
+
+            tracing::trace!(?tx_id, "finished async checks");
 
             // Get the `value_balance` to calculate the transaction fee.
             let value_balance = tx.value_balance(&spent_utxos);
@@ -429,6 +438,10 @@ where
 
             Ok(rsp)
         }
+        .inspect(move |result| {
+            // Hide the transaction data to avoid filling the logs
+            tracing::trace!(?tx_id, result = ?result.as_ref().map(|_tx| ()), "got tx verify result");
+        })
         .instrument(span)
         .boxed()
     }

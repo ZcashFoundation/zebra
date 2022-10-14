@@ -439,7 +439,7 @@ where
                     let cancel = self.cancel_handles.remove(&key);
                     assert!(cancel.is_some(), "missing cancel handle");
 
-                    if svc.version() >= self.minimum_peer_version.current() {
+                    if svc.remote_version() >= self.minimum_peer_version.current() {
                         self.ready_services.insert(key, svc);
                     }
                 }
@@ -509,7 +509,7 @@ where
             let preselected_p2c_peer = &mut self.preselected_p2c_peer;
 
             self.ready_services.retain(|address, peer| {
-                if peer.version() >= minimum_version {
+                if peer.remote_version() >= minimum_version {
                     true
                 } else {
                     if *preselected_p2c_peer == Some(*address) {
@@ -562,7 +562,7 @@ where
     /// If the service is for a connection to an outdated peer, the request is cancelled and the
     /// service is dropped.
     fn push_unready(&mut self, key: D::Key, svc: D::Service) {
-        let peer_version = svc.version();
+        let peer_version = svc.remote_version();
         let (tx, rx) = oneshot::channel();
 
         self.unready_services.push(UnreadyService {

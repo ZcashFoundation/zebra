@@ -13,14 +13,16 @@
 //! - `GetBlockRange`: Covered.
 //!
 //! - `GetTransaction`: Covered.
-//! - `SendTransaction`: Not covered and it will never be, it has its own test.
+//! - `SendTransaction`: Covered by the send_transaction_test.
 //!
 //! - `GetTaddressTxids`: Covered.
 //! - `GetTaddressBalance`: Covered.
 //! - `GetTaddressBalanceStream`: Covered.
 //!
-//! - `GetMempoolTx`: Not covered.
-//! - `GetMempoolStream`: Not covered.
+//! - `GetMempoolTx`: Covered by the send_transaction_test,
+//!                   currently disabled by `lightwalletd`.
+//! - `GetMempoolStream`: Covered by the send_transaction_test,
+//!                       currently disabled by `lightwalletd`.
 //!
 //! - `GetTreeState`: Covered.
 //!
@@ -28,6 +30,7 @@
 //! - `GetAddressUtxosStream`: Covered.
 //!
 //! - `GetLightdInfo`: Covered.
+//!
 //! - `Ping`: Not covered and it will never be. `Ping` is only used for testing
 //! purposes.
 
@@ -43,74 +46,94 @@ use zebra_chain::{
 use zebra_network::constants::USER_AGENT;
 
 use crate::common::{
-    launch::spawn_zebrad_for_rpc_without_initial_peers,
+    launch::spawn_zebrad_for_rpc,
     lightwalletd::{
+        can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
+        sync::wait_for_zebrad_and_lightwalletd_sync,
         wallet_grpc::{
-            connect_to_lightwalletd, spawn_lightwalletd_with_rpc_server, Address, AddressList,
-            BlockId, BlockRange, ChainSpec, Empty, GetAddressUtxosArg,
-            TransparentAddressBlockFilter, TxFilter,
+            connect_to_lightwalletd, Address, AddressList, BlockId, BlockRange, ChainSpec, Empty,
+            GetAddressUtxosArg, TransparentAddressBlockFilter, TxFilter,
         },
-        zebra_skip_lightwalletd_tests,
         LightwalletdTestType::UpdateCachedState,
     },
 };
 
 /// The test entry point.
+//
+// TODO:
+// - check output of zebrad and lightwalletd in different threads,
+//   to avoid test hangs due to full output pipes
+//   (see lightwalletd_integration_test for an example)
 pub async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
-
-    // Skip the test unless the user specifically asked for it
-    if zebra_skip_lightwalletd_tests() {
-        return Ok(());
-    }
 
     // We want a zebra state dir and a lightwalletd data dir in place,
     // so `UpdateCachedState` can be used as our test type
     let test_type = UpdateCachedState;
 
-    // Require to have a `ZEBRA_CACHED_STATE_DIR` in place
-    let zebrad_state_path = test_type.zebrad_state_path("wallet_grpc_test".to_string());
-    if zebrad_state_path.is_none() {
-        return Ok(());
-    }
-
-    // Require to have a `LIGHTWALLETD_DATA_DIR` in place
-    let lightwalletd_state_path = test_type.lightwalletd_state_path("wallet_grpc_test".to_string());
-    if lightwalletd_state_path.is_none() {
-        return Ok(());
-    }
-
     // This test is only for the mainnet
     let network = Network::Mainnet;
+    let test_name = "wallet_grpc_test";
+
+    // We run these gRPC tests with a network connection, for better test coverage.
+    let use_internet_connection = true;
+
+    if test_type.launches_lightwalletd() && !can_spawn_lightwalletd_for_rpc(test_name, test_type) {
+        tracing::info!("skipping test due to missing lightwalletd network or cached state");
+        return Ok(());
+    }
+
+    // Launch zebra with peers and using a predefined zebrad state path.
+    // As this tests are just queries we can have a live chain where blocks are coming.
+    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
+        spawn_zebrad_for_rpc(network, test_name, test_type, use_internet_connection)?
+    {
+        tracing::info!(
+            ?network,
+            ?test_type,
+            "running gRPC query tests using lightwalletd & zebrad...",
+        );
+
+        zebrad_and_address
+    } else {
+        // Skip the test, we don't have the required cached state
+        return Ok(());
+    };
+
+    let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
 
     tracing::info!(
-        ?network,
         ?test_type,
-        ?zebrad_state_path,
-        ?lightwalletd_state_path,
-        "running gRPC query tests using lightwalletd & zebrad, \
-         launching disconnected zebrad...",
+        ?zebra_rpc_address,
+        "launched zebrad, waiting for zebrad to open its RPC port..."
     );
-
-    // Launch zebra using a predefined zebrad state path
-    let (_zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc_without_initial_peers(network, zebrad_state_path.unwrap(), test_type)?;
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {}", zebra_rpc_address))?;
 
     tracing::info!(
         ?zebra_rpc_address,
-        "launching lightwalletd connected to zebrad...",
+        "zebrad opened its RPC port, spawning lightwalletd...",
     );
 
     // Launch lightwalletd
-    let (_lightwalletd, lightwalletd_rpc_port) = spawn_lightwalletd_with_rpc_server(
-        zebra_rpc_address,
-        lightwalletd_state_path,
-        test_type,
-        false,
-    )?;
+    let (lightwalletd, lightwalletd_rpc_port) =
+        spawn_lightwalletd_for_rpc(network, test_name, test_type, zebra_rpc_address)?
+            .expect("already checked cached state and network requirements");
 
-    // Give lightwalletd a few seconds to open its grpc port before connecting to it
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    tracing::info!(
+        ?lightwalletd_rpc_port,
+        "spawned lightwalletd connected to zebrad, waiting for them both to sync...",
+    );
+
+    let (_lightwalletd, _zebrad) = wait_for_zebrad_and_lightwalletd_sync(
+        lightwalletd,
+        lightwalletd_rpc_port,
+        zebrad,
+        zebra_rpc_address,
+        test_type,
+        // We want our queries to include the mempool and network for better coverage
+        true,
+        use_internet_connection,
+    )?;
 
     tracing::info!(
         ?lightwalletd_rpc_port,
@@ -276,8 +299,6 @@ pub async fn run() -> Result<()> {
         balance_both.value_zat,
         balance_zf.value_zat + balance_mg.value_zat
     );
-
-    // TODO: Create call and checks for `GetMempoolTx` and `GetMempoolTxStream`?
 
     let sapling_treestate_init_height = sapling_activation_height + 1;
 

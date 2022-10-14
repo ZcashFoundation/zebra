@@ -15,7 +15,9 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::{check, StateService},
+    service::{
+        check, finalized_state::FinalizedState, non_finalized_state::NonFinalizedState, read,
+    },
     Config, FinalizedBlock,
 };
 
@@ -81,24 +83,34 @@ pub(crate) fn partial_nu5_chain_strategy(
 
 /// Return a new `StateService` containing the mainnet genesis block.
 /// Also returns the finalized genesis block itself.
-pub(crate) fn new_state_with_mainnet_genesis() -> (StateService, FinalizedBlock) {
+pub(crate) fn new_state_with_mainnet_genesis() -> (FinalizedState, NonFinalizedState, FinalizedBlock)
+{
     let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
         .zcash_deserialize_into::<Arc<Block>>()
         .expect("block should deserialize");
 
-    let (mut state, _, _, _) = StateService::new(Config::ephemeral(), Mainnet);
+    let config = Config::ephemeral();
+    let network = Mainnet;
 
-    assert_eq!(None, state.best_tip());
+    let mut finalized_state = FinalizedState::new(&config, network);
+    let non_finalized_state = NonFinalizedState::new(network);
+
+    assert_eq!(
+        None,
+        read::best_tip(&non_finalized_state, &finalized_state.db)
+    );
 
     let genesis = FinalizedBlock::from(genesis);
-    state
-        .disk
-        .commit_finalized_direct(genesis.clone(), "test")
+    finalized_state
+        .commit_finalized_direct(genesis.clone().into(), "test")
         .expect("unexpected invalid genesis block test vector");
 
-    assert_eq!(Some((Height(0), genesis.hash)), state.best_tip());
+    assert_eq!(
+        Some((Height(0), genesis.hash)),
+        read::best_tip(&non_finalized_state, &finalized_state.db)
+    );
 
-    (state, genesis)
+    (finalized_state, non_finalized_state, genesis)
 }
 
 /// Return a `Transaction::V4` with the coinbase data from `coinbase`.

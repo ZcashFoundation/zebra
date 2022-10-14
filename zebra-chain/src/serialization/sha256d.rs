@@ -49,7 +49,7 @@ impl<'a> From<&'a [u8]> for Checksum {
 impl fmt::Debug for Checksum {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Sha256dChecksum")
-            .field(&hex::encode(&self.0))
+            .field(&hex::encode(self.0))
             .finish()
     }
 }
