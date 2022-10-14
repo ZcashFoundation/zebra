@@ -648,13 +648,49 @@ async fn rpc_getblockcount() {
     use crate::methods::getblocktemplate::GetBlockTemplateRpc;
 
     // Get the tip height using RPC method `get_block_count`
-    let get_block_count = rpc
-        .get_block_count()
-        .expect("We should have a GetBestBlockHash struct");
-    //let response_height = get_block_count;
+    let get_block_count = rpc.get_block_count().expect("We should have a number");
 
     // Check if response is equal to block 10 hash.
     assert_eq!(get_block_count, tip_block_hight.0);
+
+    mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn rpc_getblockcount_empty_state() {
+    let _init_guard = zebra_test::init();
+
+    // Get a mempool handle
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create an empty state
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init_test_services(Mainnet);
+
+    // Init RPC
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
+        Mainnet,
+        false,
+        Buffer::new(mempool.clone(), 1),
+        read_state,
+        latest_chain_tip,
+    );
+
+    use crate::methods::getblocktemplate::GetBlockTemplateRpc;
+
+    // Get the tip height using RPC method `get_block_count
+    let get_block_count = rpc.get_block_count();
+
+    // state an empty so we should get an error
+    assert!(get_block_count.is_err());
+
+    // Check the error we got is the correct one
+    assert_eq!(get_block_count.err().unwrap().message, "No blocks in state");
 
     mempool.expect_no_requests().await;
 
