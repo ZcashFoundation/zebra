@@ -18,6 +18,9 @@ use zebra_node_services::BoxError;
 
 use zebra_test::mock_service::MockService;
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use crate::methods::getblocktemplate::GetBlockTemplateRpc;
+
 use super::super::*;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -645,8 +648,6 @@ async fn rpc_getblockcount() {
         latest_chain_tip,
     );
 
-    use crate::methods::getblocktemplate::GetBlockTemplateRpc;
-
     // Get the tip height using RPC method `get_block_count`
     let get_block_count = rpc.get_block_count().expect("We should have a number");
 
@@ -680,8 +681,6 @@ async fn rpc_getblockcount_empty_state() {
         read_state,
         latest_chain_tip,
     );
-
-    use crate::methods::getblocktemplate::GetBlockTemplateRpc;
 
     // Get the tip height using RPC method `get_block_count
     let get_block_count = rpc.get_block_count();
