@@ -1525,8 +1525,8 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let hash = state.best_chain_receiver.with_watch_data(|best_chain| {
-                            read::hash(best_chain, &state.db, height)
+                        let hash = state.non_finalized_state_receiver.with_watch_data(|non_finalized_state| {
+                            read::hash(non_finalized_state.best_chain(), &state.db, height)
                         });
 
                         // The work is done in the future.
