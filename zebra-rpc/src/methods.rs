@@ -141,7 +141,7 @@ pub trait Rpc {
     #[rpc(name = "getblock")]
     fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>>;
 
-    /// Returns the hash of the current best blockchain tip block, as a [`GetBestBlockHash`] JSON string.
+    /// Returns the hash of the current best blockchain tip block, as a [`GetBlockHash`] JSON string.
     ///
     /// zcashd reference: [`getbestblockhash`](https://zcash.github.io/rpc/getbestblockhash.html)
     #[rpc(name = "getbestblockhash")]

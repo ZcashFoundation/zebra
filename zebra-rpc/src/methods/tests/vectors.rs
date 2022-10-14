@@ -638,14 +638,13 @@ async fn rpc_getblockhash() {
         latest_chain_tip,
     );
 
-
     // Query the hashes using positive indexes
     for (i, block) in blocks.iter().enumerate() {
         let get_block_hash = rpc
             .0
             .get_block_hash(i.try_into().expect("usize always fits in i32"))
             .await
-            .expect("We should have a GetBestBlock struct");
+            .expect("We should have a GetBlockHash struct");
 
         assert_eq!(get_block_hash, GetBlockHash(block.clone().hash()));
     }
@@ -656,7 +655,7 @@ async fn rpc_getblockhash() {
             .0
             .get_block_hash(i)
             .await
-            .expect("We should have a GetBestBlock struct");
+            .expect("We should have a GetBlockHash struct");
         assert_eq!(
             get_block_hash,
             GetBlockHash(blocks[(10 + (i + 1)) as usize].hash())
