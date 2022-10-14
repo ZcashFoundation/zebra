@@ -1,4 +1,4 @@
-//! RPC methods related to mining only available with `getblocktemplate-rpcs` rust feature.
+//! RPC methods related to mining pools, only available with `getblocktemplate-rpcs` rust feature.
 use jsonrpc_core::{self, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::Service;
@@ -10,7 +10,10 @@ use zebra_node_services::{mempool, BoxError};
 #[rpc(server)]
 /// Additional RPC methods for mining pools.
 pub trait GetBlockTemplateRpc: Rpc {
-    /// Add documentation
+    /// Returns the height of the most recent block in the best valid block chain (equivalently,
+    /// the number of blocks in this chain excluding the genesis block).
+    ///
+    /// zcashd reference: [`getblockcount`](https://zcash.github.io/rpc/getblockcount.html)
     #[rpc(name = "getblockcount")]
     fn get_block_count(&self) -> Result<u32>;
 }
