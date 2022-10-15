@@ -166,6 +166,15 @@ async fn test_rpc_response_data_for_network(network: Network) {
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddressutxos(get_address_utxos, &settings);
+
+    // `getblockhash`
+    const BLOCK_HEIGHT10: i32 = 10;
+    let get_block_hash = rpc
+        .get_block_hash(BLOCK_HEIGHT10)
+        .await
+        .expect("We should have a GetBlockHash struct");
+
+    snapshot_rpc_getblockhash(get_block_hash, &settings);
 }
 
 /// Snapshot `getinfo` response, using `cargo insta` and JSON serialization.
@@ -252,6 +261,11 @@ fn snapshot_rpc_getaddresstxids(transactions: Vec<String>, settings: &insta::Set
 /// Snapshot `getaddressutxos` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getaddressutxos(utxos: Vec<GetAddressUtxos>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_utxos", utxos));
+}
+
+/// Snapshot `getblockhash` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getblockhash(block_hash: GetBlockHash, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_block_hash", block_hash));
 }
 
 /// Utility function to convert a `Network` to a lowercase string.
