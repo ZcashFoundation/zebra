@@ -113,7 +113,7 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::BestChainBlockHash`](crate::ReadRequest::BestChainBlockHash) with the
     /// specified block hash.
-    Hash(Option<block::Hash>),
+    BlockHash(Option<block::Hash>),
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.
@@ -146,7 +146,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressBalance(_)
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
-            | ReadResponse::Hash(_) => {
+            | ReadResponse::BlockHash(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
         }

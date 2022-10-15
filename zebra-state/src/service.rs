@@ -1507,7 +1507,7 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // Used by get_block_hash RPC.
-            ReadRequest::Hash(height) => {
+            ReadRequest::BestChainBlockHash(height) => {
                 metrics::counter!(
                     "state.requests",
                     1,
@@ -1534,7 +1534,7 @@ impl Service<ReadRequest> for ReadStateService {
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Block");
 
-                        Ok(ReadResponse::Hash(hash))
+                        Ok(ReadResponse::BlockHash(hash))
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::Block"))

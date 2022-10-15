@@ -739,7 +739,7 @@ pub enum ReadRequest {
     /// * [`ReadResponse::Hash(Some(hash))`](ReadResponse::Hash) if the block is in the best chain;
     /// * [`ReadResponse::Hash(None)`](ReadResponse::Hash) otherwise.
     ///
-    Hash(Height),
+    BestChainBlockHash(Height),
 }
 
 impl ReadRequest {
@@ -760,7 +760,7 @@ impl ReadRequest {
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addesses",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
-            ReadRequest::Hash(_) => "block_hash",
+            ReadRequest::BestChainBlockHash(_) => "block_hash",
         }
     }
 

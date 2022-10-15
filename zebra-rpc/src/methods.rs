@@ -1006,7 +1006,7 @@ where
 
             let height = get_height_from_int(index, tip_height)?;
 
-            let request = zebra_state::ReadRequest::Hash(height);
+            let request = zebra_state::ReadRequest::BestChainBlockHash(height);
             let response = state
                 .ready()
                 .and_then(|service| service.call(request))
@@ -1018,8 +1018,8 @@ where
                 })?;
 
             match response {
-                zebra_state::ReadResponse::Hash(Some(hash)) => Ok(GetBlockHash(hash)),
-                zebra_state::ReadResponse::Hash(None) => Err(Error {
+                zebra_state::ReadResponse::BlockHash(Some(hash)) => Ok(GetBlockHash(hash)),
+                zebra_state::ReadResponse::BlockHash(None) => Err(Error {
                     code: MISSING_BLOCK_ERROR_CODE,
                     message: "Block not found".to_string(),
                     data: None,
