@@ -86,7 +86,7 @@ This is a list of Rust code that is in scope and out of scope for Zebra's first 
 | [bitflags](https://github.com/bitflags/bitflags) | [1.3.2](https://github.com/bitflags/bitflags/releases/tag/1.3.2) 
 | [bitvec](https://github.com/bitvecto-rs/bitvec) | 1.0.1 
 | [byteorder](https://github.com/BurntSushi/byteorder) | [1.4.3](https://github.com/BurntSushi/byteorder/releases/tag/1.4.3) 
-| [chrono](https://github.com/chronotope/chrono) | [0.4.22](https://github.com/chronotope/chrono/releases/tag/v0.4.22) 
+| [chrono](https://github.com/chronotope/chrono) | [0.4.22](https://github.com/chronotope/chrono/releases/tag/v0.4.22) | We treat chrono as a time library, and assume it works. It only implements the consensus rule about the local clock.
 | [hex](https://github.com/KokaKiwi/rust-hex) | [0.4.3](https://github.com/KokaKiwi/rust-hex/releases/tag/v0.4.3) 
 | [humantime](https://github.com/tailhook/humantime) | [2.1.0](https://github.com/tailhook/humantime/releases/tag/v2.1.0) 
 | [itertools](https://github.com/rust-itertools/itertools) | 0.10.5 
