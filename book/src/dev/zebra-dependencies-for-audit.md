@@ -111,7 +111,7 @@ This is a list of Rust code that is in scope and out of scope for Zebra's first 
 
 | Name | Version | Notes
 |------| ------- | -----
-| [rocksdb](https://github.com/rust-rocksdb/rust-rocksdb) | [0.19.0](https://github.com/rust-rocksdb/rust-rocksdb/releases/tag/v0.19.0) 
+| [rocksdb](https://github.com/rust-rocksdb/rust-rocksdb) | [0.19.0](https://github.com/rust-rocksdb/rust-rocksdb/releases/tag/v0.19.0) | We can treat rocksdb as a database library, and assume it works. It is consensus-critical that stored data is returned without any mistakes. But we don't want to audit a huge pile of C++ code
 | [abscissa_core](https://github.com/iqlusioninc/abscissa/tree/develop/) | 0.5.2 
 | [gumdrop](https://github.com/murarth/gumdrop) | 0.7.0 
 
