@@ -39,25 +39,27 @@ This is a list of Rust code that is in scope and out of scope for Zebra's first 
 
 ## Cryptography dependencies
 
-| Name | Version | Notes
-|------| ------- | -----
-| [<i>aes</i>](https://github.com/RustCrypto/block-ciphers) | 0.7.5 |  <i>`struct aes::Aes256`</i>
-| [bech32](https://github.com/rust-bitcoin/rust-bech32) | [0.9.1](https://github.com/rust-bitcoin/rust-bech32/releases/tag/v0.9.1) |
-| [blake2b_simd](https://github.com/oconnor663/blake2_simd) | [1.0.0](https://github.com/oconnor663/blake2_simd/releases/tag/1.0.0) |
-| [blake2s_simd](https://github.com/oconnor663/blake2_simd) | [1.0.0](https://github.com/oconnor663/blake2_simd/releases/tag/1.0.0) |
-| [bls12_381](https://github.com/zkcrypto/bls12_381) | [0.7.0](https://github.com/zkcrypto/bls12_381/releases/tag/0.7.0) |
-| [bs58](https://github.com/mycorrhiza/bs58-rs) | [0.4.0](https://github.com/mycorrhiza/bs58-rs/releases/tag/0.4.0) |
-| [rand](https://github.com/rust-random/rand) | [0.8.5](https://github.com/rust-random/rand/releases/tag/0.8.5) |
-| [rand_core](https://github.com/rust-random/rand) | [0.6.4](https://github.com/rust-random/rand/releases/tag/0.6.4) |
-| [sha2](https://github.com/RustCrypto/hashes) | 0.9.9 | 
-| [ripemd](https://github.com/RustCrypto/hashes) | 0.1.3 | 
-| [secp256k1](https://github.com/rust-bitcoin/rust-secp256k1/) | 0.21.3 | 
-| [subtle](https://github.com/dalek-cryptography/subtle) | [2.4.1](https://github.com/dalek-cryptography/subtle/releases/tag/2.4.1) |
-| [fpe](https://github.com/str4d/fpe) | 0.5.1 |
-| [group](https://github.com/zkcrypto/group) | [0.12.0](https://github.com/zkcrypto/group/releases/tag/0.12.0) |
-| [x25519-dalek](https://github.com/dalek-cryptography/x25519-dalek) | [1.2.0](https://github.com/dalek-cryptography/x25519-dalek/releases/tag/1.2.0) |
-| [jubjub](https://github.com/zkcrypto/jubjub) | [0.9.0](https://github.com/zkcrypto/jubjub/releases/tag/0.9.0) |
-| [bellman](https://github.com/zkcrypto/bellman) | 0.13.1 | 
+**All crypto dependencies are out of scope of the 1st audit**
+
+| Name | Version | Audited | Notes
+|------| ------- | ------- | -----
+| [aes](https://github.com/RustCrypto/block-ciphers) | 0.7.5 | [audited](https://github.com/RustCrypto/block-ciphers#warnings) | `struct aes::Aes256`
+| [bech32](https://github.com/rust-bitcoin/rust-bech32) | [0.9.1](https://github.com/rust-bitcoin/rust-bech32/releases/tag/v0.9.1) | no audit, but seems simple enough
+| [blake2b_simd](https://github.com/oconnor663/blake2_simd) | [1.0.0](https://github.com/oconnor663/blake2_simd/releases/tag/1.0.0) | no audit, but is widely used
+| [blake2s_simd](https://github.com/oconnor663/blake2_simd) | [1.0.0](https://github.com/oconnor663/blake2_simd/releases/tag/1.0.0) | no audit, but is widely used
+| [bls12_381](https://github.com/zkcrypto/bls12_381) | [0.7.0](https://github.com/zkcrypto/bls12_381/releases/tag/0.7.0) | no audit, but seems widely used
+| [bs58](https://github.com/mycorrhiza/bs58-rs) | [0.4.0](https://github.com/mycorrhiza/bs58-rs/releases/tag/0.4.0) | no audit, but seems simple enough
+| [rand](https://github.com/rust-random/rand) | [0.8.5](https://github.com/rust-random/rand/releases/tag/0.8.5) | no audits, but seems widely used
+| [rand_core](https://github.com/rust-random/rand) | [0.6.4](https://github.com/rust-random/rand/releases/tag/0.6.4) | no audits, but seems widely used
+| [sha2](https://github.com/RustCrypto/hashes) | 0.9.9 | no audits, but seems widely used
+| [ripemd](https://github.com/RustCrypto/hashes) | 0.1.3 | no audits, but seems widely used
+| [secp256k1](https://github.com/rust-bitcoin/rust-secp256k1/) | 0.21.3 | no audits, but seems widely used
+| [subtle](https://github.com/dalek-cryptography/subtle) | [2.4.1](https://github.com/dalek-cryptography/subtle/releases/tag/2.4.1) | no audits, but seems widely used
+| [fpe](https://github.com/str4d/fpe) | 0.5.1 |  I think it's not being used yet
+| [group](https://github.com/zkcrypto/group) | [0.12.0](https://github.com/zkcrypto/group/releases/tag/0.12.0) | no audits but it's just traits, seems widely used
+| [x25519-dalek](https://github.com/dalek-cryptography/x25519-dalek) | [1.2.0](https://github.com/dalek-cryptography/x25519-dalek/releases/tag/1.2.0) | no audits, but seems widely used
+| [jubjub](https://github.com/zkcrypto/jubjub) | [0.9.0](https://github.com/zkcrypto/jubjub/releases/tag/0.9.0) | not sure if were covered by ECC audits. Seem widely used.
+| [bellman](https://github.com/zkcrypto/bellman) | 0.13.1 | not sure if were covered by ECC audits. Seem widely used.
 
 ## Async code and services
 
