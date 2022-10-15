@@ -35,7 +35,7 @@ This is a list of Rust code that is in scope and out of scope for Zebra's first 
 | [redjubjub](https://github.com/ZcashFoundation/redjubjub) | [0.5.0](https://github.com/ZcashFoundation/redjubjub/releases/tag/0.5.0) | [jp](https://github.com/ZcashFoundation/redjubjub/raw/main/zcash-frost-audit-report-20210323.pdf) |
 | [orchard](https://github.com/zcash/orchard) | [0.2.0](https://github.com/zcash/orchard/releases/tag/0.2.0) | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) |
 | [zcash_proofs](https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766#ca841230) | [0.7.1](https://github.com/zcash/librustzcash.git?rev=ca84123038b64f0f4aa5615f7cf224fbf7ece766#ca841230/releases/tag/v0.7.1) | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) |
-| [zcash_script](https://github.com/ZcashFoundation/zcash_script) | [0.1.7](https://github.com/ZcashFoundation/zcash_script/releases/tag/v0.1.7) |
+| [<i>zcash_script</i>](https://github.com/ZcashFoundation/zcash_script) | [0.1.7](https://github.com/ZcashFoundation/zcash_script/releases/tag/v0.1.7) | <i>The C++ parts of `zcashd` got audited as part of the ECC audit, so we only need to audit [1](https://github.com/zcash/zcash/blob/master/src/script/zcash_script.cpp),[2](https://github.com/zcash/zcash/blob/master/src/script/zcash_script.h) and the rust code in [3](https://github.com/ZcashFoundation/zcash_script/tree/master/src)</i>
 
 ## Cryptography dependencies
 
