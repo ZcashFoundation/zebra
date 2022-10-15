@@ -101,7 +101,6 @@ This is a list of Rust code that is in scope and out of scope for Zebra's first 
 | [serde_json](https://github.com/serde-rs/json) | [1.0.85](https://github.com/serde-rs/json/releases/tag/v1.0.85) 
 | [bincode](https://github.com/servo/bincode) | [1.3.3](https://github.com/servo/bincode/releases/tag/v1.3.3) 
 | [mset](https://github.com/lonnen/mset) | [0.1.0](https://github.com/lonnen/mset/releases/tag/0.1.0)  
-| [structopt](https://github.com/TeXitoi/structopt) | [0.3.26](https://github.com/TeXitoi/structopt/releases/tag/v0.3.26) 
 | [tinyvec](https://github.com/Lokathor/tinyvec) | [1.6.0](https://github.com/Lokathor/tinyvec/releases/tag/v1.6.0) 
 | [num-integer](https://github.com/rust-num/num-integer) | 0.1.45 
 | [sentry](https://github.com/getsentry/sentry-rust) | [0.27.0](https://github.com/getsentry/sentry-rust/releases/tag/0.27.0) 
@@ -146,5 +145,6 @@ This is a list of Rust code that is in scope and out of scope for Zebra's first 
 | [tracing-journald](https://github.com/tokio-rs/tracing) | 0.3.0 | Tracing
 | [atty](https://github.com/softprops/atty) | [0.2.14](https://github.com/softprops/atty/releases/tag/0.2.14) 
 | [rand_chacha](https://github.com/rust-random/rand) | [0.3.1](https://github.com/rust-random/rand/releases/tag/0.3.1) | Testing
+| [structopt](https://github.com/TeXitoi/structopt) | [0.3.26](https://github.com/TeXitoi/structopt/releases/tag/v0.3.26) | Trivial usage in zebra-utils
 
 
