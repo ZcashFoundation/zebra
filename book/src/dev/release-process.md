@@ -10,7 +10,7 @@ Before reading, you should understand [Semantic Versioning](https://semver.org/s
 
 ## Zebra versioning {#zebra-versioning}
 
-Zebra version numbers indicate the level of changes that are introduced by the release and are composed of three parts: `major.minor.patch`.
+Zebra version numbers show the impact of the changes in a release. They are composed of three parts: `major.minor.patch`.
 For example, version `3.1.11` indicates major version 3, minor version 1, and patch level 11.
 
 The version number is incremented based on the level of change included in the release.
@@ -70,11 +70,13 @@ Zebras's tagging relates directly to versions published on Docker. We will refer
 |:---    |:---         |
 | latest | The most recent stable version. |
 | beta   | The most recent pre-release version of Zebra for testing. May not always exist. |
-| rc     | The most recent release candidate of Zebra, meant to become a stable version. |
+| rc     | The most recent release candidate of Zebra, meant to become a stable version. May not always exist. |
 
 ### Feature Flags {#feature-flags}
 
-To keep the `main` branch in a releasable state, breaking changes and experimental features must be gated behind a [feature flag](https://doc.rust-lang.org/cargo/reference/features.html).
+To keep the `main` branch in a releasable state, experimental features must be gated behind a [Rust feature flag](https://doc.rust-lang.org/cargo/reference/features.html).
+Breaking changes should also be gated behind a feature flag, unless the team decides they are urgent.
+(For example, security fixes which also break backwards compatibility.)
 
 <a id="frequency"></a>
 
