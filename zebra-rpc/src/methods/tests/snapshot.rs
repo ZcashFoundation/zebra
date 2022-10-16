@@ -13,9 +13,6 @@ use zebra_network::constants::USER_AGENT;
 use zebra_node_services::BoxError;
 use zebra_test::mock_service::MockService;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
-use crate::methods::getblocktemplate::GetBlockTemplateRpc;
-
 use super::super::*;
 
 /// Snapshot test for RPC methods responses.

@@ -18,9 +18,6 @@ use zebra_node_services::BoxError;
 
 use zebra_test::mock_service::MockService;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
-use crate::methods::getblocktemplate::GetBlockTemplateRpc;
-
 use super::super::*;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -661,8 +658,8 @@ async fn rpc_getblockcount() {
     assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
-#[tokio::test(flavor = "multi_thread")]
 #[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockcount_empty_state() {
     let _init_guard = zebra_test::init();
 

@@ -37,9 +37,6 @@ use crate::queue::Queue;
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
-pub mod getblocktemplate;
-
 /// The RPC error code used by `zcashd` for missing blocks.
 ///
 /// `lightwalletd` expects error code `-8` when a block is not found:
@@ -233,6 +230,14 @@ pub trait Rpc {
         &self,
         address_strings: AddressStrings,
     ) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Returns the height of the most recent block in the best valid block chain (equivalently,
+    /// the number of blocks in this chain excluding the genesis block).
+    ///
+    /// zcashd reference: [`getblockcount`](https://zcash.github.io/rpc/getblockcount.html)
+    #[rpc(name = "getblockcount")]
+    fn get_block_count(&self) -> Result<u32>;
 }
 
 /// RPC method implementations.
@@ -977,6 +982,18 @@ where
             Ok(response_utxos)
         }
         .boxed()
+    }
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    fn get_block_count(&self) -> Result<u32> {
+        self.latest_chain_tip
+            .best_tip_height()
+            .map(|height| height.0)
+            .ok_or(Error {
+                code: ErrorCode::ServerError(0),
+                message: "No blocks in state".to_string(),
+                data: None,
+            })
     }
 }
 
