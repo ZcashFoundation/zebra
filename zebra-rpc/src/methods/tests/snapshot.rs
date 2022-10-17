@@ -169,7 +169,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     {
-        // `getbestblockcount`
+        // `getblockcount`
         let get_block_count = rpc.get_block_count().expect("We should have a number");
         snapshot_rpc_getblockcount(get_block_count, &settings);
     }
