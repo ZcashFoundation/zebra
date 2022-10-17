@@ -236,7 +236,7 @@ pub trait Rpc {
     ///
     /// zcashd reference: [`getblockcount`](https://zcash.github.io/rpc/getblockcount.html)
     ///
-    /// #Notes
+    /// # Notes
     ///
     /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[rpc(name = "getblockcount")]
