@@ -34,6 +34,12 @@ use zebra_state::{OutputIndex, OutputLocation, TransactionLocation};
 
 use crate::queue::Queue;
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+mod get_block_template;
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+pub use get_block_template::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
+
 #[cfg(test)]
 mod tests;
 
@@ -230,17 +236,6 @@ pub trait Rpc {
         &self,
         address_strings: AddressStrings,
     ) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
-
-    /// Returns the height of the most recent block in the best valid block chain (equivalently,
-    /// the number of blocks in this chain excluding the genesis block).
-    ///
-    /// zcashd reference: [`getblockcount`](https://zcash.github.io/rpc/getblockcount.html)
-    ///
-    /// # Notes
-    ///
-    /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
-    #[rpc(name = "getblockcount")]
-    fn get_block_count(&self) -> Result<u32>;
 }
 
 /// RPC method implementations.
@@ -985,30 +980,6 @@ where
             Ok(response_utxos)
         }
         .boxed()
-    }
-
-    cfg_if::cfg_if! {
-        if #[cfg(feature = "getblocktemplate-rpcs")] {
-            fn get_block_count(&self) -> Result<u32> {
-                self.latest_chain_tip
-                    .best_tip_height()
-                    .map(|height| height.0)
-                    .ok_or(Error {
-                        code: ErrorCode::ServerError(0),
-                        message: "No blocks in state".to_string(),
-                        data: None,
-                    })
-            }
-        }
-        else {
-            fn get_block_count(&self) -> Result<u32> {
-                Err(Error {
-                    code: ErrorCode::ServerError(0),
-                    message: "RPC method is not implemented for zebra builds without `getblocktemplate-rpcs` feature".to_string(),
-                    data: None,
-                })
-            }
-        }
     }
 }
 

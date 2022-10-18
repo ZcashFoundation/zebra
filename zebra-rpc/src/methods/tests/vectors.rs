@@ -636,17 +636,23 @@ async fn rpc_getblockcount() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     // Init RPC
-    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+    let (_rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Mainnet,
         false,
         Buffer::new(mempool.clone(), 1),
         read_state,
-        latest_chain_tip,
+        latest_chain_tip.clone(),
     );
 
+    // Init RPC
+    let get_block_template_rpc =
+        get_block_template::GetBlockTemplateRpcImpl::new(latest_chain_tip.clone());
+
     // Get the tip height using RPC method `get_block_count`
-    let get_block_count = rpc.get_block_count().expect("We should have a number");
+    let get_block_count = get_block_template_rpc
+        .get_block_count()
+        .expect("We should have a number");
 
     // Check if response is equal to block 10 hash.
     assert_eq!(get_block_count, tip_block_height.0);
@@ -670,17 +676,20 @@ async fn rpc_getblockcount_empty_state() {
         zebra_state::init_test_services(Mainnet);
 
     // Init RPC
-    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+    let (_rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Mainnet,
         false,
         Buffer::new(mempool.clone(), 1),
         read_state,
-        latest_chain_tip,
+        latest_chain_tip.clone(),
     );
 
+    let get_block_template_rpc =
+        get_block_template::GetBlockTemplateRpcImpl::new(latest_chain_tip.clone());
+
     // Get the tip height using RPC method `get_block_count
-    let get_block_count = rpc.get_block_count();
+    let get_block_count = get_block_template_rpc.get_block_count();
 
     // state an empty so we should get an error
     assert!(get_block_count.is_err());
