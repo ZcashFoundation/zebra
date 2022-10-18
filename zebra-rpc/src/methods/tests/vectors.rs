@@ -627,7 +627,7 @@ async fn rpc_getblockcount() {
     // Get the height of the block at the tip using hardcoded block tip bytes.
     // We want to test the RPC response is equal to this hash
     let tip_block = blocks.last().unwrap();
-    let tip_block_hight = tip_block.coinbase_height().unwrap();
+    let tip_block_height = tip_block.coinbase_height().unwrap();
 
     // Get a mempool handle
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -649,7 +649,7 @@ async fn rpc_getblockcount() {
     let get_block_count = rpc.get_block_count().expect("We should have a number");
 
     // Check if response is equal to block 10 hash.
-    assert_eq!(get_block_count, tip_block_hight.0);
+    assert_eq!(get_block_count, tip_block_height.0);
 
     mempool.expect_no_requests().await;
 
