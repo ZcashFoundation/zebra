@@ -85,10 +85,6 @@ skip-tree = [
 
     # Optional dependencies
 
-    # wait for inferno -> num-format to upgrade
-    { name = "arrayvec", version = "=0.4.12" },
-    { name = "itoa", version = "=0.4.8" },
-
     # upgrade abscissa (required dependency) and arti (optional dependency)
     { name = "darling", version = "=0.10.2" },
     { name = "darling", version = "=0.12.4" },
