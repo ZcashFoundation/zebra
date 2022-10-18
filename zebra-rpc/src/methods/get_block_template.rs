@@ -24,7 +24,7 @@ pub struct GetBlockTemplateRpcImpl<Tip>
 where
     Tip: ChainTip,
 {
-    // TODO: Add the other fields from the [`Rpc`] struct
+    // TODO: Add the other fields from the [`Rpc`] struct as-needed
     /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: Tip,
 }
