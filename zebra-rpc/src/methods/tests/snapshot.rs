@@ -41,6 +41,9 @@ async fn test_rpc_response_data_for_network(network: Network) {
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), network).await;
 
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    let latest_chain_tip_gbt_clone = latest_chain_tip.clone();
+
     // Init RPC
     let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
@@ -169,8 +172,12 @@ async fn test_rpc_response_data_for_network(network: Network) {
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     {
+        let get_block_template_rpc = GetBlockTemplateRpcImpl::new(latest_chain_tip_gbt_clone);
+
         // `getblockcount`
-        let get_block_count = rpc.get_block_count().expect("We should have a number");
+        let get_block_count = get_block_template_rpc
+            .get_block_count()
+            .expect("We should have a number");
         snapshot_rpc_getblockcount(get_block_count, &settings);
     }
 }
