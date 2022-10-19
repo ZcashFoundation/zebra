@@ -904,13 +904,13 @@ jobs:
           -e 'test result:.*finished in' \
           "
 
-  # follow the logs of the test we just launched, up to block 1,790,000 or later
+  # follow the logs of the test we just launched, up to block 1,800,000 or later
   # (or the test finishing)
   #
-  # We chose this height because it was about 16 hours into the NU5 sync, in September 2022.
+  # We chose this height because it was about 20 hours into the NU5 sync, in October 2022.
   # (These blocks seem to be larger than the previous ones.)
-  logs-1790k:
-    name: Log ${{ inputs.test_id }} test (1790k)
+  logs-1800k:
+    name: Log ${{ inputs.test_id }} test (1800k)
     needs: [ logs-1780k ]
     # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() }}
@@ -944,8 +944,8 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Show recent logs, following until block 1,790,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1790k)
+      # Show recent logs, following until block 1,800,000 (or the test finishes)
+      - name: Show logs for ${{ inputs.test_id }} test (1800k)
         run: |
           gcloud compute ssh \
           github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -962,20 +962,20 @@ jobs:
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*179[0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*180[0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'estimated progress.*current_height.*=.*1[8-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'test result:.*finished in' \
           "
 
-  # follow the logs of the test we just launched, up to block 1,810,000 or later
+  # follow the logs of the test we just launched, up to block 1,820,000 or later
   # (or the test finishing)
   #
-  # We chose this height because it was about 20 hours into the NU5 sync, in October 2022.
+  # We chose this height because it was about 24 hours into the NU5 sync, in October 2022.
   # (These blocks seem to be larger than the previous ones.)
-  logs-1810k:
-    name: Log ${{ inputs.test_id }} test (1810k)
-    needs: [ logs-1790k ]
+  logs-1820k:
+    name: Log ${{ inputs.test_id }} test (1820k)
+    needs: [ logs-1800k ]
     # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -1008,8 +1008,8 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
           token_format: 'access_token'
 
-      # Show recent logs, following until block 1,810,000 (or the test finishes)
-      - name: Show logs for ${{ inputs.test_id }} test (1810k)
+      # Show recent logs, following until block 1,820,000 (or the test finishes)
+      - name: Show logs for ${{ inputs.test_id }} test (1820k)
         run: |
           gcloud compute ssh \
           github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -1026,8 +1026,8 @@ jobs:
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*181[0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*1[8-9][1-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*182[0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*1[8-9][2-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'test result:.*finished in' \
           "
@@ -1035,7 +1035,7 @@ jobs:
   # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
   logs-checkpoint:
     name: Log ${{ inputs.test_id }} test (checkpoint)
-    needs: [ logs-1810k ]
+    needs: [ logs-1820k ]
     # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
