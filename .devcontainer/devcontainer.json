@@ -16,7 +16,7 @@
 		"seccomp=unconfined"
 	],
 	"hostRequirements": {
-		"cpus": 2,
+		"cpus": 8,
 		"memory": "16gb",
 		"storage": "300gb"
 	},
@@ -55,6 +55,7 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	"forwardPorts": [
 		18233,
+		18232,
 		9999,
 		8232,
 		8233,
