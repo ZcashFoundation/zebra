@@ -1026,8 +1026,8 @@ jobs:
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*current_height.*=.*182[0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
-          -e 'estimated progress.*current_height.*=.*1[8-9][2-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*18[2-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*19[0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
           -e 'test result:.*finished in' \
           "
