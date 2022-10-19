@@ -756,8 +756,4 @@ async fn rpc_getblockhash() {
     }
 
     mempool.expect_no_requests().await;
-
-    // The queue task should continue without errors or panics
-    //let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-    //assert!(matches!(rpc_tx_queue_task_result, None));
 }
