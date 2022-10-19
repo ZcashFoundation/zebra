@@ -761,7 +761,7 @@ impl ReadRequest {
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addesses",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
             #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadRequest::BestChainBlockHash(_) => "block_hash",
+            ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
         }
     }
 
