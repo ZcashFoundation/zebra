@@ -1376,10 +1376,13 @@ fn get_height_from_int(index: i32, tip_height: Height) -> Result<Height> {
         }
         Ok(Height(height))
     } else {
-        let height = (tip_height.0 as i32).checked_add(index + 1);
+        // `index + 1` can't overflow, because `index` is always negative here.
+        let height = i32::try_from(tip_height.0)
+            .expect("tip height fits in i32, because Height::MAX fits in i32")
+            .checked_add(index + 1);
 
         let sanitized_height = match height {
-            None => Err(Error::invalid_params("Provided index is not valid")),
+            None => return Err(Error::invalid_params("Provided index is not valid")),
             Some(h) => {
                 if h < 0 {
                     return Err(Error::invalid_params(
@@ -1393,10 +1396,10 @@ fn get_height_from_int(index: i32, tip_height: Height) -> Result<Height> {
                     ));
                 }
 
-                Ok(h)
+                h
             }
         };
 
-        Ok(Height(sanitized_height?))
+        Ok(Height(sanitized_height))
     }
 }
