@@ -128,21 +128,3 @@ To help ensure that you have sufficient time and a clear path to update, this is
 ## Release candidate & release process {#release-process}
 
 Our release checklist is available as a template, which defines each step our team needs to follow to create a new pre-release or release, and to also build and push the binaries to the official channels [Release Checklist Template](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist.md).
-
-## Decision making
-
-| Rust Features | Feature Branches | Stable Branch | Audit Branch | Audit/Release Tag |
-|:---           |:---              |:---           |:---          |:---               |
-|Simple git/branch management |✅ | ❌ | ❌ | ❓ | ❌ |
-|Simple Mergify config | ✅ | ❌ | ❌ | ✅ | ✅ |
-|Fewer Test Workflows | ✅ | ❌ | ❌ | ❓ | ✅ |
-|Testing Costs | ✅ | ❌ | ❌ | ❓ | ✅ |
-|Simple builds on the command-line | ❓ | ✅ | ✅ | ✅ | ✅ |
-|It's clear what code is being run | ❓ | ✅ | ✅ | ✅ | ✅ |
-|It's easy to merge code | ✅ | ❓ | ❌ | ❓  | ✅ |
-|Deciding where to target a PR | ✅ | ❓ | ❌ | ❓ | ✅ |
-|Security updates | ✅ | ✅ | ❓ | ✅ | ❌ |
-|Organising code for features/backports/fixes | ❓ | ✅ | ❓ | ❓ |✅ |
-|Something users might want | ✅ | ❓| ✅ | ❓ | ✅ |
-|Auditors can understand it  |❌ | ❌| ❓ | ✅ | ✅ |
-|Making audit fixes and getting them re-audited | ❌ | ❓ | ❓ | ✅ | ❓ |
