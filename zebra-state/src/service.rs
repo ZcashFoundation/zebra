@@ -1513,7 +1513,7 @@ impl Service<ReadRequest> for ReadStateService {
                     "state.requests",
                     1,
                     "service" => "read_state",
-                    "type" => "block_hash",
+                    "type" => "best_chain_block_hash",
                 );
 
                 let timer = CodeTimer::start();
@@ -1533,12 +1533,12 @@ impl Service<ReadRequest> for ReadStateService {
                         );
 
                         // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::Block");
+                        timer.finish(module_path!(), line!(), "ReadRequest::BestChainBlockHash");
 
                         Ok(ReadResponse::BlockHash(hash))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Block"))
+                .map(|join_result| join_result.expect("panic in ReadRequest::BestChainBlockHash"))
                 .boxed()
             }
         }
