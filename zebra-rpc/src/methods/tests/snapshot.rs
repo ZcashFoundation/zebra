@@ -41,6 +41,9 @@ async fn test_rpc_response_data_for_network(network: Network) {
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), network).await;
 
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    let latest_chain_tip_gbt_clone = latest_chain_tip.clone();
+
     // Init RPC
     let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
@@ -166,6 +169,17 @@ async fn test_rpc_response_data_for_network(network: Network) {
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddressutxos(get_address_utxos, &settings);
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    {
+        let get_block_template_rpc = GetBlockTemplateRpcImpl::new(latest_chain_tip_gbt_clone);
+
+        // `getblockcount`
+        let get_block_count = get_block_template_rpc
+            .get_block_count()
+            .expect("We should have a number");
+        snapshot_rpc_getblockcount(get_block_count, &settings);
+    }
 }
 
 /// Snapshot `getinfo` response, using `cargo insta` and JSON serialization.
@@ -252,6 +266,12 @@ fn snapshot_rpc_getaddresstxids(transactions: Vec<String>, settings: &insta::Set
 /// Snapshot `getaddressutxos` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getaddressutxos(utxos: Vec<GetAddressUtxos>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_utxos", utxos));
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+/// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getblockcount(block_count: u32, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_block_count", block_count));
 }
 
 /// Utility function to convert a `Network` to a lowercase string.
