@@ -43,6 +43,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     let latest_chain_tip_gbt_clone = latest_chain_tip.clone();
+    #[cfg(feature = "getblocktemplate-rpcs")]
     let read_state_clone = read_state.clone();
 
     // Init RPC

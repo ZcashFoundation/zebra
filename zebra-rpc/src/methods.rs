@@ -1145,7 +1145,7 @@ pub enum GetBlock {
 ///
 /// Contains the hex-encoded hash of the requested block.
 ///
-/// Also see the notes for the [`Rpc::get_best_block_hash`] and [`Rpc::get_block_hash`] methods.
+/// Also see the notes for the [`Rpc::get_best_block_hash`] and `get_block_hash` methods.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GetBlockHash(#[serde(with = "hex")] block::Hash);
 

@@ -736,9 +736,8 @@ pub enum ReadRequest {
     ///
     /// Returns
     ///
-    /// * [`ReadResponse::Hash(Some(hash))`](ReadResponse::Hash) if the block is in the best chain;
-    /// * [`ReadResponse::Hash(None)`](ReadResponse::Hash) otherwise.
-    ///
+    /// * [`ReadResponse::BlockHash(Some(hash))`](ReadResponse::BlockHash) if the block is in the best chain;
+    /// * [`ReadResponse::BlockHash(None)`](ReadResponse::BlockHash) otherwise.
     BestChainBlockHash(Height),
 }
 
