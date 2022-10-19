@@ -233,7 +233,7 @@ async fn rpc_getbestblockhash() {
     // Get the tip hash using RPC method `get_best_block_hash`
     let get_best_block_hash = rpc
         .get_best_block_hash()
-        .expect("We should have a GetBlockHash struct");
+        .expect("We should have a GetBestBlockHash struct");
     let response_hash = get_best_block_hash.0;
 
     // Check if response is equal to block 10 hash.
@@ -614,7 +614,8 @@ async fn rpc_getaddressutxos_response() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn rpc_getblockhash() {
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn rpc_getblockcount() {
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -623,48 +624,82 @@ async fn rpc_getblockhash() {
         .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
+    // Get the height of the block at the tip using hardcoded block tip bytes.
+    // We want to test the RPC response is equal to this hash
+    let tip_block = blocks.last().unwrap();
+    let tip_block_height = tip_block.coinbase_height().unwrap();
+
+    // Get a mempool handle
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    // Create a populated state service
+    // Create a populated state service, the tip will be in `NUMBER_OF_BLOCKS`.
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     // Init RPC
-    let rpc = RpcImpl::new(
+    let (_rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
         Mainnet,
         false,
         Buffer::new(mempool.clone(), 1),
-        Buffer::new(read_state.clone(), 1),
-        latest_chain_tip,
+        read_state,
+        latest_chain_tip.clone(),
     );
 
-    // Query the hashes using positive indexes
-    for (i, block) in blocks.iter().enumerate() {
-        let get_block_hash = rpc
-            .0
-            .get_block_hash(i.try_into().expect("usize always fits in i32"))
-            .await
-            .expect("We should have a GetBlockHash struct");
+    // Init RPC
+    let get_block_template_rpc =
+        get_block_template::GetBlockTemplateRpcImpl::new(latest_chain_tip.clone());
 
-        assert_eq!(get_block_hash, GetBlockHash(block.clone().hash()));
-    }
+    // Get the tip height using RPC method `get_block_count`
+    let get_block_count = get_block_template_rpc
+        .get_block_count()
+        .expect("We should have a number");
 
-    // Query the hashes using negative indexes
-    for i in (-10..=-1).rev() {
-        let get_block_hash = rpc
-            .0
-            .get_block_hash(i)
-            .await
-            .expect("We should have a GetBlockHash struct");
-        assert_eq!(
-            get_block_hash,
-            GetBlockHash(blocks[(10 + (i + 1)) as usize].hash())
-        );
-    }
+    // Check if response is equal to block 10 hash.
+    assert_eq!(get_block_count, tip_block_height.0);
 
     mempool.expect_no_requests().await;
 
     // The queue task should continue without errors or panics
-    //let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-    //assert!(matches!(rpc_tx_queue_task_result, None));
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblockcount_empty_state() {
+    let _init_guard = zebra_test::init();
+
+    // Get a mempool handle
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create an empty state
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init_test_services(Mainnet);
+
+    // Init RPC
+    let (_rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
+        Mainnet,
+        false,
+        Buffer::new(mempool.clone(), 1),
+        read_state,
+        latest_chain_tip.clone(),
+    );
+
+    let get_block_template_rpc =
+        get_block_template::GetBlockTemplateRpcImpl::new(latest_chain_tip.clone());
+
+    // Get the tip height using RPC method `get_block_count
+    let get_block_count = get_block_template_rpc.get_block_count();
+
+    // state an empty so we should get an error
+    assert!(get_block_count.is_err());
+
+    // Check the error we got is the correct one
+    assert_eq!(get_block_count.err().unwrap().message, "No blocks in state");
+
+    mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
 }
