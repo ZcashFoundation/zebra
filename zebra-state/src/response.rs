@@ -111,6 +111,7 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::UtxosByAddresses`] with found utxos and transaction data.
     AddressUtxos(AddressUtxos),
 
+    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::BestChainBlockHash`](crate::ReadRequest::BestChainBlockHash) with the
     /// specified block hash.
     BlockHash(Option<block::Hash>),
@@ -145,8 +146,12 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::OrchardTree(_)
             | ReadResponse::AddressBalance(_)
             | ReadResponse::AddressesTransactionIds(_)
-            | ReadResponse::AddressUtxos(_)
-            | ReadResponse::BlockHash(_) => {
+            | ReadResponse::AddressUtxos(_) => {
+                Err("there is no corresponding Response for this ReadResponse")
+            }
+
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadResponse::BlockHash(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
         }

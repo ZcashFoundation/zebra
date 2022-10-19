@@ -1507,6 +1507,7 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // Used by get_block_hash RPC.
+            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::BestChainBlockHash(height) => {
                 metrics::counter!(
                     "state.requests",
