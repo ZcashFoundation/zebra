@@ -28,9 +28,11 @@ pub use address::{
     utxo::{address_utxos, AddressUtxos, ADDRESS_HEIGHTS_FULL_RANGE},
 };
 
-pub use block::{
-    any_utxo, block, block_header, hash, transaction, transaction_hashes_for_block, utxo,
-};
+pub use block::{any_utxo, block, block_header, transaction, transaction_hashes_for_block, utxo};
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+pub use block::hash;
+
 pub use find::{
     best_tip, block_locator, chain_contains_hash, depth, find_chain_hashes, find_chain_headers,
     hash_by_height, height_by_hash, tip, tip_height,

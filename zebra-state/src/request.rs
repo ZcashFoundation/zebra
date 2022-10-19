@@ -8,7 +8,7 @@ use std::{
 
 use zebra_chain::{
     amount::NegativeAllowed,
-    block::{self, Block, Height},
+    block::{self, Block},
     history_tree::HistoryTree,
     orchard,
     parallel::tree::NoteCommitmentTrees,
@@ -739,7 +739,7 @@ pub enum ReadRequest {
     ///
     /// * [`ReadResponse::BlockHash(Some(hash))`](ReadResponse::BlockHash) if the block is in the best chain;
     /// * [`ReadResponse::BlockHash(None)`](ReadResponse::BlockHash) otherwise.
-    BestChainBlockHash(Height),
+    BestChainBlockHash(block::Height),
 }
 
 impl ReadRequest {

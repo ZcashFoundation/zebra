@@ -168,6 +168,7 @@ pub fn any_utxo(
         .or_else(|| db.utxo(&outpoint).map(|utxo| utxo.utxo))
 }
 
+#[cfg(feature = "getblocktemplate-rpcs")]
 /// Returns the [`Hash`] given [`block::Height`](zebra_chain::block::Height), if it exists in
 /// the non-finalized `chain` or finalized `db`.
 pub fn hash<C>(chain: Option<C>, db: &ZebraDb, height: Height) -> Option<zebra_chain::block::Hash>
