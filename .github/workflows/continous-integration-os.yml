@@ -165,7 +165,7 @@ jobs:
         uses: actions-rs/cargo@v1.0.3
         with:
           command: test
-          args: --verbose --workspace -- --nocapture
+          args: --all-features --verbose --workspace -- --nocapture
 
       # Explicitly run any tests that are usually #[ignored]
 
