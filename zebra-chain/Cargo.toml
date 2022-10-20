@@ -43,7 +43,7 @@ x25519-dalek = { version = "1.2.0", features = ["serde"] }
 # ECC deps
 halo2 = { package = "halo2_proofs", version = "0.2.0" }
 orchard = "0.2.0"
-zcash_encoding = "0.1.0"
+zcash_encoding = "0.2.0"
 zcash_history = "0.3.0"
 zcash_note_encryption = "0.1"
 zcash_primitives = { version = "0.7.0", features = ["transparent-inputs"] }
