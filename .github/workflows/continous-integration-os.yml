@@ -57,8 +57,7 @@ jobs:
     # The large timeout is to accommodate:
     # - Windows builds (75 minutes, typically 30-50 minutes), and
     # - parameter downloads (an extra 90 minutes, but only when the cache expires)
-    # - all features enabled (extra 10-15 mins)
-    timeout-minutes: 180
+    timeout-minutes: 165
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -166,7 +165,13 @@ jobs:
         uses: actions-rs/cargo@v1.0.3
         with:
           command: test
-          args: --all-features --verbose --workspace -- --nocapture
+          args: --verbose --workspace -- --nocapture
+
+      - name: Run tests with getblocktemplate-rpcs feature
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: test
+          args: --features getblocktemplate-rpcs --verbose --workspace -- --nocapture
 
       # Explicitly run any tests that are usually #[ignored]
 
