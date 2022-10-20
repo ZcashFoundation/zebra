@@ -65,9 +65,6 @@ and Zebra implements all the features required to reach Zcash network consensus.
 Zebra also supports the [`lightwalletd` backend JSON-RPCs](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd).
 
 Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
-But it may not validate any:
-- Undocumented rules derived from Bitcoin
-- Undocumented network protocol requirements
 
 ## Getting Started
 
