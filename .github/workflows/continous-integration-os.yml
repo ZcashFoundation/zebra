@@ -57,7 +57,8 @@ jobs:
     # The large timeout is to accommodate:
     # - Windows builds (75 minutes, typically 30-50 minutes), and
     # - parameter downloads (an extra 90 minutes, but only when the cache expires)
-    timeout-minutes: 165
+    # - all features enabled (extra 10-15 mins)
+    timeout-minutes: 180
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
