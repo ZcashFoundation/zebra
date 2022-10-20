@@ -226,6 +226,13 @@ So Zebra's state should always be valid, unless your OS or disk hardware is corr
 
 There are a few bugs in Zebra that we're still working on fixing:
 
+- Zebra falsely estimates that it's close to the tip when the network connection goes down [#4649](https://github.com/ZcashFoundation/zebra/issues/4649)
+
+  - One of the consequences of this issue is that Zebra might add unwanted load
+    to other peers when the connection goes back up. This load will last only
+    for a short period of time because Zebra will quickly find out that it's
+    still not close to the tip.
+
 - Zebra requires Rust 1.63, due to [a compiler performance regression in Rust 1.64](https://github.com/ZcashFoundation/zebra/issues/5091)
 - No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801)
   - We used to test with Windows Server 2019, but not anymore; see issue for details
