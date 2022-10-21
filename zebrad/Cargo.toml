@@ -82,7 +82,7 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 indexmap = "1.9.1"
 lazy_static = "1.4.0"
-serde = { version = "1.0.145", features = ["serde_derive"] }
+serde = { version = "1.0.146", features = ["serde_derive"] }
 toml = "0.5.9"
 
 futures = "0.3.24"
