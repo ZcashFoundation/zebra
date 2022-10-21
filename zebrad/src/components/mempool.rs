@@ -365,11 +365,39 @@ impl Service<Request> for Mempool {
             if let Some(TipAction::Grow { block }) = tip_action {
                 tracing::trace!(block_height = ?block.height, "handling blocks added to tip");
 
+                let spent_outpoints = block
+                    .transactions
+                    .iter()
+                    .flat_map(|tx| tx.spent_outpoints())
+                    .collect();
+
+                let sprout_nullifiers = block
+                    .transactions
+                    .iter()
+                    .flat_map(|transaction| transaction.sprout_nullifiers())
+                    .collect();
+                let sapling_nullifiers = block
+                    .transactions
+                    .iter()
+                    .flat_map(|transaction| transaction.sapling_nullifiers())
+                    .collect();
+                let orchard_nullifiers = block
+                    .transactions
+                    .iter()
+                    .flat_map(|transaction| transaction.orchard_nullifiers())
+                    .collect();
+
                 // Cancel downloads/verifications/storage of transactions
                 // with the same mined IDs as recently mined transactions.
                 let mined_ids = block.transaction_hashes.iter().cloned().collect();
                 tx_downloads.cancel(&mined_ids);
                 storage.remove_same_effects(&mined_ids);
+                storage.reject_invalidated_transactions(
+                    spent_outpoints,
+                    sprout_nullifiers,
+                    sapling_nullifiers,
+                    orchard_nullifiers,
+                );
                 storage.clear_tip_rejections();
             }
 

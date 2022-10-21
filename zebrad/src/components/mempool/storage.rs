@@ -15,7 +15,11 @@ use std::{
 
 use thiserror::Error;
 
-use zebra_chain::transaction::{self, Hash, UnminedTx, UnminedTxId, VerifiedUnminedTx};
+use zebra_chain::{
+    orchard, sapling, sprout,
+    transaction::{self, Hash, UnminedTx, UnminedTxId, VerifiedUnminedTx},
+    transparent::OutPoint,
+};
 
 use self::{eviction_list::EvictionList, verified_set::VerifiedSet};
 use super::{config, downloads::TransactionDownloadVerifyError, MempoolError};
@@ -77,6 +81,9 @@ pub enum SameEffectsTipRejectionError {
 pub enum SameEffectsChainRejectionError {
     #[error("best chain tip has reached transaction expiry height")]
     Expired,
+
+    #[error("transaction outpoints or nullifiers were committed to the best chain")]
+    Mined,
 
     /// Otherwise valid transaction removed from mempool due to [ZIP-401] random
     /// eviction.
@@ -292,6 +299,51 @@ impl Storage {
     pub fn remove_same_effects(&mut self, mined_ids: &HashSet<transaction::Hash>) -> usize {
         self.verified
             .remove_all_that(|tx| mined_ids.contains(&tx.transaction.id.mined_id()))
+    }
+
+    /// Removes and rejects transactions from the mempool that contain any outpoints or nullifiers in
+    /// the `spent_outpoints` or `nullifiers` collections that are passed in.
+    ///
+    /// Returns the number of transactions that were removed and rejected.
+    pub fn reject_invalidated_transactions(
+        &mut self,
+        spent_outpoints: HashSet<OutPoint>,
+        sprout_nullifiers: HashSet<&sprout::Nullifier>,
+        sapling_nullifiers: HashSet<&sapling::Nullifier>,
+        orchard_nullifiers: HashSet<&orchard::Nullifier>,
+    ) -> usize {
+        let mined_ids: HashSet<_> = self
+            .verified
+            .transactions()
+            .filter_map(|tx| {
+                (tx.transaction
+                    .spent_outpoints()
+                    .any(|outpoint| spent_outpoints.contains(&outpoint))
+                    || tx
+                        .transaction
+                        .sprout_nullifiers()
+                        .any(|nullifier| sprout_nullifiers.contains(nullifier))
+                    || tx
+                        .transaction
+                        .sapling_nullifiers()
+                        .any(|nullifier| sapling_nullifiers.contains(nullifier))
+                    || tx
+                        .transaction
+                        .orchard_nullifiers()
+                        .any(|nullifier| orchard_nullifiers.contains(nullifier)))
+                .then(|| tx.id)
+            })
+            .collect();
+
+        let num_removals = self
+            .verified
+            .remove_all_that(|tx| mined_ids.contains(&tx.transaction.id));
+
+        for mined_id in mined_ids {
+            self.reject(mined_id, SameEffectsChainRejectionError::Mined.into());
+        }
+
+        num_removals
     }
 
     /// Clears the whole mempool storage.
