@@ -206,7 +206,7 @@ See our [roadmap](#future-work) for details.
 
 ### Disk Usage
 
-Zebra uses around 130 GB of space for cached mainnet data, and 10 GB of space for cached testnet data.
+Zebra uses around 200 GB of space for cached mainnet data, and 10 GB of space for cached testnet data.
 We expect disk usage to grow over time, so we recommend reserving at least 300 GB for mainnet nodes.
 
 Zebra's database cleans up outdated data periodically, and when Zebra is shut down and restarted.
