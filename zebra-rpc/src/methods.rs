@@ -147,11 +147,11 @@ pub trait Rpc {
     #[rpc(name = "getblock")]
     fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>>;
 
-    /// Returns the hash of the current best blockchain tip block, as a [`GetBestBlockHash`] JSON string.
+    /// Returns the hash of the current best blockchain tip block, as a [`GetBlockHash`] JSON string.
     ///
     /// zcashd reference: [`getbestblockhash`](https://zcash.github.io/rpc/getbestblockhash.html)
     #[rpc(name = "getbestblockhash")]
-    fn get_best_block_hash(&self) -> Result<GetBestBlockHash>;
+    fn get_best_block_hash(&self) -> Result<GetBlockHash>;
 
     /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
@@ -610,10 +610,10 @@ where
         .boxed()
     }
 
-    fn get_best_block_hash(&self) -> Result<GetBestBlockHash> {
+    fn get_best_block_hash(&self) -> Result<GetBlockHash> {
         self.latest_chain_tip
             .best_tip_hash()
-            .map(GetBestBlockHash)
+            .map(GetBlockHash)
             .ok_or(Error {
                 code: ErrorCode::ServerError(0),
                 message: "No blocks in state".to_string(),
@@ -1141,13 +1141,13 @@ pub enum GetBlock {
     },
 }
 
-/// Response to a `getbestblockhash` RPC request.
+/// Response to a `getbestblockhash` and `getblockhash` RPC request.
 ///
-/// Contains the hex-encoded hash of the tip block.
+/// Contains the hex-encoded hash of the requested block.
 ///
-/// Also see the notes for the [`Rpc::get_best_block_hash` method].
+/// Also see the notes for the [`Rpc::get_best_block_hash`] and `get_block_hash` methods.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
+pub struct GetBlockHash(#[serde(with = "hex")] block::Hash);
 
 /// Response to a `z_gettreestate` RPC request.
 ///
