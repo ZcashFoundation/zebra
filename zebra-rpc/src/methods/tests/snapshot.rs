@@ -43,6 +43,8 @@ async fn test_rpc_response_data_for_network(network: Network) {
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     let latest_chain_tip_gbt_clone = latest_chain_tip.clone();
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    let read_state_clone = read_state.clone();
 
     // Init RPC
     let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
@@ -104,7 +106,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // `getbestblockhash`
     let get_best_block_hash = rpc
         .get_best_block_hash()
-        .expect("We should have a GetBestBlockHash struct");
+        .expect("We should have a GetBlockHash struct");
     snapshot_rpc_getbestblockhash(get_best_block_hash, &settings);
 
     // `getrawmempool`
@@ -172,13 +174,23 @@ async fn test_rpc_response_data_for_network(network: Network) {
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     {
-        let get_block_template_rpc = GetBlockTemplateRpcImpl::new(latest_chain_tip_gbt_clone);
+        let get_block_template_rpc =
+            GetBlockTemplateRpcImpl::new(latest_chain_tip_gbt_clone, read_state_clone);
 
         // `getblockcount`
         let get_block_count = get_block_template_rpc
             .get_block_count()
             .expect("We should have a number");
         snapshot_rpc_getblockcount(get_block_count, &settings);
+
+        // `getblockhash`
+        const BLOCK_HEIGHT10: i32 = 10;
+        let get_block_hash = get_block_template_rpc
+            .get_block_hash(BLOCK_HEIGHT10)
+            .await
+            .expect("We should have a GetBlockHash struct");
+
+        snapshot_rpc_getblockhash(get_block_hash, &settings);
     }
 }
 
@@ -239,7 +251,7 @@ fn snapshot_rpc_getblock_verbose(block: GetBlock, settings: &insta::Settings) {
 }
 
 /// Snapshot `getbestblockhash` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getbestblockhash(tip_hash: GetBestBlockHash, settings: &insta::Settings) {
+fn snapshot_rpc_getbestblockhash(tip_hash: GetBlockHash, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_best_block_hash", tip_hash));
 }
 
@@ -272,6 +284,12 @@ fn snapshot_rpc_getaddressutxos(utxos: Vec<GetAddressUtxos>, settings: &insta::S
 /// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblockcount(block_count: u32, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_block_count", block_count));
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+/// Snapshot `getblockhash` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getblockhash(block_hash: GetBlockHash, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_block_hash", block_hash));
 }
 
 /// Utility function to convert a `Network` to a lowercase string.
