@@ -1,8 +1,9 @@
 //! An HTTP endpoint for metrics collection.
 
-use abscissa_core::{Component, FrameworkError};
+use std::net::SocketAddr;
 
-use crate::config::ZebradConfig;
+use abscissa_core::{Component, FrameworkError};
+use serde::{Deserialize, Serialize};
 
 /// Abscissa component which runs a metrics endpoint.
 #[derive(Debug, Component)]
@@ -11,7 +12,7 @@ pub struct MetricsEndpoint {}
 impl MetricsEndpoint {
     /// Create the component.
     #[cfg(feature = "prometheus")]
-    pub fn new(config: &ZebradConfig) -> Result<Self, FrameworkError> {
+    pub fn new(config: &Config) -> Result<Self, FrameworkError> {
         if let Some(addr) = config.metrics.endpoint_addr {
             info!("Trying to open metrics endpoint at {}...", addr);
 
@@ -45,8 +46,8 @@ impl MetricsEndpoint {
 
     /// Create the component.
     #[cfg(not(feature = "prometheus"))]
-    pub fn new(config: &ZebradConfig) -> Result<Self, FrameworkError> {
-        if let Some(addr) = config.metrics.endpoint_addr {
+    pub fn new(config: &Config) -> Result<Self, FrameworkError> {
+        if let Some(addr) = config.endpoint_addr {
             warn!(
                 ?addr,
                 "unable to activate configured metrics endpoint: \
@@ -55,5 +56,28 @@ impl MetricsEndpoint {
         }
 
         Ok(Self {})
+    }
+}
+
+/// Metrics configuration section.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Config {
+    /// The address used for the Prometheus metrics endpoint.
+    ///
+    /// Install Zebra using `cargo install --features=prometheus` to enable this config.
+    ///
+    /// The endpoint is disabled if this is set to `None`.
+    pub endpoint_addr: Option<SocketAddr>,
+}
+
+// we like our default configs to be explicit
+#[allow(unknown_lints)]
+#[allow(clippy::derivable_impls)]
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            endpoint_addr: None,
+        }
     }
 }
