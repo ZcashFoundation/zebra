@@ -98,11 +98,11 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
 thiserror = "1.0.37"
 
-tracing-subscriber = { version = "0.3.15", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 tracing-appender = "0.2.2"
 tracing-error = "0.2.0"
 tracing-futures = "0.2.5"
-tracing = "0.1.36"
+tracing = "0.1.37"
 
 metrics = "0.20.1"
 
@@ -118,7 +118,7 @@ sentry = { version = "0.27.0", default-features = false, features = ["backtrace"
 
 # prod feature flamegraph
 tracing-flame = { version = "0.2.0", optional = true }
-inferno = { version = "0.11.9", default-features = false, optional = true }
+inferno = { version = "0.11.11", default-features = false, optional = true }
 
 # prod feature journald
 tracing-journald = { version = "0.3.0", optional = true }
@@ -156,14 +156,14 @@ regex = "1.6.0"
 semver = "1.0.14"
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
-serde_json = { version = "1.0.85", features = ["preserve_order"] }
+serde_json = { version = "1.0.86", features = ["preserve_order"] }
 tempfile = "3.3.0"
 
 hyper = { version = "0.14.20", features = ["http1", "http2", "server"]}
 reqwest = "0.11.12"
 
 tokio = { version = "1.21.2", features = ["full", "tracing", "test-util"] }
-tokio-stream = "0.1.10"
+tokio-stream = "0.1.11"
 
 # test feature lightwalletd-grpc-tests
 prost = "0.11.0"

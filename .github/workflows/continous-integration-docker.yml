@@ -21,13 +21,19 @@ on:
       regenerate-disks:
         type: boolean
         default: false
-        description: 'Just update mandatory checkpoint disks'
+        description: 'Just run a Zebra checkpoint sync and update checkpoint disks'
         required: true
       run-full-sync:
         type: boolean
         default: false
-        description: 'Just run a full sync and update tip disks'
+        description: 'Just run a Zebra full sync and update tip disks'
         required: true
+      run-lwd-sync:
+        type: boolean
+        default: false
+        description: 'Just run a lightwalletd full sync and update tip disks'
+        required: true
+
 
   pull_request:
     paths:
@@ -95,7 +101,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.1
+        uses: google-github-actions/auth@v0.8.3
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
@@ -179,7 +185,7 @@ jobs:
     name: Test all
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -204,7 +210,7 @@ jobs:
     name: Test with fake activation heights
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -225,7 +231,7 @@ jobs:
     name: Test checkpoint sync from empty state
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -244,7 +250,7 @@ jobs:
     name: Test integration with lightwalletd
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -281,6 +287,14 @@ jobs:
       saves_to_disk: true
       disk_suffix: checkpoint
       height_grep_text: 'flushing database to disk .*height.*=.*Height.*\('
+    # We want to prevent multiple checkpoint syncs running at the same time,
+    # but we don't want to cancel running syncs on `main` if a new PR gets merged,
+    # because we might never get a finished sync.
+    #
+    # See the concurrency comment on the zebrad test-full-sync job for details.
+    concurrency: 
+      group: ${{ github.workflow }}−${{ github.ref }}-regenerate-stateful-disks
+      cancel-in-progress: false
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached mandatory checkpoint disk
   #
@@ -290,7 +304,7 @@ jobs:
     name: Zebra checkpoint update
     needs: regenerate-stateful-disks
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: sync-past-checkpoint
@@ -328,9 +342,11 @@ jobs:
       saves_to_disk: true
       disk_suffix: tip
       height_grep_text: 'current_height.*=.*Height.*\('
-    # We don't want to cancel running full syncs on `main` if a new PR gets merged,
-    # because we might never finish a full sync during busy weeks. Instead, we let the
-    # first sync complete, then queue the latest pending sync, cancelling any syncs in between.
+    # We want to prevent multiple full zebrad syncs running at the same time,
+    # but we don't want to cancel running syncs on `main` if a new PR gets merged,
+    # because we might never get a finished sync.
+    # 
+    # Instead, we let the first sync complete, then queue the latest pending sync, cancelling any syncs in between.
     # (As the general workflow concurrency group just gets matched in Pull Requests,
     # it has no impact on this job.)
     #
@@ -338,7 +354,7 @@ jobs:
     # - allow multiple manual syncs on a branch, and isolate manual syncs from automatic syncs, by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
     # - stop multiple automatic full syncs across different PRs by removing '−${{ github.ref }}' when needs.get-available-disks.outputs.zebra_tip_disk is true
     concurrency: 
-      group: ${{ github.workflow }}−${{ github.ref }}
+      group: ${{ github.workflow }}−${{ github.ref }}-test-full-sync
       cancel-in-progress: false
 
   # Test that Zebra can sync to the chain tip, using a cached Zebra tip state,
@@ -354,7 +370,7 @@ jobs:
     name: Zebra tip update
     needs: test-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: update-to-tip
@@ -374,7 +390,6 @@ jobs:
   #
   # Runs:
   # - after every PR is merged to `main`
-  # - on every PR update
   #
   # If the state version has changed, waits for the new cached state to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
@@ -385,7 +400,7 @@ jobs:
     # to also run on Mergify head branches,
     # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-    if: ${{ (!cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) }}
+    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
     with:
       app_name: lightwalletd
       test_id: lwd-full-sync
@@ -400,6 +415,14 @@ jobs:
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
       height_grep_text: '(current_height.*=.*Height.*\()|(Adding block to cache )'
+    # We want to prevent multiple lightwalletd full syncs running at the same time,
+    # but we don't want to cancel running syncs on `main` if a new PR gets merged,
+    # because we might never get a finished sync.
+    #
+    # See the concurrency comment on the zebrad test-full-sync job for details.
+    concurrency: 
+      group: ${{ github.workflow }}−${{ github.ref }}-lightwalletd-full-sync
+      cancel-in-progress: false
 
   # Test update sync of lightwalletd with a lightwalletd and Zebra tip state
   # Runs:
@@ -412,7 +435,7 @@ jobs:
     name: lightwalletd tip update
     needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-update-sync
@@ -441,7 +464,7 @@ jobs:
     name: Zebra tip JSON-RPC
     needs: test-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: fully-synced-rpc
@@ -466,7 +489,7 @@ jobs:
     name: lightwalletd tip send
     needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-send-transactions
@@ -492,7 +515,7 @@ jobs:
     name: lightwalletd GRPC tests
     needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-grpc-wallet

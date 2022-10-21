@@ -154,14 +154,16 @@ pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
 /// failure loop.
 ///
 /// We've observed spurious 15 minute timeouts when a lot of blocks are being committed to
-/// the state, so we allow double that time here.
-pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// the state. But there are also some blocks that seem to hang entirely, and never return.
+///
+/// So we allow about half the spurious timeout, which might cause some re-downloads.
+pub(super) const BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(8 * 60);
 
 /// A shorter timeout used for the first few blocks after the final checkpoint.
 ///
 /// This is a workaround for bug #5125, where the first fully validated blocks
 /// after the final checkpoint fail with a timeout, due to a UTXO race condition.
-const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(2 * 60);
 
 /// The number of blocks after the final checkpoint that get the shorter timeout.
 ///

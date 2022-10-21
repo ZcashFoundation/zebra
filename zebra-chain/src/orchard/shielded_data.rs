@@ -249,7 +249,10 @@ impl ZcashDeserialize for Flags {
         // Consensus rule: "In a version 5 transaction,
         // the reserved bits 2..7 of the flagsOrchard field MUST be zero."
         // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
+        //
+        // Clippy 1.64 is wrong here, this lazy evaluation is necessary, constructors are functions. This is fixed in 1.66.
+        #[allow(clippy::unnecessary_lazy_evaluations)]
         Flags::from_bits(reader.read_u8()?)
-            .ok_or(SerializationError::Parse("invalid reserved orchard flags"))
+            .ok_or_else(|| SerializationError::Parse("invalid reserved orchard flags"))
     }
 }

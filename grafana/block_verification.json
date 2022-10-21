@@ -3,33 +3,41 @@
     "list": [
       {
         "builtIn": 1,
-        "datasource": "-- Grafana --",
+        "datasource": {
+          "type": "datasource",
+          "uid": "grafana"
+        },
         "enable": true,
         "hide": true,
         "iconColor": "rgba(0, 211, 255, 1)",
         "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
         "type": "dashboard"
       }
     ]
   },
   "editable": true,
-  "gnetId": null,
+  "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1633652785661,
   "links": [],
+  "liveNow": false,
   "panels": [
     {
       "aliasColors": {},
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
-      "decimals": 0,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpR76-qMz"
       },
+      "decimals": 0,
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -48,7 +56,6 @@
         "min": false,
         "rightSide": true,
         "show": true,
-        "sideWidth": null,
         "total": false,
         "values": true
       },
@@ -59,59 +66,146 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.7",
+      "pluginVersion": "9.1.6",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
       "repeat": "job",
-      "scopedVars": {
-        "job": {
-          "selected": false,
-          "text": "zebrad-mainnet",
-          "value": "zebrad-mainnet"
-        }
-      },
       "seriesOverrides": [],
       "spaceLength": 10,
       "stack": false,
       "steppedLine": false,
       "targets": [
         {
-          "exemplar": true,
-          "expr": "zcash_chain_verified_block_height{job=\"$job\"}",
-          "interval": "",
-          "legendFormat": "committed",
-          "refId": "A"
-        },
-        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
+          "editorMode": "code",
           "exemplar": true,
           "expr": "state_full_verifier_committed_block_height{job=\"$job\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "full verified",
+          "range": true,
           "refId": "B"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
+          "editorMode": "code",
           "exemplar": true,
           "expr": "state_checkpoint_finalized_block_height{job=\"$job\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "checkpoint",
+          "legendFormat": "checkpoint verified",
+          "range": true,
           "refId": "C"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
+          "editorMode": "code",
+          "expr": "state_memory_queued_max_height{job=\"$job\"}",
+          "hide": false,
+          "legendFormat": "full queued max",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
+          "editorMode": "code",
+          "expr": "state_memory_queued_min_height{job=\"$job\"}",
+          "hide": false,
+          "legendFormat": "full queued min",
+          "range": true,
+          "refId": "I"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
+          "editorMode": "code",
+          "expr": "state_checkpoint_queued_max_height{job=\"$job\"}",
+          "hide": false,
+          "legendFormat": "checkpoint queued max",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
+          "editorMode": "code",
+          "expr": "state_checkpoint_queued_min_height{job=\"$job\"}",
+          "hide": false,
+          "legendFormat": "checkpoint queued min",
+          "range": true,
+          "refId": "J"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
+          "editorMode": "code",
+          "expr": "state_memory_sent_block_height{job=\"$job\"}",
+          "hide": false,
+          "legendFormat": "full sent",
+          "range": true,
+          "refId": "H"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
+          "editorMode": "code",
+          "expr": "state_checkpoint_sent_block_height{job=\"$job\"}",
+          "hide": false,
+          "legendFormat": "checkpoint sent",
+          "range": true,
+          "refId": "G"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
+          "editorMode": "code",
+          "exemplar": true,
+          "expr": "zcash_chain_verified_block_height{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "committed",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
+          "editorMode": "code",
           "exemplar": true,
           "expr": "state_finalized_block_height{job=\"$job\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "finalized",
+          "range": true,
           "refId": "D"
         }
       ],
       "thresholds": [],
-      "timeFrom": null,
       "timeRegions": [],
-      "timeShift": null,
       "title": "Verified Block Height - $job",
       "tooltip": {
         "shared": true,
@@ -120,9 +214,7 @@
       },
       "type": "graph",
       "xaxis": {
-        "buckets": null,
         "mode": "time",
-        "name": null,
         "show": true,
         "values": []
       },
@@ -130,25 +222,18 @@
         {
           "$$hashKey": "object:84",
           "format": "none",
-          "label": null,
           "logBase": 1,
-          "max": null,
-          "min": null,
           "show": true
         },
         {
           "$$hashKey": "object:85",
           "format": "none",
-          "label": null,
           "logBase": 1,
-          "max": null,
-          "min": null,
           "show": true
         }
       ],
       "yaxis": {
-        "align": false,
-        "alignLevel": null
+        "align": false
       }
     },
     {
@@ -156,409 +241,9 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
-      "decimals": 0,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 7,
-        "w": 6,
-        "x": 6,
-        "y": 0
-      },
-      "hiddenSeries": false,
-      "id": 6,
-      "legend": {
-        "alignAsTable": false,
-        "avg": false,
-        "current": true,
-        "max": false,
-        "min": false,
-        "rightSide": true,
-        "show": true,
-        "sideWidth": null,
-        "total": false,
-        "values": true
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.7",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "repeatIteration": 1633652785661,
-      "repeatPanelId": 4,
-      "scopedVars": {
-        "job": {
-          "selected": false,
-          "text": "zebrad-mainnet-tmp",
-          "value": "zebrad-mainnet-tmp"
-        }
-      },
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "zcash_chain_verified_block_height{job=\"$job\"}",
-          "interval": "",
-          "legendFormat": "committed",
-          "refId": "A"
-        },
-        {
-          "exemplar": true,
-          "expr": "state_full_verifier_committed_block_height{job=\"$job\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "full verified",
-          "refId": "B"
-        },
-        {
-          "exemplar": true,
-          "expr": "state_checkpoint_finalized_block_height{job=\"$job\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "checkpoint",
-          "refId": "C"
-        },
-        {
-          "exemplar": true,
-          "expr": "state_finalized_block_height{job=\"$job\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "finalized",
-          "refId": "D"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Verified Block Height - $job",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:84",
-          "format": "none",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:85",
-          "format": "none",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "decimals": 0,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 7,
-        "w": 6,
-        "x": 12,
-        "y": 0
-      },
-      "hiddenSeries": false,
-      "id": 7,
-      "legend": {
-        "alignAsTable": false,
-        "avg": false,
-        "current": true,
-        "max": false,
-        "min": false,
-        "rightSide": true,
-        "show": true,
-        "sideWidth": null,
-        "total": false,
-        "values": true
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.7",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "repeatIteration": 1633652785661,
-      "repeatPanelId": 4,
-      "scopedVars": {
-        "job": {
-          "selected": false,
-          "text": "zebrad-testnet",
-          "value": "zebrad-testnet"
-        }
-      },
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "zcash_chain_verified_block_height{job=\"$job\"}",
-          "interval": "",
-          "legendFormat": "committed",
-          "refId": "A"
-        },
-        {
-          "exemplar": true,
-          "expr": "state_full_verifier_committed_block_height{job=\"$job\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "full verified",
-          "refId": "B"
-        },
-        {
-          "exemplar": true,
-          "expr": "state_checkpoint_finalized_block_height{job=\"$job\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "checkpoint",
-          "refId": "C"
-        },
-        {
-          "exemplar": true,
-          "expr": "state_finalized_block_height{job=\"$job\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "finalized",
-          "refId": "D"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Verified Block Height - $job",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:84",
-          "format": "none",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:85",
-          "format": "none",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "decimals": 0,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 7,
-        "w": 6,
-        "x": 18,
-        "y": 0
-      },
-      "hiddenSeries": false,
-      "id": 8,
-      "legend": {
-        "alignAsTable": false,
-        "avg": false,
-        "current": true,
-        "max": false,
-        "min": false,
-        "rightSide": true,
-        "show": true,
-        "sideWidth": null,
-        "total": false,
-        "values": true
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.7",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "repeatIteration": 1633652785661,
-      "repeatPanelId": 4,
-      "scopedVars": {
-        "job": {
-          "selected": false,
-          "text": "zebrad-testnet-tmp",
-          "value": "zebrad-testnet-tmp"
-        }
-      },
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "zcash_chain_verified_block_height{job=\"$job\"}",
-          "interval": "",
-          "legendFormat": "committed",
-          "refId": "A"
-        },
-        {
-          "exemplar": true,
-          "expr": "state_full_verifier_committed_block_height{job=\"$job\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "full verified",
-          "refId": "B"
-        },
-        {
-          "exemplar": true,
-          "expr": "state_checkpoint_finalized_block_height{job=\"$job\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "checkpoint",
-          "refId": "C"
-        },
-        {
-          "exemplar": true,
-          "expr": "state_finalized_block_height{job=\"$job\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "finalized",
-          "refId": "D"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Verified Block Height - $job",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:84",
-          "format": "none",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:85",
-          "format": "none",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpR76-qMz"
       },
       "fill": 1,
       "fillGradient": 0,
@@ -586,43 +271,52 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.7",
+      "pluginVersion": "9.1.6",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
       "repeat": "job",
       "repeatDirection": "h",
-      "scopedVars": {
-        "job": {
-          "selected": false,
-          "text": "zebrad-mainnet",
-          "value": "zebrad-mainnet"
-        }
-      },
       "seriesOverrides": [],
       "spaceLength": 10,
       "stack": false,
       "steppedLine": false,
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
           "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
           "interval": "",
           "legendFormat": "zcash_chain_verified_block_total[1s]",
           "refId": "A"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
           "expr": "rate(sync_downloaded_block_count{job=\"$job\"}[1s])",
           "interval": "",
           "legendFormat": "sync_downloaded_block_count",
           "refId": "H"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
           "expr": "sync_downloads_in_flight{job=\"$job\"}",
           "interval": "",
           "legendFormat": "sync_downloads_in_flight",
           "refId": "I"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
           "expr": "rate(sync_verified_block_count{job=\"$job\"}[1s])",
           "interval": "",
           "legendFormat": "sync_verified_block_count",
@@ -630,9 +324,7 @@
         }
       ],
       "thresholds": [],
-      "timeFrom": null,
       "timeRegions": [],
-      "timeShift": null,
       "title": "Block Sync Count - $job",
       "tooltip": {
         "shared": true,
@@ -641,9 +333,7 @@
       },
       "type": "graph",
       "xaxis": {
-        "buckets": null,
         "mode": "time",
-        "name": null,
         "show": true,
         "values": []
       },
@@ -651,25 +341,18 @@
         {
           "$$hashKey": "object:167",
           "format": "short",
-          "label": null,
           "logBase": 1,
-          "max": null,
-          "min": null,
           "show": true
         },
         {
           "$$hashKey": "object:168",
           "format": "short",
-          "label": null,
           "logBase": 1,
-          "max": null,
-          "min": null,
           "show": true
         }
       ],
       "yaxis": {
-        "align": false,
-        "alignLevel": null
+        "align": false
       }
     },
     {
@@ -677,379 +360,9 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 7,
-        "w": 6,
-        "x": 6,
-        "y": 7
-      },
-      "hiddenSeries": false,
-      "id": 9,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.7",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "repeatDirection": "h",
-      "repeatIteration": 1633652785661,
-      "repeatPanelId": 5,
-      "scopedVars": {
-        "job": {
-          "selected": false,
-          "text": "zebrad-mainnet-tmp",
-          "value": "zebrad-mainnet-tmp"
-        }
-      },
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "zcash_chain_verified_block_total[1s]",
-          "refId": "A"
-        },
-        {
-          "expr": "rate(sync_downloaded_block_count{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "sync_downloaded_block_count",
-          "refId": "H"
-        },
-        {
-          "expr": "sync_downloads_in_flight{job=\"$job\"}",
-          "interval": "",
-          "legendFormat": "sync_downloads_in_flight",
-          "refId": "I"
-        },
-        {
-          "expr": "rate(sync_verified_block_count{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "sync_verified_block_count",
-          "refId": "J"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Block Sync Count - $job",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:167",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:168",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 7,
-        "w": 6,
-        "x": 12,
-        "y": 7
-      },
-      "hiddenSeries": false,
-      "id": 10,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.7",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "repeatDirection": "h",
-      "repeatIteration": 1633652785661,
-      "repeatPanelId": 5,
-      "scopedVars": {
-        "job": {
-          "selected": false,
-          "text": "zebrad-testnet",
-          "value": "zebrad-testnet"
-        }
-      },
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "zcash_chain_verified_block_total[1s]",
-          "refId": "A"
-        },
-        {
-          "expr": "rate(sync_downloaded_block_count{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "sync_downloaded_block_count",
-          "refId": "H"
-        },
-        {
-          "expr": "sync_downloads_in_flight{job=\"$job\"}",
-          "interval": "",
-          "legendFormat": "sync_downloads_in_flight",
-          "refId": "I"
-        },
-        {
-          "expr": "rate(sync_verified_block_count{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "sync_verified_block_count",
-          "refId": "J"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Block Sync Count - $job",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:167",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:168",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 7,
-        "w": 6,
-        "x": 18,
-        "y": 7
-      },
-      "hiddenSeries": false,
-      "id": 11,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.7",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "repeatDirection": "h",
-      "repeatIteration": 1633652785661,
-      "repeatPanelId": 5,
-      "scopedVars": {
-        "job": {
-          "selected": false,
-          "text": "zebrad-testnet-tmp",
-          "value": "zebrad-testnet-tmp"
-        }
-      },
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "zcash_chain_verified_block_total[1s]",
-          "refId": "A"
-        },
-        {
-          "expr": "rate(sync_downloaded_block_count{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "sync_downloaded_block_count",
-          "refId": "H"
-        },
-        {
-          "expr": "sync_downloads_in_flight{job=\"$job\"}",
-          "interval": "",
-          "legendFormat": "sync_downloads_in_flight",
-          "refId": "I"
-        },
-        {
-          "expr": "rate(sync_verified_block_count{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "sync_verified_block_count",
-          "refId": "J"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Block Sync Count - $job",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:167",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:168",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
+      "datasource": {
+        "type": "prometheus",
+        "uid": "rpR76-qMz"
       },
       "fill": 1,
       "fillGradient": 0,
@@ -1077,43 +390,52 @@
         "alertThreshold": true
       },
       "percentage": false,
-      "pluginVersion": "7.5.7",
+      "pluginVersion": "9.1.6",
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
       "repeat": "job",
       "repeatDirection": "h",
-      "scopedVars": {
-        "job": {
-          "selected": false,
-          "text": "zebrad-mainnet",
-          "value": "zebrad-mainnet"
-        }
-      },
       "seriesOverrides": [],
       "spaceLength": 10,
       "stack": false,
       "steppedLine": false,
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
           "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
           "interval": "",
           "legendFormat": "zcash_chain_verified_block_total[1s]",
           "refId": "A"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
           "expr": "rate(gossip_downloaded_block_count{job=\"$job\"}[1s])",
           "interval": "",
           "legendFormat": "gossip_downloaded_block_count[1s]",
           "refId": "C"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
           "expr": "rate(gossip_verified_block_count{job=\"$job\"}[1s])",
           "interval": "",
           "legendFormat": "gossip_verified_block_count[1s]",
           "refId": "D"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "rpR76-qMz"
+          },
           "expr": "gossip_queued_block_count{job=\"$job\"}",
           "interval": "",
           "legendFormat": "gossip_queued_block_count",
@@ -1121,9 +443,7 @@
         }
       ],
       "thresholds": [],
-      "timeFrom": null,
       "timeRegions": [],
-      "timeShift": null,
       "title": "Block Gossip Count - $job",
       "tooltip": {
         "shared": true,
@@ -1132,9 +452,7 @@
       },
       "type": "graph",
       "xaxis": {
-        "buckets": null,
         "mode": "time",
-        "name": null,
         "show": true,
         "values": []
       },
@@ -1142,405 +460,28 @@
         {
           "$$hashKey": "object:252",
           "format": "short",
-          "label": null,
           "logBase": 1,
-          "max": null,
-          "min": null,
           "show": true
         },
         {
           "$$hashKey": "object:253",
           "format": "short",
-          "label": null,
           "logBase": 1,
-          "max": null,
-          "min": null,
           "show": true
         }
       ],
       "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 7,
-        "w": 6,
-        "x": 6,
-        "y": 14
-      },
-      "hiddenSeries": false,
-      "id": 12,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.7",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "repeatDirection": "h",
-      "repeatIteration": 1633652785661,
-      "repeatPanelId": 2,
-      "scopedVars": {
-        "job": {
-          "selected": false,
-          "text": "zebrad-mainnet-tmp",
-          "value": "zebrad-mainnet-tmp"
-        }
-      },
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "zcash_chain_verified_block_total[1s]",
-          "refId": "A"
-        },
-        {
-          "expr": "rate(gossip_downloaded_block_count{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "gossip_downloaded_block_count[1s]",
-          "refId": "C"
-        },
-        {
-          "expr": "rate(gossip_verified_block_count{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "gossip_verified_block_count[1s]",
-          "refId": "D"
-        },
-        {
-          "expr": "gossip_queued_block_count{job=\"$job\"}",
-          "interval": "",
-          "legendFormat": "gossip_queued_block_count",
-          "refId": "E"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Block Gossip Count - $job",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:252",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:253",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 7,
-        "w": 6,
-        "x": 12,
-        "y": 14
-      },
-      "hiddenSeries": false,
-      "id": 13,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.7",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "repeatDirection": "h",
-      "repeatIteration": 1633652785661,
-      "repeatPanelId": 2,
-      "scopedVars": {
-        "job": {
-          "selected": false,
-          "text": "zebrad-testnet",
-          "value": "zebrad-testnet"
-        }
-      },
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "zcash_chain_verified_block_total[1s]",
-          "refId": "A"
-        },
-        {
-          "expr": "rate(gossip_downloaded_block_count{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "gossip_downloaded_block_count[1s]",
-          "refId": "C"
-        },
-        {
-          "expr": "rate(gossip_verified_block_count{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "gossip_verified_block_count[1s]",
-          "refId": "D"
-        },
-        {
-          "expr": "gossip_queued_block_count{job=\"$job\"}",
-          "interval": "",
-          "legendFormat": "gossip_queued_block_count",
-          "refId": "E"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Block Gossip Count - $job",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:252",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:253",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 7,
-        "w": 6,
-        "x": 18,
-        "y": 14
-      },
-      "hiddenSeries": false,
-      "id": 14,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.7",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "repeatDirection": "h",
-      "repeatIteration": 1633652785661,
-      "repeatPanelId": 2,
-      "scopedVars": {
-        "job": {
-          "selected": false,
-          "text": "zebrad-testnet-tmp",
-          "value": "zebrad-testnet-tmp"
-        }
-      },
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "zcash_chain_verified_block_total[1s]",
-          "refId": "A"
-        },
-        {
-          "expr": "rate(gossip_downloaded_block_count{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "gossip_downloaded_block_count[1s]",
-          "refId": "C"
-        },
-        {
-          "expr": "rate(gossip_verified_block_count{job=\"$job\"}[1s])",
-          "interval": "",
-          "legendFormat": "gossip_verified_block_count[1s]",
-          "refId": "D"
-        },
-        {
-          "expr": "gossip_queued_block_count{job=\"$job\"}",
-          "interval": "",
-          "legendFormat": "gossip_queued_block_count",
-          "refId": "E"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Block Gossip Count - $job",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:252",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:253",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
+        "align": false
       }
     }
   ],
-  "refresh": "5s",
-  "schemaVersion": 27,
+  "refresh": "1m",
+  "schemaVersion": 37,
   "style": "dark",
   "tags": [],
   "templating": {
     "list": [
       {
-        "allValue": null,
         "current": {
           "selected": true,
           "text": [
@@ -1550,13 +491,13 @@
             "$__all"
           ]
         },
-        "datasource": "Prometheus-Zebra",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "rpR76-qMz"
+        },
         "definition": "label_values(zcash_chain_verified_block_height, job)",
-        "description": null,
-        "error": null,
         "hide": 0,
         "includeAll": true,
-        "label": null,
         "multi": true,
         "name": "job",
         "options": [],
@@ -1569,7 +510,6 @@
         "skipUrlSync": false,
         "sort": 1,
         "tagValuesQuery": "",
-        "tags": [],
         "tagsQuery": "",
         "type": "query",
         "useTags": false
@@ -1584,5 +524,6 @@
   "timezone": "",
   "title": "block verification",
   "uid": "rO_Cl5tGz",
-  "version": 14
+  "version": 18,
+  "weekStart": ""
 }
