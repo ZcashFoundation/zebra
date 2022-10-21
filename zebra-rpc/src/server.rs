@@ -75,7 +75,7 @@ impl RpcServer {
             {
                 // Initialize the getblocktemplate rpc methods
                 let get_block_template_rpc_impl =
-                    GetBlockTemplateRpcImpl::new(latest_chain_tip.clone());
+                    GetBlockTemplateRpcImpl::new(latest_chain_tip.clone(), state.clone());
 
                 io.extend_with(get_block_template_rpc_impl.to_delegate());
             }
