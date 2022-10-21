@@ -378,8 +378,16 @@ proptest! {
         // Remove some transactions.
         match &input {
             RemoveExact { wtx_ids_to_remove, .. } => storage.remove_exact(wtx_ids_to_remove),
-            RejectAndRemoveSameEffects { mined_ids_to_remove, .. } =>
-                storage.reject_and_remove_same_effects(mined_ids_to_remove, vec![]),
+            RejectAndRemoveSameEffects { mined_ids_to_remove, .. } => {
+                let num_removals = storage.reject_and_remove_same_effects(mined_ids_to_remove, vec![]);
+                    for &removed_transaction_id in mined_ids_to_remove.iter() {
+                        prop_assert_eq!(
+                            storage.rejection_error(&UnminedTxId::Legacy(removed_transaction_id)),
+                            Some(SameEffectsChainRejectionError::Mined.into())
+                        );
+                    }
+                num_removals
+            },
         };
 
         // Check that the removed transactions are not in the storage.
@@ -387,10 +395,6 @@ proptest! {
 
         for removed_transaction_id in &removed_transactions {
             prop_assert!(!storage.contains_transaction_exact(removed_transaction_id));
-            prop_assert_eq!(
-                storage.rejection_error(removed_transaction_id),
-                Some(SameEffectsChainRejectionError::Mined.into())
-            );
         }
 
         // Check that the remaining transactions are still in the storage.

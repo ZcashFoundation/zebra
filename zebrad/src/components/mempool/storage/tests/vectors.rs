@@ -188,14 +188,20 @@ fn mempool_storage_crud_same_effects_mainnet() {
         Some(SameEffectsChainRejectionError::Mined.into())
     );
     assert_eq!(
-        storage.insert(unmined_tx_1.clone()),
+        storage.insert(unmined_tx_1),
         Err(SameEffectsChainRejectionError::Mined.into())
     );
 
     // Get a different unmined transaction
     let unmined_tx_2 = unmined_transactions_in_blocks(1.., network)
-        .next()
-        .expect("at least one unmined transaction");
+        .find(|tx| {
+            tx.transaction
+                .transaction
+                .spent_outpoints()
+                .next()
+                .is_some()
+        })
+        .expect("at least one unmined transaction with at least 1 spent outpoint");
 
     // Insert unmined tx into the mempool.
     assert_eq!(
@@ -208,7 +214,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
 
     // Reject and remove duplicate spend tx
     let removal_count = storage.reject_and_remove_same_effects(
-        &iter::once(unmined_tx_1.transaction.id.mined_id()).collect(),
+        &HashSet::new(),
         vec![unmined_tx_2.transaction.transaction.clone()],
     );
 
@@ -223,7 +229,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
     );
     assert_eq!(
         storage.insert(unmined_tx_2),
-        Err(SameEffectsChainRejectionError::Mined.into())
+        Err(SameEffectsChainRejectionError::DuplicateSpend.into())
     );
 }
 
