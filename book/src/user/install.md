@@ -1,19 +1,6 @@
 # Installing Zebra
 
-`zebrad` is still under development, so there is no supported packaging or
-install mechanism. To run `zebrad`, follow the instructions to compile `zebrad`
-for your platform:
-
-1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
-   - Using `rustup` installs the stable Rust toolchain, which `zebrad` targets.
-2. Install Zebra's build dependencies:
-   - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
-   - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.0 zebrad`
-4. Run `zebrad start` (see [Running Zebra](run.md) for more information)
-
-If you're interested in testing out `zebrad` please feel free, but keep in mind
-that there is a lot of key functionality still missing.
+Follow the [Docker or compilation instructions in the README](https://github.com/ZcashFoundation/zebra#getting-started).
 
 #### Build Troubleshooting
 

@@ -8,7 +8,7 @@ Before reading, you should understand [Semantic Versioning](https://semver.org/s
 
 <a id="versioning"></a>
 
-## Zebra versioning {#zebra-versioning}
+## Zebra versioning
 
 Zebra version numbers show the impact of the changes in a release. They are composed of three parts: `major.minor.patch`.
 For example, version `3.1.11` indicates major version 3, minor version 1, and patch level 11.
@@ -31,7 +31,7 @@ The pre-release version is denoted by appending a hyphen and a series of dot sep
 
 <a id="supported-releases"></a>
 
-### Supported Releases {#supported-releases}
+### Supported Releases
 
 Older Zebra versions are always supported until the next Zebra major, minor or patch release. Initially, we can only guarantee support for the latest Zebra release.
 We might be able to provide support for earlier releases, or we might ask you to upgrade to the latest release.
@@ -42,7 +42,7 @@ Older Zebra versions that only support previous network upgrades will never be s
 
 <a id="updating"></a>
 
-### Supported update paths {#supported-update-paths}
+### Supported update paths
 
 You can update to any version of Zebra, provided that the following criteria are met:
 
@@ -53,7 +53,7 @@ See [Keeping Up-to-Date](guide/updating "Updating your projects") for more infor
 
 <a id="previews"></a>
 
-### Preview releases {#preview-releases}
+### Preview releases
 
 We let you preview what's coming by providing Release Candidate \(`rc`\) pre-releases for some major releases:
 
@@ -62,7 +62,7 @@ We let you preview what's coming by providing Release Candidate \(`rc`\) pre-rel
 | Beta              | The release that is under active development and testing. The beta release is indicated by a release tag appended with the `-beta` identifier, such as  `8.1.0-beta.0`. |
 | Release candidate | A release for final testing of new features. A release candidate is indicated by a release tag appended with the `-rc` identifier, such as version `8.1.0-rc.0`. |
 
-### Distribution tags {#distribution-tags}
+### Distribution tags
 
 Zebras's tagging relates directly to versions published on Docker. We will reference these [Docker Hub distribution tags](https://hub.docker.com/r/zfnd/zebra/tags) throughout:
 
@@ -72,7 +72,7 @@ Zebras's tagging relates directly to versions published on Docker. We will refer
 | beta   | The most recent pre-release version of Zebra for testing. May not always exist. |
 | rc     | The most recent release candidate of Zebra, meant to become a stable version. May not always exist. |
 
-### Feature Flags {#feature-flags}
+### Feature Flags
 
 To keep the `main` branch in a releasable state, experimental features must be gated behind a [Rust feature flag](https://doc.rust-lang.org/cargo/reference/features.html).
 Breaking changes should also be gated behind a feature flag, unless the team decides they are urgent.
@@ -80,7 +80,7 @@ Breaking changes should also be gated behind a feature flag, unless the team dec
 
 <a id="frequency"></a>
 
-## Release frequency {#release-frequency}
+## Release frequency
 
 We work toward a regular schedule of releases, so that you can plan and coordinate your updates with the continuing evolution of Zebra.
 
@@ -100,7 +100,7 @@ This cadence of releases gives eager developers access to new features as soon a
 
 <a id="deprecation"></a>
 
-## Deprecation practices {#deprecation-practices}
+## Deprecation practices
 
 Sometimes "breaking changes", such as the removal of support for RPCs, APIs, and features, are necessary to:
 
@@ -125,6 +125,6 @@ To help ensure that you have sufficient time and a clear path to update, this is
 
 <a id="process"></a>
 
-## Release candidate & release process {#release-process}
+## Release candidate & release process
 
 Our release checklist is available as a template, which defines each step our team needs to follow to create a new pre-release or release, and to also build and push the binaries to the official channels [Release Checklist Template](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist.md).
