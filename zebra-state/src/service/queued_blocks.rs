@@ -2,7 +2,7 @@
 
 use std::{
     collections::{hash_map::Drain, BTreeMap, HashMap, HashSet, VecDeque},
-    mem,
+    iter, mem,
 };
 
 use tokio::sync::oneshot;
@@ -182,12 +182,19 @@ impl QueuedBlocks {
 
     /// Update metrics after the queue is modified
     fn update_metrics(&self) {
+        if let Some(min_height) = self.by_height.keys().next() {
+            metrics::gauge!("state.memory.queued.min.height", min_height.0 as f64);
+        } else {
+            // use f64::NAN as a sentinel value for "None", because 0 is a valid height
+            metrics::gauge!("state.memory.queued.min.height", f64::NAN);
+        }
         if let Some(max_height) = self.by_height.keys().next_back() {
             metrics::gauge!("state.memory.queued.max.height", max_height.0 as f64);
         } else {
             // use f64::NAN as a sentinel value for "None", because 0 is a valid height
             metrics::gauge!("state.memory.queued.max.height", f64::NAN);
         }
+
         metrics::gauge!("state.memory.queued.block.count", self.blocks.len() as f64);
     }
 
@@ -198,7 +205,9 @@ impl QueuedBlocks {
     }
 
     /// Clears known_utxos, by_parent, and by_height, then drains blocks.
-    /// Returns all key-value pairs of blocks as an iterator
+    /// Returns all key-value pairs of blocks as an iterator.
+    ///
+    /// Doesn't update the metrics, because it is only used when the state is being dropped.
     pub fn drain(&mut self) -> Drain<'_, block::Hash, QueuedNonFinalized> {
         self.known_utxos.clear();
         self.known_utxos.shrink_to_fit();
@@ -248,6 +257,8 @@ impl SentHashes {
 
         self.curr_buf.push_back((block.hash, block.height));
         self.sent.insert(block.hash, outpoints);
+
+        self.update_metrics_for_block(block.height);
     }
 
     /// Stores the finalized `block`'s hash, height, and UTXOs, so they can be used to check if a
@@ -271,6 +282,8 @@ impl SentHashes {
 
         self.curr_buf.push_back((block.hash, block.height));
         self.sent.insert(block.hash, outpoints);
+
+        self.update_metrics_for_block(block.height);
     }
 
     /// Try to look up this UTXO in any sent block.
@@ -315,10 +328,55 @@ impl SentHashes {
         });
 
         self.sent.shrink_to_fit();
+
+        self.update_metrics_for_cache();
     }
 
     /// Returns true if SentHashes contains the `hash`
     pub fn contains(&self, hash: &block::Hash) -> bool {
         self.sent.contains_key(hash)
+    }
+
+    /// Update sent block metrics after a block is sent.
+    fn update_metrics_for_block(&self, height: block::Height) {
+        metrics::counter!("state.memory.sent.block.count", 1);
+        metrics::gauge!("state.memory.sent.block.height", height.0 as f64);
+
+        self.update_metrics_for_cache();
+    }
+
+    /// Update sent block cache metrics after the sent blocks are modified.
+    fn update_metrics_for_cache(&self) {
+        let batch_iter = || self.bufs.iter().chain(iter::once(&self.curr_buf));
+
+        if let Some(min_height) = batch_iter()
+            .flat_map(|batch| batch.front().map(|(_hash, height)| height))
+            .min()
+        {
+            metrics::gauge!("state.memory.sent.cache.min.height", min_height.0 as f64);
+        } else {
+            // use f64::NAN as a sentinel value for "None", because 0 is a valid height
+            metrics::gauge!("state.memory.sent.cache.min.height", f64::NAN);
+        }
+
+        if let Some(max_height) = batch_iter()
+            .flat_map(|batch| batch.back().map(|(_hash, height)| height))
+            .max()
+        {
+            metrics::gauge!("state.memory.sent.cache.max.height", max_height.0 as f64);
+        } else {
+            // use f64::NAN as a sentinel value for "None", because 0 is a valid height
+            metrics::gauge!("state.memory.sent.cache.max.height", f64::NAN);
+        }
+
+        metrics::gauge!(
+            "state.memory.sent.cache.block.count",
+            batch_iter().flatten().count() as f64,
+        );
+
+        metrics::gauge!(
+            "state.memory.sent.cache.batch.count",
+            batch_iter().count() as f64,
+        );
     }
 }
