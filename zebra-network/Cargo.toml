@@ -29,7 +29,7 @@ regex = "1.6.0"
 serde = { version = "1.0.145", features = ["serde_derive"] }
 thiserror = "1.0.37"
 
-futures = "0.3.24"
+futures = "0.3.25"
 tokio = { version = "1.21.2", features = ["net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.11", features = ["sync", "time"] }
 tokio-util = { version = "0.7.4", features = ["codec"] }
