@@ -13,7 +13,7 @@ impl MetricsEndpoint {
     /// Create the component.
     #[cfg(feature = "prometheus")]
     pub fn new(config: &Config) -> Result<Self, FrameworkError> {
-        if let Some(addr) = config.metrics.endpoint_addr {
+        if let Some(addr) = config.endpoint_addr {
             info!("Trying to open metrics endpoint at {}...", addr);
 
             let endpoint_result = metrics_exporter_prometheus::PrometheusBuilder::new()
