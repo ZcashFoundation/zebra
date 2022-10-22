@@ -108,6 +108,16 @@ async fn rpc_getblock() {
         );
     }
 
+    // Make calls with verbosity=2 and check response
+    for (i, _block) in blocks.iter().enumerate() {
+        let get_block = rpc
+            .get_block(i.to_string(), 2u8)
+            .await
+            .expect("We should have a GetBlock struct");
+
+        dbg!(get_block);
+    }
+
     mempool.expect_no_requests().await;
 
     // The queue task should continue without errors or panics

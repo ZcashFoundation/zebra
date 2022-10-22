@@ -6,7 +6,11 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-use std::{collections::HashSet, io, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    io,
+    sync::Arc,
+};
 
 use chrono::Utc;
 use futures::{FutureExt, TryFutureExt};
@@ -599,6 +603,68 @@ where
                     }),
                     _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
                 }
+            } else if verbosity == 2 {
+                let request = zebra_state::ReadRequest::Block(height.into());
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
+
+                match response {
+                    zebra_state::ReadResponse::Block(Some(block)) => {
+                        let mut txs = vec![];
+                        let mut value_pools = vec![];
+
+                        for t in &block.transactions {
+                            let utxos = HashMap::new();
+                            let value_balance = t.value_balance(&utxos).unwrap();
+
+                            value_pools.push(ValuePool {
+                                id: "sprout".to_string(),
+                                monitored: true,
+                                chain_value: "0".to_string(),
+                                chain_value_zat: value_balance.sprout_amount().into(),
+                                value_delta: "0".to_string(),
+                                value_delta_zat: 0,
+                            });
+
+                            value_pools.push(ValuePool {
+                                id: "sapling".to_string(),
+                                monitored: true,
+                                chain_value: "0".to_string(),
+                                chain_value_zat: value_balance.sapling_amount().into(),
+                                value_delta: "0".to_string(),
+                                value_delta_zat: 0,
+                            });
+
+                            value_pools.push(ValuePool {
+                                id: "orchard".to_string(),
+                                monitored: true,
+                                chain_value: "0".to_string(),
+                                chain_value_zat: value_balance.orchard_amount().into(),
+                                value_delta: "0".to_string(),
+                                value_delta_zat: 0,
+                            });
+
+                            txs.push(t.clone());
+                        }
+                        Ok(GetBlock::TxObject {
+                            tx: txs,
+                            value_pools,
+                        })
+                    }
+                    zebra_state::ReadResponse::Block(None) => Err(Error {
+                        code: MISSING_BLOCK_ERROR_CODE,
+                        message: "Block not found".to_string(),
+                        data: None,
+                    }),
+                    _ => unreachable!("unmatched response to a block request"),
+                }
             } else {
                 Err(Error {
                     code: ErrorCode::InvalidParams,
@@ -1139,6 +1205,29 @@ pub enum GetBlock {
         /// List of transaction IDs in block order, hex-encoded.
         tx: Vec<String>,
     },
+    /// Blah
+    TxObject {
+        /// List of transaction IDs in block order, hex-encoded.
+        tx: Vec<Arc<zebra_chain::transaction::Transaction>>,
+        /// Blah
+        #[serde(rename = "valuePools")]
+        value_pools: Vec<ValuePool>,
+    },
+}
+
+/// Blah
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct ValuePool {
+    id: String,
+    monitored: bool,
+    #[serde(rename = "chainValue")]
+    chain_value: String,
+    #[serde(rename = "chainValueZat")]
+    chain_value_zat: i64,
+    #[serde(rename = "valueDelta")]
+    value_delta: String,
+    #[serde(rename = "valueDeltaZat")]
+    value_delta_zat: i64,
 }
 
 /// Response to a `getbestblockhash` and `getblockhash` RPC request.
