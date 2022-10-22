@@ -757,3 +757,68 @@ async fn rpc_getblockhash() {
 
     mempool.expect_no_requests().await;
 }
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblocktemplate() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    // Init RPCs
+    let _rpc = RpcImpl::new(
+        "RPC test",
+        Mainnet,
+        false,
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        latest_chain_tip.clone(),
+    );
+    let get_block_template_rpc =
+        get_block_template::GetBlockTemplateRpcImpl::new(latest_chain_tip, read_state);
+
+    let get_block_template = get_block_template_rpc
+        .get_block_template()
+        .await
+        .expect("We should have a GetBlockTemplate struct");
+
+    assert!(get_block_template.capabilities.is_empty());
+    assert_eq!(get_block_template.version, 0);
+    assert!(get_block_template.previousblockhash.is_empty());
+    assert!(get_block_template.blockcommitmentshash.is_empty());
+    assert!(get_block_template.lightclientroothash.is_empty());
+    assert!(get_block_template.finalsaplingroothash.is_empty());
+    assert!(get_block_template.defaultroots.merkleroot.is_empty());
+    assert!(get_block_template.defaultroots.chainhistoryroot.is_empty());
+    assert!(get_block_template.defaultroots.authdataroot.is_empty());
+    assert!(get_block_template
+        .defaultroots
+        .blockcommitmentshash
+        .is_empty());
+    assert!(get_block_template.transactions.is_empty());
+    assert_eq!(
+        get_block_template.coinbasetxn,
+        get_block_template::Coinbase {}
+    );
+    assert!(get_block_template.longpollid.is_empty());
+    assert!(get_block_template.target.is_empty());
+    assert_eq!(get_block_template.mintime, 0);
+    assert!(get_block_template.mutable.is_empty());
+    assert!(get_block_template.noncerange.is_empty());
+    assert_eq!(get_block_template.sigoplimit, 0);
+    assert_eq!(get_block_template.sizelimit, 0);
+    assert_eq!(get_block_template.curtime, 0);
+    assert!(get_block_template.bits.is_empty());
+    assert_eq!(get_block_template.height, 0);
+
+    mempool.expect_no_requests().await;
+}

@@ -35,8 +35,19 @@ pub trait GetBlockTemplateRpc {
     ///
     /// - If `index` is positive then index = block height.
     /// - If `index` is negative then -1 is the last known valid block.
+    /// - This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[rpc(name = "getblockhash")]
     fn get_block_hash(&self, index: i32) -> BoxFuture<Result<GetBlockHash>>;
+
+    /// Documentation to be filled as we go.
+    ///
+    /// zcashd reference: [`getblocktemplate`](https://zcash-rpc.github.io/getblocktemplate.html)
+    ///
+    /// # Notes
+    ///
+    /// - This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
+    #[rpc(name = "getblocktemplate")]
+    fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>>;
 }
 
 /// RPC method implementations.
@@ -139,7 +150,105 @@ where
         }
         .boxed()
     }
+
+    fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>> {
+        async move {
+            let empty_string = String::from("");
+
+            // Returns empty `GetBlockTemplate`
+            Ok(GetBlockTemplate {
+                capabilities: vec![],
+                version: 0,
+                previousblockhash: empty_string.clone(),
+                blockcommitmentshash: empty_string.clone(),
+                lightclientroothash: empty_string.clone(),
+                finalsaplingroothash: empty_string.clone(),
+                defaultroots: DefaultRoots {
+                    merkleroot: empty_string.clone(),
+                    chainhistoryroot: empty_string.clone(),
+                    authdataroot: empty_string.clone(),
+                    blockcommitmentshash: empty_string.clone(),
+                },
+                transactions: vec![],
+                coinbasetxn: Coinbase {},
+                longpollid: empty_string.clone(),
+                target: empty_string.clone(),
+                mintime: 0,
+                mutable: vec![],
+                noncerange: empty_string.clone(),
+                sigoplimit: 0,
+                sizelimit: 0,
+                curtime: 0,
+                bits: empty_string,
+                height: 0,
+            })
+        }
+        .boxed()
+    }
 }
+/// Documentation to be added after we document all the individual fields.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GetBlockTemplate {
+    /// Add documentation.
+    pub capabilities: Vec<String>,
+    /// Add documentation.
+    pub version: usize,
+    /// Add documentation.
+    pub previousblockhash: String,
+    /// Add documentation.
+    pub blockcommitmentshash: String,
+    /// Add documentation.
+    pub lightclientroothash: String,
+    /// Add documentation.
+    pub finalsaplingroothash: String,
+    /// Add documentation.
+    pub defaultroots: DefaultRoots,
+    /// Add documentation.
+    pub transactions: Vec<Transaction>,
+    /// Add documentation.
+    pub coinbasetxn: Coinbase,
+    /// Add documentation.
+    pub longpollid: String,
+    /// Add documentation.
+    pub target: String,
+    /// Add documentation.
+    pub mintime: u32,
+    /// Add documentation.
+    pub mutable: Vec<String>,
+    /// Add documentation.
+    pub noncerange: String,
+    /// Add documentation.
+    pub sigoplimit: u32,
+    /// Add documentation.
+    pub sizelimit: u32,
+    /// Add documentation.
+    pub curtime: u32,
+    /// Add documentation.
+    pub bits: String,
+    /// Add documentation.
+    pub height: u32,
+}
+
+/// Documentation to be added in #5452 or #5455.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DefaultRoots {
+    /// Add documentation.
+    pub merkleroot: String,
+    /// Add documentation.
+    pub chainhistoryroot: String,
+    /// Add documentation.
+    pub authdataroot: String,
+    /// Add documentation.
+    pub blockcommitmentshash: String,
+}
+
+/// Documentation and fields to be added in #5454.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Transaction {}
+
+/// documentation and fields to be added in #5453.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Coinbase {}
 
 /// Given a potentially negative index, find the corresponding `Height`.
 ///

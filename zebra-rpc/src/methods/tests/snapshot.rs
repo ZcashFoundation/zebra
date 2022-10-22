@@ -191,6 +191,13 @@ async fn test_rpc_response_data_for_network(network: Network) {
             .expect("We should have a GetBlockHash struct");
 
         snapshot_rpc_getblockhash(get_block_hash, &settings);
+
+        // `getblocktemplate`
+        let get_block_template = get_block_template_rpc
+            .get_block_template()
+            .await
+            .expect("We should have a GetBlockTemplate struct");
+        snapshot_rpc_getblocktemplate(get_block_template, &settings);
     }
 }
 
@@ -290,6 +297,15 @@ fn snapshot_rpc_getblockcount(block_count: u32, settings: &insta::Settings) {
 /// Snapshot `getblockhash` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblockhash(block_hash: GetBlockHash, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_block_hash", block_hash));
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+/// Snapshot `getblocktemplate` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getblocktemplate(
+    block_template: crate::methods::get_block_template::GetBlockTemplate,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| insta::assert_json_snapshot!("get_block_template", block_template));
 }
 
 /// Utility function to convert a `Network` to a lowercase string.
