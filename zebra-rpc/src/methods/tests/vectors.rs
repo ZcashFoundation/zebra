@@ -109,13 +109,32 @@ async fn rpc_getblock() {
     }
 
     // Make calls with verbosity=2 and check response
-    for (i, _block) in blocks.iter().enumerate() {
+    for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(i.to_string(), 2u8)
             .await
             .expect("We should have a GetBlock struct");
 
-        dbg!(get_block);
+        assert_eq!(
+            get_block,
+            GetBlock::TxObject {
+                tx: block.transactions.iter().map(|tx| tx.clone()).collect(),
+                value_pools: vec![
+                    ValuePool {
+                        id: "sprout".to_string(),
+                        chain_value_zat: 0,
+                    },
+                    ValuePool {
+                        id: "sapling".to_string(),
+                        chain_value_zat: 0,
+                    },
+                    ValuePool {
+                        id: "orchard".to_string(),
+                        chain_value_zat: 0,
+                    },
+                ]
+            }
+        );
     }
 
     mempool.expect_no_requests().await;

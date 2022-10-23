@@ -621,34 +621,24 @@ where
                         let mut value_pools = vec![];
 
                         for t in &block.transactions {
+                            // we don't need utxos are we only return shielded pools
                             let utxos = HashMap::new();
-                            let value_balance = t.value_balance(&utxos).unwrap();
+
+                            let value_balance = t.value_balance(&utxos).expect("not sure yet");
 
                             value_pools.push(ValuePool {
                                 id: "sprout".to_string(),
-                                monitored: true,
-                                chain_value: "0".to_string(),
                                 chain_value_zat: value_balance.sprout_amount().into(),
-                                value_delta: "0".to_string(),
-                                value_delta_zat: 0,
                             });
 
                             value_pools.push(ValuePool {
                                 id: "sapling".to_string(),
-                                monitored: true,
-                                chain_value: "0".to_string(),
                                 chain_value_zat: value_balance.sapling_amount().into(),
-                                value_delta: "0".to_string(),
-                                value_delta_zat: 0,
                             });
 
                             value_pools.push(ValuePool {
                                 id: "orchard".to_string(),
-                                monitored: true,
-                                chain_value: "0".to_string(),
                                 chain_value_zat: value_balance.orchard_amount().into(),
-                                value_delta: "0".to_string(),
-                                value_delta_zat: 0,
                             });
 
                             txs.push(t.clone());
@@ -1219,15 +1209,15 @@ pub enum GetBlock {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct ValuePool {
     id: String,
-    monitored: bool,
-    #[serde(rename = "chainValue")]
-    chain_value: String,
+    //monitored: bool,
+    //#[serde(rename = "chainValue")]
+    //chain_value: String,
     #[serde(rename = "chainValueZat")]
     chain_value_zat: i64,
-    #[serde(rename = "valueDelta")]
-    value_delta: String,
-    #[serde(rename = "valueDeltaZat")]
-    value_delta_zat: i64,
+    //#[serde(rename = "valueDelta")]
+    //value_delta: String,
+    //#[serde(rename = "valueDeltaZat")]
+    //value_delta_zat: i64,
 }
 
 /// Response to a `getbestblockhash` and `getblockhash` RPC request.
