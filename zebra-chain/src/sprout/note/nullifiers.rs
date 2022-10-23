@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 use sha2::digest::generic_array::{typenum::U64, GenericArray};

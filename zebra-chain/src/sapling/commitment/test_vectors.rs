@@ -9,8 +9,6 @@
 // librustzcash, they match their Display impl to match the Python hex strings
 // and that's what they compare in their unit tests, not the bytes.
 
-#![allow(dead_code)]
-
 use bitvec::prelude::*;
 use lazy_static::lazy_static;
 

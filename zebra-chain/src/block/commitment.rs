@@ -125,7 +125,7 @@ impl Commitment {
     }
 
     /// Returns the serialized bytes for this Commitment.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn to_bytes(self) -> [u8; 32] {
         use Commitment::*;
 
@@ -220,7 +220,7 @@ impl ChainHistoryBlockTxAuthCommitmentHash {
 /// all possible verification failures enumerates the consensus rules we
 /// implement, and ensures that we don't reject blocks or transactions
 /// for a non-enumerated reason.
-#[allow(dead_code, missing_docs)]
+#[allow(missing_docs)]
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum CommitmentError {
     #[error(
