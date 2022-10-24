@@ -353,6 +353,8 @@ impl Storage {
 
         for &mined_id in mined_ids {
             self.reject(
+                // the reject and rejection_error fns that store and check `SameEffectsChainRejectionError`s
+                // only use the mined id, so using `Legacy` ids will apply to v5 transactions as well.
                 UnminedTxId::Legacy(mined_id),
                 SameEffectsChainRejectionError::Mined.into(),
             );
