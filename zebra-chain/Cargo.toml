@@ -60,12 +60,12 @@ tracing = "0.1.37"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.145", features = ["serde_derive", "rc"] }
+serde = { version = "1.0.147", features = ["serde_derive", "rc"] }
 serde_with = "2.0.1"
 serde-big-array = "0.4.1"
 
 # Processing
-futures = "0.3.24"
+futures = "0.3.25"
 itertools = "0.10.5"
 rayon = "1.5.3"
 
