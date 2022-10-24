@@ -198,11 +198,24 @@ jobs:
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
           docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace -- --nocapture --include-ignored
 
-      - name: Run all zebrad tests with getblocktemplate-rpcs feature
+  # zebrad tests without cached state with `getblocktemplate-rpcs` feature
+
+  # Same as above but we run all the tests behind the `getblocktemplate-rpcs` feature.
+  test-all-getblocktemplate-rpcs:
+    name: Test all with getblocktemplate-rpcs feature
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    steps:
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Run all zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
           docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace -- --nocapture --include-ignored
-
 
   # Run state tests with fake activation heights.
   #
