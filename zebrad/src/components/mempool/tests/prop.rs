@@ -288,6 +288,7 @@ impl FakeChainTip {
                     hash: chain_tip_block.hash,
                     height,
                     time: previous.time + mock_block_time_delta,
+                    transactions: chain_tip_block.transactions.clone(),
                     transaction_hashes: chain_tip_block.transaction_hashes.clone(),
                     previous_block_hash: previous.hash,
                 }

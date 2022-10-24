@@ -59,10 +59,12 @@ impl From<PreparedBlock> for ChainTipBlock {
             new_outputs: _,
             transaction_hashes,
         } = prepared;
+
         Self {
             hash,
             height,
             time: block.header.time,
+            transactions: block.transactions.clone(),
             transaction_hashes,
             previous_block_hash: block.header.previous_block_hash,
         }

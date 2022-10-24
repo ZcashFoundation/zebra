@@ -162,23 +162,75 @@ fn mempool_storage_crud_same_effects_mainnet() {
     });
 
     // Get one (1) unmined transaction
-    let unmined_tx = unmined_transactions_in_blocks(.., network)
+    let unmined_tx_1 = unmined_transactions_in_blocks(.., network)
         .next()
         .expect("at least one unmined transaction");
 
     // Insert unmined tx into the mempool.
-    let _ = storage.insert(unmined_tx.clone());
+    let _ = storage.insert(unmined_tx_1.clone());
 
     // Check that it is in the mempool, and not rejected.
-    assert!(storage.contains_transaction_exact(&unmined_tx.transaction.id));
+    assert!(storage.contains_transaction_exact(&unmined_tx_1.transaction.id));
 
-    // Remove tx
-    let removal_count =
-        storage.remove_same_effects(&iter::once(unmined_tx.transaction.id.mined_id()).collect());
+    // Reject and remove mined tx
+    let removal_count = storage.reject_and_remove_same_effects(
+        &iter::once(unmined_tx_1.transaction.id.mined_id()).collect(),
+        vec![unmined_tx_1.transaction.transaction.clone()],
+    );
 
-    // Check that it is /not/ in the mempool.
+    // Check that it is /not/ in the mempool as a verified transaction.
     assert_eq!(removal_count, 1);
-    assert!(!storage.contains_transaction_exact(&unmined_tx.transaction.id));
+    assert!(!storage.contains_transaction_exact(&unmined_tx_1.transaction.id));
+
+    // Check that it's rejection is cached in the chain_rejected_same_effects' `Mined` eviction list.
+    assert_eq!(
+        storage.rejection_error(&unmined_tx_1.transaction.id),
+        Some(SameEffectsChainRejectionError::Mined.into())
+    );
+    assert_eq!(
+        storage.insert(unmined_tx_1),
+        Err(SameEffectsChainRejectionError::Mined.into())
+    );
+
+    // Get a different unmined transaction
+    let unmined_tx_2 = unmined_transactions_in_blocks(1.., network)
+        .find(|tx| {
+            tx.transaction
+                .transaction
+                .spent_outpoints()
+                .next()
+                .is_some()
+        })
+        .expect("at least one unmined transaction with at least 1 spent outpoint");
+
+    // Insert unmined tx into the mempool.
+    assert_eq!(
+        storage.insert(unmined_tx_2.clone()),
+        Ok(unmined_tx_2.transaction.id)
+    );
+
+    // Check that it is in the mempool, and not rejected.
+    assert!(storage.contains_transaction_exact(&unmined_tx_2.transaction.id));
+
+    // Reject and remove duplicate spend tx
+    let removal_count = storage.reject_and_remove_same_effects(
+        &HashSet::new(),
+        vec![unmined_tx_2.transaction.transaction.clone()],
+    );
+
+    // Check that it is /not/ in the mempool as a verified transaction.
+    assert_eq!(removal_count, 1);
+    assert!(!storage.contains_transaction_exact(&unmined_tx_2.transaction.id));
+
+    // Check that it's rejection is cached in the chain_rejected_same_effects' `SpendConflict` eviction list.
+    assert_eq!(
+        storage.rejection_error(&unmined_tx_2.transaction.id),
+        Some(SameEffectsChainRejectionError::DuplicateSpend.into())
+    );
+    assert_eq!(
+        storage.insert(unmined_tx_2),
+        Err(SameEffectsChainRejectionError::DuplicateSpend.into())
+    );
 }
 
 #[test]

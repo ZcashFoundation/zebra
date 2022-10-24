@@ -20,7 +20,7 @@ use zebra_chain::{
     block,
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
-    transaction,
+    transaction::{self, Transaction},
 };
 
 use crate::{
@@ -56,6 +56,9 @@ pub struct ChainTipBlock {
     )]
     pub time: DateTime<Utc>,
 
+    /// The block transactions.
+    pub transactions: Vec<Arc<Transaction>>,
+
     /// The mined transaction IDs of the transactions in `block`,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
@@ -84,6 +87,7 @@ impl From<ContextuallyValidBlock> for ChainTipBlock {
             hash,
             height,
             time: block.header.time,
+            transactions: block.transactions.clone(),
             transaction_hashes,
             previous_block_hash: block.header.previous_block_hash,
         }
@@ -99,10 +103,12 @@ impl From<FinalizedBlock> for ChainTipBlock {
             transaction_hashes,
             ..
         } = finalized;
+
         Self {
             hash,
             height,
             time: block.header.time,
+            transactions: block.transactions.clone(),
             transaction_hashes,
             previous_block_hash: block.header.previous_block_hash,
         }
