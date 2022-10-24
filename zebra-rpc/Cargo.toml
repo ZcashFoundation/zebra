@@ -14,7 +14,7 @@ getblocktemplate-rpcs = ["zebra-state/getblocktemplate-rpcs"]
 
 [dependencies]
 chrono = { version = "0.4.22", default-features = false, features = ["clock", "std"] }
-futures = "0.3.24"
+futures = "0.3.25"
 
 # lightwalletd sends JSON-RPC requests over HTTP 1.1
 hyper = { version = "0.14.20", features = ["http1", "server"] }
@@ -35,7 +35,7 @@ tracing = "0.1.37"
 tracing-futures = "0.2.5"
 
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.145", features = ["serde_derive"] }
+serde = { version = "1.0.147", features = ["serde_derive"] }
 
 proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
