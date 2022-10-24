@@ -69,7 +69,7 @@ test_sync_past_mandatory_checkpoint_testnet = []
 
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
-zebra-consensus = { path = "../zebra-consensus/" }
+zebra-consensus = { path = "../zebra-consensus" }
 zebra-network = { path = "../zebra-network" }
 zebra-node-services = { path = "../zebra-node-services" }
 zebra-rpc = { path = "../zebra-rpc" }
@@ -176,7 +176,7 @@ proptest-derive = "0.3.0"
 color-eyre = { version = "0.6.2", features = ["issue-url"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
-zebra-consensus = { path = "../zebra-consensus/", features = ["proptest-impl"] }
+zebra-consensus = { path = "../zebra-consensus", features = ["proptest-impl"] }
 zebra-network = { path = "../zebra-network", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test" }
