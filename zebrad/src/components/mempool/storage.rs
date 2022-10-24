@@ -81,7 +81,7 @@ pub enum SameEffectsChainRejectionError {
     #[error("best chain tip has reached transaction expiry height")]
     Expired,
 
-    #[error("transaction outpoints or nullifiers were committed to the best chain")]
+    #[error("transaction inputs were spent, or nullifiers were revealed, in the best chain")]
     DuplicateSpend,
 
     #[error("transaction was committed to the best chain")]
