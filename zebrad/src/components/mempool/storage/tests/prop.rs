@@ -364,11 +364,14 @@ proptest! {
 
         // Insert all input transactions, and keep track of the IDs of the one that were actually
         // inserted.
-        let inserted_transactions: HashSet<_> = input.transactions().filter_map(|transaction| {
-            let id = transaction.transaction.id;
+        let inserted_transactions: HashSet<_> = input
+            .transactions()
+            .filter_map(|transaction| {
+                let id = transaction.transaction.id;
 
-            storage.insert(transaction.clone()).ok().map(|_| id)
-        }).collect();
+                storage.insert(transaction.clone()).ok().map(|_| id)
+            })
+            .collect();
 
         // Check that the inserted transactions are still there.
         for transaction_id in &inserted_transactions {
