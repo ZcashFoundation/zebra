@@ -180,7 +180,7 @@ jobs:
   # Run all the zebra tests, including tests that are ignored by default.
   # Skips tests that need a cached state disk or a lightwalletd binary.
   #
-  # - We run all the tests behind the `getblocktemplate-rpcs` feature.
+  # - We run all the tests behind the `getblocktemplate-rpcs` feature as a separated step.
   # - We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.
   test-all:
     name: Test all
@@ -196,7 +196,13 @@ jobs:
       - name: Run all zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace -- --nocapture --include-ignored
+
+      - name: Run all zebrad tests with getblocktemplate-rpcs feature
+        run: |
+          docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
           docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace -- --nocapture --include-ignored
+
 
   # Run state tests with fake activation heights.
   #
