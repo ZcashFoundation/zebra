@@ -1,8 +1,10 @@
 # Zebra dependencies
 
-This is a list of Rust code that is in scope and out of scope for Zebra's first audit:
+This is a list of production Rust code that is in scope and out of scope for Zebra's first audit:
 - **bold**: Crates that we want to be audited fully.
 - <i>italic</i>: Crates we want to be audited with conditions.
+
+Test code, deployment configurations, and other configuration files in the `zebra` repository are out of scope.
 
 ## Crates
 
@@ -10,21 +12,21 @@ This is a list of Rust code that is in scope and out of scope for Zebra's first 
 |------| ------- | -----
 | [**tower-batch**](https://github.com/ZcashFoundation/zebra/tree/main/tower-batch) | [0.2.31](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/tower-batch) |
 | [**tower-fallback**](https://github.com/ZcashFoundation/zebra/tree/main/tower-fallback) | [0.2.31](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/tower-fallback) | 
-| [**zebra-chain**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-chain) | [1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-chain) |
-| [**zebra-consensus**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus) | [1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-consensus) |
-| [**zebra-network**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-network) | [1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-network) |
-| [**zebra-node-services**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-node-services) | [1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-node-services)  |
-| [**zebra-rpc**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-rpc) | [1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-rpc) |
-| [**zebra-script**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-script) | [1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-script) |
-| [**zebra-state**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-state) | [1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-state) |
+| [**zebra-chain**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-chain) | [1.0.0-beta.16](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-chain) |
+| [**zebra-consensus**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus) | [1.0.0-beta.16](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-consensus) |
+| [**zebra-network**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-network) | [1.0.0-beta.16](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-network) |
+| [**zebra-node-services**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-node-services) | [1.0.0-beta.16](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-node-services)  |
+| [**zebra-rpc**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-rpc) | [1.0.0-beta.16](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-rpc) |
+| [**zebra-script**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-script) | [1.0.0-beta.16](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-script) |
+| [**zebra-state**](https://github.com/ZcashFoundation/zebra/tree/main/zebra-state) | [1.0.0-beta.16](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-state) |
 | [**zebrad**](https://github.com/ZcashFoundation/zebra/tree/main/zebrad) | [1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebrad) |
-| [<i>zebra-utils</i>](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils) | [1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-utils) | <i>Only [zebra-checkpoints](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-utils/src/bin/zebra-checkpoints) utility needs to be audited.</i>
+| [<i>zebra-utils</i>](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils) | [1.0.0-beta.16](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-utils) | <i>Only [zebra-checkpoints](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-utils/src/bin/zebra-checkpoints) utility needs to be audited.</i>
 
 ## Zcash/ZF dependencies
 
 | Name | Version | Audited | Notes
 |------| --------|-------- | -----
-| [ed25519-zebra](https://github.com/ZcashFoundation/ed25519-zebra) | [3.0.0](https://github.com/ZcashFoundation/ed25519-zebra/releases/tag/3.0.0) | |
+| [**ed25519-zebra**](https://github.com/ZcashFoundation/ed25519-zebra) | [3.0.0](https://github.com/ZcashFoundation/ed25519-zebra/releases/tag/3.0.0) | |
 | [equihash](https://github.com/zcash/librustzcash) | [0.2.0](https://github.com/zcash/librustzcash/releases/tag/0.2.0) | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) |
 | [halo2_proofs](https://github.com/zcash/halo2) | [0.2.0](https://github.com/zcash/halo2/tree/halo2_proofs-0.2.0) | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) [mary](https://z.cash/halo2-audit/) |
 | [incrementalmerkletree](https://github.com/zcash/incrementalmerkletree) | [0.3.0](https://github.com/zcash/incrementalmerkletree/releases/tag/v0.3.0) | |  
