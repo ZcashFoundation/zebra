@@ -1,5 +1,4 @@
 #![allow(clippy::unit_arg)]
-#![allow(dead_code)]
 
 use std::{
     convert::TryFrom,
