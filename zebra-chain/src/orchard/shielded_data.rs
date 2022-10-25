@@ -165,7 +165,7 @@ impl AuthorizedAction {
 /// [ps]: <https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus>
 pub const ACTION_SIZE: u64 = 5 * 32 + 580 + 80;
 
-/// The size of a single Signature<SpendAuth>
+/// The size of a single `Signature<SpendAuth>`.
 ///
 /// Each Signature is 64 bytes.
 /// [7.1 Transaction Encoding and Consensus][ps]
