@@ -793,29 +793,32 @@ async fn rpc_getblocktemplate() {
 
     assert!(get_block_template.capabilities.is_empty());
     assert_eq!(get_block_template.version, 0);
-    assert!(get_block_template.previousblockhash.is_empty());
-    assert!(get_block_template.blockcommitmentshash.is_empty());
-    assert!(get_block_template.lightclientroothash.is_empty());
-    assert!(get_block_template.finalsaplingroothash.is_empty());
-    assert!(get_block_template.defaultroots.merkleroot.is_empty());
-    assert!(get_block_template.defaultroots.chainhistoryroot.is_empty());
-    assert!(get_block_template.defaultroots.authdataroot.is_empty());
+    assert!(get_block_template.previous_block_hash.is_empty());
+    assert!(get_block_template.block_commitments_hash.is_empty());
+    assert!(get_block_template.light_client_root_hash.is_empty());
+    assert!(get_block_template.final_sapling_root_hash.is_empty());
+    assert!(get_block_template.default_roots.merkle_root.is_empty());
     assert!(get_block_template
-        .defaultroots
-        .blockcommitmentshash
+        .default_roots
+        .chain_history_root
+        .is_empty());
+    assert!(get_block_template.default_roots.auth_data_root.is_empty());
+    assert!(get_block_template
+        .default_roots
+        .block_commitments_hash
         .is_empty());
     assert!(get_block_template.transactions.is_empty());
     assert_eq!(
-        get_block_template.coinbasetxn,
+        get_block_template.coinbase_txn,
         get_block_template::Coinbase {}
     );
     assert!(get_block_template.target.is_empty());
-    assert_eq!(get_block_template.mintime, 0);
+    assert_eq!(get_block_template.min_time, 0);
     assert!(get_block_template.mutable.is_empty());
-    assert!(get_block_template.noncerange.is_empty());
-    assert_eq!(get_block_template.sigoplimit, 0);
-    assert_eq!(get_block_template.sizelimit, 0);
-    assert_eq!(get_block_template.curtime, 0);
+    assert!(get_block_template.nonce_range.is_empty());
+    assert_eq!(get_block_template.sigop_limit, 0);
+    assert_eq!(get_block_template.size_limit, 0);
+    assert_eq!(get_block_template.cur_time, 0);
     assert!(get_block_template.bits.is_empty());
     assert_eq!(get_block_template.height, 0);
 

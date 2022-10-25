@@ -159,25 +159,25 @@ where
             Ok(GetBlockTemplate {
                 capabilities: vec![],
                 version: 0,
-                previousblockhash: empty_string.clone(),
-                blockcommitmentshash: empty_string.clone(),
-                lightclientroothash: empty_string.clone(),
-                finalsaplingroothash: empty_string.clone(),
-                defaultroots: DefaultRoots {
-                    merkleroot: empty_string.clone(),
-                    chainhistoryroot: empty_string.clone(),
-                    authdataroot: empty_string.clone(),
-                    blockcommitmentshash: empty_string.clone(),
+                previous_block_hash: empty_string.clone(),
+                block_commitments_hash: empty_string.clone(),
+                light_client_root_hash: empty_string.clone(),
+                final_sapling_root_hash: empty_string.clone(),
+                default_roots: DefaultRoots {
+                    merkle_root: empty_string.clone(),
+                    chain_history_root: empty_string.clone(),
+                    auth_data_root: empty_string.clone(),
+                    block_commitments_hash: empty_string.clone(),
                 },
                 transactions: vec![],
-                coinbasetxn: Coinbase {},
+                coinbase_txn: Coinbase {},
                 target: empty_string.clone(),
-                mintime: 0,
+                min_time: 0,
                 mutable: vec![],
-                noncerange: empty_string.clone(),
-                sigoplimit: 0,
-                sizelimit: 0,
-                curtime: 0,
+                nonce_range: empty_string.clone(),
+                sigop_limit: 0,
+                size_limit: 0,
+                cur_time: 0,
                 bits: empty_string,
                 height: 0,
             })
@@ -193,33 +193,44 @@ pub struct GetBlockTemplate {
     /// Add documentation.
     pub version: usize,
     /// Add documentation.
-    pub previousblockhash: String,
+    #[serde(rename = "previousblockhash")]
+    pub previous_block_hash: String,
     /// Add documentation.
-    pub blockcommitmentshash: String,
+    #[serde(rename = "blockcommitmentshash")]
+    pub block_commitments_hash: String,
     /// Add documentation.
-    pub lightclientroothash: String,
+    #[serde(rename = "lightclientroothash")]
+    pub light_client_root_hash: String,
     /// Add documentation.
-    pub finalsaplingroothash: String,
+    #[serde(rename = "finalsaplingroothash")]
+    pub final_sapling_root_hash: String,
     /// Add documentation.
-    pub defaultroots: DefaultRoots,
+    #[serde(rename = "defaultroots")]
+    pub default_roots: DefaultRoots,
     /// Add documentation.
     pub transactions: Vec<Transaction>,
     /// Add documentation.
-    pub coinbasetxn: Coinbase,
+    #[serde(rename = "coinbasetxn")]
+    pub coinbase_txn: Coinbase,
     /// Add documentation.
     pub target: String,
     /// Add documentation.
-    pub mintime: u32,
+    #[serde(rename = "mintime")]
+    pub min_time: u32,
     /// Add documentation.
     pub mutable: Vec<String>,
     /// Add documentation.
-    pub noncerange: String,
+    #[serde(rename = "noncerange")]
+    pub nonce_range: String,
     /// Add documentation.
-    pub sigoplimit: u32,
+    #[serde(rename = "sigoplimit")]
+    pub sigop_limit: u32,
     /// Add documentation.
-    pub sizelimit: u32,
+    #[serde(rename = "sizelimit")]
+    pub size_limit: u32,
     /// Add documentation.
-    pub curtime: u32,
+    #[serde(rename = "curtime")]
+    pub cur_time: u32,
     /// Add documentation.
     pub bits: String,
     /// Add documentation.
@@ -230,13 +241,17 @@ pub struct GetBlockTemplate {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DefaultRoots {
     /// Add documentation.
-    pub merkleroot: String,
+    #[serde(rename = "merkleroot")]
+    pub merkle_root: String,
     /// Add documentation.
-    pub chainhistoryroot: String,
+    #[serde(rename = "chainhistoryroot")]
+    pub chain_history_root: String,
     /// Add documentation.
-    pub authdataroot: String,
+    #[serde(rename = "authdataroot")]
+    pub auth_data_root: String,
     /// Add documentation.
-    pub blockcommitmentshash: String,
+    #[serde(rename = "blockcommitmentshash")]
+    pub block_commitments_hash: String,
 }
 
 /// Documentation and fields to be added in #5454.
