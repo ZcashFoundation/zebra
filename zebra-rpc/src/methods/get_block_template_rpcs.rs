@@ -6,7 +6,14 @@ use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{Service, ServiceExt};
 
-use crate::methods::{GetBlockHash, MISSING_BLOCK_ERROR_CODE};
+pub(crate) mod types;
+
+use crate::methods::{
+    get_block_template_rpcs::types::{
+        coinbase::Coinbase, default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
+    },
+    GetBlockHash, MISSING_BLOCK_ERROR_CODE,
+};
 
 /// getblocktemplate RPC method signatures.
 #[rpc(server)]
@@ -185,82 +192,6 @@ where
         .boxed()
     }
 }
-/// Documentation to be added after we document all the individual fields.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct GetBlockTemplate {
-    /// Add documentation.
-    pub capabilities: Vec<String>,
-    /// Add documentation.
-    pub version: usize,
-    /// Add documentation.
-    #[serde(rename = "previousblockhash")]
-    pub previous_block_hash: String,
-    /// Add documentation.
-    #[serde(rename = "blockcommitmentshash")]
-    pub block_commitments_hash: String,
-    /// Add documentation.
-    #[serde(rename = "lightclientroothash")]
-    pub light_client_root_hash: String,
-    /// Add documentation.
-    #[serde(rename = "finalsaplingroothash")]
-    pub final_sapling_root_hash: String,
-    /// Add documentation.
-    #[serde(rename = "defaultroots")]
-    pub default_roots: DefaultRoots,
-    /// Add documentation.
-    pub transactions: Vec<Transaction>,
-    /// Add documentation.
-    #[serde(rename = "coinbasetxn")]
-    pub coinbase_txn: Coinbase,
-    /// Add documentation.
-    pub target: String,
-    /// Add documentation.
-    #[serde(rename = "mintime")]
-    pub min_time: u32,
-    /// Add documentation.
-    pub mutable: Vec<String>,
-    /// Add documentation.
-    #[serde(rename = "noncerange")]
-    pub nonce_range: String,
-    /// Add documentation.
-    #[serde(rename = "sigoplimit")]
-    pub sigop_limit: u32,
-    /// Add documentation.
-    #[serde(rename = "sizelimit")]
-    pub size_limit: u32,
-    /// Add documentation.
-    #[serde(rename = "curtime")]
-    pub cur_time: u32,
-    /// Add documentation.
-    pub bits: String,
-    /// Add documentation.
-    pub height: u32,
-}
-
-/// Documentation to be added in #5452 or #5455.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct DefaultRoots {
-    /// Add documentation.
-    #[serde(rename = "merkleroot")]
-    pub merkle_root: String,
-    /// Add documentation.
-    #[serde(rename = "chainhistoryroot")]
-    pub chain_history_root: String,
-    /// Add documentation.
-    #[serde(rename = "authdataroot")]
-    pub auth_data_root: String,
-    /// Add documentation.
-    #[serde(rename = "blockcommitmentshash")]
-    pub block_commitments_hash: String,
-}
-
-/// Documentation and fields to be added in #5454.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Transaction {}
-
-/// documentation and fields to be added in #5453.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Coinbase {}
 
 /// Given a potentially negative index, find the corresponding `Height`.
 ///

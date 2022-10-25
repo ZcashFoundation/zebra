@@ -647,7 +647,7 @@ async fn rpc_getblockcount() {
 
     // Init RPC
     let get_block_template_rpc =
-        get_block_template::GetBlockTemplateRpcImpl::new(latest_chain_tip.clone(), read_state);
+        get_block_template_rpcs::GetBlockTemplateRpcImpl::new(latest_chain_tip.clone(), read_state);
 
     // Get the tip height using RPC method `get_block_count`
     let get_block_count = get_block_template_rpc
@@ -686,7 +686,7 @@ async fn rpc_getblockcount_empty_state() {
     );
 
     let get_block_template_rpc =
-        get_block_template::GetBlockTemplateRpcImpl::new(latest_chain_tip.clone(), read_state);
+        get_block_template_rpcs::GetBlockTemplateRpcImpl::new(latest_chain_tip.clone(), read_state);
 
     // Get the tip height using RPC method `get_block_count
     let get_block_count = get_block_template_rpc.get_block_count();
@@ -730,7 +730,7 @@ async fn rpc_getblockhash() {
         latest_chain_tip.clone(),
     );
     let get_block_template_rpc =
-        get_block_template::GetBlockTemplateRpcImpl::new(latest_chain_tip, read_state);
+        get_block_template_rpcs::GetBlockTemplateRpcImpl::new(latest_chain_tip, read_state);
 
     // Query the hashes using positive indexes
     for (i, block) in blocks.iter().enumerate() {
@@ -784,7 +784,7 @@ async fn rpc_getblocktemplate() {
         latest_chain_tip.clone(),
     );
     let get_block_template_rpc =
-        get_block_template::GetBlockTemplateRpcImpl::new(latest_chain_tip, read_state);
+        get_block_template_rpcs::GetBlockTemplateRpcImpl::new(latest_chain_tip, read_state);
 
     let get_block_template = get_block_template_rpc
         .get_block_template()
@@ -810,7 +810,7 @@ async fn rpc_getblocktemplate() {
     assert!(get_block_template.transactions.is_empty());
     assert_eq!(
         get_block_template.coinbase_txn,
-        get_block_template::Coinbase {}
+        get_block_template_rpcs::types::coinbase::Coinbase {}
     );
     assert!(get_block_template.target.is_empty());
     assert_eq!(get_block_template.min_time, 0);
