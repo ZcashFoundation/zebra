@@ -975,29 +975,6 @@ impl Transaction {
             .map_err(ValueBalanceError::Transparent)
     }
 
-    /// Return the transparent value balance,
-    /// the change in the value of the transaction value pool.
-    ///
-    /// The sum of the UTXOs spent by transparent inputs in `tx_in` fields,
-    /// minus the sum of the newly created outputs in `tx_out` fields.
-    ///
-    /// Positive values are added to this transaction's value pool,
-    /// and removed from the transparent chain value pool.
-    /// Negative values are removed from the transparent chain value pool,
-    /// and added to this transaction.
-    ///
-    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
-    ///
-    /// `utxos` must contain the utxos of every input in the transaction,
-    /// including UTXOs created by earlier transactions in this block.
-    #[allow(dead_code)]
-    fn transparent_value_balance(
-        &self,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        self.transparent_value_balance_from_outputs(&outputs_from_utxos(utxos.clone()))
-    }
-
     /// Modify the transparent output values of this transaction, regardless of version.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn output_values_mut(&mut self) -> impl Iterator<Item = &mut Amount<NonNegative>> {

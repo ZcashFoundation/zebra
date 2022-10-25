@@ -1,7 +1,6 @@
 //! Sapling notes
 
 #![allow(clippy::unit_arg)]
-#![allow(dead_code)]
 
 mod ciphertexts;
 mod nullifiers;

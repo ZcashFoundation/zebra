@@ -1,7 +1,6 @@
 //! Sprout notes
 
 #![allow(clippy::unit_arg)]
-#![allow(dead_code)]
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;

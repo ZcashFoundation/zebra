@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-#[allow(dead_code, missing_docs)]
+#[allow(missing_docs)]
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum BlockError {
     #[error("transaction has wrong consensus branch id for block network upgrade")]

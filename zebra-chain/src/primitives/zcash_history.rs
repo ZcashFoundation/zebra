@@ -2,7 +2,6 @@
 //! librustzcash.
 
 // TODO: remove after this module gets to be used
-#![allow(dead_code)]
 #![allow(missing_docs)]
 
 mod tests;
@@ -210,26 +209,6 @@ impl<V: Version> Tree<V> {
         }
         Ok(new_nodes)
     }
-
-    /// Append multiple blocks to the tree.
-    fn append_leaf_iter(
-        &mut self,
-        vals: impl Iterator<Item = (Arc<Block>, sapling::tree::Root, orchard::tree::Root)>,
-    ) -> Result<Vec<Entry>, zcash_history::Error> {
-        let mut new_nodes = Vec::new();
-        for (block, sapling_root, orchard_root) in vals {
-            new_nodes.append(&mut self.append_leaf(block, &sapling_root, &orchard_root)?);
-        }
-        Ok(new_nodes)
-    }
-
-    /// Remove the last leaf (block) from the tree.
-    ///
-    /// Returns the number of nodes removed from the tree after the operation.
-    fn truncate_leaf(&mut self) -> Result<u32, zcash_history::Error> {
-        self.inner.truncate_leaf()
-    }
-
     /// Return the root hash of the tree, i.e. `hashChainHistoryRoot`.
     pub fn hash(&self) -> ChainHistoryMmrRootHash {
         // Both append_leaf() and truncate_leaf() leave a root node, so it should
