@@ -36,7 +36,7 @@ tracing-futures = "0.2.5"
 
 orchard = "0.2.0"
 
-zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "ca84123038b64f0f4aa5615f7cf224fbf7ece766", features = ["local-prover", "multicore", "download-params"] }
+zcash_proofs = { version = "0.8.0", features = ["local-prover", "multicore", "download-params"] }
 
 tower-fallback = { path = "../tower-fallback/" }
 tower-batch = { path = "../tower-batch/" }
