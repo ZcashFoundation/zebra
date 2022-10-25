@@ -2303,9 +2303,9 @@ dependencies = [
 
 [[package]]
 name = "inferno"
-version = "0.11.11"
+version = "0.11.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f3b820618e1737bba20ec69b6fcd6efb25cfed922669353817e2f24c86bdc10"
+checksum = "bd2fa5a9ad16dedcfabbc87f048ee6dd40d4944736fe4c5d362fb01df1209de1"
 dependencies = [
  "ahash",
  "atty",
