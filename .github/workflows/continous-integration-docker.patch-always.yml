@@ -24,3 +24,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
+
+  lightwalletd-transactions-test:
+    name: lightwalletd tip send
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
