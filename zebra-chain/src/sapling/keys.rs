@@ -9,7 +9,6 @@
 //! [3.1]: https://zips.z.cash/protocol/protocol.pdf#addressesandkeys
 #![allow(clippy::unit_arg)]
 #![allow(clippy::fallible_impl_from)]
-#![allow(dead_code)]
 
 #[cfg(test)]
 mod test_vectors;
@@ -63,25 +62,6 @@ fn prf_expand(sk: [u8; 32], t: &[u8]) -> [u8; 64] {
         .finalize();
 
     *hash.as_array()
-}
-
-/// Used to derive the outgoing cipher key _ock_ used to encrypt an Output ciphertext.
-///
-/// PRF^ock(ovk, cv, cm_u, ephemeralKey) := BLAKE2b-256(“Zcash_Derive_ock”, ovk || cv || cm_u || ephemeralKey)
-///
-/// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
-fn prf_ock(ovk: [u8; 32], cv: [u8; 32], cm_u: [u8; 32], ephemeral_key: [u8; 32]) -> [u8; 32] {
-    let hash = blake2b_simd::Params::new()
-        .hash_length(32)
-        .personal(b"Zcash_Derive_ock")
-        .to_state()
-        .update(&ovk)
-        .update(&cv)
-        .update(&cm_u)
-        .update(&ephemeral_key)
-        .finalize();
-
-    <[u8; 32]>::try_from(hash.as_bytes()).expect("32 byte array")
 }
 
 /// Invokes Blake2s-256 as _CRH^ivk_, to derive the IncomingViewingKey

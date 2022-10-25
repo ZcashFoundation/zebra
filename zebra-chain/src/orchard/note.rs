@@ -1,7 +1,6 @@
 //! Orchard notes
 
 #![allow(clippy::unit_arg)]
-#![allow(dead_code)]
 
 use group::{ff::PrimeField, GroupEncoding};
 use halo2::{arithmetic::FieldExt, pasta::pallas};
