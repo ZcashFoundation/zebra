@@ -809,7 +809,6 @@ async fn rpc_getblocktemplate() {
         get_block_template.coinbasetxn,
         get_block_template::Coinbase {}
     );
-    assert!(get_block_template.longpollid.is_empty());
     assert!(get_block_template.target.is_empty());
     assert_eq!(get_block_template.mintime, 0);
     assert!(get_block_template.mutable.is_empty());

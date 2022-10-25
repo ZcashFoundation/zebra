@@ -171,7 +171,6 @@ where
                 },
                 transactions: vec![],
                 coinbasetxn: Coinbase {},
-                longpollid: empty_string.clone(),
                 target: empty_string.clone(),
                 mintime: 0,
                 mutable: vec![],
@@ -207,8 +206,6 @@ pub struct GetBlockTemplate {
     pub transactions: Vec<Transaction>,
     /// Add documentation.
     pub coinbasetxn: Coinbase,
-    /// Add documentation.
-    pub longpollid: String,
     /// Add documentation.
     pub target: String,
     /// Add documentation.

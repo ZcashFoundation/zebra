@@ -18,7 +18,6 @@ expression: block_template
   },
   "transactions": [],
   "coinbasetxn": {},
-  "longpollid": "",
   "target": "",
   "mintime": 0,
   "mutable": [],
