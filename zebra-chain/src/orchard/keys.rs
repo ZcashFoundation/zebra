@@ -2,7 +2,6 @@
 //!
 //! <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
 #![allow(clippy::fallible_impl_from)]
-#![allow(dead_code)]
 
 #[cfg(test)]
 mod tests;
@@ -74,27 +73,6 @@ pub fn prf_expand(sk: [u8; 32], t: Vec<&[u8]>) -> [u8; 64] {
     }
 
     *state.finalize().as_array()
-}
-
-/// Used to derive the outgoing cipher key _ock_ used to encrypt an encrypted
-/// output note from an Action.
-///
-/// PRF^ock(ovk, cv, cm_x, ephemeralKey) := BLAKE2b-256(“Zcash_Orchardock”, ovk || cv || cm_x || ephemeralKey)
-///
-/// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
-/// <https://zips.z.cash/protocol/nu5.pdf#concretesym>
-fn prf_ock(ovk: [u8; 32], cv: [u8; 32], cm_x: [u8; 32], ephemeral_key: [u8; 32]) -> [u8; 32] {
-    let hash = blake2b_simd::Params::new()
-        .hash_length(32)
-        .personal(b"Zcash_Orchardock")
-        .to_state()
-        .update(&ovk)
-        .update(&cv)
-        .update(&cm_x)
-        .update(&ephemeral_key)
-        .finalize();
-
-    hash.as_bytes().try_into().expect("32 byte array")
 }
 
 /// Used to derive a diversified base point from a diversifier value.

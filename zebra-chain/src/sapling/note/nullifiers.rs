@@ -1,5 +1,4 @@
 #![allow(clippy::unit_arg)]
-#![allow(dead_code)]
 
 use super::super::{
     commitment::{pedersen_hashes::mixing_pedersen_hash, NoteCommitment},

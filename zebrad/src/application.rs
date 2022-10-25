@@ -386,6 +386,7 @@ impl Application for ZebradApp {
 
         // Ignore the configured tracing filter for short-lived utility commands
         let mut tracing_config = cfg_ref.tracing.clone();
+        let metrics_config = cfg_ref.metrics.clone();
         if is_server {
             // Override the default tracing filter based on the command-line verbosity.
             tracing_config.filter = tracing_config
@@ -426,7 +427,7 @@ impl Application for ZebradApp {
         if is_server {
             components.push(Box::new(TokioComponent::new()?));
             components.push(Box::new(TracingEndpoint::new(cfg_ref)?));
-            components.push(Box::new(MetricsEndpoint::new(cfg_ref)?));
+            components.push(Box::new(MetricsEndpoint::new(&metrics_config)?));
         }
 
         self.state.components.register(components)

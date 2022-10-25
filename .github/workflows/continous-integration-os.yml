@@ -167,6 +167,12 @@ jobs:
           command: test
           args: --verbose --workspace -- --nocapture
 
+      - name: Run tests with getblocktemplate-rpcs feature
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          command: test
+          args: --features getblocktemplate-rpcs --verbose --workspace -- --nocapture
+
       # Explicitly run any tests that are usually #[ignored]
 
       - name: Run zebrad large sync tests

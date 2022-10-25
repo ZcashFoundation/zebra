@@ -15,8 +15,8 @@ use color_eyre::eyre::Result;
 use tempfile::TempDir;
 
 use zebrad::{
-    components::{mempool, sync},
-    config::{SyncSection, TracingSection, ZebradConfig},
+    components::{mempool, sync, tracing},
+    config::ZebradConfig,
 };
 
 /// Returns a config with:
@@ -34,10 +34,10 @@ pub fn default_test_config() -> Result<ZebradConfig> {
         ..zebra_network::Config::default()
     };
 
-    let sync = SyncSection {
+    let sync = sync::Config {
         // Avoid downloading unnecessary blocks.
         checkpoint_verify_concurrency_limit: sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
-        ..SyncSection::default()
+        ..sync::Config::default()
     };
 
     let mempool = mempool::Config {
@@ -54,9 +54,9 @@ pub fn default_test_config() -> Result<ZebradConfig> {
         env::var("ZEBRA_FORCE_USE_COLOR"),
         Err(env::VarError::NotPresent)
     );
-    let tracing = TracingSection {
+    let tracing = tracing::Config {
         force_use_color,
-        ..TracingSection::default()
+        ..tracing::Config::default()
     };
 
     let config = ZebradConfig {

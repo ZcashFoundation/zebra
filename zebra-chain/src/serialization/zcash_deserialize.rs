@@ -41,7 +41,7 @@ impl<T: ZcashDeserialize + TrustedPreallocate> ZcashDeserialize for AtLeastOne<T
     }
 }
 
-/// Implement ZcashDeserialize for Vec<u8> directly instead of using the blanket Vec implementation
+/// Implement ZcashDeserialize for `Vec<u8>` directly instead of using the blanket Vec implementation
 ///
 /// This allows us to optimize the inner loop into a single call to `read_exact()`
 /// Note that we don't implement TrustedPreallocate for u8.
@@ -158,14 +158,14 @@ impl<R: io::Read> ZcashDeserializeInto for R {
     }
 }
 
-/// Blind preallocation of a Vec<T: TrustedPreallocate> is based on a bounded length. This is in contrast
-/// to blind preallocation of a generic Vec<T>, which is a DOS vector.
+/// Blind preallocation of a `Vec<T: TrustedPreallocate>` is based on a bounded length. This is in contrast
+/// to blind preallocation of a generic `Vec<T>`, which is a DOS vector.
 ///
-/// The max_allocation() function provides a loose upper bound on the size of the Vec<T: TrustedPreallocate>
+/// The max_allocation() function provides a loose upper bound on the size of the `Vec<T: TrustedPreallocate>`
 /// which can possibly be received from an honest peer. If this limit is too low, Zebra may reject valid messages.
 /// In the worst case, setting the lower bound too low could cause Zebra to fall out of consensus by rejecting all messages containing a valid block.
 pub trait TrustedPreallocate {
-    /// Provides a ***loose upper bound*** on the size of the Vec<T: TrustedPreallocate>
+    /// Provides a ***loose upper bound*** on the size of the `Vec<T: TrustedPreallocate>`
     /// which can possibly be received from an honest peer.
     fn max_allocation() -> u64;
 }
@@ -182,6 +182,6 @@ where
 /// The length of the longest valid `Vec<u8>` that can be received over the network
 ///
 /// It takes 5 bytes to encode a CompactSize representing any number netween 2^16 and (2^32 - 1)
-/// MAX_PROTOCOL_MESSAGE_LEN is ~2^21, so the largest Vec<u8> that can be received from an honest peer is
+/// MAX_PROTOCOL_MESSAGE_LEN is ~2^21, so the largest `Vec<u8>` that can be received from an honest peer is
 /// (MAX_PROTOCOL_MESSAGE_LEN - 5);
 pub(crate) const MAX_U8_ALLOCATION: usize = MAX_PROTOCOL_MESSAGE_LEN - 5;
