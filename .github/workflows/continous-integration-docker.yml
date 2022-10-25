@@ -500,7 +500,6 @@ jobs:
   #
   # Runs:
   # - after every PR is merged to `main`
-  # - on every PR update
   #
   # If the state version has changed, waits for the new cached states to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
@@ -509,7 +508,7 @@ jobs:
     name: lightwalletd tip send
     needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event_name == 'push' && github.ref_name == 'main' && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-send-transactions
