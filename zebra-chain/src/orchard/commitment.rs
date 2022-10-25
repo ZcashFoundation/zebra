@@ -1,6 +1,6 @@
 //! Note and value commitments.
 
-use std::{convert::TryFrom, fmt, io};
+use std::{fmt, io};
 
 use bitvec::prelude::*;
 use group::{ff::PrimeField, prime::PrimeCurveAffine, GroupEncoding};

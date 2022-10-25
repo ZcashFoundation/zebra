@@ -1,7 +1,5 @@
 //! Orchard notes
 
-#![allow(clippy::unit_arg)]
-
 use group::{ff::PrimeField, GroupEncoding};
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 use rand_core::{CryptoRng, RngCore};
@@ -10,13 +8,14 @@ use crate::amount::{Amount, NonNegative};
 
 use super::{address::Address, keys::prf_expand, sinsemilla::extract_p};
 
-#[cfg(any(test, feature = "proptest-impl"))]
-mod arbitrary;
 mod ciphertexts;
 mod nullifiers;
 
 pub use ciphertexts::{EncryptedNote, WrappedNoteKey};
 pub use nullifiers::Nullifier;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
 
 #[derive(Clone, Copy, Debug)]
 /// A random seed (rseed) used in the Orchard note creation.

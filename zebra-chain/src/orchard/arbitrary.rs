@@ -1,3 +1,7 @@
+//! Randomised data generation for Orchard types.
+
+use std::marker::PhantomData;
+
 use group::{ff::PrimeField, prime::PrimeCurveAffine};
 use halo2::{arithmetic::FieldExt, pasta::pallas};
 use proptest::{arbitrary::any, array, collection::vec, prelude::*};
@@ -7,11 +11,6 @@ use crate::primitives::redpallas::{Signature, SpendAuth, VerificationKey, Verifi
 use super::{
     keys, note, tree, Action, Address, AuthorizedAction, Diversifier, Flags, NoteCommitment,
     ValueCommitment,
-};
-
-use std::{
-    convert::{TryFrom, TryInto},
-    marker::PhantomData,
 };
 
 impl Arbitrary for Action {

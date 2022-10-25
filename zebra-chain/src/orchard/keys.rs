@@ -1,10 +1,6 @@
 //! Orchard key types.
 //!
 //! <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
-#![allow(clippy::fallible_impl_from)]
-
-#[cfg(test)]
-mod tests;
 
 use std::{fmt, io};
 
@@ -27,6 +23,9 @@ use crate::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
 };
+
+#[cfg(test)]
+mod tests;
 
 use super::sinsemilla::*;
 
@@ -60,6 +59,9 @@ fn prp_d(K: [u8; 32], d: [u8; 11]) -> [u8; 11] {
 // TODO: This is basically a duplicate of the one in our sapling module, its
 // definition in the draft Nu5 spec is incomplete so I'm putting it here in case
 // it changes.
+//
+// Review question: @dconnolly is this code still incomplete?
+// It's used to generate new note commitments from notes.
 pub fn prf_expand(sk: [u8; 32], t: Vec<&[u8]>) -> [u8; 64] {
     let mut state = blake2b_simd::Params::new()
         .hash_length(64)
@@ -278,6 +280,8 @@ impl Eq for SpendValidatingKey {}
 
 impl From<[u8; 32]> for SpendValidatingKey {
     fn from(bytes: [u8; 32]) -> Self {
+        // Review question: @dconnolly do we need to delete or fix this panic?
+        // It's used as part of the full viewing key, which is used to generate new spending keys.
         Self(redpallas::VerificationKey::try_from(bytes).unwrap())
     }
 }
@@ -579,7 +583,11 @@ impl PartialEq for FullViewingKey {
 #[derive(Copy, Clone)]
 pub struct IncomingViewingKey {
     dk: DiversifierKey,
+
     // TODO: refine type, so that IncomingViewingkey.ivk cannot be 0
+    //
+    // Review question: @dconnolly do we need to fix this bug before the audit?
+    // It's used to generate valid TransmissionKeys, is that code used in production?
     ivk: pallas::Scalar,
 }
 
@@ -675,11 +683,12 @@ impl TryFrom<FullViewingKey> for IncomingViewingKey {
     /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
     /// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
     #[allow(non_snake_case)]
-    #[allow(clippy::unwrap_in_result)]
     fn try_from(fvk: FullViewingKey) -> Result<Self, Self::Error> {
         let mut M: BitVec<u8, Lsb0> = BitVec::new();
 
         // I2LEBSP_l^Orchard_base(ak)︁
+        //
+        // Review question: @dconnolly do we need to fix this panic, or is it impossible?
         let ak_bytes =
             extract_p(pallas::Point::from_bytes(&fvk.spend_validating_key.into()).unwrap())
                 .to_repr();
@@ -986,6 +995,8 @@ impl From<[u8; 32]> for TransmissionKey {
     /// Attempts to interpret a byte representation of an affine point, failing
     /// if the element is not on the curve or non-canonical.
     fn from(bytes: [u8; 32]) -> Self {
+        // Review question: @dconnolly do we need to fix this panic, or is it impossible?
+        // It's used as part of the Orchard address.
         Self(pallas::Affine::from_bytes(&bytes).unwrap())
     }
 }
@@ -1017,64 +1028,10 @@ impl PartialEq<[u8; 32]> for TransmissionKey {
     }
 }
 
-/// An _outgoing cipher key_ for Orchard note encryption/decryption.
-///
-/// <https://zips.z.cash/protocol/nu5.pdf#saplingandorchardencrypt>
-// TODO: derive `OutgoingCipherKey`: https://github.com/ZcashFoundation/zebra/issues/2041
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub struct OutgoingCipherKey([u8; 32]);
+// TODO:
+// - implement and derive OutgoingCipherKey: #2041, #5476
+// - implement EphemeralPrivateKey: #2192, #5476
 
-impl fmt::Debug for OutgoingCipherKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("OutgoingCipherKey")
-            .field(&hex::encode(self.0))
-            .finish()
-    }
-}
-
-impl From<&OutgoingCipherKey> for [u8; 32] {
-    fn from(ock: &OutgoingCipherKey) -> [u8; 32] {
-        ock.0
-    }
-}
-
-// TODO: implement PrivateKey: #2192
-
-/// An _ephemeral private key_ for Orchard key agreement.
-///
-/// <https://zips.z.cash/protocol/nu5.pdf#concreteorchardkeyagreement>
-/// <https://zips.z.cash/protocol/nu5.pdf#saplingandorchardencrypt>
-// TODO: refine so that the inner `Scalar` != 0
-#[derive(Copy, Clone, Debug)]
-pub struct EphemeralPrivateKey(pub(crate) pallas::Scalar);
-
-impl ConstantTimeEq for EphemeralPrivateKey {
-    /// Check whether two `EphemeralPrivateKey`s are equal, runtime independent
-    /// of the value of the secret.
-    fn ct_eq(&self, other: &Self) -> Choice {
-        self.0.to_repr().ct_eq(&other.0.to_repr())
-    }
-}
-
-impl Eq for EphemeralPrivateKey {}
-
-impl From<EphemeralPrivateKey> for [u8; 32] {
-    fn from(esk: EphemeralPrivateKey) -> Self {
-        esk.0.to_repr()
-    }
-}
-
-impl PartialEq for EphemeralPrivateKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).unwrap_u8() == 1u8
-    }
-}
-
-impl PartialEq<[u8; 32]> for EphemeralPrivateKey {
-    fn eq(&self, other: &[u8; 32]) -> bool {
-        self.0.to_repr().ct_eq(other).unwrap_u8() == 1u8
-    }
-}
 /// An ephemeral public key for Orchard key agreement.
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concreteorchardkeyagreement>
