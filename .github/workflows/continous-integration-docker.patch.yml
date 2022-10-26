@@ -42,6 +42,12 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
+  test-all-getblocktemplate-rpcs:
+    name: Test all with getblocktemplate-rpcs feature
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
   test-fake-activation-heights:
     name: Test with fake activation heights
     runs-on: ubuntu-latest
