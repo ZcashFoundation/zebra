@@ -6,7 +6,14 @@ use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{Service, ServiceExt};
 
-use crate::methods::{GetBlockHash, MISSING_BLOCK_ERROR_CODE};
+pub(crate) mod types;
+
+use crate::methods::{
+    get_block_template_rpcs::types::{
+        coinbase::Coinbase, default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
+    },
+    GetBlockHash, MISSING_BLOCK_ERROR_CODE,
+};
 
 /// getblocktemplate RPC method signatures.
 #[rpc(server)]
@@ -35,8 +42,19 @@ pub trait GetBlockTemplateRpc {
     ///
     /// - If `index` is positive then index = block height.
     /// - If `index` is negative then -1 is the last known valid block.
+    /// - This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[rpc(name = "getblockhash")]
     fn get_block_hash(&self, index: i32) -> BoxFuture<Result<GetBlockHash>>;
+
+    /// Documentation to be filled as we go.
+    ///
+    /// zcashd reference: [`getblocktemplate`](https://zcash-rpc.github.io/getblocktemplate.html)
+    ///
+    /// # Notes
+    ///
+    /// - This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
+    #[rpc(name = "getblocktemplate")]
+    fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>>;
 }
 
 /// RPC method implementations.
@@ -136,6 +154,40 @@ where
                 }),
                 _ => unreachable!("unmatched response to a block request"),
             }
+        }
+        .boxed()
+    }
+
+    fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>> {
+        async move {
+            let empty_string = String::from("");
+
+            // Returns empty `GetBlockTemplate`
+            Ok(GetBlockTemplate {
+                capabilities: vec![],
+                version: 0,
+                previous_block_hash: empty_string.clone(),
+                block_commitments_hash: empty_string.clone(),
+                light_client_root_hash: empty_string.clone(),
+                final_sapling_root_hash: empty_string.clone(),
+                default_roots: DefaultRoots {
+                    merkle_root: empty_string.clone(),
+                    chain_history_root: empty_string.clone(),
+                    auth_data_root: empty_string.clone(),
+                    block_commitments_hash: empty_string.clone(),
+                },
+                transactions: vec![],
+                coinbase_txn: Coinbase {},
+                target: empty_string.clone(),
+                min_time: 0,
+                mutable: vec![],
+                nonce_range: empty_string.clone(),
+                sigop_limit: 0,
+                size_limit: 0,
+                cur_time: 0,
+                bits: empty_string,
+                height: 0,
+            })
         }
         .boxed()
     }
