@@ -508,7 +508,7 @@ jobs:
     name: lightwalletd tip send
     needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event_name == 'push' && github.ref_name == 'main' && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event_name == 'push' && github.ref_name == 'main' }}
     with:
       app_name: lightwalletd
       test_id: lwd-send-transactions
