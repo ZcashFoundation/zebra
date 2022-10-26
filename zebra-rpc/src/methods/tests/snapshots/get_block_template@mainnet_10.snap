@@ -1,0 +1,30 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+assertion_line: 308
+expression: block_template
+---
+{
+  "capabilities": [],
+  "version": 0,
+  "previousblockhash": "",
+  "blockcommitmentshash": "",
+  "lightclientroothash": "",
+  "finalsaplingroothash": "",
+  "defaultroots": {
+    "merkleroot": "",
+    "chainhistoryroot": "",
+    "authdataroot": "",
+    "blockcommitmentshash": ""
+  },
+  "transactions": [],
+  "coinbasetxn": {},
+  "target": "",
+  "mintime": 0,
+  "mutable": [],
+  "noncerange": "",
+  "sigoplimit": 0,
+  "sizelimit": 0,
+  "curtime": 0,
+  "bits": "",
+  "height": 0
+}
