@@ -25,6 +25,9 @@ use crate::{
     server::{compatibility::FixHttpRequestMiddleware, tracing_middleware::TracingMiddleware},
 };
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use crate::methods::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
+
 pub mod compatibility;
 mod tracing_middleware;
 
@@ -46,7 +49,7 @@ impl RpcServer {
         network: Network,
     ) -> (JoinHandle<()>, JoinHandle<()>)
     where
-        Version: ToString,
+        Version: ToString + Clone,
         Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
             + 'static,
         Mempool::Future: Send,
@@ -64,6 +67,19 @@ impl RpcServer {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
+            // Create handler compatible with V1 and V2 RPC protocols
+            let mut io: MetaIoHandler<(), _> =
+                MetaIoHandler::new(Compatibility::Both, TracingMiddleware);
+
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            {
+                // Initialize the getblocktemplate rpc methods
+                let get_block_template_rpc_impl =
+                    GetBlockTemplateRpcImpl::new(latest_chain_tip.clone(), state.clone());
+
+                io.extend_with(get_block_template_rpc_impl.to_delegate());
+            }
+
             // Initialize the rpc methods with the zebra version
             let (rpc_impl, rpc_tx_queue_task_handle) = RpcImpl::new(
                 app_version,
@@ -74,9 +90,6 @@ impl RpcServer {
                 latest_chain_tip,
             );
 
-            // Create handler compatible with V1 and V2 RPC protocols
-            let mut io: MetaIoHandler<(), _> =
-                MetaIoHandler::new(Compatibility::Both, TracingMiddleware);
             io.extend_with(rpc_impl.to_delegate());
 
             // If zero, automatically scale threads to the number of CPU cores

@@ -7,13 +7,14 @@ edition = "2021"
 
 [features]
 proptest-impl = ["proptest", "proptest-derive", "zebra-test", "zebra-chain/proptest-impl"]
+getblocktemplate-rpcs = []
 
 [dependencies]
 bincode = "1.3.3"
 chrono = { version = "0.4.22", default-features = false, features = ["clock", "std"] }
 dirs = "4.0.0"
 displaydoc = "0.2.3"
-futures = "0.3.24"
+futures = "0.3.25"
 hex = "0.4.3"
 indexmap = "1.9.1"
 itertools = "0.10.5"
@@ -23,14 +24,14 @@ mset = "0.1.0"
 regex = "1.6.0"
 rlimit = "0.8.3"
 rocksdb = { version = "0.19.0", default_features = false, features = ["lz4"] }
-serde = { version = "1.0.145", features = ["serde_derive"] }
+serde = { version = "1.0.147", features = ["serde_derive"] }
 tempfile = "3.3.0"
 thiserror = "1.0.37"
 
 rayon = "1.5.3"
 tokio = { version = "1.21.2", features = ["sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
-tracing = "0.1.36"
+tracing = "0.1.37"
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-test = { path = "../zebra-test/", optional = true }

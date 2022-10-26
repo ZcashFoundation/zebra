@@ -369,7 +369,7 @@ impl Service<Request> for Mempool {
                 // with the same mined IDs as recently mined transactions.
                 let mined_ids = block.transaction_hashes.iter().cloned().collect();
                 tx_downloads.cancel(&mined_ids);
-                storage.remove_same_effects(&mined_ids);
+                storage.reject_and_remove_same_effects(&mined_ids, block.transactions);
                 storage.clear_tip_rejections();
             }
 

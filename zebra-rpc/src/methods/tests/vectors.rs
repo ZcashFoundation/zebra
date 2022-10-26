@@ -233,7 +233,7 @@ async fn rpc_getbestblockhash() {
     // Get the tip hash using RPC method `get_best_block_hash`
     let get_best_block_hash = rpc
         .get_best_block_hash()
-        .expect("We should have a GetBestBlockHash struct");
+        .expect("We should have a GetBlockHash struct");
     let response_hash = get_best_block_hash.0;
 
     // Check if response is equal to block 10 hash.
@@ -609,6 +609,218 @@ async fn rpc_getaddressutxos_response() {
 
     // there are 10 outputs for provided address
     assert_eq!(response.len(), 10);
+
+    mempool.expect_no_requests().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn rpc_getblockcount() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // Get the height of the block at the tip using hardcoded block tip bytes.
+    // We want to test the RPC response is equal to this hash
+    let tip_block = blocks.last().unwrap();
+    let tip_block_height = tip_block.coinbase_height().unwrap();
+
+    // Get a mempool handle
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create a populated state service, the tip will be in `NUMBER_OF_BLOCKS`.
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    // Init RPC
+    let (_rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
+        Mainnet,
+        false,
+        Buffer::new(mempool.clone(), 1),
+        read_state.clone(),
+        latest_chain_tip.clone(),
+    );
+
+    // Init RPC
+    let get_block_template_rpc =
+        get_block_template_rpcs::GetBlockTemplateRpcImpl::new(latest_chain_tip.clone(), read_state);
+
+    // Get the tip height using RPC method `get_block_count`
+    let get_block_count = get_block_template_rpc
+        .get_block_count()
+        .expect("We should have a number");
+
+    // Check if response is equal to block 10 hash.
+    assert_eq!(get_block_count, tip_block_height.0);
+
+    mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblockcount_empty_state() {
+    let _init_guard = zebra_test::init();
+
+    // Get a mempool handle
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create an empty state
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init_test_services(Mainnet);
+
+    // Init RPC
+    let (_rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
+        Mainnet,
+        false,
+        Buffer::new(mempool.clone(), 1),
+        read_state.clone(),
+        latest_chain_tip.clone(),
+    );
+
+    let get_block_template_rpc =
+        get_block_template_rpcs::GetBlockTemplateRpcImpl::new(latest_chain_tip.clone(), read_state);
+
+    // Get the tip height using RPC method `get_block_count
+    let get_block_count = get_block_template_rpc.get_block_count();
+
+    // state an empty so we should get an error
+    assert!(get_block_count.is_err());
+
+    // Check the error we got is the correct one
+    assert_eq!(get_block_count.err().unwrap().message, "No blocks in state");
+
+    mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(matches!(rpc_tx_queue_task_result, None));
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblockhash() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    // Init RPCs
+    let _rpc = RpcImpl::new(
+        "RPC test",
+        Mainnet,
+        false,
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        latest_chain_tip.clone(),
+    );
+    let get_block_template_rpc =
+        get_block_template_rpcs::GetBlockTemplateRpcImpl::new(latest_chain_tip, read_state);
+
+    // Query the hashes using positive indexes
+    for (i, block) in blocks.iter().enumerate() {
+        let get_block_hash = get_block_template_rpc
+            .get_block_hash(i.try_into().expect("usize always fits in i32"))
+            .await
+            .expect("We should have a GetBlockHash struct");
+
+        assert_eq!(get_block_hash, GetBlockHash(block.clone().hash()));
+    }
+
+    // Query the hashes using negative indexes
+    for i in (-10..=-1).rev() {
+        let get_block_hash = get_block_template_rpc
+            .get_block_hash(i)
+            .await
+            .expect("We should have a GetBlockHash struct");
+
+        assert_eq!(
+            get_block_hash,
+            GetBlockHash(blocks[(10 + (i + 1)) as usize].hash())
+        );
+    }
+
+    mempool.expect_no_requests().await;
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblocktemplate() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    // Init RPCs
+    let _rpc = RpcImpl::new(
+        "RPC test",
+        Mainnet,
+        false,
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        latest_chain_tip.clone(),
+    );
+    let get_block_template_rpc =
+        get_block_template_rpcs::GetBlockTemplateRpcImpl::new(latest_chain_tip, read_state);
+
+    let get_block_template = get_block_template_rpc
+        .get_block_template()
+        .await
+        .expect("We should have a GetBlockTemplate struct");
+
+    assert!(get_block_template.capabilities.is_empty());
+    assert_eq!(get_block_template.version, 0);
+    assert!(get_block_template.previous_block_hash.is_empty());
+    assert!(get_block_template.block_commitments_hash.is_empty());
+    assert!(get_block_template.light_client_root_hash.is_empty());
+    assert!(get_block_template.final_sapling_root_hash.is_empty());
+    assert!(get_block_template.default_roots.merkle_root.is_empty());
+    assert!(get_block_template
+        .default_roots
+        .chain_history_root
+        .is_empty());
+    assert!(get_block_template.default_roots.auth_data_root.is_empty());
+    assert!(get_block_template
+        .default_roots
+        .block_commitments_hash
+        .is_empty());
+    assert!(get_block_template.transactions.is_empty());
+    assert_eq!(
+        get_block_template.coinbase_txn,
+        get_block_template_rpcs::types::coinbase::Coinbase {}
+    );
+    assert!(get_block_template.target.is_empty());
+    assert_eq!(get_block_template.min_time, 0);
+    assert!(get_block_template.mutable.is_empty());
+    assert!(get_block_template.nonce_range.is_empty());
+    assert_eq!(get_block_template.sigop_limit, 0);
+    assert_eq!(get_block_template.size_limit, 0);
+    assert_eq!(get_block_template.cur_time, 0);
+    assert!(get_block_template.bits.is_empty());
+    assert_eq!(get_block_template.height, 0);
 
     mempool.expect_no_requests().await;
 }

@@ -1,6 +1,7 @@
 ![Zebra logotype](https://zfnd.org/wp-content/uploads/2022/03/zebra-logotype.png)
 
 ---
+
 [![CI Docker](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml) [![CI OSes](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-os.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-os.yml) [![Continuous Delivery](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-delivery.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-delivery.yml) [![Coverage](https://github.com/ZcashFoundation/zebra/actions/workflows/coverage.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/coverage.yml) [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra) [![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/docs.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/docs.yml) [![Build lightwalletd](https://github.com/ZcashFoundation/zebra/actions/workflows/zcash-lightwalletd.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/zcash-lightwalletd.yml) [![Build Zcash Params](https://github.com/ZcashFoundation/zebra/actions/workflows/zcash-params.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/zcash-params.yml)
 
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
@@ -65,9 +66,6 @@ and Zebra implements all the features required to reach Zcash network consensus.
 Zebra also supports the [`lightwalletd` backend JSON-RPCs](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd).
 
 Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
-But it may not validate any:
-- Undocumented rules derived from Bitcoin
-- Undocumented network protocol requirements
 
 ## Getting Started
 
@@ -208,7 +206,7 @@ See our [roadmap](#future-work) for details.
 
 ### Disk Usage
 
-Zebra uses around 100 GB of space for cached mainnet data, and 10 GB of space for cached testnet data.
+Zebra uses around 200 GB of space for cached mainnet data, and 10 GB of space for cached testnet data.
 We expect disk usage to grow over time, so we recommend reserving at least 300 GB for mainnet nodes.
 
 Zebra's database cleans up outdated data periodically, and when Zebra is shut down and restarted.
@@ -226,7 +224,15 @@ So Zebra's state should always be valid, unless your OS or disk hardware is corr
 
 There are a few bugs in Zebra that we're still working on fixing:
 
+- Zebra falsely estimates that it's close to the tip when the network connection goes down [#4649](https://github.com/ZcashFoundation/zebra/issues/4649)
+
+  - One of the consequences of this issue is that Zebra might add unwanted load
+    to other peers when the connection goes back up. This load will last only
+    for a short period of time because Zebra will quickly find out that it's
+    still not close to the tip.
+
 - Zebra requires Rust 1.63, due to [a compiler performance regression in Rust 1.64](https://github.com/ZcashFoundation/zebra/issues/5091)
+  - If Zebra fails downloading the Zcash parameters, use [the Zcash parameters download script](https://github.com/zcash/zcash/blob/master/zcutil/fetch-params.sh) instead. This script might be needed on macOS, even with Rust 1.63.
 - No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801)
   - We used to test with Windows Server 2019, but not anymore; see issue for details
 

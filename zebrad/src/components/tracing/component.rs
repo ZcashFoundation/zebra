@@ -12,7 +12,7 @@ use tracing_subscriber::{
 
 use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
 
-use crate::{application::app_version, config::TracingSection};
+use crate::{application::app_version, components::tracing::Config};
 
 #[cfg(feature = "flamegraph")]
 use super::flame;
@@ -43,7 +43,7 @@ pub struct Tracing {
 
 impl Tracing {
     /// Try to create a new [`Tracing`] component with the given `filter`.
-    pub fn new(config: TracingSection) -> Result<Self, FrameworkError> {
+    pub fn new(config: Config) -> Result<Self, FrameworkError> {
         let filter = config.filter.unwrap_or_default();
         let flame_root = &config.flamegraph;
 

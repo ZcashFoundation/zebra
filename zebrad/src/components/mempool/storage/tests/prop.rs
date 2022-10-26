@@ -364,10 +364,14 @@ proptest! {
 
         // Insert all input transactions, and keep track of the IDs of the one that were actually
         // inserted.
-        let inserted_transactions: HashSet<_> = input.transactions().filter_map(|transaction| {
-            let id = transaction.transaction.id;
+        let inserted_transactions: HashSet<_> = input
+            .transactions()
+            .filter_map(|transaction| {
+                let id = transaction.transaction.id;
 
-            storage.insert(transaction.clone()).ok().map(|_| id)}).collect();
+                storage.insert(transaction.clone()).ok().map(|_| id)
+            })
+            .collect();
 
         // Check that the inserted transactions are still there.
         for transaction_id in &inserted_transactions {
@@ -377,7 +381,16 @@ proptest! {
         // Remove some transactions.
         match &input {
             RemoveExact { wtx_ids_to_remove, .. } => storage.remove_exact(wtx_ids_to_remove),
-            RemoveSameEffects { mined_ids_to_remove, .. } => storage.remove_same_effects(mined_ids_to_remove),
+            RejectAndRemoveSameEffects { mined_ids_to_remove, .. } => {
+                let num_removals = storage.reject_and_remove_same_effects(mined_ids_to_remove, vec![]);
+                    for &removed_transaction_id in mined_ids_to_remove.iter() {
+                        prop_assert_eq!(
+                            storage.rejection_error(&UnminedTxId::Legacy(removed_transaction_id)),
+                            Some(SameEffectsChainRejectionError::Mined.into())
+                        );
+                    }
+                num_removals
+            },
         };
 
         // Check that the removed transactions are not in the storage.
@@ -911,7 +924,7 @@ pub enum MultipleTransactionRemovalTestInput {
         wtx_ids_to_remove: SummaryDebug<HashSet<UnminedTxId>>,
     },
 
-    RemoveSameEffects {
+    RejectAndRemoveSameEffects {
         transactions: SummaryDebug<Vec<VerifiedUnminedTx>>,
         mined_ids_to_remove: SummaryDebug<HashSet<transaction::Hash>>,
     },
@@ -947,7 +960,7 @@ impl Arbitrary for MultipleTransactionRemovalTestInput {
                     .collect();
 
                 prop_oneof![
-                    Just(RemoveSameEffects {
+                    Just(RejectAndRemoveSameEffects {
                         transactions: transactions.clone().into(),
                         mined_ids_to_remove: mined_ids_to_remove.into(),
                     }),
@@ -967,7 +980,7 @@ impl MultipleTransactionRemovalTestInput {
     /// Iterate over all transactions generated as input.
     pub fn transactions(&self) -> impl Iterator<Item = &VerifiedUnminedTx> + '_ {
         match self {
-            RemoveExact { transactions, .. } | RemoveSameEffects { transactions, .. } => {
+            RemoveExact { transactions, .. } | RejectAndRemoveSameEffects { transactions, .. } => {
                 transactions.iter()
             }
         }
@@ -980,7 +993,7 @@ impl MultipleTransactionRemovalTestInput {
                 wtx_ids_to_remove, ..
             } => wtx_ids_to_remove.0.clone(),
 
-            RemoveSameEffects {
+            RejectAndRemoveSameEffects {
                 transactions,
                 mined_ids_to_remove,
             } => transactions

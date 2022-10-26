@@ -4,14 +4,13 @@ This document contains the practices that we follow to provide you with a leadin
 We strive to ensure that future changes are always introduced in a predictable way.
 We want everyone who depends on Zebra to know when and how new features are added, and to be well-prepared when obsolete ones are removed.
 
+Before reading, you should understand [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and how a [Trunk-based development](https://www.atlassian.com/continuous-delivery/continuous-integration/trunk-based-development) works
+
 <a id="versioning"></a>
 
 ## Zebra versioning
 
-Zebra version numbers indicate the level of changes that are introduced by the release.
-This use of [semantic versioning](https://semver.org/ "Semantic Versioning Specification") helps you understand the potential impact of updating to a new version.
-
-Zebra version numbers have three parts: `major.minor.patch`.
+Zebra version numbers show the impact of the changes in a release. They are composed of three parts: `major.minor.patch`.
 For example, version `3.1.11` indicates major version 3, minor version 1, and patch level 11.
 
 The version number is incremented based on the level of change included in the release.
@@ -34,10 +33,8 @@ The pre-release version is denoted by appending a hyphen and a series of dot sep
 
 ### Supported Releases
 
-Older Zebra versions are always supported until:
-* the next Zebra major, minor or patch release.
-
-Initially, we can only guarantee support for the latest Zebra release. We might be able to provide support for earlier releases, or we might ask you to upgrade to the latest release.
+Older Zebra versions are always supported until the next Zebra major, minor or patch release. Initially, we can only guarantee support for the latest Zebra release.
+We might be able to provide support for earlier releases, or we might ask you to upgrade to the latest release.
 
 Our support periods will be extended as we gain experience with supporting Zebra releases.
 
@@ -50,8 +47,7 @@ Older Zebra versions that only support previous network upgrades will never be s
 You can update to any version of Zebra, provided that the following criteria are met:
 
 * The version you want to update *to* is supported.
-* The version you want to update *from* is within one major version of the version you want to
-    upgrade to.
+* The version you want to update *from* is within one major version of the version you want to upgrade to.
 
 See [Keeping Up-to-Date](guide/updating "Updating your projects") for more information about updating your Zebra projects to the most recent version.
 
@@ -63,8 +59,24 @@ We let you preview what's coming by providing Release Candidate \(`rc`\) pre-rel
 
 | Pre-release type  | Details |
 |:---               |:---     |
-| Beta              | The release that is under active development and testing. The beta release is indicated by a release tag appended with the `-beta` identifier, such as  `8.1.0-beta.0`.      |
+| Beta              | The release that is under active development and testing. The beta release is indicated by a release tag appended with the `-beta` identifier, such as  `8.1.0-beta.0`. |
 | Release candidate | A release for final testing of new features. A release candidate is indicated by a release tag appended with the `-rc` identifier, such as version `8.1.0-rc.0`. |
+
+### Distribution tags
+
+Zebras's tagging relates directly to versions published on Docker. We will reference these [Docker Hub distribution tags](https://hub.docker.com/r/zfnd/zebra/tags) throughout:
+
+| Tag    | Description |
+|:---    |:---         |
+| latest | The most recent stable version. |
+| beta   | The most recent pre-release version of Zebra for testing. May not always exist. |
+| rc     | The most recent release candidate of Zebra, meant to become a stable version. May not always exist. |
+
+### Feature Flags
+
+To keep the `main` branch in a releasable state, experimental features must be gated behind a [Rust feature flag](https://doc.rust-lang.org/cargo/reference/features.html).
+Breaking changes should also be gated behind a feature flag, unless the team decides they are urgent.
+(For example, security fixes which also break backwards compatibility.)
 
 <a id="frequency"></a>
 
@@ -109,7 +121,7 @@ To help ensure that you have sufficient time and a clear path to update, this is
 |:---                |:---     |
 | Announcement       | We announce deprecated RPCs and features in the [change log](https://github.com/ZcashFoundation/zebra/blob/main/CHANGELOG.md "Zebra change log"). When we announce a deprecation, we also announce a recommended update path. |
 | Deprecation period | When a RPC or a feature is deprecated, it is still present until the next major release. A deprecation can be announced in any release, but the removal of a deprecated RPC or feature happens only in major release. Until a deprecated RPC or feature is removed, it is maintained according to the Tier 1 support policy, meaning that only critical and security issues are fixed. |
-| Rust APIs | The Rust APIs of the Zebra crates are currently unstable and unsupported. Use the `zebrad` commands or JSON-RPCs to interact with Zebra. |
+| Rust APIs          | The Rust APIs of the Zebra crates are currently unstable and unsupported. Use the `zebrad` commands or JSON-RPCs to interact with Zebra. |
 
 <a id="process"></a>
 
