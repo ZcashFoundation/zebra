@@ -521,6 +521,14 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
+    # We want to prevent multiple lightwalletd send transaction tests running at the same time,
+    # but we don't want to cancel running tests on `main` if a new PR gets merged,
+    # because we might never get a finished test.
+    #
+    # See the concurrency comment on the zebrad test-full-sync job for details.
+    concurrency: 
+      group: ${{ github.workflow }}−${{ github.ref }}-lightwalletd-transactions-test
+      cancel-in-progress: false
 
   # Test that Zebra can handle gRPC wallet calls, using a cached Zebra tip state
   #
