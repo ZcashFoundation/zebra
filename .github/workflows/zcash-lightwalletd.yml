@@ -1,5 +1,14 @@
 name: zcash-lightwalletd
 
+# Ensures that only one workflow task will run at a time. Previous builds, if
+# already in process, will get cancelled. Only the latest commit will be allowed
+# to run, cancelling any workflows in between
+#
+# Cancelling old jobs is the most efficient approach, because the workflow is quick.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
 
