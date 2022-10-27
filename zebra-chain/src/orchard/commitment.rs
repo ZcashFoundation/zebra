@@ -258,20 +258,6 @@ mod tests {
 
     use super::*;
 
-    // #[test]
-    // fn sinsemilla_hash_to_point_test_vectors() {
-    //     let _init_guard = zebra_test::init();
-
-    //     const D: [u8; 8] = *b"Zcash_PH";
-
-    //     for test_vector in test_vectors::TEST_VECTORS.iter() {
-    //         let result =
-    //             pallas::Affine::from(sinsemilla_hash_to_point(D, &test_vector.input_bits.clone()));
-
-    //         assert_eq!(result, test_vector.output_point);
-    //     }
-    // }
-
     #[test]
     fn add() {
         let _init_guard = zebra_test::init();
