@@ -6,6 +6,7 @@ use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{Service, ServiceExt};
 
+pub mod config;
 pub(crate) mod types;
 
 use crate::methods::{
