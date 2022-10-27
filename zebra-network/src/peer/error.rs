@@ -135,7 +135,7 @@ impl PeerError {
             PeerError::ConnectionSendTimeout => "ConnectionSendTimeout".into(),
             PeerError::ConnectionReceiveTimeout => "ConnectionReceiveTimeout".into(),
             // TODO: add error kinds or summaries to `SerializationError`
-            PeerError::Serialization(inner) => format!("Serialization({})", inner).into(),
+            PeerError::Serialization(inner) => format!("Serialization({inner})").into(),
             PeerError::DuplicateHandshake => "DuplicateHandshake".into(),
             PeerError::Overloaded => "Overloaded".into(),
             PeerError::NotFoundResponse(_) => "NotFoundResponse".into(),

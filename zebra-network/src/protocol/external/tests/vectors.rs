@@ -49,7 +49,7 @@ fn parses_msg_addr_v1_ip() {
     {
         let deserialized: Message = codec
             .read_addr(&mut addr_v1_bytes.as_slice())
-            .unwrap_or_else(|_| panic!("failed to deserialize AddrV1 case {}", case_idx));
+            .unwrap_or_else(|_| panic!("failed to deserialize AddrV1 case {case_idx}"));
 
         if let Message::Addr(addrs) = deserialized {
             assert!(
@@ -114,7 +114,7 @@ fn parses_msg_addr_v1_empty() {
     {
         let deserialized: Message = codec
             .read_addr(&mut addr_v1_bytes.as_slice())
-            .unwrap_or_else(|_| panic!("failed to deserialize AddrV1 case {}", case_idx));
+            .unwrap_or_else(|_| panic!("failed to deserialize AddrV1 case {case_idx}"));
 
         if let Message::Addr(addrs) = deserialized {
             assert!(
@@ -148,7 +148,7 @@ fn parses_msg_addr_v2_ip() {
     {
         let deserialized: Message = codec
             .read_addrv2(&mut addr_v2_bytes.as_slice())
-            .unwrap_or_else(|_| panic!("failed to deserialize AddrV2 case {}", case_idx));
+            .unwrap_or_else(|_| panic!("failed to deserialize AddrV2 case {case_idx}"));
 
         if let Message::Addr(addrs) = deserialized {
             assert!(
@@ -238,7 +238,7 @@ fn parses_msg_addr_v2_empty() {
     {
         let deserialized: Message = codec
             .read_addrv2(&mut addr_v2_bytes.as_slice())
-            .unwrap_or_else(|_| panic!("failed to deserialize AddrV2 case {}", case_idx));
+            .unwrap_or_else(|_| panic!("failed to deserialize AddrV2 case {case_idx}"));
 
         if let Message::Addr(addrs) = deserialized {
             assert!(

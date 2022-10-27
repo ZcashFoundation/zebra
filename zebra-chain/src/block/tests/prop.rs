@@ -40,7 +40,7 @@ proptest! {
     fn block_hash_display_fromstr_roundtrip(hash in any::<Hash>()) {
         let _init_guard = zebra_test::init();
 
-        let display = format!("{}", hash);
+        let display = format!("{hash}");
         let parsed = display.parse::<Hash>().expect("hash should parse");
         prop_assert_eq!(hash, parsed);
     }

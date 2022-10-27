@@ -232,7 +232,7 @@ pub async fn show_block_chain_progress(
                 );
             }
         } else {
-            let sync_percent = format!("{:.frac$} %", 0.0f64, frac = SYNC_PERCENT_FRAC_DIGITS,);
+            let sync_percent = format!("{:.SYNC_PERCENT_FRAC_DIGITS$} %", 0.0f64,);
 
             if is_syncer_stopped {
                 // We've stopped syncing blocks,

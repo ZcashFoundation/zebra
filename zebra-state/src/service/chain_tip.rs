@@ -259,8 +259,8 @@ impl ChainTipSender {
         let height = tip.as_ref().map(|block| block.height);
         let hash = tip.as_ref().map(|block| block.hash);
 
-        span.record(format!("{}_height", prefix).as_str(), &field::debug(height));
-        span.record(format!("{}_hash", prefix).as_str(), &field::debug(hash));
+        span.record(format!("{prefix}_height").as_str(), &field::debug(height));
+        span.record(format!("{prefix}_hash").as_str(), &field::debug(hash));
     }
 }
 

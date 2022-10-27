@@ -114,18 +114,17 @@ where
                         Err(eyre!(
                             "response doesn't match transcript's expected response"
                         ))
-                        .with_section(|| format!("{:?}", expected_rsp).header("Expected Response:"))
-                        .with_section(|| format!("{:?}", rsp).header("Found Response:"))?;
+                        .with_section(|| format!("{expected_rsp:?}").header("Expected Response:"))
+                        .with_section(|| format!("{rsp:?}").header("Found Response:"))?;
                     }
                 }
                 (Ok(rsp), Err(error_checker)) => {
                     let error = Err(eyre!("received a response when an error was expected"))
-                        .with_section(|| format!("{:?}", rsp).header("Found Response:"));
+                        .with_section(|| format!("{rsp:?}").header("Found Response:"));
 
                     let error = match std::panic::catch_unwind(|| error_checker.mock()) {
-                        Ok(expected_err) => error.with_section(|| {
-                            format!("{:?}", expected_err).header("Expected Error:")
-                        }),
+                        Ok(expected_err) => error
+                            .with_section(|| format!("{expected_err:?}").header("Expected Error:")),
                         Err(pi) => {
                             let payload = pi
                                 .downcast_ref::<String>()
@@ -144,9 +143,7 @@ where
                 (Err(e), Ok(expected_rsp)) => {
                     Err(eyre!("received an error when a response was expected"))
                         .with_error(|| ErrorCheckerError(e.into()))
-                        .with_section(|| {
-                            format!("{:?}", expected_rsp).header("Expected Response:")
-                        })?
+                        .with_section(|| format!("{expected_rsp:?}").header("Expected Response:"))?
                 }
                 (Err(e), Err(error_checker)) => {
                     error_checker.check(e.into())?;
@@ -182,9 +179,9 @@ where
                         ready(
                             Err(eyre!("received unexpected request"))
                                 .with_section(|| {
-                                    format!("{:?}", expected_request).header("Expected Request:")
+                                    format!("{expected_request:?}").header("Expected Request:")
                                 })
-                                .with_section(|| format!("{:?}", request).header("Found Request:")),
+                                .with_section(|| format!("{request:?}").header("Found Request:")),
                         )
                     }
                 }
