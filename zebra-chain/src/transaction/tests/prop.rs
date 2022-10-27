@@ -38,7 +38,7 @@ proptest! {
     fn transaction_hash_struct_display_roundtrip(hash in any::<Hash>()) {
         let _init_guard = zebra_test::init();
 
-        let display = format!("{}", hash);
+        let display = format!("{hash}");
         let parsed = display.parse::<Hash>().expect("hash should parse");
         prop_assert_eq!(hash, parsed);
     }
@@ -48,7 +48,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         if let Ok(parsed) = hash.parse::<Hash>() {
-            let display = format!("{}", parsed);
+            let display = format!("{parsed}");
             prop_assert_eq!(hash, display);
         }
     }
@@ -66,7 +66,7 @@ proptest! {
     fn transaction_auth_digest_struct_display_roundtrip(auth_digest in any::<AuthDigest>()) {
         let _init_guard = zebra_test::init();
 
-        let display = format!("{}", auth_digest);
+        let display = format!("{auth_digest}");
         let parsed = display.parse::<AuthDigest>().expect("auth digest should parse");
         prop_assert_eq!(auth_digest, parsed);
     }
@@ -76,7 +76,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         if let Ok(parsed) = auth_digest.parse::<AuthDigest>() {
-            let display = format!("{}", parsed);
+            let display = format!("{parsed}");
             prop_assert_eq!(auth_digest, display);
         }
     }
@@ -85,7 +85,7 @@ proptest! {
     fn transaction_wtx_id_struct_display_roundtrip(wtx_id in any::<WtxId>()) {
         let _init_guard = zebra_test::init();
 
-        let display = format!("{}", wtx_id);
+        let display = format!("{wtx_id}");
         let parsed = display.parse::<WtxId>().expect("wide transaction ID should parse");
         prop_assert_eq!(wtx_id, parsed);
     }
@@ -95,7 +95,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         if let Ok(parsed) = wtx_id.parse::<WtxId>() {
-            let display = format!("{}", parsed);
+            let display = format!("{parsed}");
             prop_assert_eq!(wtx_id, display);
         }
     }

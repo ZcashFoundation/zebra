@@ -270,7 +270,7 @@ mod tests {
 
         let t_addr = pub_key.to_address(Network::Mainnet);
 
-        assert_eq!(format!("{}", t_addr), "t1bmMa1wJDFdbc2TiURQP5BbBz6jHjUBuHq");
+        assert_eq!(format!("{t_addr}"), "t1bmMa1wJDFdbc2TiURQP5BbBz6jHjUBuHq");
     }
 
     #[test]
@@ -285,7 +285,7 @@ mod tests {
 
         let t_addr = pub_key.to_address(Network::Testnet);
 
-        assert_eq!(format!("{}", t_addr), "tmTc6trRhbv96kGfA99i7vrFwb5p7BVFwc3");
+        assert_eq!(format!("{t_addr}"), "tmTc6trRhbv96kGfA99i7vrFwb5p7BVFwc3");
     }
 
     #[test]
@@ -296,7 +296,7 @@ mod tests {
 
         let t_addr = script.to_address(Network::Mainnet);
 
-        assert_eq!(format!("{}", t_addr), "t3Y5pHwfgHbS6pDjj1HLuMFxhFFip1fcJ6g");
+        assert_eq!(format!("{t_addr}"), "t3Y5pHwfgHbS6pDjj1HLuMFxhFFip1fcJ6g");
     }
 
     #[test]
@@ -307,7 +307,7 @@ mod tests {
 
         let t_addr = script.to_address(Network::Testnet);
 
-        assert_eq!(format!("{}", t_addr), "t2L51LcmpA43UMvKTw2Lwtt9LMjwyqU2V1P");
+        assert_eq!(format!("{t_addr}"), "t2L51LcmpA43UMvKTw2Lwtt9LMjwyqU2V1P");
     }
 
     #[test]
@@ -316,7 +316,7 @@ mod tests {
 
         let t_addr: Address = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".parse().unwrap();
 
-        assert_eq!(format!("{}", t_addr), "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd");
+        assert_eq!(format!("{t_addr}"), "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd");
     }
 
     #[test]
@@ -326,7 +326,7 @@ mod tests {
         let t_addr: Address = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".parse().unwrap();
 
         assert_eq!(
-            format!("{:?}", t_addr),
+            format!("{t_addr:?}"),
             "TransparentAddress { network: Mainnet, script_hash: \"7d46a730d31f97b1930d3368a967c309bd4d136a\" }"
         );
     }

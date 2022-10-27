@@ -185,7 +185,7 @@ where
 
         if !config.state.ephemeral {
             let cache_dir = dir.join("state");
-            fs::create_dir_all(&cache_dir)?;
+            fs::create_dir_all(cache_dir)?;
         } else {
             fs::create_dir_all(dir)?;
         }

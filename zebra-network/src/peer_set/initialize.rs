@@ -483,10 +483,10 @@ pub(crate) async fn open_listener(config: &Config) -> (TcpListener, SocketAddr) 
     let listener = match listener_result {
         Ok(l) => l,
         Err(e) => panic!(
-            "Opening Zcash network protocol listener {:?} failed: {:?}. \
+            "Opening Zcash network protocol listener {:?} failed: {e:?}. \
              Hint: Check if another zebrad or zcashd process is running. \
              Try changing the network listen_addr in the Zebra config.",
-            config.listen_addr, e,
+            config.listen_addr,
         ),
     };
 
@@ -530,7 +530,7 @@ where
             next_handshake_res = handshakes.next() => match next_handshake_res {
                 // The task has already sent the peer change to the peer set.
                 Some(Ok(_)) => continue,
-                Some(Err(task_panic)) => panic!("panic in inbound handshake task: {:?}", task_panic),
+                Some(Err(task_panic)) => panic!("panic in inbound handshake task: {task_panic:?}"),
                 None => unreachable!("handshakes never terminates, because it contains a future that never resolves"),
             },
 
@@ -765,7 +765,7 @@ where
                 .map(move |res| match res {
                     Ok(crawler_action) => crawler_action,
                     Err(e) => {
-                        panic!("panic during handshaking with {:?}: {:?} ", candidate, e);
+                        panic!("panic during handshaking with {candidate:?}: {e:?} ");
                     }
                 })
                 .in_current_span();
