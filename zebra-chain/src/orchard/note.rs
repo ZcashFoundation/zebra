@@ -1,12 +1,12 @@
 //! Orchard notes
 
 use group::{ff::PrimeField, GroupEncoding};
-use halo2::{arithmetic::FieldExt, pasta::pallas};
+use halo2::pasta::pallas;
 use rand_core::{CryptoRng, RngCore};
 
 use crate::amount::{Amount, NonNegative};
 
-use super::{address::Address, keys::prf_expand, sinsemilla::extract_p};
+use super::{address::Address, sinsemilla::extract_p};
 
 mod ciphertexts;
 mod nullifiers;
@@ -77,18 +77,6 @@ pub struct Psi(pub(crate) pallas::Base);
 impl From<Psi> for [u8; 32] {
     fn from(psi: Psi) -> Self {
         psi.0.to_repr()
-    }
-}
-
-impl From<SeedRandomness> for Psi {
-    /// rcm = ToScalar^Orchard((PRF^expand_rseed (\[9\]))
-    ///
-    /// <https://zips.z.cash/protocol/nu5.pdf#orchardsend>
-    fn from(rseed: SeedRandomness) -> Self {
-        Self(pallas::Base::from_bytes_wide(&prf_expand(
-            rseed.0,
-            vec![&[9]],
-        )))
     }
 }
 

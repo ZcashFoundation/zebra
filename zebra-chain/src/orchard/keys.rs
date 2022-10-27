@@ -1,6 +1,6 @@
 //! Orchard key types.
 //!
-//! Some unused key types are not implemented, others are in the `arbitrary::keys` module.
+//! Some unused key types are not implemented.
 //!
 //! <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
 
@@ -11,7 +11,7 @@ use bech32::{self, ToBase32, Variant};
 use fpe::ff1::{BinaryNumeralString, FF1};
 use group::{ff::PrimeField, prime::PrimeCurveAffine, Group, GroupEncoding};
 use halo2::{
-    arithmetic::{Coordinates, CurveAffine, FieldExt},
+    arithmetic::{Coordinates, CurveAffine},
     pasta::pallas,
 };
 use rand_core::{CryptoRng, RngCore};
@@ -47,32 +47,6 @@ fn prp_d(K: [u8; 32], d: [u8; 11]) -> [u8; 11] {
         .to_bytes_le()
         .try_into()
         .unwrap()
-}
-
-/// Invokes Blake2b-512 as PRF^expand with parameter t.
-///
-/// PRF^expand(sk, t) := BLAKE2b-512("Zcash_ExpandSeed", sk || t)
-///
-/// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
-// TODO: This is basically a duplicate of the one in our sapling module, its
-// definition in the draft Nu5 spec is incomplete so I'm putting it here in case
-// it changes.
-//
-// Review question: @dconnolly is this code still incomplete?
-// It's used to generate new note commitments from notes.
-pub fn prf_expand(sk: [u8; 32], t: Vec<&[u8]>) -> [u8; 64] {
-    let mut state = blake2b_simd::Params::new()
-        .hash_length(64)
-        .personal(b"Zcash_ExpandSeed")
-        .to_state();
-
-    state.update(&sk[..]);
-
-    for t_i in t {
-        state.update(t_i);
-    }
-
-    *state.finalize().as_array()
 }
 
 /// Used to derive a diversified base point from a diversifier value.
@@ -206,30 +180,6 @@ impl From<SpendAuthorizingKey> for [u8; 32] {
     }
 }
 
-impl From<SpendingKey> for SpendAuthorizingKey {
-    /// Invokes Blake2b-512 as _PRF^expand_, t=6, to derive a
-    /// `SpendAuthorizingKey` from a `SpendingKey`.
-    ///
-    /// ask := ToScalar^Orchard(PRF^expand(sk, \[6\]))
-    ///
-    /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
-    /// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
-    fn from(spending_key: SpendingKey) -> SpendAuthorizingKey {
-        // Handles ToScalar^Orchard
-        let ask = pallas::Scalar::from_bytes_wide(&prf_expand(spending_key.bytes, vec![&[6]]));
-
-        // let ak^P = SpendAuthSig^Orchard.DerivePublic(ask)...
-        let ak_bytes: [u8; 32] = SpendValidatingKey::from(SpendAuthorizingKey(ask)).into();
-
-        // if the last bit (that is, the 𝑦˜ bit) of repr_P (ak^P ) is 1:
-        //   set ask ← −ask
-        match (ak_bytes[31] >> 7) == 0b0000_0001 {
-            true => Self(-ask),
-            false => Self(ask),
-        }
-    }
-}
-
 impl PartialEq for SpendAuthorizingKey {
     fn eq(&self, other: &Self) -> bool {
         self.ct_eq(other).unwrap_u8() == 1u8
@@ -332,18 +282,6 @@ impl From<[u8; 32]> for NullifierDerivingKey {
     }
 }
 
-impl From<SpendingKey> for NullifierDerivingKey {
-    /// nk = ToBase^Orchard(PRF^expand_sk (\[7\]))
-    ///
-    /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
-    fn from(sk: SpendingKey) -> Self {
-        Self(pallas::Base::from_bytes_wide(&prf_expand(
-            sk.into(),
-            vec![&[7]],
-        )))
-    }
-}
-
 impl PartialEq for NullifierDerivingKey {
     fn eq(&self, other: &Self) -> bool {
         self.ct_eq(other).unwrap_u8() == 1u8
@@ -380,17 +318,6 @@ impl fmt::Debug for IvkCommitRandomness {
 }
 
 impl Eq for IvkCommitRandomness {}
-
-impl From<SpendingKey> for IvkCommitRandomness {
-    /// rivk = ToScalar^Orchard(PRF^expand_sk (\[8\]))
-    ///
-    /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
-    fn from(sk: SpendingKey) -> Self {
-        let scalar = pallas::Scalar::from_bytes_wide(&prf_expand(sk.into(), vec![&[8]]));
-
-        Self(scalar)
-    }
-}
 
 impl From<IvkCommitRandomness> for [u8; 32] {
     fn from(rivk: IvkCommitRandomness) -> Self {
@@ -441,26 +368,6 @@ pub struct FullViewingKey {
     pub(super) spend_validating_key: SpendValidatingKey,
     pub(super) nullifier_deriving_key: NullifierDerivingKey,
     pub(super) ivk_commit_randomness: IvkCommitRandomness,
-}
-
-impl FullViewingKey {
-    /// [4.2.3]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-    #[allow(non_snake_case)]
-    pub fn to_R(self) -> [u8; 64] {
-        // let K = I2LEBSP_l_sk(rivk)
-        let K: [u8; 32] = self.ivk_commit_randomness.into();
-
-        let mut t: Vec<&[u8]> = vec![&[0x82u8]];
-
-        let ak_bytes = <[u8; 32]>::from(self.spend_validating_key);
-        t.push(&ak_bytes);
-
-        let nk_bytes = <[u8; 32]>::from(self.nullifier_deriving_key);
-        t.push(&nk_bytes);
-
-        // let R = PRF^expand_K( [0x82] || I2LEOSP256(ak) || I2LEOSP256(nk) )
-        prf_expand(K, t)
-    }
 }
 
 impl ConstantTimeEq for FullViewingKey {
@@ -517,22 +424,6 @@ impl From<FullViewingKey> for [u8; 96] {
     }
 }
 
-impl From<SpendingKey> for FullViewingKey {
-    /// Derive a _full viewing key_ from a existing _spending key_.
-    ///
-    /// <https://zips.z.cash/protocol/nu5.pdf#addressesandkeys>
-    /// <https://zips.z.cash/protocol/nu5.pdf#orchardfullviewingkeyencoding>
-    fn from(sk: SpendingKey) -> FullViewingKey {
-        let spend_authorizing_key = SpendAuthorizingKey::from(sk);
-
-        Self {
-            spend_validating_key: SpendValidatingKey::from(spend_authorizing_key),
-            nullifier_deriving_key: NullifierDerivingKey::from(sk),
-            ivk_commit_randomness: IvkCommitRandomness::from(sk),
-        }
-    }
-}
-
 impl PartialEq for FullViewingKey {
     fn eq(&self, other: &Self) -> bool {
         self.ct_eq(other).unwrap_u8() == 1u8
@@ -579,21 +470,6 @@ impl From<OutgoingViewingKey> for [u8; 32] {
     }
 }
 
-impl From<FullViewingKey> for OutgoingViewingKey {
-    /// Derive an `OutgoingViewingKey` from a `FullViewingKey`.
-    ///
-    /// [4.2.3]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-    #[allow(non_snake_case)]
-    fn from(fvk: FullViewingKey) -> OutgoingViewingKey {
-        let R = fvk.to_R();
-
-        // let ovk be the remaining [32] bytes of R [which is 64 bytes]
-        let ovk_bytes: [u8; 32] = R[32..64].try_into().expect("32 byte array");
-
-        Self::from(ovk_bytes)
-    }
-}
-
 impl PartialEq for OutgoingViewingKey {
     fn eq(&self, other: &Self) -> bool {
         self.ct_eq(other).unwrap_u8() == 1u8
@@ -631,29 +507,6 @@ impl ConstantTimeEq for DiversifierKey {
 }
 
 impl Eq for DiversifierKey {}
-
-impl From<FullViewingKey> for DiversifierKey {
-    /// Derives a _diversifier key_ from a `FullViewingKey`.
-    ///
-    /// 'For each spending key, there is also a default diversified
-    /// payment address with a “random-looking” diversifier. This
-    /// allows an implementation that does not expose diversified
-    /// addresses as a user-visible feature, to use a default address
-    /// that cannot be distinguished (without knowledge of the
-    /// spending key) from one with a random diversifier...'
-    ///
-    /// Derived as specified in section [4.2.3] of the spec, and [ZIP-32].
-    ///
-    /// [4.2.3]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-    /// [ZIP-32]: https://zips.z.cash/zip-0032#orchard-diversifier-derivation
-    #[allow(non_snake_case)]
-    fn from(fvk: FullViewingKey) -> DiversifierKey {
-        let R = fvk.to_R();
-
-        // "let dk be the first [32] bytes of R"
-        Self(R[..32].try_into().expect("subslice of R is a valid array"))
-    }
-}
 
 impl From<[u8; 32]> for DiversifierKey {
     fn from(bytes: [u8; 32]) -> DiversifierKey {
