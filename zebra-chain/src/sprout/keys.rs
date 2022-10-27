@@ -1,6 +1,6 @@
 //! Sprout key types.
 //!
-//! Unused key types are not implemented.
+//! Unused key types are not implemented, see PR #5476.
 //!
 //! "The receiving key sk_enc, the incoming viewing key ivk = (apk,
 //! sk_enc), and the shielded payment address addr_pk = (a_pk, pk_enc) are

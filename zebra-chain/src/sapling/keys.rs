@@ -1,6 +1,6 @@
 //! Sapling key types.
 //!
-//! Unused key types are not implemented.
+//! Unused key types are not implemented, see PR #5476.
 //!
 //! "The spend authorizing key ask, proof authorizing key (ak, nsk),
 //! full viewing key (ak, nk, ovk), incoming viewing key ivk, and each
