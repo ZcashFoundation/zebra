@@ -1,16 +1,17 @@
 //! Orchard key types.
 //!
+//! Some unused key types are not implemented, others are in the `arbitrary::keys` module.
+//!
 //! <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
 
 use std::{fmt, io};
 
 use aes::Aes256;
 use bech32::{self, ToBase32, Variant};
-use bitvec::prelude::*;
 use fpe::ff1::{BinaryNumeralString, FF1};
 use group::{ff::PrimeField, prime::PrimeCurveAffine, Group, GroupEncoding};
 use halo2::{
-    arithmetic::{Coordinates, CurveAffine, Field, FieldExt},
+    arithmetic::{Coordinates, CurveAffine, FieldExt},
     pasta::pallas,
 };
 use rand_core::{CryptoRng, RngCore};
@@ -23,9 +24,6 @@ use crate::{
         serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
     },
 };
-
-#[cfg(test)]
-mod tests;
 
 use super::sinsemilla::*;
 
@@ -117,7 +115,7 @@ mod sk_hrp {
 )]
 pub struct SpendingKey {
     network: Network,
-    bytes: [u8; 32],
+    pub(super) bytes: [u8; 32],
 }
 
 impl ConstantTimeEq for SpendingKey {
@@ -165,39 +163,14 @@ impl PartialEq for SpendingKey {
 }
 
 impl SpendingKey {
-    /// Generate a new `SpendingKey`.
-    ///
-    /// When generating, we check that the corresponding `SpendAuthorizingKey`
-    /// is not zero, else fail.
-    ///
-    /// [orchardkeycomponents]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-    pub fn new<T>(csprng: &mut T, network: Network) -> Self
-    where
-        T: RngCore + CryptoRng,
-    {
-        loop {
-            let mut bytes = [0u8; 32];
-            csprng.fill_bytes(&mut bytes);
-
-            let sk = Self::from_bytes(bytes, network);
-
-            // "if ask = 0, discard this key and repeat with a new sk"
-            if SpendAuthorizingKey::from(sk).0.is_zero().into() {
-                continue;
-            }
-
-            // "if ivk ∈ {0, ⊥}, discard this key and repeat with a new sk"
-            if IncomingViewingKey::try_from(FullViewingKey::from(sk)).is_err() {
-                continue;
-            }
-
-            break sk;
-        }
-    }
-
     /// Generate a `SpendingKey` from existing bytes.
     pub fn from_bytes(bytes: [u8; 32], network: Network) -> Self {
         Self { network, bytes }
+    }
+
+    /// Returns the network for this spending key.
+    pub fn network(&self) -> Network {
+        self.network
     }
 }
 
@@ -277,14 +250,6 @@ impl PartialEq<[u8; 32]> for SpendAuthorizingKey {
 pub struct SpendValidatingKey(pub(crate) redpallas::VerificationKey<SpendAuth>);
 
 impl Eq for SpendValidatingKey {}
-
-impl From<[u8; 32]> for SpendValidatingKey {
-    fn from(bytes: [u8; 32]) -> Self {
-        // Review question: @dconnolly do we need to delete or fix this panic?
-        // It's used as part of the full viewing key, which is used to generate new spending keys.
-        Self(redpallas::VerificationKey::try_from(bytes).unwrap())
-    }
-}
 
 impl From<SpendValidatingKey> for [u8; 32] {
     fn from(ak: SpendValidatingKey) -> [u8; 32] {
@@ -473,9 +438,9 @@ impl TryFrom<[u8; 32]> for IvkCommitRandomness {
 /// <https://zips.z.cash/protocol/nu5.pdf#orchardfullviewingkeyencoding>
 #[derive(Copy, Clone)]
 pub struct FullViewingKey {
-    spend_validating_key: SpendValidatingKey,
-    nullifier_deriving_key: NullifierDerivingKey,
-    ivk_commit_randomness: IvkCommitRandomness,
+    pub(super) spend_validating_key: SpendValidatingKey,
+    pub(super) nullifier_deriving_key: NullifierDerivingKey,
+    pub(super) ivk_commit_randomness: IvkCommitRandomness,
 }
 
 impl FullViewingKey {
@@ -569,161 +534,6 @@ impl From<SpendingKey> for FullViewingKey {
 }
 
 impl PartialEq for FullViewingKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).unwrap_u8() == 1u8
-    }
-}
-
-/// An _incoming viewing key_, as described in [protocol specification
-/// §4.2.3][ps].
-///
-/// Used to decrypt incoming notes without spending them.
-///
-/// [ps]: https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents
-#[derive(Copy, Clone)]
-pub struct IncomingViewingKey {
-    dk: DiversifierKey,
-
-    // TODO: refine type, so that IncomingViewingkey.ivk cannot be 0
-    //
-    // Review question: @dconnolly do we need to fix this bug before the audit?
-    // It's used to generate valid TransmissionKeys, is that code used in production?
-    ivk: pallas::Scalar,
-}
-
-impl ConstantTimeEq for IncomingViewingKey {
-    /// Check whether two `IncomingViewingKey`s are equal, runtime independent
-    /// of the value of the secret.
-    ///
-    /// # Note
-    ///
-    /// This function should execute in time independent of the `dk` and `ivk` values.
-    fn ct_eq(&self, other: &Self) -> Choice {
-        <[u8; 64]>::from(*self).ct_eq(&<[u8; 64]>::from(*other))
-    }
-}
-
-impl fmt::Debug for IncomingViewingKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("IncomingViewingKey")
-            .field("dk", &self.dk)
-            .field("ivk", &self.ivk)
-            .finish()
-    }
-}
-
-impl fmt::Display for IncomingViewingKey {
-    /// The _raw encoding_ of an **Orchard** _incoming viewing key_.
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#orchardfullviewingkeyencoding>
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(&hex::encode(<[u8; 64]>::from(*self)))
-    }
-}
-
-impl Eq for IncomingViewingKey {}
-
-impl From<IncomingViewingKey> for [u8; 64] {
-    fn from(ivk: IncomingViewingKey) -> [u8; 64] {
-        let mut bytes = [0u8; 64];
-
-        bytes[..32].copy_from_slice(&<[u8; 32]>::from(ivk.dk));
-        bytes[32..].copy_from_slice(&<[u8; 32]>::from(ivk.ivk));
-
-        bytes
-    }
-}
-
-impl TryFrom<[u8; 64]> for IncomingViewingKey {
-    type Error = &'static str;
-
-    /// Convert an array of bytes into a [`IncomingViewingKey`].
-    ///
-    /// Returns an error if the encoding is malformed or if it [encodes the scalar additive
-    /// identity, 0][1].
-    ///
-    /// > ivk MUST be in the range {1 .. 𝑞P - 1}
-    ///
-    /// [1]: https://zips.z.cash/protocol/protocol.pdf#orchardinviewingkeyencoding
-    fn try_from(bytes: [u8; 64]) -> Result<Self, Self::Error> {
-        let mut dk_bytes = [0u8; 32];
-        dk_bytes.copy_from_slice(&bytes[..32]);
-        let dk = DiversifierKey::from(dk_bytes);
-
-        let mut ivk_bytes = [0u8; 32];
-        ivk_bytes.copy_from_slice(&bytes[32..]);
-
-        let possible_scalar = pallas::Scalar::from_repr(ivk_bytes);
-
-        if possible_scalar.is_some().into() {
-            let scalar = possible_scalar.unwrap();
-            if scalar.is_zero().into() {
-                Err("pallas::Scalar value for Orchard IncomingViewingKey is 0")
-            } else {
-                Ok(Self {
-                    dk,
-                    ivk: possible_scalar.unwrap(),
-                })
-            }
-        } else {
-            Err("Invalid pallas::Scalar value for Orchard IncomingViewingKey")
-        }
-    }
-}
-
-impl TryFrom<FullViewingKey> for IncomingViewingKey {
-    type Error = &'static str;
-
-    /// Commit^ivk_rivk(ak, nk) :=
-    ///     SinsemillaShortCommit_rcm(︁
-    ///        "z.cash:Orchard-CommitIvk",
-    ///        I2LEBSP_l^Orchard_base(ak) || I2LEBSP_l^Orchard_base(nk)︁
-    ///     ) mod r_P
-    ///
-    /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
-    /// <https://zips.z.cash/protocol/nu5.pdf#concreteprfs>
-    #[allow(non_snake_case)]
-    fn try_from(fvk: FullViewingKey) -> Result<Self, Self::Error> {
-        let mut M: BitVec<u8, Lsb0> = BitVec::new();
-
-        // I2LEBSP_l^Orchard_base(ak)︁
-        //
-        // Review question: @dconnolly do we need to fix this panic, or is it impossible?
-        let ak_bytes =
-            extract_p(pallas::Point::from_bytes(&fvk.spend_validating_key.into()).unwrap())
-                .to_repr();
-        M.extend_from_bitslice(&BitArray::<_, Lsb0>::from(ak_bytes)[0..255]);
-
-        // I2LEBSP_l^Orchard_base(nk)︁
-        let nk_bytes: [u8; 32] = fvk.nullifier_deriving_key.into();
-        M.extend_from_bitslice(&BitArray::<_, Lsb0>::from(nk_bytes)[0..255]);
-
-        // Commit^ivk_rivk
-        // rivk needs to be 255 bits long
-        let commit_x = sinsemilla_short_commit(
-            fvk.ivk_commit_randomness.into(),
-            b"z.cash:Orchard-CommitIvk",
-            &M,
-        )
-        .expect("deriving orchard commit^ivk should not output ⊥ ");
-
-        let ivk_ctoption = pallas::Scalar::from_repr(commit_x.into());
-
-        // if ivk ∈ {0, ⊥}, discard this key
-
-        // [`Scalar::is_zero()`] is constant-time under the hood, and ivk is mod r_P
-        if ivk_ctoption.is_some().into() && !<bool>::from(ivk_ctoption.unwrap().is_zero()) {
-            Ok(Self {
-                dk: fvk.into(),
-                ivk: ivk_ctoption.unwrap(),
-            })
-        } else {
-            Err("generated ivk is the additive identity 0, invalid")
-        }
-    }
-}
-
-impl PartialEq for IncomingViewingKey {
     fn eq(&self, other: &Self) -> bool {
         self.ct_eq(other).unwrap_u8() == 1u8
     }
@@ -991,34 +801,9 @@ impl fmt::Debug for TransmissionKey {
 
 impl Eq for TransmissionKey {}
 
-impl From<[u8; 32]> for TransmissionKey {
-    /// Attempts to interpret a byte representation of an affine point, failing
-    /// if the element is not on the curve or non-canonical.
-    fn from(bytes: [u8; 32]) -> Self {
-        // Review question: @dconnolly do we need to fix this panic, or is it impossible?
-        // It's used as part of the Orchard address.
-        Self(pallas::Affine::from_bytes(&bytes).unwrap())
-    }
-}
-
 impl From<TransmissionKey> for [u8; 32] {
     fn from(pk_d: TransmissionKey) -> [u8; 32] {
         pk_d.0.to_bytes()
-    }
-}
-
-impl From<(IncomingViewingKey, Diversifier)> for TransmissionKey {
-    /// This includes _KA^Orchard.DerivePublic(ivk, G_d)_, which is just a
-    /// scalar mult _\[ivk\]G_d_.
-    ///
-    ///  KA^Orchard.DerivePublic(sk, B) := \[sk\] B
-    ///
-    /// <https://zips.z.cash/protocol/nu5.pdf#orchardkeycomponents>
-    /// <https://zips.z.cash/protocol/nu5.pdf#concreteorchardkeyagreement>
-    fn from((ivk, d): (IncomingViewingKey, Diversifier)) -> Self {
-        let g_d = pallas::Point::from(d);
-
-        Self(pallas::Affine::from(g_d * ivk.ivk))
     }
 }
 

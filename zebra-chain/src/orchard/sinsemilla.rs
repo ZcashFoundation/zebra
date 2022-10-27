@@ -182,6 +182,7 @@ pub fn sinsemilla_commit(
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit>
 #[allow(non_snake_case)]
+#[allow(dead_code)]
 pub fn sinsemilla_short_commit(
     r: pallas::Scalar,
     D: &[u8],

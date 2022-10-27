@@ -9,9 +9,13 @@ use proptest::{arbitrary::any, array, collection::vec, prelude::*};
 use crate::primitives::redpallas::{Signature, SpendAuth, VerificationKey, VerificationKeyBytes};
 
 use super::{
-    keys, note, tree, Action, Address, AuthorizedAction, Diversifier, Flags, NoteCommitment,
+    keys::*, note, tree, Action, Address, AuthorizedAction, Diversifier, Flags, NoteCommitment,
     ValueCommitment,
 };
+
+pub mod keys;
+
+use keys::*;
 
 impl Arbitrary for Action {
     type Parameters = ();
@@ -28,7 +32,7 @@ impl Arbitrary for Action {
                 nullifier,
                 rk,
                 cm_x: NoteCommitment(pallas::Affine::identity()).extract_x(),
-                ephemeral_key: keys::EphemeralPublicKey(pallas::Affine::generator()),
+                ephemeral_key: EphemeralPublicKey(pallas::Affine::generator()),
                 enc_ciphertext,
                 out_ciphertext,
             })
@@ -128,18 +132,18 @@ impl Arbitrary for tree::Root {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for keys::TransmissionKey {
+impl Arbitrary for TransmissionKey {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<keys::SpendingKey>())
+        (any::<SpendingKey>())
             .prop_map(|spending_key| {
-                let full_viewing_key = keys::FullViewingKey::from(spending_key);
+                let full_viewing_key = FullViewingKey::from(spending_key);
 
-                let diversifier_key = keys::DiversifierKey::from(full_viewing_key);
+                let diversifier_key = DiversifierKey::from(full_viewing_key);
 
                 let diversifier = Diversifier::from(diversifier_key);
-                let incoming_viewing_key = keys::IncomingViewingKey::try_from(full_viewing_key)
+                let incoming_viewing_key = IncomingViewingKey::try_from(full_viewing_key)
                     .expect("a valid incoming viewing key");
 
                 Self::from((incoming_viewing_key, diversifier))
@@ -154,7 +158,7 @@ impl Arbitrary for Address {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<keys::Diversifier>(), any::<keys::TransmissionKey>())
+        (any::<Diversifier>(), any::<TransmissionKey>())
             .prop_map(|(diversifier, transmission_key)| Self {
                 diversifier,
                 transmission_key,
