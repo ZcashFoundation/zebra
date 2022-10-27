@@ -124,7 +124,7 @@ fn main() -> Result<()> {
             || height_gap.0 >= zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP as u32
         {
             // print to output
-            println!("{} {}", height.0, hash);
+            println!("{} {hash}", height.0);
 
             // reset counters
             cumulative_bytes = 0;

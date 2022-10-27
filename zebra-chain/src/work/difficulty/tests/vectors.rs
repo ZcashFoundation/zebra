@@ -31,16 +31,16 @@ fn debug_format() {
     );
     let one = CompactDifficulty((1 << PRECISION) + (1 << 16));
     assert_eq!(
-        format!("{:?}", one),
+        format!("{one:?}"),
         "CompactDifficulty(0x01010000, Some(ExpandedDifficulty(\"0000000000000000000000000000000000000000000000000000000000000001\")))");
     let mant = CompactDifficulty(OFFSET as u32 * (1 << PRECISION) + UNSIGNED_MANTISSA_MASK);
     assert_eq!(
-        format!("{:?}", mant),
+        format!("{mant:?}"),
         "CompactDifficulty(0x037fffff, Some(ExpandedDifficulty(\"00000000000000000000000000000000000000000000000000000000007fffff\")))"
     );
     let exp = CompactDifficulty(((31 + OFFSET - 2) as u32) * (1 << PRECISION) + (1 << 16));
     assert_eq!(
-        format!("{:?}", exp),
+        format!("{exp:?}"),
         "CompactDifficulty(0x20010000, Some(ExpandedDifficulty(\"0100000000000000000000000000000000000000000000000000000000000000\")))"
     );
 

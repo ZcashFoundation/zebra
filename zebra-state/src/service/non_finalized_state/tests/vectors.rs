@@ -527,7 +527,7 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
         crate::ValidateContextError::InvalidBlockCommitment(
             zebra_chain::block::CommitmentError::InvalidChainHistoryActivationReserved { .. },
         ) => {},
-        _ => panic!("Error must be InvalidBlockCommitment::InvalidChainHistoryActivationReserved instead of {:?}", err),
+        _ => panic!("Error must be InvalidBlockCommitment::InvalidChainHistoryActivationReserved instead of {err:?}"),
     };
 
     // Test committing the Heartwood activation block with the correct commitment

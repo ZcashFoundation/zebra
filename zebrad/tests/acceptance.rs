@@ -970,7 +970,7 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
 #[tracing::instrument]
 fn create_cached_database(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height();
-    let checkpoint_stop_regex = format!("{}.*CommitFinalized request", STOP_AT_HEIGHT_REGEX);
+    let checkpoint_stop_regex = format!("{STOP_AT_HEIGHT_REGEX}.*CommitFinalized request");
 
     create_cached_database_height(
         network,
@@ -988,7 +988,7 @@ fn create_cached_database(network: Network) -> Result<()> {
 fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height() + 1200;
     let full_validation_stop_regex =
-        format!("{}.*best non-finalized chain root", STOP_AT_HEIGHT_REGEX);
+        format!("{STOP_AT_HEIGHT_REGEX}.*best non-finalized chain root");
 
     create_cached_database_height(
         network,
@@ -1126,8 +1126,8 @@ async fn metrics_endpoint() -> Result<()> {
 
     // [Note on port conflict](#Note on port conflict)
     let port = random_known_port();
-    let endpoint = format!("127.0.0.1:{}", port);
-    let url = format!("http://{}", endpoint);
+    let endpoint = format!("127.0.0.1:{port}");
+    let url = format!("http://{endpoint}");
 
     // Write a configuration that has metrics endpoint_addr set
     let mut config = default_test_config()?;
@@ -1163,7 +1163,7 @@ async fn metrics_endpoint() -> Result<()> {
     std::str::from_utf8(&body).expect("unexpected invalid UTF-8 in metrics exporter response");
 
     // Make sure metrics was started
-    output.stdout_line_contains(format!("Opened metrics endpoint at {}", endpoint).as_str())?;
+    output.stdout_line_contains(format!("Opened metrics endpoint at {endpoint}").as_str())?;
 
     // [Note on port conflict](#Note on port conflict)
     output
@@ -1182,9 +1182,9 @@ async fn tracing_endpoint() -> Result<()> {
 
     // [Note on port conflict](#Note on port conflict)
     let port = random_known_port();
-    let endpoint = format!("127.0.0.1:{}", port);
-    let url_default = format!("http://{}", endpoint);
-    let url_filter = format!("{}/filter", url_default);
+    let endpoint = format!("127.0.0.1:{port}");
+    let url_default = format!("http://{endpoint}");
+    let url_filter = format!("{url_default}/filter");
 
     // Write a configuration that has tracing endpoint_addr option set
     let mut config = default_test_config()?;
@@ -1230,7 +1230,7 @@ async fn tracing_endpoint() -> Result<()> {
     let output = output.assert_failure()?;
 
     // Make sure tracing endpoint was started
-    output.stdout_line_contains(format!("Opened tracing endpoint at {}", endpoint).as_str())?;
+    output.stdout_line_contains(format!("Opened tracing endpoint at {endpoint}").as_str())?;
     // TODO: Match some trace level messages from output
 
     // Make sure the endpoint header is correct
@@ -1333,11 +1333,11 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
 
     // Check that we have at least 4 characters in the `build` field.
     let build = parsed["result"]["build"].as_str().unwrap();
-    assert!(build.len() > 4, "Got {}", build);
+    assert!(build.len() > 4, "Got {build}");
 
     // Check that the `subversion` field has "Zebra" in it.
     let subversion = parsed["result"]["subversion"].as_str().unwrap();
-    assert!(subversion.contains("Zebra"), "Got {}", subversion);
+    assert!(subversion.contains("Zebra"), "Got {subversion}");
 
     child.kill(false)?;
 
@@ -1755,7 +1755,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
 
     // [Note on port conflict](#Note on port conflict)
     let port = random_known_port();
-    let listen_addr = format!("127.0.0.1:{}", port);
+    let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created network listen_addr
     let mut config = default_test_config()?;
@@ -1787,13 +1787,13 @@ fn zebra_metrics_conflict() -> Result<()> {
 
     // [Note on port conflict](#Note on port conflict)
     let port = random_known_port();
-    let listen_addr = format!("127.0.0.1:{}", port);
+    let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created metrics endpoint_addr
     let mut config = default_test_config()?;
     config.metrics.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
-    let regex1 = regex::escape(&format!(r"Opened metrics endpoint at {}", listen_addr));
+    let regex1 = regex::escape(&format!(r"Opened metrics endpoint at {listen_addr}"));
 
     // From another folder create a configuration with the same endpoint.
     // `metrics.endpoint_addr` will be the same in the 2 nodes.
@@ -1816,13 +1816,13 @@ fn zebra_tracing_conflict() -> Result<()> {
 
     // [Note on port conflict](#Note on port conflict)
     let port = random_known_port();
-    let listen_addr = format!("127.0.0.1:{}", port);
+    let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created tracing endpoint_addr
     let mut config = default_test_config()?;
     config.tracing.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
-    let regex1 = regex::escape(&format!(r"Opened tracing endpoint at {}", listen_addr));
+    let regex1 = regex::escape(&format!(r"Opened tracing endpoint at {listen_addr}"));
 
     // From another folder create a configuration with the same endpoint.
     // `tracing.endpoint_addr` will be the same in the 2 nodes.

@@ -54,7 +54,7 @@ impl Runnable for GenerateCmd {
                     .expect("must be able to write output");
             }
             None => {
-                println!("{}", output);
+                println!("{output}");
             }
         }
     }

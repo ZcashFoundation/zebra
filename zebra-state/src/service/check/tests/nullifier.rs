@@ -187,7 +187,7 @@ proptest! {
             .expect("block should deserialize");
 
         make_distinct_nullifiers(
-            &mut joinsplit1
+            joinsplit1
                 .nullifiers
                 .iter_mut()
                 .chain(joinsplit2.nullifiers.iter_mut()),
@@ -244,7 +244,7 @@ proptest! {
             .expect("block should deserialize");
 
         make_distinct_nullifiers(
-            &mut joinsplit1
+            joinsplit1
                 .nullifiers
                 .iter_mut()
                 .chain(joinsplit2.nullifiers.iter_mut()),
@@ -307,7 +307,7 @@ proptest! {
             .expect("block should deserialize");
 
         make_distinct_nullifiers(
-            &mut joinsplit1
+            joinsplit1
                 .nullifiers
                 .iter_mut()
                 .chain(joinsplit2.nullifiers.iter_mut()),

@@ -30,7 +30,7 @@ fn blockheaderhash_debug() {
     let hash = Hash(sha_writer.finish());
 
     assert_eq!(
-        format!("{:?}", hash),
+        format!("{hash:?}"),
         "block::Hash(\"3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf\")"
     );
 }
@@ -44,7 +44,7 @@ fn blockheaderhash_from_blockheader() {
     let hash = Hash::from(&blockheader);
 
     assert_eq!(
-        format!("{:?}", hash),
+        format!("{hash:?}"),
         "block::Hash(\"d1d6974bbe1d4d127c889119b2fc05724c67588dc72708839727586b8c2bc939\")"
     );
 

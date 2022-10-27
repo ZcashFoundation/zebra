@@ -79,7 +79,7 @@ pub fn app_version() -> Version {
 
                 // it's the "git semver" format, which doesn't quite match SemVer 2.0
                 [hash, commit_count, tag] => {
-                    let semver_fix = format!("{}+{}.{}", tag, commit_count, hash);
+                    let semver_fix = format!("{tag}+{commit_count}.{hash}");
                     semver_fix.parse().unwrap_or_else(|_|
                                                       panic!("Modified VERGEN_GIT_SEMVER {:?} -> {:?} -> {:?} must be valid. Note: CARGO_PKG_VERSION was {:?}.",
                                                              vergen_git_semver,
@@ -280,7 +280,7 @@ impl Application for ZebradApp {
         let mut metadata_section = "Metadata:".to_string();
         for (k, v) in panic_metadata {
             builder = builder.add_issue_metadata(k, v.clone());
-            write!(&mut metadata_section, "\n{}: {}", k, &v)
+            write!(&mut metadata_section, "\n{k}: {}", &v)
                 .expect("unexpected failure writing to string");
         }
 
@@ -340,7 +340,7 @@ impl Application for ZebradApp {
 
         std::panic::set_hook(Box::new(move |panic_info| {
             let panic_report = panic_hook.panic_report(panic_info);
-            eprintln!("{}", panic_report);
+            eprintln!("{panic_report}");
 
             #[cfg(feature = "sentry")]
             {
@@ -362,7 +362,7 @@ impl Application for ZebradApp {
         //   when that crate is being used by itself?
         rayon::ThreadPoolBuilder::new()
             .num_threads(config.sync.parallel_cpu_threads)
-            .thread_name(|thread_index| format!("rayon {}", thread_index))
+            .thread_name(|thread_index| format!("rayon {thread_index}"))
             .build_global()
             .expect("unable to initialize rayon thread pool");
 

@@ -227,7 +227,7 @@ pub fn sync_until(
 
     let mut child = tempdir.spawn_child(args!["start"])?.with_timeout(timeout);
 
-    let network = format!("network: {},", network);
+    let network = format!("network: {network},");
 
     if mempool_behavior.require_activation() {
         // require that the mempool activated,
@@ -383,7 +383,7 @@ pub fn create_cached_database_height(
         .with_timeout(FINISH_FULL_SYNC_TIMEOUT)
         .bypass_test_capture(true);
 
-    let network = format!("network: {},", network);
+    let network = format!("network: {network},");
     child.expect_stdout_line_matches(&network)?;
 
     child.expect_stdout_line_matches("starting legacy chain check")?;

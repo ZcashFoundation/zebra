@@ -50,7 +50,7 @@ async fn connection_run_loop_ok() {
     assert_eq!(result, None);
 
     let error = shared_error_slot.try_get_error();
-    assert!(error.is_none(), "unexpected error: {:?}", error);
+    assert!(error.is_none(), "unexpected error: {error:?}");
 
     assert!(!client_tx.is_closed());
     assert!(!peer_tx.is_closed());
@@ -79,7 +79,7 @@ async fn connection_run_loop_spawn_ok() {
     let mut connection_join_handle = tokio::spawn(connection.run(peer_rx));
 
     let error = shared_error_slot.try_get_error();
-    assert!(error.is_none(), "unexpected error: {:?}", error);
+    assert!(error.is_none(), "unexpected error: {error:?}");
 
     assert!(!client_tx.is_closed());
     assert!(!peer_tx.is_closed());
@@ -159,7 +159,7 @@ async fn connection_run_loop_message_ok() {
     );
 
     let error = shared_error_slot.try_get_error();
-    assert!(error.is_none(), "unexpected error: {:?}", error);
+    assert!(error.is_none(), "unexpected error: {error:?}");
 
     assert!(!client_tx.is_closed());
     assert!(!peer_tx.is_closed());
@@ -625,7 +625,7 @@ async fn connection_run_loop_receive_timeout() {
 
     // Receive timeouts don't close the connection
     let error = shared_error_slot.try_get_error();
-    assert!(error.is_none(), "unexpected error: {:?}", error);
+    assert!(error.is_none(), "unexpected error: {error:?}");
 
     assert!(!client_tx.is_closed());
     assert!(!peer_tx.is_closed());

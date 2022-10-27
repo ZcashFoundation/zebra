@@ -110,8 +110,8 @@ impl Arbitrary for OutputInTransactionV4 {
 /// crate does not provide an Arbitrary implementation for it.
 fn spendauth_verification_key_bytes() -> impl Strategy<Value = ValidatingKey> {
     prop::array::uniform32(any::<u8>()).prop_map(|bytes| {
-        let mut rng = ChaChaRng::from_seed(bytes);
-        let sk = redjubjub::SigningKey::<redjubjub::SpendAuth>::new(&mut rng);
+        let rng = ChaChaRng::from_seed(bytes);
+        let sk = redjubjub::SigningKey::<redjubjub::SpendAuth>::new(rng);
         redjubjub::VerificationKey::<redjubjub::SpendAuth>::from(&sk)
             .try_into()
             .unwrap()

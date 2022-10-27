@@ -51,7 +51,7 @@ fn transactionhash_struct_from_str_roundtrip() {
         .unwrap();
 
     assert_eq!(
-        format!("{:?}", hash),
+        format!("{hash:?}"),
         r#"transaction::Hash("3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf")"#
     );
     assert_eq!(
@@ -69,7 +69,7 @@ fn auth_digest_struct_from_str_roundtrip() {
         .unwrap();
 
     assert_eq!(
-        format!("{:?}", digest),
+        format!("{digest:?}"),
         r#"AuthDigest("3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf")"#
     );
     assert_eq!(
@@ -87,7 +87,7 @@ fn wtx_id_struct_from_str_roundtrip() {
         .unwrap();
 
     assert_eq!(
-        format!("{:?}", wtx_id),
+        format!("{wtx_id:?}"),
         r#"WtxId { id: transaction::Hash("3166411bd5343e0b284a108f39a929fbbb62619784f8c6dafe520703b5b446bf"), auth_digest: AuthDigest("0000000000000000000000000000000000000000000000000000000000000001") }"#
     );
     assert_eq!(
@@ -850,7 +850,7 @@ fn zip143_sighash() -> Result<()> {
             ),
         );
         let expected = hex::encode(test.sighash);
-        assert_eq!(expected, result, "test #{}: sighash does not match", i);
+        assert_eq!(expected, result, "test #{i}: sighash does not match");
     }
 
     Ok(())
@@ -886,7 +886,7 @@ fn zip243_sighash() -> Result<()> {
             ),
         );
         let expected = hex::encode(test.sighash);
-        assert_eq!(expected, result, "test #{}: sighash does not match", i);
+        assert_eq!(expected, result, "test #{i}: sighash does not match");
     }
 
     Ok(())
@@ -916,7 +916,7 @@ fn zip244_sighash() -> Result<()> {
             None,
         ));
         let expected = hex::encode(test.sighash_shielded);
-        assert_eq!(expected, result, "test #{}: sighash does not match", i);
+        assert_eq!(expected, result, "test #{i}: sighash does not match");
 
         if let Some(sighash_all) = test.sighash_all {
             let result = hex::encode(transaction.sighash(
@@ -926,7 +926,7 @@ fn zip244_sighash() -> Result<()> {
                 test.transparent_input.map(|idx| idx as _),
             ));
             let expected = hex::encode(sighash_all);
-            assert_eq!(expected, result, "test #{}: sighash does not match", i);
+            assert_eq!(expected, result, "test #{i}: sighash does not match");
         }
     }
 

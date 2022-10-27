@@ -70,8 +70,8 @@ pub(super) enum Handler {
 impl fmt::Display for Handler {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(&match self {
-            Handler::Finished(Ok(response)) => format!("Finished({})", response),
-            Handler::Finished(Err(error)) => format!("Finished({})", error),
+            Handler::Finished(Ok(response)) => format!("Finished({response})"),
+            Handler::Finished(Err(error)) => format!("Finished({error})"),
 
             Handler::Ping(_) => "Ping".to_string(),
             Handler::Peers => "Peers".to_string(),
@@ -403,7 +403,7 @@ impl fmt::Display for State {
         f.write_str(&match self {
             State::AwaitingRequest => "AwaitingRequest".to_string(),
             State::AwaitingResponse { handler, .. } => {
-                format!("AwaitingResponse({})", handler)
+                format!("AwaitingResponse({handler})")
             }
             State::Failed => "Failed".to_string(),
         })
@@ -1327,7 +1327,7 @@ impl<S, Tx> Connection<S, Tx> {
     /// using `extra_state_info` as additional state information.
     fn update_state_metrics(&mut self, extra_state_info: impl Into<Option<String>>) {
         let current_metrics_state = if let Some(extra_state_info) = extra_state_info.into() {
-            format!("{}::{}", self.state.command(), extra_state_info).into()
+            format!("{}::{extra_state_info}", self.state.command()).into()
         } else {
             self.state.command()
         };

@@ -1043,7 +1043,7 @@ impl AddressStrings {
             .into_iter()
             .map(|address| {
                 address.parse().map_err(|error| {
-                    Error::invalid_params(&format!("invalid address {address:?}: {error}"))
+                    Error::invalid_params(format!("invalid address {address:?}: {error}"))
                 })
             })
             .collect::<Result<_>>()?;

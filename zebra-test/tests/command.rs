@@ -209,7 +209,7 @@ fn failure_regex_matches_stdout_failure_message() {
         .expect_stdout_line_matches("this regex should not match")
         .unwrap_err();
 
-    let expected_error = format!("{:?}", expected_error);
+    let expected_error = format!("{expected_error:?}");
     assert!(
         expected_error.contains("Logged a failure message"),
         "error did not contain expected failure message: {}",
@@ -248,7 +248,7 @@ fn failure_regex_matches_stderr_failure_message() {
         .expect_stderr_line_matches("this regex should not match")
         .unwrap_err();
 
-    let expected_error = format!("{:?}", expected_error);
+    let expected_error = format!("{expected_error:?}");
     assert!(
         expected_error.contains("Logged a failure message"),
         "error did not contain expected failure message: {}",
@@ -314,7 +314,7 @@ fn failure_regex_reads_multi_line_output_on_expect_line() {
         .expect_stdout_line_matches("this regex should not match")
         .unwrap_err();
 
-    let expected_error = format!("{:?}", expected_error);
+    let expected_error = format!("{expected_error:?}");
     assert!(
         expected_error.contains(
             "\
@@ -478,7 +478,7 @@ fn failure_regex_timeout_continuous_output() {
         .expect_stdout_line_matches("this regex should not match")
         .unwrap_err();
 
-    let expected_error = format!("{:?}", expected_error);
+    let expected_error = format!("{expected_error:?}");
     assert!(
         expected_error.contains("Logged a failure message"),
         "error did not contain expected failure message: {}",
@@ -544,7 +544,7 @@ fn failure_regex_iter_matches_stdout_failure_message() {
         .expect_stdout_line_matches("this regex should not match")
         .unwrap_err();
 
-    let expected_error = format!("{:?}", expected_error);
+    let expected_error = format!("{expected_error:?}");
     assert!(
         expected_error.contains("Logged a failure message"),
         "error did not contain expected failure message: {}",

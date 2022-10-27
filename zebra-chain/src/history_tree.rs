@@ -38,7 +38,7 @@ impl PartialEq for HistoryTreeError {
     fn eq(&self, other: &Self) -> bool {
         // Workaround since subtypes do not implement Eq.
         // This is only used for tests anyway.
-        format!("{:?}", self) == format!("{:?}", other)
+        format!("{self:?}") == format!("{other:?}")
     }
 }
 
