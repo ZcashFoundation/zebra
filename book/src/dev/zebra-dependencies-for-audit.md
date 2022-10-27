@@ -26,7 +26,7 @@ Test code, deployment configurations, and other configuration files in the `zebr
 
 | Name | Version | Notes
 |------| ------- | -----
-| [ed25519-zebra](https://github.com/ZcashFoundation/ed25519-zebra) | [3.0.0](https://github.com/ZcashFoundation/ed25519-zebra/releases/tag/3.0.0) |
+| [ed25519-zebra](https://github.com/ZcashFoundation/ed25519-zebra) | [3.1.0](https://github.com/ZcashFoundation/ed25519-zebra/releases/tag/3.1.0) |
 
 ---
 ## Partial Audit 
