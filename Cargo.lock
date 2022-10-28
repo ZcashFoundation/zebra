@@ -194,20 +194,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async_executors"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b13b311cd10e80105651ad640a6741991d147787badb4141e8e1b7fd59816f5"
-dependencies = [
- "blanket",
- "futures-core",
- "futures-task",
- "futures-util",
- "pin-project 1.0.12",
- "rustc_version",
-]
-
-[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -447,17 +433,6 @@ dependencies = [
  "arrayref",
  "arrayvec",
  "constant_time_eq",
-]
-
-[[package]]
-name = "blanket"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b04ce3d2372d05d1ef4ea3fdf427da6ae3c17ca06d688a107b5344836276bc3"
-dependencies = [
- "proc-macro2 1.0.42",
- "quote 1.0.20",
- "syn 1.0.99",
 ]
 
 [[package]]
@@ -4493,19 +4468,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tor-rtcompat"
-version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8935238722b33676922c70eb4e1eef408ef9d413e57cf1cb05ca237ae04353e3"
-dependencies = [
- "async-trait",
- "async_executors",
- "futures",
- "native-tls",
- "pin-project 1.0.12",
-]
-
-[[package]]
 name = "tower"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5549,7 +5511,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util 0.7.4",
  "toml",
- "tor-rtcompat",
  "tower",
  "tracing",
  "tracing-error",
