@@ -26,7 +26,7 @@
 //!
 //! If this test fails, run:
 //! ```sh
-//! cargo insta test --review --delete-unreferenced-snapshots
+//! cargo insta test --review
 //! ```
 //! to update the test snapshots, then commit the `test_*.snap` files using git.
 

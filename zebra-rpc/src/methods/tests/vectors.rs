@@ -636,18 +636,11 @@ async fn rpc_getblockcount() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     // Init RPC
-    let (_rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
-        Mainnet,
-        false,
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
-        read_state.clone(),
+        read_state,
         latest_chain_tip.clone(),
     );
-
-    // Init RPC
-    let get_block_template_rpc =
-        get_block_template_rpcs::GetBlockTemplateRpcImpl::new(latest_chain_tip.clone(), read_state);
 
     // Get the tip height using RPC method `get_block_count`
     let get_block_count = get_block_template_rpc
@@ -658,10 +651,6 @@ async fn rpc_getblockcount() {
     assert_eq!(get_block_count, tip_block_height.0);
 
     mempool.expect_no_requests().await;
-
-    // The queue task should continue without errors or panics
-    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-    assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -676,17 +665,11 @@ async fn rpc_getblockcount_empty_state() {
         zebra_state::init_test_services(Mainnet);
 
     // Init RPC
-    let (_rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
-        Mainnet,
-        false,
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
-        read_state.clone(),
+        read_state,
         latest_chain_tip.clone(),
     );
-
-    let get_block_template_rpc =
-        get_block_template_rpcs::GetBlockTemplateRpcImpl::new(latest_chain_tip.clone(), read_state);
 
     // Get the tip height using RPC method `get_block_count
     let get_block_count = get_block_template_rpc.get_block_count();
@@ -698,10 +681,6 @@ async fn rpc_getblockcount_empty_state() {
     assert_eq!(get_block_count.err().unwrap().message, "No blocks in state");
 
     mempool.expect_no_requests().await;
-
-    // The queue task should continue without errors or panics
-    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-    assert!(matches!(rpc_tx_queue_task_result, None));
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -720,17 +699,12 @@ async fn rpc_getblockhash() {
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
-    // Init RPCs
-    let _rpc = RpcImpl::new(
-        "RPC test",
-        Mainnet,
-        false,
+    // Init RPC
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
-        Buffer::new(read_state.clone(), 1),
+        read_state,
         latest_chain_tip.clone(),
     );
-    let get_block_template_rpc =
-        get_block_template_rpcs::GetBlockTemplateRpcImpl::new(latest_chain_tip, read_state);
 
     // Query the hashes using positive indexes
     for (i, block) in blocks.iter().enumerate() {
@@ -774,17 +748,12 @@ async fn rpc_getblocktemplate() {
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
-    // Init RPCs
-    let _rpc = RpcImpl::new(
-        "RPC test",
-        Mainnet,
-        false,
+    // Init RPC
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
-        Buffer::new(read_state.clone(), 1),
+        read_state,
         latest_chain_tip.clone(),
     );
-    let get_block_template_rpc =
-        get_block_template_rpcs::GetBlockTemplateRpcImpl::new(latest_chain_tip, read_state);
 
     let get_block_template = get_block_template_rpc
         .get_block_template()
