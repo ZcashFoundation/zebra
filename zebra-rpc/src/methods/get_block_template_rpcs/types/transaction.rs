@@ -8,10 +8,10 @@ use zebra_chain::{
 
 /// Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(bound = "FeeConstraint: amount::Constraint")]
+#[serde(bound = "FeeConstraint: amount::Constraint + Clone")]
 pub struct TransactionTemplate<FeeConstraint>
 where
-    FeeConstraint: amount::Constraint,
+    FeeConstraint: amount::Constraint + Clone,
 {
     /// The hex-encoded serialized data for this transaction.
     #[serde(with = "hex")]

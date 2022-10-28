@@ -7,7 +7,6 @@
 
 use std::{
     cmp::Ordering,
-    convert::{TryFrom, TryInto},
     hash::{Hash, Hasher},
     marker::PhantomData,
     ops::RangeInclusive,
@@ -28,7 +27,8 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// A runtime validated type for representing amounts of zatoshis
 #[derive(Clone, Copy, Serialize, Deserialize)]
 #[serde(try_from = "i64")]
-#[serde(bound = "C: Constraint")]
+#[serde(into = "i64")]
+#[serde(bound = "C: Constraint + Clone")]
 pub struct Amount<C = NegativeAllowed>(
     /// The inner amount value.
     i64,

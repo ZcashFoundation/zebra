@@ -24,18 +24,22 @@ pub struct GetBlockTemplate {
     /// Add documentation.
     #[serde(rename = "previousblockhash")]
     pub previous_block_hash: GetBlockHash,
+
     /// Add documentation.
     #[serde(rename = "blockcommitmentshash")]
     #[serde(with = "hex")]
     pub block_commitments_hash: ChainHistoryBlockTxAuthCommitmentHash,
+
     /// Add documentation.
     #[serde(rename = "lightclientroothash")]
     #[serde(with = "hex")]
     pub light_client_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
+
     /// Add documentation.
     #[serde(rename = "finalsaplingroothash")]
     #[serde(with = "hex")]
     pub final_sapling_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
+
     /// Add documentation.
     #[serde(rename = "defaultroots")]
     pub default_roots: DefaultRoots,
