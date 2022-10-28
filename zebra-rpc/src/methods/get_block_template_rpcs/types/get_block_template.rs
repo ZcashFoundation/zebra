@@ -16,7 +16,9 @@ pub struct GetBlockTemplate {
     pub capabilities: Vec<String>,
 
     /// Add documentation.
-    pub version: usize,
+    //
+    pub version: u32,
+
     /// Add documentation.
     #[serde(rename = "previousblockhash")]
     pub previous_block_hash: GetBlockHash,
@@ -43,26 +45,43 @@ pub struct GetBlockTemplate {
     pub coinbase_txn: TransactionTemplate,
 
     /// Add documentation.
+    // TODO: use ExpandedDifficulty type.
     pub target: String,
+
     /// Add documentation.
     #[serde(rename = "mintime")]
+    // TODO: use DateTime32 type?
     pub min_time: u32,
+
     /// Add documentation.
     pub mutable: Vec<String>,
+
     /// Add documentation.
     #[serde(rename = "noncerange")]
     pub nonce_range: String,
+
     /// Add documentation.
+    ///
+    /// The same as `MAX_BLOCK_SIGOPS`.
     #[serde(rename = "sigoplimit")]
-    pub sigop_limit: u32,
+    pub sigop_limit: u64,
+
     /// Add documentation.
+    ///
+    /// The same as `MAX_BLOCK_BYTES`.
     #[serde(rename = "sizelimit")]
-    pub size_limit: u32,
+    pub size_limit: u64,
+
     /// Add documentation.
+    // TODO: use DateTime32 type?
     #[serde(rename = "curtime")]
     pub cur_time: u32,
+
     /// Add documentation.
+    // TODO: use CompactDifficulty type.
     pub bits: String,
+
     /// Add documentation.
+    // TODO: use Height type?
     pub height: u32,
 }
