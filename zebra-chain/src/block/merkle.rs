@@ -8,7 +8,7 @@ use std::{fmt, io::Write};
 use proptest_derive::Arbitrary;
 
 use crate::serialization::sha256d;
-use crate::transaction::{self, Transaction};
+use crate::transaction::{self, Transaction, UnminedTx, UnminedTxId};
 
 /// The root of the Bitcoin-inherited transaction Merkle tree, binding the
 /// block header to the transactions in the block.
@@ -115,6 +115,27 @@ where
     }
 }
 
+impl std::iter::FromIterator<UnminedTx> for Root {
+    fn from_iter<I>(transactions: I) -> Self
+    where
+        I: IntoIterator<Item = UnminedTx>,
+    {
+        transactions
+            .into_iter()
+            .map(|tx| tx.id.mined_id())
+            .collect()
+    }
+}
+
+impl std::iter::FromIterator<UnminedTxId> for Root {
+    fn from_iter<I>(tx_ids: I) -> Self
+    where
+        I: IntoIterator<Item = UnminedTxId>,
+    {
+        tx_ids.into_iter().map(|tx_id| tx_id.mined_id()).collect()
+    }
+}
+
 impl std::iter::FromIterator<transaction::Hash> for Root {
     fn from_iter<I>(hashes: I) -> Self
     where
@@ -166,6 +187,16 @@ impl From<AuthDataRoot> for [u8; 32] {
     }
 }
 
+/// The placeholder used for the [`AuthDigest`](transaction::AuthDigest) of pre-v5 transactions.
+///
+/// # Consensus
+///
+/// > For transaction versions before v5, a placeholder value consisting
+/// > of 32 bytes of 0xFF is used in place of the authorizing data commitment.
+/// > This is only used in the tree committed to by hashAuthDataRoot.
+/// https://zips.z.cash/zip-0244#authorizing-data-commitment
+const AUTH_DIGEST_PLACEHOLDER: transaction::AuthDigest = transaction::AuthDigest([0xFF; 32]);
+
 impl<T> std::iter::FromIterator<T> for AuthDataRoot
 where
     T: std::convert::AsRef<Transaction>,
@@ -174,17 +205,33 @@ where
     where
         I: IntoIterator<Item = T>,
     {
-        // > For transaction versions before v5, a placeholder value consisting
-        // > of 32 bytes of 0xFF is used in place of the authorizing data commitment.
-        // > This is only used in the tree committed to by hashAuthDataRoot.
-        // https://zips.z.cash/zip-0244#authorizing-data-commitment
         transactions
             .into_iter()
-            .map(|tx| {
-                tx.as_ref()
-                    .auth_digest()
-                    .unwrap_or(transaction::AuthDigest([0xFF; 32]))
-            })
+            .map(|tx| tx.as_ref().auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER))
+            .collect()
+    }
+}
+
+impl std::iter::FromIterator<UnminedTx> for AuthDataRoot {
+    fn from_iter<I>(transactions: I) -> Self
+    where
+        I: IntoIterator<Item = UnminedTx>,
+    {
+        transactions
+            .into_iter()
+            .map(|tx| tx.id.auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER))
+            .collect()
+    }
+}
+
+impl std::iter::FromIterator<UnminedTxId> for AuthDataRoot {
+    fn from_iter<I>(tx_ids: I) -> Self
+    where
+        I: IntoIterator<Item = UnminedTxId>,
+    {
+        tx_ids
+            .into_iter()
+            .map(|tx_id| tx_id.auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER))
             .collect()
     }
 }
