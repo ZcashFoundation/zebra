@@ -193,11 +193,11 @@ impl UnminedTxId {
 /// (But it might still need semantic or contextual verification.)
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnminedTx {
-    /// A unique identifier for this unmined transaction.
-    pub id: UnminedTxId,
-
     /// The unmined transaction itself.
     pub transaction: Arc<Transaction>,
+
+    /// A unique identifier for this unmined transaction.
+    pub id: UnminedTxId,
 
     /// The size in bytes of the serialized transaction data
     pub size: usize,
