@@ -5,18 +5,28 @@ expression: block_template
 {
   "capabilities": [],
   "version": 0,
-  "previousblockhash": "",
-  "blockcommitmentshash": "",
-  "lightclientroothash": "",
-  "finalsaplingroothash": "",
+  "previousblockhash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "blockcommitmentshash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "lightclientroothash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "finalsaplingroothash": "0000000000000000000000000000000000000000000000000000000000000000",
   "defaultroots": {
-    "merkleroot": "",
-    "chainhistoryroot": "",
-    "authdataroot": "",
-    "blockcommitmentshash": ""
+    "merkleroot": "0000000000000000000000000000000000000000000000000000000000000000",
+    "chainhistoryroot": "0000000000000000000000000000000000000000000000000000000000000000",
+    "authdataroot": "0000000000000000000000000000000000000000000000000000000000000000",
+    "blockcommitmentshash": "0000000000000000000000000000000000000000000000000000000000000000"
   },
   "transactions": [],
-  "coinbasetxn": {},
+  "coinbasetxn": {
+    "data": "",
+    "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "authdigest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "depends": [],
+    "fee": [
+      0
+    ],
+    "sigops": 0,
+    "required": true
+  },
   "target": "",
   "mintime": 0,
   "mutable": [],
