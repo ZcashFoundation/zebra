@@ -171,7 +171,7 @@ impl ChainHistoryMmrRootHash {
         reversed_bytes
     }
 
-    /// Convert bytes in big-endian byte-order into a [`ChainHistoryMmrRootHash`](crate::block::commitment::ChainHistoryMmrRootHash).
+    /// Convert bytes in big-endian byte-order into a `ChainHistoryMmrRootHash`.
     ///
     /// Zebra displays transaction and block hashes in big-endian byte-order,
     /// following the u256 convention set by Bitcoin and zcashd.
@@ -280,7 +280,7 @@ impl ChainHistoryBlockTxAuthCommitmentHash {
         reversed_bytes
     }
 
-    /// Convert bytes in big-endian byte-order into a [`ChainHistoryBlockTxAuthCommitmentHash`](crate::block::commitment::ChainHistoryBlockTxAuthCommitmentHash).
+    /// Convert bytes in big-endian byte-order into a `ChainHistoryBlockTxAuthCommitmentHash`.
     ///
     /// Zebra displays transaction and block hashes in big-endian byte-order,
     /// following the u256 convention set by Bitcoin and zcashd.

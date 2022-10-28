@@ -320,7 +320,8 @@ impl FromHex for AuthDataRoot {
 /// > For transaction versions before v5, a placeholder value consisting
 /// > of 32 bytes of 0xFF is used in place of the authorizing data commitment.
 /// > This is only used in the tree committed to by hashAuthDataRoot.
-/// https://zips.z.cash/zip-0244#authorizing-data-commitment
+///
+/// <https://zips.z.cash/zip-0244#authorizing-data-commitment>
 pub const AUTH_DIGEST_PLACEHOLDER: transaction::AuthDigest = transaction::AuthDigest([0xFF; 32]);
 
 impl<T> std::iter::FromIterator<T> for AuthDataRoot
