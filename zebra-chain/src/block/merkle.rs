@@ -1,14 +1,16 @@
 //! The Bitcoin-inherited Merkle tree of transactions.
-#![allow(clippy::unit_arg)]
 
-use std::iter;
-use std::{fmt, io::Write};
+use std::{fmt, io::Write, iter};
+
+use hex::{FromHex, ToHex};
+
+use crate::{
+    serialization::sha256d,
+    transaction::{self, Transaction, UnminedTx, UnminedTxId},
+};
 
 #[cfg(any(any(test, feature = "proptest-impl"), feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-
-use crate::serialization::sha256d;
-use crate::transaction::{self, Transaction, UnminedTx, UnminedTxId};
 
 /// The root of the Bitcoin-inherited transaction Merkle tree, binding the
 /// block header to the transactions in the block.
@@ -86,6 +88,60 @@ impl From<[u8; 32]> for Root {
 impl From<Root> for [u8; 32] {
     fn from(hash: Root) -> Self {
         hash.0
+    }
+}
+
+impl Root {
+    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        let mut reversed_bytes = self.0;
+        reversed_bytes.reverse();
+        reversed_bytes
+    }
+
+    /// Convert bytes in big-endian byte-order into a [`merkle::Root`](crate::block::merkle::Root).
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> Root {
+        let mut internal_byte_order = *bytes_in_display_order;
+        internal_byte_order.reverse();
+
+        Root(internal_byte_order)
+    }
+}
+
+impl ToHex for &Root {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
+    }
+}
+
+impl ToHex for Root {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
+    }
+}
+
+impl FromHex for Root {
+    type Error = <[u8; 32] as FromHex>::Error;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let mut hash = <[u8; 32]>::from_hex(hex)?;
+        hash.reverse();
+
+        Ok(hash.into())
     }
 }
 
@@ -200,6 +256,60 @@ impl From<[u8; 32]> for AuthDataRoot {
 impl From<AuthDataRoot> for [u8; 32] {
     fn from(hash: AuthDataRoot) -> Self {
         hash.0
+    }
+}
+
+impl AuthDataRoot {
+    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        let mut reversed_bytes = self.0;
+        reversed_bytes.reverse();
+        reversed_bytes
+    }
+
+    /// Convert bytes in big-endian byte-order into a [`merkle::AuthDataRoot`](crate::block::merkle::AuthDataRoot).
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> AuthDataRoot {
+        let mut internal_byte_order = *bytes_in_display_order;
+        internal_byte_order.reverse();
+
+        AuthDataRoot(internal_byte_order)
+    }
+}
+
+impl ToHex for &AuthDataRoot {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
+    }
+}
+
+impl ToHex for AuthDataRoot {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
+    }
+}
+
+impl FromHex for AuthDataRoot {
+    type Error = <[u8; 32] as FromHex>::Error;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let mut hash = <[u8; 32]>::from_hex(hex)?;
+        hash.reverse();
+
+        Ok(hash.into())
     }
 }
 

@@ -15,8 +15,10 @@ pub struct GetBlockTemplate {
     /// Add documentation.
     pub capabilities: Vec<String>,
 
-    /// Add documentation.
+    /// The version of the block format.
+    /// Always 4 for new Zcash blocks.
     //
+    // TODO: add a default block version constant to zebra-chain.
     pub version: u32,
 
     /// Add documentation.
@@ -24,12 +26,15 @@ pub struct GetBlockTemplate {
     pub previous_block_hash: GetBlockHash,
     /// Add documentation.
     #[serde(rename = "blockcommitmentshash")]
+    #[serde(with = "hex")]
     pub block_commitments_hash: ChainHistoryBlockTxAuthCommitmentHash,
     /// Add documentation.
     #[serde(rename = "lightclientroothash")]
+    #[serde(with = "hex")]
     pub light_client_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
     /// Add documentation.
     #[serde(rename = "finalsaplingroothash")]
+    #[serde(with = "hex")]
     pub final_sapling_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
     /// Add documentation.
     #[serde(rename = "defaultroots")]
