@@ -760,22 +760,13 @@ async fn rpc_getblocktemplate() {
         .await
         .expect("We should have a GetBlockTemplate struct");
 
+    mempool
+        .expect_request(mempool::Request::Transactions)
+        .await
+        .respond(mempool::Response::Transactions(vec![]));
+
     assert!(get_block_template.capabilities.is_empty());
     assert_eq!(get_block_template.version, 0);
-    assert!(get_block_template.previous_block_hash.is_empty());
-    assert!(get_block_template.block_commitments_hash.is_empty());
-    assert!(get_block_template.light_client_root_hash.is_empty());
-    assert!(get_block_template.final_sapling_root_hash.is_empty());
-    assert!(get_block_template.default_roots.merkle_root.is_empty());
-    assert!(get_block_template
-        .default_roots
-        .chain_history_root
-        .is_empty());
-    assert!(get_block_template.default_roots.auth_data_root.is_empty());
-    assert!(get_block_template
-        .default_roots
-        .block_commitments_hash
-        .is_empty());
     assert!(get_block_template.transactions.is_empty());
     assert_eq!(
         get_block_template.coinbase_txn,

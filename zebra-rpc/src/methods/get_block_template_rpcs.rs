@@ -98,7 +98,6 @@ where
     // Services
     //
     /// A handle to the mempool service.
-    #[allow(dead_code)]
     mempool: Buffer<Mempool, mempool::Request>,
 
     /// A handle to the state service.
@@ -208,23 +207,42 @@ where
     }
 
     fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>> {
-        async move {
-            let empty_string = String::from("");
+        let mempool = self.mempool.clone();
 
-            // Returns empty `GetBlockTemplate`
+        // Since this is a very large RPC, we use separate functions for each group of fields.
+        async move {
+            // TODO: put this in a separate get_mempool_transactions() function
+            let request = mempool::Request::Transactions;
+            let response = mempool.oneshot(request).await.map_err(|error| Error {
+                code: ErrorCode::ServerError(0),
+                message: error.to_string(),
+                data: None,
+            })?;
+
+            let transactions = if let mempool::Response::Transactions(transactions) = response {
+                // TODO: select transactions according to ZIP-317 (#5473)
+                transactions
+            } else {
+                unreachable!("unmatched response to a mempool::Transactions request");
+            };
+
+            let empty_string = String::from("");
             Ok(GetBlockTemplate {
                 capabilities: vec![],
+
                 version: 0,
-                previous_block_hash: empty_string.clone(),
-                block_commitments_hash: empty_string.clone(),
-                light_client_root_hash: empty_string.clone(),
-                final_sapling_root_hash: empty_string.clone(),
+
+                previous_block_hash: GetBlockHash([0; 32].into()),
+                block_commitments_hash: [0; 32].into(),
+                light_client_root_hash: [0; 32].into(),
+                final_sapling_root_hash: [0; 32].into(),
                 default_roots: DefaultRoots {
-                    merkle_root: empty_string.clone(),
-                    chain_history_root: empty_string.clone(),
-                    auth_data_root: empty_string.clone(),
-                    block_commitments_hash: empty_string.clone(),
+                    merkle_root: transactions.iter().cloned().collect(),
+                    chain_history_root: [0; 32].into(),
+                    auth_data_root: transactions.iter().cloned().collect(),
+                    block_commitments_hash: [0; 32].into(),
                 },
+
                 transactions: vec![],
                 coinbase_txn: Coinbase {},
                 target: empty_string.clone(),

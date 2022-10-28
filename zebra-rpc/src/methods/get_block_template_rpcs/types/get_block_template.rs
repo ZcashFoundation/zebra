@@ -9,20 +9,21 @@ use crate::methods::get_block_template_rpcs::types::{
 pub struct GetBlockTemplate {
     /// Add documentation.
     pub capabilities: Vec<String>,
+
     /// Add documentation.
     pub version: usize,
     /// Add documentation.
     #[serde(rename = "previousblockhash")]
-    pub previous_block_hash: String,
+    pub previous_block_hash: GetBlockHash,
     /// Add documentation.
     #[serde(rename = "blockcommitmentshash")]
-    pub block_commitments_hash: String,
+    pub block_commitments_hash: ChainHistoryBlockTxAuthCommitmentHash,
     /// Add documentation.
     #[serde(rename = "lightclientroothash")]
-    pub light_client_root_hash: String,
+    pub light_client_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
     /// Add documentation.
     #[serde(rename = "finalsaplingroothash")]
-    pub final_sapling_root_hash: String,
+    pub final_sapling_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
     /// Add documentation.
     #[serde(rename = "defaultroots")]
     pub default_roots: DefaultRoots,
