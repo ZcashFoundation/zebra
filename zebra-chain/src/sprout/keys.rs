@@ -10,7 +10,7 @@
 
 use std::fmt;
 
-/// A Sprout paying key.
+/// A Sprout _paying key_.
 ///
 /// Derived from a sprout Spending Key.
 #[derive(Copy, Clone, Eq, PartialEq)]
