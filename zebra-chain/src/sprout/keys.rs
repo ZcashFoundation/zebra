@@ -12,7 +12,7 @@ use std::fmt;
 
 /// A Sprout _paying key_.
 ///
-/// Derived from a sprout Spending Key.
+/// Derived from a Sprout _spending key.
 #[derive(Copy, Clone, Eq, PartialEq)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
