@@ -16,7 +16,14 @@ default-run = "zebrad"
 # In release builds, don't compile debug logging code, to improve performance.
 default = ["release_max_level_info"]
 
-# Production features that activate extra dependencies
+# Production features that activate extra dependencies, or extra features in dependencies
+
+# Experimental mining RPC support
+getblocktemplate-rpcs = [
+    "zebra-rpc/getblocktemplate-rpcs",
+    "zebra-state/getblocktemplate-rpcs",
+    "zebra-node-services/getblocktemplate-rpcs",
+]
 
 sentry = ["dep:sentry", "sentry-tracing"]
 flamegraph = ["tracing-flame", "inferno"]

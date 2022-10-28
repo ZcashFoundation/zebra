@@ -9,8 +9,10 @@ edition = "2021"
 
 [features]
 default = []
+getblocktemplate-rpcs = ["zebra-state/getblocktemplate-rpcs", "zebra-node-services/getblocktemplate-rpcs"]
+
+# Test-only features
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
-getblocktemplate-rpcs = ["zebra-state/getblocktemplate-rpcs"]
 
 [dependencies]
 chrono = { version = "0.4.22", default-features = false, features = ["clock", "std"] }

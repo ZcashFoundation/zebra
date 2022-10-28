@@ -424,6 +424,7 @@ impl Service<Request> for Mempool {
 
                     async move { Ok(Response::TransactionIds(res)) }.boxed()
                 }
+
                 Request::TransactionsById(ref ids) => {
                     trace!(?req, "got mempool request");
 
@@ -445,6 +446,17 @@ impl Service<Request> for Mempool {
 
                     async move { Ok(Response::Transactions(res)) }.boxed()
                 }
+                #[cfg(feature = "getblocktemplate-rpcs")]
+                Request::Transactions => {
+                    trace!(?req, "got mempool request");
+
+                    let res: Vec<_> = storage.transactions().cloned().collect();
+
+                    trace!(?req, res_count = ?res.len(), "answered mempool request");
+
+                    async move { Ok(Response::Transactions(res)) }.boxed()
+                }
+
                 Request::RejectedTransactionIds(ref ids) => {
                     trace!(?req, "got mempool request");
 
