@@ -237,6 +237,9 @@ There are a few bugs in Zebra that we're still working on fixing:
 - Zebra requires Rust 1.63, due to [a compiler performance regression in Rust 1.64](https://github.com/ZcashFoundation/zebra/issues/5091)
 - No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801)
   - We used to test with Windows Server 2019, but not anymore; see issue for details
+  
+- Experimental Tor support is disabled until [`arti-client` upgrades to `x25519-dalek` 2.0.0 or later](https://github.com/ZcashFoundation/zebra/issues/5492)
+  - This happens due to a Rust dependency conflict, which can only be resolved by changing the dependencies of `x25519-dalek`
 
 ## Future Work
 
