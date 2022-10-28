@@ -503,8 +503,12 @@ impl Service<Request> for Mempool {
                 let resp = match req {
                     // Empty Queries
                     Request::TransactionIds => Response::TransactionIds(Default::default()),
+
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
+                    #[cfg(feature = "getblocktemplate-rpcs")]
+                    Request::Transactions => Response::Transactions(Default::default()),
+
                     Request::RejectedTransactionIds(_) => {
                         Response::RejectedTransactionIds(Default::default())
                     }
