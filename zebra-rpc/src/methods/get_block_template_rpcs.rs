@@ -227,8 +227,17 @@ where
                 unreachable!("unmatched response to a mempool::Transactions request");
             };
 
-            let merkle_root = transactions.iter().cloned().collect();
-            let auth_data_root = transactions.iter().cloned().collect();
+            let merkle_root;
+            let auth_data_root;
+
+            // TODO: add the coinbase transaction to these lists, and delete the is_empty() check
+            if !transactions.is_empty() {
+                merkle_root = transactions.iter().cloned().collect();
+                auth_data_root = transactions.iter().cloned().collect();
+            } else {
+                merkle_root = [0; 32].into();
+                auth_data_root = [0; 32].into();
+            }
 
             let transactions = transactions.iter().map(Into::into).collect();
 

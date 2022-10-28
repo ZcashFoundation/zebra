@@ -77,6 +77,18 @@ impl fmt::Debug for Root {
     }
 }
 
+impl From<[u8; 32]> for Root {
+    fn from(hash: [u8; 32]) -> Self {
+        Root(hash)
+    }
+}
+
+impl From<Root> for [u8; 32] {
+    fn from(hash: Root) -> Self {
+        hash.0
+    }
+}
+
 fn hash(h1: &[u8; 32], h2: &[u8; 32]) -> [u8; 32] {
     let mut w = sha256d::Writer::default();
     w.write_all(h1).unwrap();
@@ -137,6 +149,10 @@ impl std::iter::FromIterator<UnminedTxId> for Root {
 }
 
 impl std::iter::FromIterator<transaction::Hash> for Root {
+    /// # Panics
+    ///
+    /// When there are no transactions in the iterator.
+    /// This is impossible, because every block must have a coinbase transaction.
     fn from_iter<I>(hashes: I) -> Self
     where
         I: IntoIterator<Item = transaction::Hash>,
