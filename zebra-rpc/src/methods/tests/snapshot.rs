@@ -1,4 +1,9 @@
 //! Snapshot tests for Zebra JSON-RPC responses.
+//!
+//! To update these snapshots, run:
+//! ```sh
+//! cargo insta test --review
+//! ```
 
 use std::sync::Arc;
 

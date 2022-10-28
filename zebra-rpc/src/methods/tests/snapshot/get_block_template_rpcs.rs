@@ -1,4 +1,9 @@
 //! Snapshot tests for getblocktemplate RPCs.
+//!
+//! To update these snapshots, run:
+//! ```sh
+//! cargo insta test --review --features getblocktemplate-rpcs --delete-unreferenced-snapshots
+//! ```
 
 use insta::Settings;
 use tower::{buffer::Buffer, Service};
