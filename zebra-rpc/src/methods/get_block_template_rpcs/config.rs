@@ -9,5 +9,5 @@ use zebra_chain::transparent::Address;
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// Miner transparent address
-    pub miner_transparent_address: Option<Address>,
+    pub miner_address: Option<Address>,
 }
