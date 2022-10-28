@@ -498,6 +498,26 @@ impl Constraint for NonNegative {
     }
 }
 
+/// Marker type for `Amount` that requires negative or zero values.
+///
+/// Used for coinbase transactions in `getblocktemplate` RPCs.
+///
+/// ```
+/// # use zebra_chain::amount::{Constraint, MAX_MONEY, NegativeOrZero};
+/// assert_eq!(
+///     NegativeOrZero::valid_range(),
+///     -MAX_MONEY..=0,
+/// );
+/// ```
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct NegativeOrZero;
+
+impl Constraint for NegativeOrZero {
+    fn valid_range() -> RangeInclusive<i64> {
+        -MAX_MONEY..=0
+    }
+}
+
 /// Number of zatoshis in 1 ZEC
 pub const COIN: i64 = 100_000_000;
 

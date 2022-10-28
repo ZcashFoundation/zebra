@@ -195,7 +195,7 @@ impl From<AuthDataRoot> for [u8; 32] {
 /// > of 32 bytes of 0xFF is used in place of the authorizing data commitment.
 /// > This is only used in the tree committed to by hashAuthDataRoot.
 /// https://zips.z.cash/zip-0244#authorizing-data-commitment
-const AUTH_DIGEST_PLACEHOLDER: transaction::AuthDigest = transaction::AuthDigest([0xFF; 32]);
+pub const AUTH_DIGEST_PLACEHOLDER: transaction::AuthDigest = transaction::AuthDigest([0xFF; 32]);
 
 impl<T> std::iter::FromIterator<T> for AuthDataRoot
 where

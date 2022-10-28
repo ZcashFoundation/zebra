@@ -5,7 +5,7 @@ use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
-use zebra_chain::{block::Height, chain_tip::ChainTip};
+use zebra_chain::{amount::Amount, block::Height, chain_tip::ChainTip};
 use zebra_node_services::mempool;
 
 use crate::methods::{
@@ -227,6 +227,11 @@ where
                 unreachable!("unmatched response to a mempool::Transactions request");
             };
 
+            let merkle_root = transactions.iter().cloned().collect();
+            let auth_data_root = transactions.iter().cloned().collect();
+
+            let transactions = transactions.iter().map(Into::into).collect();
+
             let empty_string = String::from("");
             Ok(GetBlockTemplate {
                 capabilities: vec![],
@@ -238,14 +243,34 @@ where
                 light_client_root_hash: [0; 32].into(),
                 final_sapling_root_hash: [0; 32].into(),
                 default_roots: DefaultRoots {
-                    merkle_root: transactions.iter().cloned().collect(),
+                    merkle_root,
                     chain_history_root: [0; 32].into(),
-                    auth_data_root: transactions.iter().cloned().collect(),
+                    auth_data_root,
                     block_commitments_hash: [0; 32].into(),
                 },
 
-                transactions: vec![],
-                coinbase_txn: TransactionTemplate {},
+                transactions,
+
+                // TODO: move to a separate function in the transactions module
+                coinbase_txn: TransactionTemplate {
+                    // TODO: generate coinbase transaction data
+                    data: vec![].into(),
+
+                    // TODO: calculate from transaction data
+                    hash: [0; 32].into(),
+                    auth_digest: [0; 32].into(),
+
+                    // Always empty for coinbase transactions.
+                    depends: Vec::new(),
+
+                    // TODO: negative sum of transactions.*.fee
+                    fee: Amount::zero(),
+
+                    // TODO: sigops used by the generated transaction data
+                    sigops: 0,
+
+                    required: true,
+                },
 
                 target: empty_string.clone(),
 

@@ -1,6 +1,6 @@
 //! The `GetBlockTempate` type is the output of the `getblocktemplate` RPC method.
 
-use zebra_chain::block::ChainHistoryBlockTxAuthCommitmentHash;
+use zebra_chain::{amount, block::ChainHistoryBlockTxAuthCommitmentHash};
 
 use crate::methods::{
     get_block_template_rpcs::types::{
@@ -38,11 +38,11 @@ pub struct GetBlockTemplate {
     /// The non-coinbase transactions selected for this block template.
     ///
     /// TODO: select these transactions using ZIP-317 (#5473)
-    pub transactions: Vec<TransactionTemplate>,
+    pub transactions: Vec<TransactionTemplate<amount::NonNegative>>,
 
     /// The coinbase transactions generated from `transactions` and `height`.
     #[serde(rename = "coinbasetxn")]
-    pub coinbase_txn: TransactionTemplate,
+    pub coinbase_txn: TransactionTemplate<amount::NegativeOrZero>,
 
     /// Add documentation.
     // TODO: use ExpandedDifficulty type.
