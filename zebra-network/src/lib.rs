@@ -60,7 +60,7 @@
 //! The [`isolated`] APIs provide anonymised TCP and [Tor](https://crates.io/crates/arti)
 //! connections to individual peers.
 //! These isolated connections can be used to send user-generated transactions anonymously.
-//! They are currently disabled until `arti-client`'s dependency `x25519-dalek v1.2.0`
+//! Tor connections are currently disabled until `arti-client`'s dependency `x25519-dalek v1.2.0`
 //! is updated to a higher version. See #5492.
 //!
 //! ### Individual Peer Connections
