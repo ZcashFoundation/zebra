@@ -8,6 +8,10 @@ use zebra_chain::transparent::Address;
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
-    /// Miner transparent address
+    /// The address used for miner payouts.
+    /// Currently, Zebra only supports transparent addresses.
+    ///
+    /// Zebra sends mining fees and miner rewards to this address in the
+    /// `getblocktemplate` RPC coinbase transaction.
     pub miner_address: Option<Address>,
 }
