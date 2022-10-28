@@ -789,6 +789,7 @@ where
 {
     /// The tokio [`TcpStream`](tokio::net::TcpStream) or Tor
     /// `arti_client::DataStream` to the peer.
+    // Use [`arti_client::DataStream`] when #5492 is done.
     pub data_stream: PeerTransport,
 
     /// The address of the peer, and other related information.

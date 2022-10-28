@@ -9,7 +9,7 @@ edition = "2021"
 
 [features]
 default = []
-# Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version.
+# Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
 # tor = ["arti-client", "tor-rtcompat"]
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 
@@ -42,7 +42,7 @@ tracing-error = { version = "0.2.0", features = ["traced-error"] }
 tracing = "0.1.37"
 
 # tor dependencies
-# Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version.
+# Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
 # arti-client = { version = "0.0.2", optional = true }
 tor-rtcompat  = { version = "0.0.2", optional = true }
 

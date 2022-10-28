@@ -60,6 +60,8 @@
 //! The [`isolated`] APIs provide anonymised TCP and [Tor](https://crates.io/crates/arti)
 //! connections to individual peers.
 //! These isolated connections can be used to send user-generated transactions anonymously.
+//! They are currently disabled until `arti-client`'s dependency `x25519-dalek v1.2.0`
+//! is updated to a higher version. See #5492.
 //!
 //! ### Individual Peer Connections
 //!
@@ -152,12 +154,12 @@ mod peer_set;
 mod policies;
 mod protocol;
 
-// Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version.
+// Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
 // #[cfg(feature = "tor")]
 #[cfg(tor)]
 pub use crate::isolated::tor::connect_isolated_tor;
 
-// Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version.
+// Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
 // #[cfg(all(feature = "tor", any(test, feature = "proptest-impl")))]
 #[cfg(tor)]
 pub use crate::isolated::tor::connect_isolated_tor_with_inbound;
