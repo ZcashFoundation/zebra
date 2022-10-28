@@ -755,15 +755,17 @@ async fn rpc_getblocktemplate() {
         latest_chain_tip.clone(),
     );
 
-    let get_block_template = get_block_template_rpc
-        .get_block_template()
-        .await
-        .expect("We should have a GetBlockTemplate struct");
+    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
 
     mempool
         .expect_request(mempool::Request::Transactions)
         .await
         .respond(mempool::Response::Transactions(vec![]));
+
+    let get_block_template = get_block_template
+        .await
+        .expect("unexpected panic in getblocktemplate RPC task")
+        .expect("unexpected error in getblocktemplate RPC call");
 
     assert!(get_block_template.capabilities.is_empty());
     assert_eq!(get_block_template.version, 0);
