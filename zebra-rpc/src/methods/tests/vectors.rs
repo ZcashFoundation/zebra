@@ -770,7 +770,7 @@ async fn rpc_getblocktemplate() {
     assert!(get_block_template.transactions.is_empty());
     assert_eq!(
         get_block_template.coinbase_txn,
-        get_block_template_rpcs::types::coinbase::Coinbase {}
+        get_block_template_rpcs::types::transaction::TransactionTemplate {}
     );
     assert!(get_block_template.target.is_empty());
     assert_eq!(get_block_template.min_time, 0);

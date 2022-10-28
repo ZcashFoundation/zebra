@@ -1,7 +1,12 @@
 //! The `GetBlockTempate` type is the output of the `getblocktemplate` RPC method.
 
-use crate::methods::get_block_template_rpcs::types::{
-    coinbase::Coinbase, default_roots::DefaultRoots, transaction::Transaction,
+use zebra_chain::block::ChainHistoryBlockTxAuthCommitmentHash;
+
+use crate::methods::{
+    get_block_template_rpcs::types::{
+        default_roots::DefaultRoots, transaction::TransactionTemplate,
+    },
+    GetBlockHash,
 };
 
 /// Documentation to be added after we document all the individual fields.
@@ -27,11 +32,16 @@ pub struct GetBlockTemplate {
     /// Add documentation.
     #[serde(rename = "defaultroots")]
     pub default_roots: DefaultRoots,
-    /// Add documentation.
-    pub transactions: Vec<Transaction>,
-    /// Add documentation.
+
+    /// The non-coinbase transactions selected for this block template.
+    ///
+    /// TODO: select these transactions using ZIP-317 (#5473)
+    pub transactions: Vec<TransactionTemplate>,
+
+    /// The coinbase transactions generated from `transactions` and `height`.
     #[serde(rename = "coinbasetxn")]
-    pub coinbase_txn: Coinbase,
+    pub coinbase_txn: TransactionTemplate,
+
     /// Add documentation.
     pub target: String,
     /// Add documentation.

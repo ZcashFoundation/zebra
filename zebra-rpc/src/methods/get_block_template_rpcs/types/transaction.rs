@@ -1,5 +1,5 @@
-//! The `Transaction` type is part of the `getblocktemplate` RPC method output.
+//! The `TransactionTemplate` type is part of the `getblocktemplate` RPC method output.
 
-/// Documentation and fields to be added in #5454.
+/// Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Transaction {}
+pub struct TransactionTemplate {}

@@ -10,7 +10,8 @@ use zebra_node_services::mempool;
 
 use crate::methods::{
     get_block_template_rpcs::types::{
-        coinbase::Coinbase, default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
+        default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
+        transaction::TransactionTemplate,
     },
     GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
@@ -244,15 +245,23 @@ where
                 },
 
                 transactions: vec![],
-                coinbase_txn: Coinbase {},
+                coinbase_txn: TransactionTemplate {},
+
                 target: empty_string.clone(),
+
                 min_time: 0,
+
                 mutable: vec![],
+
                 nonce_range: empty_string.clone(),
+
                 sigop_limit: 0,
                 size_limit: 0,
+
                 cur_time: 0,
+
                 bits: empty_string,
+
                 height: 0,
             })
         }
