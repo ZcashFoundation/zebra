@@ -48,13 +48,28 @@ pub trait GetBlockTemplateRpc {
     #[rpc(name = "getblockhash")]
     fn get_block_hash(&self, index: i32) -> BoxFuture<Result<GetBlockHash>>;
 
-    /// Documentation to be filled as we go.
+    /// Returns a block template for mining new Zcash blocks.
+    ///
+    /// # Parameters
+    ///
+    /// - `jsonrequestobject`: (string, optional) A JSON object containing arguments.
     ///
     /// zcashd reference: [`getblocktemplate`](https://zcash-rpc.github.io/getblocktemplate.html)
     ///
     /// # Notes
     ///
-    /// - This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
+    /// Arguments to this RPC are currently ignored.
+    /// Long polling, block proposals, server lists, and work IDs are not supported.
+    ///
+    /// Miners can make arbitrary changes to blocks, as long as:
+    /// - the data set to `submitblock` is a valid Zcash block, and
+    /// - the parent block is a valid block that Zebra already has, or will receive soon.
+    ///
+    /// Zebra verifies blocks in parallel, and keeps recent chains in parallel,
+    /// so moving between chains is very cheap. (But forking a new chain may take some time,
+    /// until bug #4794 is fixed.)
+    ///
+    /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[rpc(name = "getblocktemplate")]
     fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>>;
 }
