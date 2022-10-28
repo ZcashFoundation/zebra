@@ -1224,7 +1224,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c24f403d068ad0b359e577a77f92392118be3f3c927538f2bb544a5ecd828c6"
 dependencies = [
  "curve25519-dalek",
- "hashbrown 0.12.1",
+ "hashbrown",
  "hex",
  "rand_core 0.6.4",
  "serde",
@@ -5405,7 +5405,7 @@ dependencies = [
  "itertools",
  "jubjub",
  "lazy_static",
- "orchard 0.2.0",
+ "orchard 0.3.0",
  "primitive-types",
  "proptest",
  "proptest-derive",
@@ -5459,7 +5459,7 @@ dependencies = [
  "lazy_static",
  "metrics",
  "once_cell",
- "orchard 0.2.0",
+ "orchard 0.3.0",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
