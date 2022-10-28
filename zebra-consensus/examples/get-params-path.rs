@@ -7,6 +7,6 @@
 fn main() {
     let path = zebra_consensus::groth16::Groth16Parameters::directory();
     if let Some(path) = path.to_str() {
-        println!("{}", path);
+        println!("{path}");
     }
 }

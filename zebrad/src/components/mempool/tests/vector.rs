@@ -261,7 +261,7 @@ async fn mempool_queue_single() -> Result<(), Report> {
                 evicted_count += 1
             }
             MempoolError::InMempool => in_mempool_count += 1,
-            error => panic!("transaction should not be rejected with reason {:?}", error),
+            error => panic!("transaction should not be rejected with reason {error:?}"),
         }
     }
     assert_eq!(in_mempool_count, transactions.len() - 1);

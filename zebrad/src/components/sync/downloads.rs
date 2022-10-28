@@ -49,7 +49,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// the rest of the capacity is reserved for the other queues.
 /// There is no reserved capacity for the syncer queue:
 /// if the other queues stay full, the syncer will eventually time out and reset.
-pub const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 4;
+pub const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 5;
 
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
@@ -445,7 +445,7 @@ where
                 let short_timeout_max = (max_checkpoint_height + FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT).expect("checkpoint block height is in valid range");
                 if block_height >= max_checkpoint_height && block_height <= short_timeout_max {
                     rsp = timeout(FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, rsp)
-                        .map_err(|timeout| format!("initial fully verified block timed out: retrying: {:?}", timeout).into())
+                        .map_err(|timeout| format!("initial fully verified block timed out: retrying: {timeout:?}").into())
                         .map(|nested_result| nested_result.and_then(convert::identity)).boxed();
                 }
 

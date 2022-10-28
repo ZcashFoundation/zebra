@@ -35,10 +35,10 @@ use zebra_state::{OutputIndex, OutputLocation, TransactionLocation};
 use crate::queue::Queue;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-mod get_block_template;
+mod get_block_template_rpcs;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-pub use get_block_template::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
+pub use get_block_template_rpcs::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
 #[cfg(test)]
 mod tests;
@@ -1049,7 +1049,7 @@ impl AddressStrings {
             .into_iter()
             .map(|address| {
                 address.parse().map_err(|error| {
-                    Error::invalid_params(&format!("invalid address {address:?}: {error}"))
+                    Error::invalid_params(format!("invalid address {address:?}: {error}"))
                 })
             })
             .collect::<Result<_>>()?;

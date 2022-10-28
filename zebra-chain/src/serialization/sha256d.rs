@@ -76,6 +76,6 @@ mod tests {
         let input = b"hello";
         let checksum = Checksum::from(&input[..]);
 
-        assert_eq!(format!("{:?}", checksum), "Sha256dChecksum(\"9595c9df\")");
+        assert_eq!(format!("{checksum:?}"), "Sha256dChecksum(\"9595c9df\")");
     }
 }

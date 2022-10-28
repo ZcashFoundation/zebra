@@ -316,7 +316,7 @@ impl MustUseClientResponseSender {
             .as_ref()
             .map(|tx| tx.is_canceled())
             .unwrap_or_else(
-                || panic!("called is_canceled() after using oneshot sender: oneshot must be used exactly once: {:?}", self))
+                || panic!("called is_canceled() after using oneshot sender: oneshot must be used exactly once: {self:?}"))
     }
 }
 
@@ -471,7 +471,7 @@ impl Client {
                 }
                 // Heartbeat task stopped with panic.
                 else if error.is_panic() {
-                    panic!("heartbeat task has panicked: {}", error);
+                    panic!("heartbeat task has panicked: {error}");
                 }
                 // Heartbeat task stopped with error.
                 else {
@@ -497,7 +497,7 @@ impl Client {
             }
             Poll::Ready(Err(error)) => {
                 // Connection task stopped unexpectedly with a panic.
-                panic!("connection task has panicked: {}", error);
+                panic!("connection task has panicked: {error}");
             }
         }
     }

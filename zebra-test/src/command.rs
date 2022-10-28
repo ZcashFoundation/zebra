@@ -60,7 +60,7 @@ impl CommandExt for Command {
     /// wrapper for `status` fn on `Command` that constructs informative error
     /// reports
     fn status2(&mut self) -> Result<TestStatus, Report> {
-        let cmd = format!("{:?}", self);
+        let cmd = format!("{self:?}");
         let status = self.status();
 
         let command = || cmd.clone().header("Command:");
@@ -79,19 +79,19 @@ impl CommandExt for Command {
 
         let output = output
             .wrap_err("failed to execute process")
-            .with_section(|| format!("{:?}", self).header("Command:"))?;
+            .with_section(|| format!("{self:?}").header("Command:"))?;
 
         Ok(TestOutput {
             dir: None,
             output,
-            cmd: format!("{:?}", self),
+            cmd: format!("{self:?}"),
         })
     }
 
     /// wrapper for `spawn` fn on `Command` that constructs informative error
     /// reports
     fn spawn2<T>(&mut self, dir: T) -> Result<TestChild<T>, Report> {
-        let cmd = format!("{:?}", self);
+        let cmd = format!("{self:?}");
         let child = self.spawn();
 
         let child = child
@@ -321,11 +321,11 @@ where
     if bypass_test_capture {
         // Send lines directly to the terminal (or process stdout file redirect).
         #[allow(clippy::explicit_write)]
-        writeln!(std::io::stdout(), "{}", line).unwrap();
+        writeln!(std::io::stdout(), "{line}").unwrap();
     } else {
         // If the test fails, the test runner captures and displays this output.
         // To show this output unconditionally, use `cargo test -- --nocapture`.
-        println!("{}", line);
+        println!("{line}");
     }
 
     // Some OSes require a flush to send all output to the terminal.
@@ -1070,7 +1070,7 @@ impl<T> TestOutput<T> {
             output_name,
             format!("contain {}", err_msg.to_string()),
         )
-        .with_section(|| format!("{:?}", s).header("Match String:"))
+        .with_section(|| format!("{s:?}").header("Match String:"))
     }
 
     /// Tests if standard output contains `s`.
@@ -1082,7 +1082,7 @@ impl<T> TestOutput<T> {
             "stdout",
             "contain the given string",
         )
-        .with_section(|| format!("{:?}", s).header("Match String:"))
+        .with_section(|| format!("{s:?}").header("Match String:"))
     }
 
     /// Tests if standard output matches `regex`.
@@ -1100,7 +1100,7 @@ impl<T> TestOutput<T> {
             "stdout",
             "matched the given regex",
         )
-        .with_section(|| format!("{:?}", regex).header("Match Regex:"))
+        .with_section(|| format!("{regex:?}").header("Match Regex:"))
     }
 
     /// Tests if any lines in standard output contain `s`.
@@ -1124,7 +1124,7 @@ impl<T> TestOutput<T> {
             "stdout",
             "matched the given regex",
         )
-        .with_section(|| format!("{:?}", regex).header("Line Match Regex:"))
+        .with_section(|| format!("{regex:?}").header("Line Match Regex:"))
     }
 
     /// Tests if standard error contains `s`.
@@ -1136,7 +1136,7 @@ impl<T> TestOutput<T> {
             "stderr",
             "contain the given string",
         )
-        .with_section(|| format!("{:?}", s).header("Match String:"))
+        .with_section(|| format!("{s:?}").header("Match String:"))
     }
 
     /// Tests if standard error matches `regex`.
@@ -1154,7 +1154,7 @@ impl<T> TestOutput<T> {
             "stderr",
             "matched the given regex",
         )
-        .with_section(|| format!("{:?}", regex).header("Match Regex:"))
+        .with_section(|| format!("{regex:?}").header("Match Regex:"))
     }
 
     /// Tests if any lines in standard error contain `s`.
@@ -1178,7 +1178,7 @@ impl<T> TestOutput<T> {
             "stderr",
             "matched the given regex",
         )
-        .with_section(|| format!("{:?}", regex).header("Line Match Regex:"))
+        .with_section(|| format!("{regex:?}").header("Line Match Regex:"))
     }
 
     /// Returns Ok if the program was killed, Err(Report) if exit was by another
@@ -1274,9 +1274,9 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
         if let Some(stdout) = &mut source.stdout {
             for line in stdout {
                 let line = line.unwrap_or_else(|error| {
-                    format!("failure reading test process logs: {:?}", error)
+                    format!("failure reading test process logs: {error:?}")
                 });
-                let _ = writeln!(&mut stdout_buf, "{}", line);
+                let _ = writeln!(&mut stdout_buf, "{line}");
             }
         } else if let Some(child) = &mut source.child {
             if let Some(stdout) = &mut child.stdout {
@@ -1287,9 +1287,9 @@ impl<T> ContextFrom<&mut TestChild<T>> for Report {
         if let Some(stderr) = &mut source.stderr {
             for line in stderr {
                 let line = line.unwrap_or_else(|error| {
-                    format!("failure reading test process logs: {:?}", error)
+                    format!("failure reading test process logs: {error:?}")
                 });
-                let _ = writeln!(&mut stderr_buf, "{}", line);
+                let _ = writeln!(&mut stderr_buf, "{line}");
             }
         } else if let Some(child) = &mut source.child {
             if let Some(stderr) = &mut child.stderr {
@@ -1344,14 +1344,14 @@ impl ContextFrom<&ExitStatus> for Report {
 
         if let Some(code) = source.code() {
             return self.with_section(|| {
-                format!("command exited {} with status code {}", how, code).header("Exit Status:")
+                format!("command exited {how} with status code {code}").header("Exit Status:")
             });
         }
 
         #[cfg(unix)]
         if let Some(signal) = source.signal() {
             self.with_section(|| {
-                format!("command terminated {} by signal {}", how, signal).header("Exit Status:")
+                format!("command terminated {how} by signal {signal}").header("Exit Status:")
             })
         } else {
             unreachable!("on unix all processes either terminate via signal or with an exit code");
