@@ -1,12 +1,11 @@
 //! Sprout notes
 
-#![allow(clippy::unit_arg)]
-
-#[cfg(any(test, feature = "proptest-impl"))]
-mod arbitrary;
 mod ciphertexts;
 mod mac;
 mod nullifiers;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+mod arbitrary;
 
 use crate::{
     amount::{Amount, NonNegative},
