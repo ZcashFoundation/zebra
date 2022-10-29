@@ -159,37 +159,6 @@ pub fn sinsemilla_hash(D: &[u8], M: &BitVec<u8, Lsb0>) -> Option<pallas::Base> {
     extract_p_bottom(sinsemilla_hash_to_point(D, M))
 }
 
-/// Sinsemilla commit
-///
-/// We construct Sinsemilla commitments by hashing to a point with Sinsemilla
-/// hash, and adding a randomized point on the Pallas curve (with complete
-/// addition, vs incomplete addition as used in [`sinsemilla_hash_to_point`]).
-///
-/// SinsemillaCommit_r(D, M) := SinsemillaHashToPoint(D || "-M", M) + \[r\]GroupHash^P(D || "-r", "")
-///
-/// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit>
-#[allow(non_snake_case)]
-pub fn sinsemilla_commit(
-    r: pallas::Scalar,
-    D: &[u8],
-    M: &BitVec<u8, Lsb0>,
-) -> Option<pallas::Point> {
-    sinsemilla_hash_to_point(&[D, b"-M"].concat(), M)
-        .map(|point| point + pallas_group_hash(&[D, b"-r"].concat(), b"") * r)
-}
-
-/// SinsemillaShortCommit_r(D, M) := Extract⊥ P(SinsemillaCommit_r(D, M))
-///
-/// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillacommit>
-#[allow(non_snake_case)]
-pub fn sinsemilla_short_commit(
-    r: pallas::Scalar,
-    D: &[u8],
-    M: &BitVec<u8, Lsb0>,
-) -> Option<pallas::Base> {
-    extract_p_bottom(sinsemilla_commit(r, D, M))
-}
-
 // TODO: test the above correctness and compatibility with the zcash-hackworks test vectors
 // https://github.com/ZcashFoundation/zebra/issues/2079
 // https://github.com/zcash-hackworks/zcash-test-vectors/pulls

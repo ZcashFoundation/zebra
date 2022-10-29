@@ -1,4 +1,8 @@
-// Generated from https://github.com/zcash-hackworks/zcash-test-vectors/blob/07dc43fd90cd78a0b45b2eb5d2be3ce3c1841603/sapling_key_components.py
+//! Sapling key test vectors.
+//!
+//! Generated from https://github.com/zcash-hackworks/zcash-test-vectors/blob/07dc43fd90cd78a0b45b2eb5d2be3ce3c1841603/sapling_key_components.py
+
+#![allow(dead_code)]
 
 pub struct TestVector {
     pub sk: [u8; 32],

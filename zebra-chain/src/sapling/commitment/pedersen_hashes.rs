@@ -98,22 +98,6 @@ pub fn pedersen_hash(domain: [u8; 8], M: &BitVec<u8, Lsb0>) -> jubjub::Fq {
     jubjub::AffinePoint::from(pedersen_hash_to_point(domain, M)).get_u()
 }
 
-/// Mixing Pedersen Hash Function
-///
-/// Used to compute ρ from a note commitment and its position in the note
-/// commitment tree.  It takes as input a Pedersen commitment P, and hashes it
-/// with another input x.
-///
-/// MixingPedersenHash(P, x) := P + \[x\]FindGroupHash^J^(r)("Zcash_J_", "")
-///
-/// <https://zips.z.cash/protocol/protocol.pdf#concretemixinghash>
-#[allow(non_snake_case)]
-pub fn mixing_pedersen_hash(P: jubjub::ExtendedPoint, x: jubjub::Fr) -> jubjub::ExtendedPoint {
-    const J: [u8; 8] = *b"Zcash_J_";
-
-    P + find_group_hash(J, b"") * x
-}
-
 /// Construct a 'windowed' Pedersen commitment by reusing a Pederson hash
 /// construction, and adding a randomized point on the Jubjub curve.
 ///

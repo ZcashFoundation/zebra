@@ -1,10 +1,5 @@
 //! Note and value commitments.
 
-#[cfg(test)]
-mod test_vectors;
-
-pub mod pedersen_hashes;
-
 use std::{
     convert::{TryFrom, TryInto},
     fmt, io,
@@ -23,6 +18,11 @@ use crate::{
 };
 
 use super::keys::{find_group_hash, Diversifier, TransmissionKey};
+
+pub mod pedersen_hashes;
+
+#[cfg(test)]
+mod test_vectors;
 
 use pedersen_hashes::*;
 

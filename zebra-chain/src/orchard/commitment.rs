@@ -1,8 +1,7 @@
 //! Note and value commitments.
 
-use std::{convert::TryFrom, fmt, io};
+use std::{fmt, io};
 
-use bitvec::prelude::*;
 use group::{ff::PrimeField, prime::PrimeCurveAffine, GroupEncoding};
 use halo2::{
     arithmetic::{Coordinates, CurveAffine, FieldExt},
@@ -18,11 +17,7 @@ use crate::{
     },
 };
 
-use super::{
-    keys::prf_expand,
-    note::{Note, Psi, SeedRandomness},
-    sinsemilla::*,
-};
+use super::sinsemilla::*;
 
 /// Generates a random scalar from the scalar field 𝔽_{q_P}.
 ///
@@ -40,18 +35,6 @@ where
 /// The randomness used in the Simsemilla hash for note commitment.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct CommitmentRandomness(pallas::Scalar);
-
-impl From<SeedRandomness> for CommitmentRandomness {
-    /// rcm = ToScalar^Orchard((PRF^expand_rseed (\[5\]))
-    ///
-    /// <https://zips.z.cash/protocol/nu5.pdf#orchardsend>
-    fn from(rseed: SeedRandomness) -> Self {
-        Self(pallas::Scalar::from_bytes_wide(&prf_expand(
-            rseed.0,
-            vec![&[5]],
-        )))
-    }
-}
 
 /// Note commitments for the output notes.
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
@@ -103,51 +86,6 @@ impl TryFrom<[u8; 32]> for NoteCommitment {
 }
 
 impl NoteCommitment {
-    /// Generate a new _NoteCommitment_.
-    ///
-    /// Unlike in Sapling, the definition of an Orchard _note_ includes the ρ
-    /// field; the _note_'s position in the _note commitment tree_ does not need
-    /// to be known in order to compute this value.
-    ///
-    /// NoteCommit^Orchard_rcm(repr_P(gd),repr_P(pkd), v, ρ, ψ) :=
-    ///
-    /// <https://zips.z.cash/protocol/nu5.pdf#concretewindowedcommit>
-    #[allow(non_snake_case)]
-    #[allow(clippy::unwrap_in_result)]
-    pub fn new(note: Note) -> Option<Self> {
-        // s as in the argument name for WindowedPedersenCommit_r(s)
-        let mut s: BitVec<u8, Lsb0> = BitVec::new();
-
-        // Prefix
-        s.append(&mut bitvec![1; 6]);
-
-        // The `TryFrom<Diversifier>` impls for the `pallas::*Point`s handles
-        // calling `DiversifyHash` implicitly.
-        // _diversified base_
-        let g_d_bytes = pallas::Affine::try_from(note.address.diversifier)
-            .ok()?
-            .to_bytes();
-
-        let pk_d_bytes: [u8; 32] = note.address.transmission_key.into();
-        let v_bytes = note.value.to_bytes();
-        let rho_bytes: [u8; 32] = note.rho.into();
-        let psi_bytes: [u8; 32] = Psi::from(note.rseed).into();
-
-        // g*d || pk*d || I2LEBSP_64(v) || I2LEBSP_l^Orchard_Base(ρ) || I2LEBSP_l^Orchard_base(ψ)
-        s.extend(g_d_bytes);
-        s.extend(pk_d_bytes);
-        s.extend(v_bytes);
-        s.extend(rho_bytes);
-        s.extend(psi_bytes);
-
-        let rcm = CommitmentRandomness::from(note.rseed);
-
-        Some(NoteCommitment::from(
-            sinsemilla_commit(rcm.0, b"z.cash:Orchard-NoteCommit", &s)
-                .expect("valid orchard note commitment, not ⊥ "),
-        ))
-    }
-
     /// Extract the x coordinate of the note commitment.
     pub fn extract_x(&self) -> pallas::Base {
         extract_p(self.0.into())
@@ -319,20 +257,6 @@ mod tests {
     use group::Group;
 
     use super::*;
-
-    // #[test]
-    // fn sinsemilla_hash_to_point_test_vectors() {
-    //     let _init_guard = zebra_test::init();
-
-    //     const D: [u8; 8] = *b"Zcash_PH";
-
-    //     for test_vector in test_vectors::TEST_VECTORS.iter() {
-    //         let result =
-    //             pallas::Affine::from(sinsemilla_hash_to_point(D, &test_vector.input_bits.clone()));
-
-    //         assert_eq!(result, test_vector.output_point);
-    //     }
-    // }
 
     #[test]
     fn add() {

@@ -24,39 +24,3 @@ impl fmt::Debug for Address {
             .finish()
     }
 }
-
-#[cfg(test)]
-mod tests {
-
-    use rand_core::OsRng;
-
-    use crate::parameters::Network;
-
-    use super::*;
-
-    #[test]
-    fn derive_keys_and_addresses() {
-        let _init_guard = zebra_test::init();
-
-        let network = Network::Mainnet;
-
-        let spending_key = keys::SpendingKey::new(&mut OsRng, network);
-
-        let full_viewing_key = keys::FullViewingKey::from(spending_key);
-
-        // Default diversifier, where index = 0.
-        let diversifier_key = keys::DiversifierKey::from(full_viewing_key);
-
-        // This should fail with negligible probability.
-        let incoming_viewing_key = keys::IncomingViewingKey::try_from(full_viewing_key)
-            .expect("a valid incoming viewing key");
-
-        let diversifier = keys::Diversifier::from(diversifier_key);
-        let transmission_key = keys::TransmissionKey::from((incoming_viewing_key, diversifier));
-
-        let _orchard_shielded_address = Address {
-            diversifier,
-            transmission_key,
-        };
-    }
-}
