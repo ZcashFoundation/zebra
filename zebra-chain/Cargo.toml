@@ -42,11 +42,11 @@ x25519-dalek = { version = "2.0.0-pre.1", features = ["serde"] }
 
 # ECC deps
 halo2 = { package = "halo2_proofs", version = "0.2.0" }
-orchard = "0.2.0"
+orchard = "0.3.0"
 zcash_encoding = "0.1.0"
 zcash_history = "0.3.0"
-zcash_note_encryption = "0.1"
-zcash_primitives = { version = "0.7.0", features = ["transparent-inputs"] }
+zcash_note_encryption = "0.2"
+zcash_primitives = { version = "0.8.1", features = ["transparent-inputs"] }
 
 # Time
 chrono = { version = "0.4.22", default-features = false, features = ["clock", "std", "serde"] }

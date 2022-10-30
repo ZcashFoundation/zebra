@@ -290,8 +290,15 @@ pub(crate) fn transparent_output_address(
     output: &transparent::Output,
     network: Network,
 ) -> Option<transparent::Address> {
-    let script = zcash_primitives::legacy::Script::from(&output.lock_script);
-    let alt_addr = script.address();
+    // Create a `TxOut` primitive from a zebra `Output`.
+    let tx_out = zcash_primitives::transaction::components::TxOut {
+        // We just set the value to zero as we are only interested in the
+        // address derived from the output lock script.
+        value: zcash_primitives::transaction::components::Amount::zero(),
+        script_pubkey: zcash_primitives::legacy::Script::from(&output.lock_script),
+    };
+    let alt_addr = tx_out.recipient_address();
+
     match alt_addr {
         Some(zcash_primitives::legacy::TransparentAddress::PublicKey(pub_key_hash)) => Some(
             transparent::Address::from_pub_key_hash(network, pub_key_hash),
