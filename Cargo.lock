@@ -980,9 +980,9 @@ dependencies = [
 
 [[package]]
 name = "cxx"
-version = "1.0.72"
+version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7c14d679239b1ccaad7acaf972a19b41b6c1d7a8cb942158294b4f11ec71bd8"
+checksum = "3f83d0ebf42c6eafb8d7c52f7e5f2d3003b89c7aa4fd2b79229209459a849af8"
 dependencies = [
  "cc",
  "cxxbridge-flags",
@@ -1004,15 +1004,15 @@ dependencies = [
 
 [[package]]
 name = "cxxbridge-flags"
-version = "1.0.72"
+version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fdfa84261f05a9b69c0afe03270f9f26d6899ca7df6f442563908b646e8a376"
+checksum = "99d2199b00553eda8012dfec8d3b1c75fce747cf27c169a270b3b99e3448ab78"
 
 [[package]]
 name = "cxxbridge-macro"
-version = "1.0.72"
+version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0269826813dfbda75223169c774fede73401793e9af3970e4edbe93879782c1d"
+checksum = "dcb67a6de1f602736dd7eaead0080cf3435df806c61b24b13328db128c58868f"
 dependencies = [
  "proc-macro2 1.0.42",
  "quote 1.0.20",
@@ -5202,8 +5202,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.1.7"
-source = "git+https://github.com/ZcashFoundation/zcash_script?branch=bump-ecc-deps#ed1254178fb4222635125a61bb89a6343e219c44"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4696f0dcc0d9dd4d9d4a8fa5009caa85cfad93faca63164cd02e5a2c6757ac27"
 dependencies = [
  "bindgen",
  "blake2b_simd",
