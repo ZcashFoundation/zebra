@@ -60,6 +60,7 @@ Test code, deployment configurations, and other configuration files in the `zebr
 | [zcash_primitives](https://github.com/zcash/librustzcash) | 0.7.0 | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) |
 | [redjubjub](https://github.com/ZcashFoundation/redjubjub) | [0.5.0](https://github.com/ZcashFoundation/redjubjub/releases/tag/0.5.0) | [jp](https://github.com/ZcashFoundation/redjubjub/raw/main/zcash-frost-audit-report-20210323.pdf) |
 | [orchard](https://github.com/zcash/orchard) | [0.2.0](https://github.com/zcash/orchard/releases/tag/0.2.0) | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) |
+
 ### Cryptography dependencies
 
 **All crypto dependencies are out of scope of the 1st audit**
