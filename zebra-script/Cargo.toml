@@ -8,7 +8,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-zcash_script = "0.1.7"
+zcash_script = {git = "https://github.com/ZcashFoundation/zcash_script", branch = "bump-ecc-deps"}
 
 zebra-chain = { path = "../zebra-chain" }
 
