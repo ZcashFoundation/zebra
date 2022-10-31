@@ -29,7 +29,7 @@ use zebra_chain::{
     transparent::{self, Address},
 };
 use zebra_network::constants::USER_AGENT;
-use zebra_node_services::{mempool, BoxError};
+use zebra_node_services::mempool;
 use zebra_state::{OutputIndex, OutputLocation, TransactionLocation};
 
 use crate::queue::Queue;
@@ -241,7 +241,11 @@ pub trait Rpc {
 /// RPC method implementations.
 pub struct RpcImpl<Mempool, State, Tip>
 where
-    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
+    Mempool: Service<
+        mempool::Request,
+        Response = mempool::Response,
+        Error = zebra_node_services::BoxError,
+    >,
     State: Service<
         zebra_state::ReadRequest,
         Response = zebra_state::ReadResponse,
@@ -280,7 +284,11 @@ where
 
 impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
 where
-    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError> + 'static,
+    Mempool: Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
     State: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
@@ -337,8 +345,11 @@ where
 
 impl<Mempool, State, Tip> Rpc for RpcImpl<Mempool, State, Tip>
 where
-    Mempool:
-        tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError> + 'static,
+    Mempool: tower::Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,

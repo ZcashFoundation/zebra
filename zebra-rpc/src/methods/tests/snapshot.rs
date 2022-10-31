@@ -1,4 +1,9 @@
 //! Snapshot tests for Zebra JSON-RPC responses.
+//!
+//! To update these snapshots, run:
+//! ```sh
+//! cargo insta test --review
+//! ```
 
 use std::sync::Arc;
 
@@ -10,10 +15,12 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
 };
 use zebra_network::constants::USER_AGENT;
-use zebra_node_services::BoxError;
 use zebra_test::mock_service::MockService;
 
 use super::super::*;
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+mod get_block_template_rpcs;
 
 /// Snapshot test for RPC methods responses.
 #[tokio::test(flavor = "multi_thread")]
@@ -36,15 +43,25 @@ async fn test_rpc_response_data_for_network(network: Network) {
         .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
-    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut mempool: MockService<_, _, _, zebra_node_services::BoxError> =
+        MockService::build().for_unit_tests();
     // Create a populated state service
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), network).await;
 
+    // Start snapshots of RPC responses.
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), blocks.len() - 1));
+
+    // Test getblocktemplate-rpcs snapshots
     #[cfg(feature = "getblocktemplate-rpcs")]
-    let latest_chain_tip_gbt_clone = latest_chain_tip.clone();
-    #[cfg(feature = "getblocktemplate-rpcs")]
-    let read_state_clone = read_state.clone();
+    get_block_template_rpcs::test_responses(
+        mempool.clone(),
+        read_state.clone(),
+        latest_chain_tip.clone(),
+        settings.clone(),
+    )
+    .await;
 
     // Init RPC
     let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
@@ -55,10 +72,6 @@ async fn test_rpc_response_data_for_network(network: Network) {
         read_state,
         latest_chain_tip,
     );
-
-    // Start snapshots of RPC responses.
-    let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(format!("{}_{}", network_string(network), blocks.len() - 1));
 
     // `getinfo`
     let get_info = rpc.get_info().expect("We should have a GetInfo struct");
@@ -171,34 +184,6 @@ async fn test_rpc_response_data_for_network(network: Network) {
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddressutxos(get_address_utxos, &settings);
-
-    #[cfg(feature = "getblocktemplate-rpcs")]
-    {
-        let get_block_template_rpc =
-            GetBlockTemplateRpcImpl::new(latest_chain_tip_gbt_clone, read_state_clone);
-
-        // `getblockcount`
-        let get_block_count = get_block_template_rpc
-            .get_block_count()
-            .expect("We should have a number");
-        snapshot_rpc_getblockcount(get_block_count, &settings);
-
-        // `getblockhash`
-        const BLOCK_HEIGHT10: i32 = 10;
-        let get_block_hash = get_block_template_rpc
-            .get_block_hash(BLOCK_HEIGHT10)
-            .await
-            .expect("We should have a GetBlockHash struct");
-
-        snapshot_rpc_getblockhash(get_block_hash, &settings);
-
-        // `getblocktemplate`
-        let get_block_template = get_block_template_rpc
-            .get_block_template()
-            .await
-            .expect("We should have a GetBlockTemplate struct");
-        snapshot_rpc_getblocktemplate(get_block_template, &settings);
-    }
 }
 
 /// Snapshot `getinfo` response, using `cargo insta` and JSON serialization.
@@ -285,27 +270,6 @@ fn snapshot_rpc_getaddresstxids(transactions: Vec<String>, settings: &insta::Set
 /// Snapshot `getaddressutxos` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getaddressutxos(utxos: Vec<GetAddressUtxos>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_utxos", utxos));
-}
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-/// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getblockcount(block_count: u32, settings: &insta::Settings) {
-    settings.bind(|| insta::assert_json_snapshot!("get_block_count", block_count));
-}
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-/// Snapshot `getblockhash` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getblockhash(block_hash: GetBlockHash, settings: &insta::Settings) {
-    settings.bind(|| insta::assert_json_snapshot!("get_block_hash", block_hash));
-}
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-/// Snapshot `getblocktemplate` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getblocktemplate(
-    block_template: crate::methods::get_block_template_rpcs::types::get_block_template::GetBlockTemplate,
-    settings: &insta::Settings,
-) {
-    settings.bind(|| insta::assert_json_snapshot!("get_block_template", block_template));
 }
 
 /// Utility function to convert a `Network` to a lowercase string.

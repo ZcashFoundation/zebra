@@ -1,13 +1,12 @@
 //! RPC methods related to mining only available with `getblocktemplate-rpcs` rust feature.
-use zebra_chain::{block::Height, chain_tip::ChainTip};
 
 use futures::{FutureExt, TryFutureExt};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
-use tower::{Service, ServiceExt};
+use tower::{buffer::Buffer, Service, ServiceExt};
 
-pub mod config;
-pub(crate) mod types;
+use zebra_chain::{block::Height, chain_tip::ChainTip};
+use zebra_node_services::mempool;
 
 use crate::methods::{
     get_block_template_rpcs::types::{
@@ -15,6 +14,9 @@ use crate::methods::{
     },
     GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
+
+pub mod config;
+pub(crate) mod types;
 
 /// getblocktemplate RPC method signatures.
 #[rpc(server)]
@@ -59,26 +61,46 @@ pub trait GetBlockTemplateRpc {
 }
 
 /// RPC method implementations.
-pub struct GetBlockTemplateRpcImpl<Tip, State>
+pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip>
 where
-    Tip: ChainTip,
+    Mempool: Service<
+        mempool::Request,
+        Response = mempool::Response,
+        Error = zebra_node_services::BoxError,
+    >,
     State: Service<
         zebra_state::ReadRequest,
         Response = zebra_state::ReadResponse,
         Error = zebra_state::BoxError,
     >,
+    Tip: ChainTip,
 {
     // TODO: Add the other fields from the [`Rpc`] struct as-needed
-    /// Allows efficient access to the best tip of the blockchain.
-    latest_chain_tip: Tip,
+
+    // Configuration
+    //
+    // TODO: add mining config for getblocktemplate RPC miner address
+
+    // Services
+    //
+    /// A handle to the mempool service.
+    #[allow(dead_code)]
+    mempool: Buffer<Mempool, mempool::Request>,
 
     /// A handle to the state service.
     state: State,
+
+    /// Allows efficient access to the best tip of the blockchain.
+    latest_chain_tip: Tip,
 }
 
-impl<Tip, State> GetBlockTemplateRpcImpl<Tip, State>
+impl<Mempool, State, Tip> GetBlockTemplateRpcImpl<Mempool, State, Tip>
 where
-    Tip: ChainTip + Clone + Send + Sync + 'static,
+    Mempool: Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
     State: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
@@ -87,19 +109,30 @@ where
         + Send
         + Sync
         + 'static,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
 {
-    /// Create a new instance of the RPC handler.
-    pub fn new(latest_chain_tip: Tip, state: State) -> Self {
+    /// Create a new instance of the handler for getblocktemplate RPCs.
+    pub fn new(
+        mempool: Buffer<Mempool, mempool::Request>,
+        state: State,
+        latest_chain_tip: Tip,
+    ) -> Self {
         Self {
-            latest_chain_tip,
+            mempool,
             state,
+            latest_chain_tip,
         }
     }
 }
 
-impl<Tip, State> GetBlockTemplateRpc for GetBlockTemplateRpcImpl<Tip, State>
+impl<Mempool, State, Tip> GetBlockTemplateRpc for GetBlockTemplateRpcImpl<Mempool, State, Tip>
 where
-    Tip: ChainTip + Send + Sync + 'static,
+    Mempool: Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
+    Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
@@ -109,6 +142,7 @@ where
         + Sync
         + 'static,
     <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    Tip: ChainTip + Send + Sync + 'static,
 {
     fn get_block_count(&self) -> Result<u32> {
         self.latest_chain_tip
