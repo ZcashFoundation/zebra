@@ -284,6 +284,10 @@ pub struct VerifiedUnminedTx {
 
     /// The transaction fee for this unmined transaction.
     pub miner_fee: Amount<NonNegative>,
+
+    /// The number of legacy signature operations in this transaction's
+    /// transparent inputs and outputs.
+    pub legacy_sigop_count: u64,
 }
 
 impl fmt::Display for VerifiedUnminedTx {
@@ -291,16 +295,22 @@ impl fmt::Display for VerifiedUnminedTx {
         f.debug_struct("VerifiedUnminedTx")
             .field("transaction", &self.transaction)
             .field("miner_fee", &self.miner_fee)
+            .field("legacy_sigop_count", &self.legacy_sigop_count)
             .finish()
     }
 }
 
 impl VerifiedUnminedTx {
     /// Create a new verified unmined transaction from a transaction and its fee.
-    pub fn new(transaction: UnminedTx, miner_fee: Amount<NonNegative>) -> Self {
+    pub fn new(
+        transaction: UnminedTx,
+        miner_fee: Amount<NonNegative>,
+        legacy_sigop_count: u64,
+    ) -> Self {
         Self {
             transaction,
             miner_fee,
+            legacy_sigop_count,
         }
     }
 

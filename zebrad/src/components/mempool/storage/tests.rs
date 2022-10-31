@@ -1,3 +1,5 @@
+//! Tests and test utility functions for mempool storage.
+
 use std::ops::RangeBounds;
 
 use zebra_chain::{
@@ -30,9 +32,10 @@ pub fn unmined_transactions_in_blocks(
         });
 
     // Extract the transactions from the blocks and wrap each one as an unmined transaction.
-    // Use a fake zero miner fee, because we don't have the UTXOs to calculate the correct fee.
+    // Use a fake zero miner fee and sigops, because we don't have the UTXOs to calculate
+    // the correct fee.
     selected_blocks
         .flat_map(|block| block.transactions)
         .map(UnminedTx::from)
-        .map(|transaction| VerifiedUnminedTx::new(transaction, Amount::zero()))
+        .map(|transaction| VerifiedUnminedTx::new(transaction, Amount::zero(), 0))
 }

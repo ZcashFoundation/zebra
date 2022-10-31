@@ -1,4 +1,6 @@
-use std::{collections::HashSet, convert::TryFrom, env, fmt::Debug, thread, time::Duration};
+//! Randomised property tests for mempool storage.
+
+use std::{collections::HashSet, env, fmt::Debug, thread, time::Duration};
 
 use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
@@ -473,8 +475,8 @@ impl SpendConflictTestInput {
         };
 
         (
-            VerifiedUnminedTx::new(first.0.into(), Amount::zero()),
-            VerifiedUnminedTx::new(second.0.into(), Amount::zero()),
+            VerifiedUnminedTx::new(first.0.into(), Amount::zero(), 0),
+            VerifiedUnminedTx::new(second.0.into(), Amount::zero(), 0),
         )
     }
 
@@ -491,8 +493,8 @@ impl SpendConflictTestInput {
         Self::remove_orchard_conflicts(&mut first, &mut second);
 
         (
-            VerifiedUnminedTx::new(first.0.into(), Amount::zero()),
-            VerifiedUnminedTx::new(second.0.into(), Amount::zero()),
+            VerifiedUnminedTx::new(first.0.into(), Amount::zero(), 0),
+            VerifiedUnminedTx::new(second.0.into(), Amount::zero(), 0),
         )
     }
 
