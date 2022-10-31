@@ -29,16 +29,16 @@ use zebra_chain::{
     transparent::{self, Address},
 };
 use zebra_network::constants::USER_AGENT;
-use zebra_node_services::{mempool, BoxError};
+use zebra_node_services::mempool;
 use zebra_state::{OutputIndex, OutputLocation, TransactionLocation};
 
 use crate::queue::Queue;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-mod get_block_template;
+mod get_block_template_rpcs;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-pub use get_block_template::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
+pub use get_block_template_rpcs::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
 #[cfg(test)]
 mod tests;
@@ -147,11 +147,11 @@ pub trait Rpc {
     #[rpc(name = "getblock")]
     fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>>;
 
-    /// Returns the hash of the current best blockchain tip block, as a [`GetBestBlockHash`] JSON string.
+    /// Returns the hash of the current best blockchain tip block, as a [`GetBlockHash`] JSON string.
     ///
     /// zcashd reference: [`getbestblockhash`](https://zcash.github.io/rpc/getbestblockhash.html)
     #[rpc(name = "getbestblockhash")]
-    fn get_best_block_hash(&self) -> Result<GetBestBlockHash>;
+    fn get_best_block_hash(&self) -> Result<GetBlockHash>;
 
     /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
@@ -241,7 +241,11 @@ pub trait Rpc {
 /// RPC method implementations.
 pub struct RpcImpl<Mempool, State, Tip>
 where
-    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>,
+    Mempool: Service<
+        mempool::Request,
+        Response = mempool::Response,
+        Error = zebra_node_services::BoxError,
+    >,
     State: Service<
         zebra_state::ReadRequest,
         Response = zebra_state::ReadResponse,
@@ -280,7 +284,11 @@ where
 
 impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
 where
-    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError> + 'static,
+    Mempool: Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
     State: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
@@ -337,8 +345,11 @@ where
 
 impl<Mempool, State, Tip> Rpc for RpcImpl<Mempool, State, Tip>
 where
-    Mempool:
-        tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError> + 'static,
+    Mempool: tower::Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -610,10 +621,10 @@ where
         .boxed()
     }
 
-    fn get_best_block_hash(&self) -> Result<GetBestBlockHash> {
+    fn get_best_block_hash(&self) -> Result<GetBlockHash> {
         self.latest_chain_tip
             .best_tip_hash()
-            .map(GetBestBlockHash)
+            .map(GetBlockHash)
             .ok_or(Error {
                 code: ErrorCode::ServerError(0),
                 message: "No blocks in state".to_string(),
@@ -1049,7 +1060,7 @@ impl AddressStrings {
             .into_iter()
             .map(|address| {
                 address.parse().map_err(|error| {
-                    Error::invalid_params(&format!("invalid address {address:?}: {error}"))
+                    Error::invalid_params(format!("invalid address {address:?}: {error}"))
                 })
             })
             .collect::<Result<_>>()?;
@@ -1141,13 +1152,13 @@ pub enum GetBlock {
     },
 }
 
-/// Response to a `getbestblockhash` RPC request.
+/// Response to a `getbestblockhash` and `getblockhash` RPC request.
 ///
-/// Contains the hex-encoded hash of the tip block.
+/// Contains the hex-encoded hash of the requested block.
 ///
-/// Also see the notes for the [`Rpc::get_best_block_hash` method].
+/// Also see the notes for the [`Rpc::get_best_block_hash`] and `get_block_hash` methods.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct GetBestBlockHash(#[serde(with = "hex")] block::Hash);
+pub struct GetBlockHash(#[serde(with = "hex")] block::Hash);
 
 /// Response to a `z_gettreestate` RPC request.
 ///

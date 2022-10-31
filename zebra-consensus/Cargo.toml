@@ -23,10 +23,10 @@ dirs = "4.0.0"
 displaydoc = "0.2.3"
 lazy_static = "1.4.0"
 once_cell = "1.15.0"
-serde = { version = "1.0.145", features = ["serde_derive"] }
+serde = { version = "1.0.147", features = ["serde_derive"] }
 
-futures = "0.3.24"
-futures-util = "0.3.24"
+futures = "0.3.25"
+futures-util = "0.3.25"
 metrics = "0.20.1"
 thiserror = "1.0.37"
 tokio = { version = "1.21.2", features = ["time", "sync", "tracing", "rt-multi-thread"] }
@@ -34,9 +34,9 @@ tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.37"
 tracing-futures = "0.2.5"
 
-orchard = "0.2.0"
+orchard = "0.3.0"
 
-zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "ca84123038b64f0f4aa5615f7cf224fbf7ece766", features = ["local-prover", "multicore", "download-params"] }
+zcash_proofs = { version = "0.8.0", features = ["local-prover", "multicore", "download-params"] }
 
 tower-fallback = { path = "../tower-fallback/" }
 tower-batch = { path = "../tower-batch/" }
@@ -57,7 +57,6 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 hex = "0.4.3"
 proptest = "0.10.1"
 proptest-derive = "0.3.0"
-rand07 = { package = "rand", version = "0.7" }
 spandoc = "0.2.2"
 
 tokio = { version = "1.21.2", features = ["full", "tracing", "test-util"] }

@@ -33,12 +33,13 @@ use crate::components::sync::{
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// A multiplier used to calculate the extra number of blocks we allow in the
-/// verifier and state pipelines, on top of the lookahead limit.
+/// verifier, state, and block commit pipelines, on top of the lookahead limit.
 ///
 /// The extra number of blocks is calculated using
 /// `lookahead_limit * VERIFICATION_PIPELINE_SCALING_MULTIPLIER`.
 ///
-/// This allows the verifier and state queues to hold a few extra tips responses worth of blocks,
+/// This allows the verifier and state queues, and the block commit channel,
+/// to hold a few extra tips responses worth of blocks,
 /// even if the syncer queue is full. Any unused capacity is shared between both queues.
 ///
 /// If this capacity is exceeded, the downloader will start failing download blocks with
@@ -48,7 +49,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// the rest of the capacity is reserved for the other queues.
 /// There is no reserved capacity for the syncer queue:
 /// if the other queues stay full, the syncer will eventually time out and reset.
-pub const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 3;
+pub const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 5;
 
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
@@ -444,7 +445,7 @@ where
                 let short_timeout_max = (max_checkpoint_height + FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT).expect("checkpoint block height is in valid range");
                 if block_height >= max_checkpoint_height && block_height <= short_timeout_max {
                     rsp = timeout(FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, rsp)
-                        .map_err(|timeout| format!("initial fully verified block timed out: retrying: {:?}", timeout).into())
+                        .map_err(|timeout| format!("initial fully verified block timed out: retrying: {timeout:?}").into())
                         .map(|nested_result| nested_result.and_then(convert::identity)).boxed();
                 }
 

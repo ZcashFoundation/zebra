@@ -20,7 +20,13 @@ jobs:
       - run: 'echo "No build required"'
 
   lightwalletd-full-sync:
-    name: lightwalletd tip / Run lightwalletd-full-sync test
+    name: lightwalletd tip / Run lwd-full-sync test
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  lightwalletd-transactions-test:
+    name: lightwalletd tip send / Run lwd-send-transactions test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'

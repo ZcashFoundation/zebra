@@ -103,7 +103,7 @@ impl fmt::Display for Response {
                             .unwrap_or_else(|| "None".into()),
                         block.hash(),
                     ),
-                    Missing(hash) => format!("Block {{ missing: {} }}", hash),
+                    Missing(hash) => format!("Block {{ missing: {hash} }}"),
                 }
             }
             Response::Blocks(blocks) => format!(

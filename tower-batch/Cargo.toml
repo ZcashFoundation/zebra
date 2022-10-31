@@ -6,8 +6,8 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-futures = "0.3.24"
-futures-core = "0.3.24"
+futures = "0.3.25"
+futures-core = "0.3.25"
 pin-project = "1.0.12"
 rayon = "1.5.3"
 tokio = { version = "1.21.2", features = ["time", "sync", "tracing", "macros"] }
@@ -22,7 +22,7 @@ color-eyre = "0.6.2"
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 
-ed25519-zebra = "3.0.0"
+ed25519-zebra = "3.1.0"
 rand = { version = "0.8.5", package = "rand" }
 
 tokio = { version = "1.21.2", features = ["full", "tracing", "test-util"] }

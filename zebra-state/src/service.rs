@@ -183,8 +183,6 @@ pub(crate) struct StateService {
     ///
     /// Set to `f64::NAN` if `queued_finalized_blocks` is empty, because grafana shows NaNs
     /// as a break in the graph.
-    //
-    // TODO: add a similar metric for `queued_non_finalized_blocks`
     max_queued_finalized_height: f64,
 }
 
@@ -487,7 +485,7 @@ impl StateService {
 
         metrics::gauge!(
             "state.checkpoint.queued.max.height",
-            self.max_queued_finalized_height
+            self.max_queued_finalized_height,
         );
         metrics::gauge!(
             "state.checkpoint.queued.block.count",
@@ -527,6 +525,8 @@ impl StateService {
             .queued_finalized_blocks
             .remove(&self.last_sent_finalized_block_hash)
         {
+            let last_sent_finalized_block_height = queued_block.0.height;
+
             self.last_sent_finalized_block_hash = queued_block.0.hash;
 
             // If we've finished sending finalized blocks, ignore any repeated blocks.
@@ -544,6 +544,11 @@ impl StateService {
 
                     self.clear_finalized_block_queue(
                         "block commit task exited. Is Zebra shutting down?",
+                    );
+                } else {
+                    metrics::gauge!(
+                        "state.checkpoint.sent.block.height",
+                        last_sent_finalized_block_height.0 as f64,
                     );
                 };
             }
@@ -1503,6 +1508,42 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::UtxosByAddresses"))
+                .boxed()
+            }
+
+            // Used by get_block_hash RPC.
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadRequest::BestChainBlockHash(height) => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "best_chain_block_hash",
+                );
+
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                // # Performance
+                //
+                // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let hash = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::hash(non_finalized_state.best_chain(), &state.db, height)
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::BestChainBlockHash");
+
+                        Ok(ReadResponse::BlockHash(hash))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::BestChainBlockHash"))
                 .boxed()
             }
         }

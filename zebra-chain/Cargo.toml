@@ -38,15 +38,15 @@ secp256k1 = { version = "0.21.3", features = ["serde"] }
 sha2 = { version = "0.9.9", features = ["compress"] }
 subtle = "2.4.1"
 uint = "0.9.4"
-x25519-dalek = { version = "1.2.0", features = ["serde"] }
+x25519-dalek = { version = "2.0.0-pre.1", features = ["serde"] }
 
 # ECC deps
 halo2 = { package = "halo2_proofs", version = "0.2.0" }
-orchard = "0.2.0"
-zcash_encoding = "0.1.0"
+orchard = "0.3.0"
+zcash_encoding = "0.2.0"
 zcash_history = "0.3.0"
-zcash_note_encryption = "0.1"
-zcash_primitives = { version = "0.7.0", features = ["transparent-inputs"] }
+zcash_note_encryption = "0.2.0"
+zcash_primitives = { version = "0.8.1", features = ["transparent-inputs"] }
 
 # Time
 chrono = { version = "0.4.22", default-features = false, features = ["clock", "std", "serde"] }
@@ -60,17 +60,17 @@ tracing = "0.1.37"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.145", features = ["serde_derive", "rc"] }
+serde = { version = "1.0.147", features = ["serde_derive", "rc"] }
 serde_with = "2.0.1"
 serde-big-array = "0.4.1"
 
 # Processing
-futures = "0.3.24"
+futures = "0.3.25"
 itertools = "0.10.5"
 rayon = "1.5.3"
 
 # ZF deps
-ed25519-zebra = "3.0.0"
+ed25519-zebra = "3.1.0"
 redjubjub = "0.5.0"
 
 # Optional testing dependencies

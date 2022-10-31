@@ -7,6 +7,7 @@ use std::{cmp::max, collections::HashSet, pin::Pin, sync::Arc, task::Poll, time:
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexSet;
+use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
@@ -203,6 +204,83 @@ const SYNC_RESTART_DELAY: Duration = Duration::from_secs(67);
 /// to download and verify the genesis block from its peers. This can cause
 /// a denial of service on those peers.
 const GENESIS_TIMEOUT_RETRY: Duration = Duration::from_secs(5);
+
+/// Sync configuration section.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Config {
+    /// The number of parallel block download requests.
+    ///
+    /// This is set to a low value by default, to avoid task and
+    /// network contention. Increasing this value may improve
+    /// performance on machines with a fast network connection.
+    #[serde(alias = "max_concurrent_block_requests")]
+    pub download_concurrency_limit: usize,
+
+    /// The number of blocks submitted in parallel to the checkpoint verifier.
+    ///
+    /// Increasing this limit increases the buffer size, so it reduces
+    /// the impact of an individual block request failing. However, it
+    /// also increases memory and CPU usage if block validation stalls,
+    /// or there are some large blocks in the pipeline.
+    ///
+    /// The block size limit is 2MB, so in theory, this could represent multiple
+    /// gigabytes of data, if we downloaded arbitrary blocks. However,
+    /// because we randomly load balance outbound requests, and separate
+    /// block download from obtaining block hashes, an adversary would
+    /// have to control a significant fraction of our peers to lead us
+    /// astray.
+    ///
+    /// For reliable checkpoint syncing, Zebra enforces a
+    /// [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`](MIN_CHECKPOINT_CONCURRENCY_LIMIT).
+    ///
+    /// This is set to a high value by default, to avoid verification pipeline stalls.
+    /// Decreasing this value reduces RAM usage.
+    #[serde(alias = "lookahead_limit")]
+    pub checkpoint_verify_concurrency_limit: usize,
+
+    /// The number of blocks submitted in parallel to the full verifier.
+    ///
+    /// This is set to a low value by default, to avoid verification timeouts on large blocks.
+    /// Increasing this value may improve performance on machines with many cores.
+    pub full_verify_concurrency_limit: usize,
+
+    /// The number of threads used to verify signatures, proofs, and other CPU-intensive code.
+    ///
+    /// Set to `0` by default, which uses one thread per available CPU core.
+    /// For details, see [the `rayon` documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
+    pub parallel_cpu_threads: usize,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            // 2/3 of the default outbound peer limit.
+            download_concurrency_limit: 50,
+
+            // A few max-length checkpoints.
+            checkpoint_verify_concurrency_limit: DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT,
+
+            // This default is deliberately very low, so Zebra can verify a few large blocks in under 60 seconds,
+            // even on machines with only a few cores.
+            //
+            // This lets users see the committed block height changing in every progress log,
+            // and avoids hangs due to out-of-order verifications flooding the CPUs.
+            //
+            // TODO:
+            // - limit full verification concurrency based on block transaction counts?
+            // - move more disk work to blocking tokio threads,
+            //   and CPU work to the rayon thread pool inside blocking tokio threads
+            full_verify_concurrency_limit: 20,
+
+            // Use one thread per CPU.
+            //
+            // If this causes tokio executor starvation, move CPU-intensive tasks to rayon threads,
+            // or reserve a few cores for tokio threads, based on `num_cpus()`.
+            parallel_cpu_threads: 0,
+        }
+    }
+}
 
 /// Helps work around defects in the bitcoin protocol by checking whether
 /// the returned hashes actually extend a chain tip.
@@ -1042,13 +1120,13 @@ where
             BlockDownloadVerifyError::Invalid {
                 error: VerifyChainError::Block(VerifyBlockError::Commit(ref source)),
                 ..
-            } if format!("{:?}", source).contains("block is already committed to the state") => {
+            } if format!("{source:?}").contains("block is already committed to the state") => {
                 // TODO: improve this by checking the type (#2908)
                 debug!(error = ?e, "block is already committed, possibly from a previous sync run, continuing");
                 false
             }
             BlockDownloadVerifyError::DownloadFailed { ref error, .. }
-                if format!("{:?}", error).contains("NotFound") =>
+                if format!("{error:?}").contains("NotFound") =>
             {
                 // Covers these errors:
                 // - NotFoundResponse
@@ -1070,7 +1148,7 @@ where
                 //
                 // TODO: add a proper test and remove this
                 // https://github.com/ZcashFoundation/zebra/issues/2909
-                let err_str = format!("{:?}", e);
+                let err_str = format!("{e:?}");
                 if err_str.contains("AlreadyVerified")
                     || err_str.contains("AlreadyInChain")
                     || err_str.contains("block is already committed to the state")

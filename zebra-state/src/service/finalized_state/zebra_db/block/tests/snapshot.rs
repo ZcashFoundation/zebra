@@ -26,7 +26,7 @@
 //!
 //! If this test fails, run:
 //! ```sh
-//! cargo insta test --review --delete-unreferenced-snapshots
+//! cargo insta test --review
 //! ```
 //! to update the test snapshots, then commit the `test_*.snap` files using git.
 
@@ -196,7 +196,7 @@ fn test_block_and_transaction_data_with_network(network: Network) {
             .expect("test block is valid");
 
         let mut settings = insta::Settings::clone_current();
-        settings.set_snapshot_suffix(format!("{}_{}", net_suffix, height));
+        settings.set_snapshot_suffix(format!("{net_suffix}_{height}"));
 
         settings.bind(|| snapshot_block_and_transaction_data(&state));
         settings.bind(|| snapshot_transparent_address_data(&state, height));

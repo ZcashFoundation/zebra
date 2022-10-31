@@ -1,13 +1,13 @@
-// Test vector data generated from
-// https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/sapling_pedersen.py
-//
-// These vectors in particular correspond to the Personalization::NoteCommitment
-// enum variant from the original source.
-//
-// The Python hex-encoded outputs for these test vectors were output in
-// big-endian byte order, so to parse them, we reversed their order; in
-// librustzcash, they match their Display impl to match the Python hex strings
-// and that's what they compare in their unit tests, not the bytes.
+//! Test vector data generated from
+//! https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/sapling_pedersen.py
+//!
+//! These vectors in particular correspond to the Personalization::NoteCommitment
+//! enum variant from the original source.
+//!
+//! The Python hex-encoded outputs for these test vectors were output in
+//! big-endian byte order, so to parse them, we reversed their order; in
+//! librustzcash, they match their Display impl to match the Python hex strings
+//! and that's what they compare in their unit tests, not the bytes.
 
 #![allow(dead_code)]
 

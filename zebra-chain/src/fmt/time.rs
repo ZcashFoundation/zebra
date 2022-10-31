@@ -27,7 +27,7 @@ pub fn humantime_seconds(duration: impl Into<Duration>) -> String {
 
     let duration = humantime::format_duration(duration);
 
-    format!("{}", duration)
+    format!("{duration}")
 }
 
 /// Returns a human-friendly formatted string for the whole number of milliseconds in `duration`.
@@ -40,5 +40,5 @@ pub fn humantime_milliseconds(duration: impl Into<Duration>) -> String {
 
     let duration = humantime::format_duration(duration_secs + duration_millis);
 
-    format!("{}", duration)
+    format!("{duration}")
 }

@@ -14,7 +14,9 @@ use crate::{
     BoxError, Config, Request, Response,
 };
 
-#[cfg(feature = "tor")]
+// Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
+// #[cfg(feature = "tor")]
+#[cfg(tor)]
 pub(crate) mod tor;
 
 #[cfg(test)]
@@ -120,7 +122,8 @@ where
 /// Transactions sent over this connection can be linked to the sending and receiving IP address
 /// by passive internet observers.
 ///
-/// Prefer [`connect_isolated_tor`](tor::connect_isolated_tor) if available.
+///
+/// Prefer `connect_isolated_tor` if available.
 pub fn connect_isolated_tcp_direct(
     network: Network,
     addr: SocketAddr,
