@@ -75,7 +75,7 @@ This command will run our latest release, and sync it to the tip:
 <!-- TODO: replace with `docker run zfnd/zebra` when we release 1.0.0 -->
 
 ```sh
-docker run zfnd/zebra:1.0.0-rc.0
+docker run zfnd/zebra:1.0.0-rc.1
 ```
 
 You can also [enable Zebra's RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd) and [configure other features](https://zebra.zfnd.org/user/run.html).
@@ -94,7 +94,7 @@ for your platform:
 2. Install Zebra's build dependencies:
    - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
    - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.0 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.1 zebrad`
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 For more detailed instructions, refer to the [documentation](https://zebra.zfnd.org/user/install.html).
