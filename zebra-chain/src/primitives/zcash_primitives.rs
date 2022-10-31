@@ -1,11 +1,7 @@
 //! Contains code that interfaces with the zcash_primitives crate from
 //! librustzcash.
 
-use std::{
-    convert::{TryFrom, TryInto},
-    io,
-    ops::Deref,
-};
+use std::{io, ops::Deref};
 
 use zcash_primitives::transaction as zp_tx;
 
@@ -182,6 +178,31 @@ pub(crate) fn convert_tx_to_librustzcash(
     Ok(alt_tx)
 }
 
+/// Convert a Zebra transparent::Output into a librustzcash one.
+impl TryFrom<&transparent::Output> for zp_tx::components::TxOut {
+    type Error = io::Error;
+
+    #[allow(clippy::unwrap_in_result)]
+    fn try_from(output: &transparent::Output) -> Result<Self, Self::Error> {
+        let serialized_output_bytes = output
+            .zcash_serialize_to_vec()
+            .expect("zcash_primitives and Zebra transparent output formats must be compatible");
+
+        zp_tx::components::TxOut::read(&mut serialized_output_bytes.as_slice())
+    }
+}
+
+/// Convert a Zebra transparent::Output into a librustzcash one.
+impl TryFrom<transparent::Output> for zp_tx::components::TxOut {
+    type Error = io::Error;
+
+    // The borrow is actually needed to use TryFrom<&transparent::Output>
+    #[allow(clippy::needless_borrow)]
+    fn try_from(output: transparent::Output) -> Result<Self, Self::Error> {
+        (&output).try_into()
+    }
+}
+
 /// Convert a Zebra Amount into a librustzcash one.
 impl TryFrom<Amount<NonNegative>> for zp_tx::components::Amount {
     type Error = ();
@@ -290,8 +311,11 @@ pub(crate) fn transparent_output_address(
     output: &transparent::Output,
     network: Network,
 ) -> Option<transparent::Address> {
-    let script = zcash_primitives::legacy::Script::from(&output.lock_script);
-    let alt_addr = script.address();
+    let tx_out = zp_tx::components::TxOut::try_from(output)
+        .expect("zcash_primitives and Zebra transparent output formats must be compatible");
+
+    let alt_addr = tx_out.recipient_address();
+
     match alt_addr {
         Some(zcash_primitives::legacy::TransparentAddress::PublicKey(pub_key_hash)) => Some(
             transparent::Address::from_pub_key_hash(network, pub_key_hash),
