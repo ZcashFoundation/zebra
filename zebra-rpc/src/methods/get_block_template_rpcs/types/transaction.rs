@@ -30,7 +30,9 @@ where
     /// These are 1-based indexes in the `transactions` list.
     ///
     /// Zebra's mempool does not support transaction dependencies, so this list is always empty.
-    pub(crate) depends: Vec<usize>,
+    ///
+    /// We use `u16` because 2 MB blocks are limited to around 39,000 transactions.
+    pub(crate) depends: Vec<u16>,
 
     /// The fee for this transaction.
     ///
