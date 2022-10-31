@@ -43,6 +43,7 @@ zebrad (rc):
 - [ ] `zebra-network` protocol user agent: https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/constants.rs
 - [ ] `README.md`
 - [ ] `book/src/user/install.md`
+- [ ] `book/src/user/docker.md`
 
 crates (pre-release):
 - [ ] zebra-* `Cargo.toml`s
