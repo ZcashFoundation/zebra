@@ -45,7 +45,12 @@ Test code, deployment configurations, and other configuration files in the `zebr
 | [zcash_script](https://github.com/ZcashFoundation/zcash_script) | [0.1.7](https://github.com/ZcashFoundation/zcash_script/releases/tag/v0.1.7) || <i>The C++ parts of `zcashd` got audited as part of the ECC audit, so we only need to audit [1](https://github.com/zcash/zcash/blob/master/src/script/zcash_script.cpp),[2](https://github.com/zcash/zcash/blob/master/src/script/zcash_script.h) and the rust code in [3](https://github.com/ZcashFoundation/zcash_script/tree/master/src)</i>
 
 ---
-## Out of Scope 
+## Out of Scope
+
+All versions of these dependencies are out of scope for the audit.
+(Some of the dependency versions in these tables might be outdated.)
+
+The latest versions of Zebra's dependencies are in [`Cargo.lock`](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/Cargo.lock), including transitive dependencies.
 
 ### Zcash/ZF dependencies
 
