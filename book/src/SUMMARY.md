@@ -5,6 +5,7 @@
   - [Zebra System Requirements](user/requirements.md)
   - [Installing Zebra](user/install.md)
   - [Running Zebra](user/run.md)
+  - [Zebra with Docker](user/docker.md)
   - [Tracing Zebra](user/tracing.md)
   - [Zebra Metrics](user/metrics.md)
   - [Lightwalletd](user/lightwalletd.md)
