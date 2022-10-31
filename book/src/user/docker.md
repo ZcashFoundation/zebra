@@ -1,6 +1,8 @@
 # Zebra with Docker
 
-We've embraced Docker in Zebra for most of the solution lifecycle, from development environments to CI (in our pipelines), and deployment to end users. Zebra can be built from source using Cargo, Rust’s build system and package manager alternatively, you can easily deploy Zebra using [Docker](https://docs.docker.com/get-docker/)
+The easiest way to run Zebra is using [Docker](https://docs.docker.com/get-docker/). 
+
+We've embraced Docker in Zebra for most of the solution lifecycle, from development environments to CI (in our pipelines), and deployment to end users. 
 
 ## Quick usage
 
