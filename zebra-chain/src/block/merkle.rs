@@ -6,7 +6,7 @@ use hex::{FromHex, ToHex};
 
 use crate::{
     serialization::sha256d,
-    transaction::{self, Transaction, UnminedTx, UnminedTxId},
+    transaction::{self, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
 
 #[cfg(any(any(test, feature = "proptest-impl"), feature = "proptest-impl"))]
@@ -204,6 +204,18 @@ impl std::iter::FromIterator<UnminedTxId> for Root {
     }
 }
 
+impl std::iter::FromIterator<VerifiedUnminedTx> for Root {
+    fn from_iter<I>(transactions: I) -> Self
+    where
+        I: IntoIterator<Item = VerifiedUnminedTx>,
+    {
+        transactions
+            .into_iter()
+            .map(|tx| tx.transaction.id.mined_id())
+            .collect()
+    }
+}
+
 impl std::iter::FromIterator<transaction::Hash> for Root {
     /// # Panics
     ///
@@ -347,6 +359,23 @@ impl std::iter::FromIterator<UnminedTx> for AuthDataRoot {
         transactions
             .into_iter()
             .map(|tx| tx.id.auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER))
+            .collect()
+    }
+}
+
+impl std::iter::FromIterator<VerifiedUnminedTx> for AuthDataRoot {
+    fn from_iter<I>(transactions: I) -> Self
+    where
+        I: IntoIterator<Item = VerifiedUnminedTx>,
+    {
+        transactions
+            .into_iter()
+            .map(|tx| {
+                tx.transaction
+                    .id
+                    .auth_digest()
+                    .unwrap_or(AUTH_DIGEST_PLACEHOLDER)
+            })
             .collect()
     }
 }
