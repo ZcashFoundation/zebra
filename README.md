@@ -10,7 +10,6 @@
 - [Contents](#contents)
 - [About](#about)
   - [Using Zebra](#using-zebra)
-  - [Running Zebra with Docker](#running-zebra-with-docker)
 - [Release Candidates](#release-candidates)
 - [Getting Started](#getting-started)
   - [Build Instructions](#build-instructions)
@@ -55,16 +54,6 @@ in terms of speed and resistance to denial of service attacks, for example.
 Zebra aims to be [faster, more secure, and more easily extensible](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages)
 than other Zcash implementations.
 
-### Running Zebra with Docker
-
-You can easily run Zebra using Docker with a simple command
-
-```shell
-docker run -d zfnd/zebra:1.0.0-rc.0
-```
-
-For more information, read our [Docker documentation](book/src/user/docker.md).
-
 ## Release Candidates
 
 Every few weeks, we release a [new Zebra version](https://github.com/ZcashFoundation/zebra/releases).
@@ -84,13 +73,13 @@ But it may not validate any:
 You can run Zebra using our Docker image.
 This command will run our latest release, and sync it to the tip:
 
-<!-- TODO: replace with `docker run zfnd/zebra` when we release 1.0.0 -->
-
-```sh
-docker run zfnd/zebra:1.0.0-rc.0
+```shell
+docker run -d zfnd/zebra:1.0.0-rc.0
 ```
 
-You can also [enable Zebra's RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd) and [configure other features](https://zebra.zfnd.org/user/run.html).
+For more information, read our [Docker documentation](book/src/user/docker.md).
+
+> You can also [enable Zebra's RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd) and [configure other features](https://zebra.zfnd.org/user/run.html).
 
 ### Build Instructions
 
