@@ -7,7 +7,7 @@
 # - runtime: is our runtime environment
 #
 # This stage implements cargo-chef for docker layer caching
-FROM rust:1.63-bullseye as chef
+FROM rust:bullseye as chef
 RUN cargo install cargo-chef --locked
 WORKDIR /opt/zebrad
 

@@ -21,7 +21,7 @@ jobs:
       matrix:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
         os: [ubuntu-latest, macos-latest]
-        rust: [1.63, beta]
+        rust: [stable, beta]
         exclude:
           - os: macos-latest
             rust: beta
