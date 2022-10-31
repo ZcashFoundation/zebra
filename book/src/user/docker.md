@@ -22,6 +22,10 @@ docker build -f docker/Dockerfile --target runtime -t zebra:local
 docker run -d zebra:local
 ```
 
+### Alternatives
+
+See the Zebra [build instructions](https://github.com/ZcashFoundation/zebra#build-instructions).
+
 ## Images
 
 The Zebra team builds multiple images with a single [Dockerfile](https://github.com/ZcashFoundation/zebra/blob/main/docker/Dockerfile) using [multistage builds](https://docs.docker.com/build/building/multi-stage/). The `test` stage adds needed features and tools (like [lightwalletd](https://github.com/adityapk00/lightwalletd)) and the `runtime` stage just adds the *zebrad* binary and required *zcash-params* for Zebra to run correctly.
