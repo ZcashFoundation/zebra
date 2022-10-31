@@ -34,7 +34,7 @@ tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.37"
 tracing-futures = "0.2.5"
 
-orchard = "0.2.0"
+orchard = "0.3.0"
 
 zcash_proofs = { version = "0.8.0", features = ["local-prover", "multicore", "download-params"] }
 
