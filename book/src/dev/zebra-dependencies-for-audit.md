@@ -42,7 +42,7 @@ Test code, deployment configurations, and other configuration files in the `zebr
 | Name | Version | Audited | Notes
 |------| --------|-------- | -----
 | zcash_proofs | 0.8.0 | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) | <i>Only the proof parameter download code in [downloadreader.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/downloadreader.rs), [hashreader.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/hashreader.rs), and [lib.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/lib.rs) need to be audited.</i>  |
-| zcash_script | 0.1.8 || <i>The C++ parts of `zcashd` got audited as part of the ECC audit, so we only need to audit [1](https://github.com/zcash/zcash/blob/v0.1.8/src/script/zcash_script.cpp),[2](https://github.com/zcash/zcash/blob/v0.1.8/src/script/zcash_script.h) and the rust code in [3](https://github.com/ZcashFoundation/zcash_script/tree/v0.1.8/src)</i>
+| zcash_script | 0.1.8 || <i>The C++ parts of `zcashd` got audited as part of the ECC audit, so we only need to audit [zcash_script.cpp](https://github.com/ZcashFoundation/zcash_script/blob/v0.1.8/depend/zcash/src/script/zcash_script.cpp),[zcash_script.h](https://github.com/ZcashFoundation/zcash_script/blob/v0.1.8/depend/zcash/src/script/zcash_script.h) and [the rust code in the zcash_script crate](https://github.com/ZcashFoundation/zcash_script/tree/v0.1.8/src)</i>
 
 ---
 ## Out of Scope
