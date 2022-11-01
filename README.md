@@ -72,7 +72,7 @@ You can run Zebra using our Docker image.
 This command will run our latest release, and sync it to the tip:
 
 ```shell
-docker run -d zfnd/zebra:1.0.0-rc.0
+docker run --detach zfnd/zebra:1.0.0-rc.0
 ```
 
 For more information, read our [Docker documentation](book/src/user/docker.md).
