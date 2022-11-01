@@ -23,6 +23,11 @@ This release has the following breaking changes:
   - Add getblocktemplate rpc call with stub fields ([#5462](https://github.com/ZcashFoundation/zebra/pull/5462))
 - Add block commit task metrics ([#5327](https://github.com/ZcashFoundation/zebra/pull/5327))
 - Document how we tag and release Zebra ([#5392](https://github.com/ZcashFoundation/zebra/pull/5392))
+- Document how to use Zebra with Docker ([#5504](https://github.com/ZcashFoundation/zebra/pull/5504))
+
+### Changed
+
+- Update mainnet and testnet checkpoints ([#5512](https://github.com/ZcashFoundation/zebra/pull/5512))
 
 ### Fixed
 
