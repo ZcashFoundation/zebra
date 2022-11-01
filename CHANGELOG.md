@@ -18,6 +18,7 @@ This release has the following breaking changes:
 ### Added
 
 - Introduce `getblocktemplate-rpcs` feature ([#5357](https://github.com/ZcashFoundation/zebra/pull/5357))
+  - Add getblockcount rpc method ([#5357](https://github.com/ZcashFoundation/zebra/pull/5357))
   - Add getblockhash rpc method ([#4967](https://github.com/ZcashFoundation/zebra/pull/4967))
   - Add getblocktemplate rpc call with stub fields ([#5462](https://github.com/ZcashFoundation/zebra/pull/5462))
 - Add block commit task metrics ([#5327](https://github.com/ZcashFoundation/zebra/pull/5327))
