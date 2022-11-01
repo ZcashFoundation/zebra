@@ -11,22 +11,22 @@ Test code, deployment configurations, and other configuration files in the `zebr
 
 | Name | Version | Notes
 |------| ------- | -----
-| [tower-batch](https://github.com/ZcashFoundation/zebra/tree/main/tower-batch) | [0.2.32](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/tower-batch) |
-| [tower-fallback](https://github.com/ZcashFoundation/zebra/tree/main/tower-fallback) | [0.2.32](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/tower-fallback) | 
-| [zebra-chain](https://github.com/ZcashFoundation/zebra/tree/main/zebra-chain) | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-chain) |
-| [zebra-consensus](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus) | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-consensus) |
-| [zebra-network](https://github.com/ZcashFoundation/zebra/tree/main/zebra-network) | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-network) |
-| [zebra-node-services](https://github.com/ZcashFoundation/zebra/tree/main/zebra-node-services) | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-node-services)  |
-| [zebra-rpc](https://github.com/ZcashFoundation/zebra/tree/main/zebra-rpc) | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-rpc) |
-| [zebra-script](https://github.com/ZcashFoundation/zebra/tree/main/zebra-script) | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-script) |
-| [zebra-state](https://github.com/ZcashFoundation/zebra/tree/main/zebra-state) | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-state) |
-| [zebrad](https://github.com/ZcashFoundation/zebra/tree/main/zebrad) | [1.0.0-rc.1](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebrad) |
+| tower-batch | [0.2.32](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/tower-batch/src) |
+| tower-fallback | [0.2.32](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/tower-fallback/src) | 
+| zebra-chain | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-chain/src) |
+| zebra-consensus | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-consensus/src) |
+| zebra-network | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-network/src) |
+| zebra-node-services | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-node-services/src) |
+| zebra-rpc | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-rpc/src) |
+| zebra-script | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-script/src) |
+| zebra-state | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-state/src) |
+| zebrad | [1.0.0-rc.1](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebrad/src) |
 
 ### Zcash/ZF dependencies
 
 | Name | Version | Notes
 |------| ------- | -----
-| [ed25519-zebra](https://github.com/ZcashFoundation/ed25519-zebra) | [3.1.0](https://github.com/ZcashFoundation/ed25519-zebra/releases/tag/3.1.0) |
+| ed25519-zebra | [3.1.0](https://github.com/ZcashFoundation/ed25519-zebra/tree/3.1.0/ed25519-zebra/src) |
 
 ---
 ## Partial Audit 
@@ -35,14 +35,14 @@ Test code, deployment configurations, and other configuration files in the `zebr
 
 | Name | Version | Notes
 |------| ------- | -----
-| [zebra-utils](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils) | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-utils) | <i>Only [zebra-checkpoints](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.0/zebra-utils/src/bin/zebra-checkpoints) utility needs to be audited.</i>
+| zebra-utils | 1.0.0-beta.17 | <i>Only [zebra-checkpoints](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-utils/src/bin/zebra-checkpoints/src) utility needs to be audited.</i>
 
 ### Zcash/ZF dependencies
 
 | Name | Version | Audited | Notes
 |------| --------|-------- | -----
-| [zcash_proofs](https://github.com/zcash/librustzcash/tree/zcash_proofs-0.8.0) | [0.8.0](https://github.com/zcash/librustzcash/tree/zcash_proofs-0.8.0) | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) | <i>Only the proof parameter download code in [downloadreader.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/downloadreader.rs), [hashreader.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/hashreader.rs), and [lib.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/lib.rs) need to be audited.</i>  |
-| [zcash_script](https://github.com/ZcashFoundation/zcash_script) | [0.1.8](https://github.com/ZcashFoundation/zcash_script/releases/tag/v0.1.8) || <i>The C++ parts of `zcashd` got audited as part of the ECC audit, so we only need to audit [1](https://github.com/zcash/zcash/blob/master/src/script/zcash_script.cpp),[2](https://github.com/zcash/zcash/blob/master/src/script/zcash_script.h) and the rust code in [3](https://github.com/ZcashFoundation/zcash_script/tree/master/src)</i>
+| zcash_proofs | 0.8.0 | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) | <i>Only the proof parameter download code in [downloadreader.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/downloadreader.rs), [hashreader.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/hashreader.rs), and [lib.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/lib.rs) need to be audited.</i>  |
+| zcash_script | 0.1.8 || <i>The C++ parts of `zcashd` got audited as part of the ECC audit, so we only need to audit [1](https://github.com/zcash/zcash/blob/v0.1.8/src/script/zcash_script.cpp),[2](https://github.com/zcash/zcash/blob/v0.1.8/src/script/zcash_script.h) and the rust code in [3](https://github.com/ZcashFoundation/zcash_script/tree/v0.1.8/src)</i>
 
 ---
 ## Out of Scope
@@ -51,6 +51,9 @@ All versions of these dependencies are out of scope for the audit.
 (Some of the dependency versions in these tables might be outdated.)
 
 The latest versions of Zebra's dependencies are in [`Cargo.lock`](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/Cargo.lock), including transitive dependencies.
+
+Click the triangle for details:
+<details>
 
 ### Zcash/ZF dependencies
 
@@ -176,3 +179,4 @@ The latest versions of Zebra's dependencies are in [`Cargo.lock`](https://github
 | [rand_chacha](https://github.com/rust-random/rand) | [0.3.1](https://github.com/rust-random/rand/releases/tag/0.3.1) | Testing
 | [structopt](https://github.com/TeXitoi/structopt) | [0.3.26](https://github.com/TeXitoi/structopt/releases/tag/v0.3.26) | Trivial usage in zebra-utils
 
+</details>
