@@ -784,6 +784,18 @@ fn stored_configs_works() -> Result<()> {
         .expect("read_dir call failed")
         .flatten()
     {
+        // ignore files starting with getblocktemplate prefix
+        // if we were not built with the getblocktemplate-rpcs feature.
+        #[cfg(not(feature = "getblocktemplate-rpcs"))]
+        if config_file
+            .file_name()
+            .into_string()
+            .expect("all files names should be string convertible")
+            .starts_with("getblocktemplate-")
+        {
+            continue;
+        }
+
         let run_dir = testdir()?;
         let stored_config_path = config_file_full_path(config_file.path());
 
