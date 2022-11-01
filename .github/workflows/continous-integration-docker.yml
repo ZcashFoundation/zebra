@@ -204,7 +204,7 @@ jobs:
       - name: Run basic zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace
+          docker run --name zebrad-tests --tag ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace
 
       # Run ignored by default acceptance tests, only showing command output if the test fails.
       #
@@ -230,7 +230,7 @@ jobs:
       - name: Run basic zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace
+          docker run --name zebrad-tests --tag ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace
 
       - name: Run ignored zebrad tests
         run: |
