@@ -240,8 +240,16 @@ where
         {
             match Pin::new(worker_handle).poll(cx) {
                 Poll::Ready(Ok(())) => return Poll::Ready(Err(self.get_worker_error())),
-                Poll::Ready(task_panic) => {
-                    task_panic.expect("unexpected panic in batch worker task")
+                Poll::Ready(Err(task_cancelled)) if task_cancelled.is_cancelled() => {
+                    tracing::warn!(
+                        "batch task cancelled: {task_cancelled}\n\
+                         Is Zebra shutting down?"
+                    );
+
+                    return Poll::Ready(Err(task_cancelled.into()));
+                }
+                Poll::Ready(Err(task_panic)) => {
+                    std::panic::resume_unwind(task_panic.into_panic());
                 }
                 Poll::Pending => {}
             }
