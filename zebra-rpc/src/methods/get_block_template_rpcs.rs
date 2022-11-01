@@ -3,16 +3,15 @@
 use std::sync::Arc;
 
 use futures::{FutureExt, TryFutureExt};
+use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
+use jsonrpc_derive::rpc;
+use tower::{buffer::Buffer, Service, ServiceExt};
+
 use zebra_chain::{
     block::{self, Block, Height},
     chain_tip::ChainTip,
     serialization::ZcashDeserializeInto,
 };
-
-use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
-use jsonrpc_derive::rpc;
-use tower::{buffer::Buffer, Service, ServiceExt};
-
 use zebra_consensus::{BlockError, VerifyBlockError};
 use zebra_node_services::mempool;
 
