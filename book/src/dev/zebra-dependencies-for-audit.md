@@ -35,7 +35,7 @@ Test code, deployment configurations, and other configuration files in the `zebr
 
 | Name | Version | Notes
 |------| ------- | -----
-| zebra-utils | 1.0.0-beta.17 | <i>Only [zebra-checkpoints](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-utils/src/bin/zebra-checkpoints) utility needs to be audited.</i>
+| zebra-utils | 1.0.0-beta.17 | <i>Only the [zebra-checkpoints](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-utils/src/bin/zebra-checkpoints) utility needs to be audited.</i>
 
 ### Zcash/ZF dependencies
 
