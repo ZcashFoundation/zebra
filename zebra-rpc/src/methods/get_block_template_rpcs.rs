@@ -3,24 +3,23 @@
 use std::sync::Arc;
 
 use futures::{FutureExt, TryFutureExt};
-use zebra_chain::{
-    block::{self, Block, Height},
-    chain_tip::ChainTip,
-    serialization::ZcashDeserializeInto,
-};
-
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
-use zebra_chain::{amount::Amount, block::Height, chain_tip::ChainTip};
+use zebra_chain::{
+    amount::Amount,
+    block::Height,
+    block::{self, Block},
+    chain_tip::ChainTip,
+    serialization::ZcashDeserializeInto,
+};
 use zebra_consensus::{BlockError, VerifyBlockError};
 use zebra_node_services::mempool;
 
 use crate::methods::{
     get_block_template_rpcs::types::{
-        coinbase::Coinbase, default_roots::DefaultRoots, default_roots::DefaultRoots,
-        get_block_template::GetBlockTemplate, get_block_template::GetBlockTemplate, submit_block,
+        default_roots::DefaultRoots, get_block_template::GetBlockTemplate, submit_block,
         transaction::TransactionTemplate,
     },
     GetBlockHash, MISSING_BLOCK_ERROR_CODE,
