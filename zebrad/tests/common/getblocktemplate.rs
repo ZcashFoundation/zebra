@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) mod submit_block {
 
-    use std::{path::PathBuf, thread};
+    use std::path::PathBuf;
 
     use color_eyre::eyre::{eyre, Context, Result};
 
@@ -54,7 +54,7 @@ pub(crate) mod submit_block {
             .bypass_test_capture(true);
 
         while child.is_running() {
-            thread::yield_now();
+            tokio::task::yield_now().await;
         }
 
         let _ = child.kill(true);
