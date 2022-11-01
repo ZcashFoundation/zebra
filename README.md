@@ -52,8 +52,7 @@ You would want to run Zebra if you want to contribute to the
 Zcash network: the more nodes are run, the more reliable the network will be
 in terms of speed and resistance to denial of service attacks, for example.
 
-Zebra aims to be
-[faster, more secure, and more easily extensible](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages)
+Zebra aims to be [faster, more secure, and more easily extensible](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-advantages)
 than other Zcash implementations.
 
 ## Release Candidates
@@ -72,13 +71,13 @@ Currently, Zebra validates all of the Zcash consensus rules for the NU5 network 
 You can run Zebra using our Docker image.
 This command will run our latest release, and sync it to the tip:
 
-<!-- TODO: replace with `docker run zfnd/zebra` when we release 1.0.0 -->
-
-```sh
-docker run zfnd/zebra:1.0.0-rc.0
+```shell
+docker run --detach zfnd/zebra:1.0.0-rc.0
 ```
 
-You can also [enable Zebra's RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd) and [configure other features](https://zebra.zfnd.org/user/run.html).
+For more information, read our [Docker documentation](book/src/user/docker.md).
+
+> You can also [enable Zebra's RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd) and [configure other features](https://zebra.zfnd.org/user/run.html).
 
 ### Build Instructions
 
