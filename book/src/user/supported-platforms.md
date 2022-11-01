@@ -17,15 +17,6 @@ For the full requirements, see [Tier 1 platform policy](platform-tier-policy.md#
 
 | platform | os | notes | rust | artifacts
 | -------|-------|-------|-------|-------
-| `x86_64-unknown-linux-gnu` | [Debian 11](https://www.debian.org/releases/bullseye/) | 64-bit | [1.63](https://github.com/rust-lang/rust/releases) | Docker
-
-### Temporarily Unsupported
-
-Zcash parameter downloads currently [hang when built with Rust 1.64 and later](https://github.com/ZcashFoundation/zebra/issues/5091).
-Those Rust versions are unsupported until that bug is fixed.
-
-| platform | os | notes | rust | artifacts
-| -------|-------|-------|-------|-------
 | `x86_64-unknown-linux-gnu` | [Debian 11](https://www.debian.org/releases/bullseye/) | 64-bit | [latest stable release](https://github.com/rust-lang/rust/releases) | Docker
 
 ## Tier 2

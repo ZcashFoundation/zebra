@@ -87,9 +87,10 @@ To run `zebrad`, follow the instructions to compile `zebrad`
 for your platform:
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
-   - Zebra requires Rust 1.63, due to [a compiler performance regression in Rust 1.64](https://github.com/ZcashFoundation/zebra/issues/5091).
-     Zebra is also tested with the latest `stable` Rust version.
-     Earlier versions are not supported or tested. Any Zebra release can remove support for older Rust versions, without any notice.
+   - Zebra is tested with the latest `stable` Rust version.
+     Earlier versions are not supported or tested.
+     Any Zebra release can remove support for older Rust versions, without any notice.
+     (Rust 1.59 and earlier are definitely not supported, due to missing features.)
 2. Install Zebra's build dependencies:
    - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
    - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
@@ -230,8 +231,7 @@ There are a few bugs in Zebra that we're still working on fixing:
     for a short period of time because Zebra will quickly find out that it's
     still not close to the tip.
 
-- Zebra requires Rust 1.63, due to [a compiler performance regression in Rust 1.64](https://github.com/ZcashFoundation/zebra/issues/5091)
-  - If Zebra fails downloading the Zcash parameters, use [the Zcash parameters download script](https://github.com/zcash/zcash/blob/master/zcutil/fetch-params.sh) instead. This script might be needed on macOS, even with Rust 1.63.
+- If Zebra fails downloading the Zcash parameters, use [the Zcash parameters download script](https://github.com/zcash/zcash/blob/master/zcutil/fetch-params.sh) instead. This script might be needed on macOS, even with Rust stable.
 - No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801)
   - We used to test with Windows Server 2019, but not anymore; see issue for details
   
