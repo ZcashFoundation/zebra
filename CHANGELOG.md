@@ -4,6 +4,97 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-rc.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.1) - 2022-11-02
+
+This is the second Zebra release candidate. Zebra's consensus rules, node sync, and `lightwalletd` RPCs are ready for user testing and experimental use. Zebra has not been audited yet.
+
+This release starts work on mining pool RPCs, including some mempool fixes. It also restores support for Rust 1.64.
+
+### Breaking Changes
+
+This release has the following breaking changes:
+- Remove unused buggy cryptographic code from zebra-chain ([#5464](https://github.com/ZcashFoundation/zebra/pull/5464)). This code was never used in production, and it had known bugs. Anyone using it should migrate to `librustzcash` instead.
+
+### Added
+
+- Introduce `getblocktemplate-rpcs` feature ([#5357](https://github.com/ZcashFoundation/zebra/pull/5357))
+  - Add getblockhash rpc method ([#4967](https://github.com/ZcashFoundation/zebra/pull/4967))
+  - Add getblocktemplate rpc call with stub fields ([#5462](https://github.com/ZcashFoundation/zebra/pull/5462))
+- Add block commit task metrics ([#5327](https://github.com/ZcashFoundation/zebra/pull/5327))
+- Document how we tag and release Zebra ([#5392](https://github.com/ZcashFoundation/zebra/pull/5392))
+
+### Fixed
+
+- Reject mempool transactions with spent outpoints or nullifiers ([#5434](https://github.com/ZcashFoundation/zebra/pull/5434))
+- Allow extra lookahead blocks in the verifier, state, and block commit task queues. This reduces the number of downloaded blocks that are dropped due to the lookahead limit. ([#5465](https://github.com/ZcashFoundation/zebra/pull/5465))
+
+### Trivial *TODO:* put this in a PR comment, not the CHANGELOG
+
+- fix(ci): Use correct lwd full sync patch job name ([#5448](https://github.com/ZcashFoundation/zebra/pull/5448))
+- fix(doc): resolve some doc warnings about unquoted HTML tags ([#5477](https://github.com/ZcashFoundation/zebra/pull/5477))
+- fix(sync): Make timeouts shorter to reduce full sync times ([#5397](https://github.com/ZcashFoundation/zebra/pull/5397))
+- fix(test): resolve a timing issue in fake\_peer\_set setup ([#5398](https://github.com/ZcashFoundation/zebra/pull/5398))
+- ci(disk): use an official GCP image on CI VMs for disk auto-resizing, make CI \& CD disks 300GB ([#5371](https://github.com/ZcashFoundation/zebra/pull/5371))
+- ci(sync): increase the height of blocks for some full sync jobs ([#5391](https://github.com/ZcashFoundation/zebra/pull/5391))
+- chore(clippy): Fix clippy cast and closure warnings ([#5378](https://github.com/ZcashFoundation/zebra/pull/5378))
+- ci(sync): only run the `lightwalletd` full sync on the `main` branch ([#5393](https://github.com/ZcashFoundation/zebra/pull/5393))
+- change(ci): Add patch jobs for lightwalletd build and getblocktemplate-rpcs tests ([#5474](https://github.com/ZcashFoundation/zebra/pull/5474))
+- change(ci): only run the send transaction test on the main branch ([#5480](https://github.com/ZcashFoundation/zebra/pull/5480))
+- change(doc): Refactor `README.md` ([#5443](https://github.com/ZcashFoundation/zebra/pull/5443))
+- build(deps): bump tj-actions/changed-files from 32.0.0 to 32.1.0 ([#5403](https://github.com/ZcashFoundation/zebra/pull/5403))
+- build(deps): bump tj-actions/changed-files from 32.1.0 to 32.1.2 ([#5414](https://github.com/ZcashFoundation/zebra/pull/5414))
+- build(deps): bump tj-actions/changed-files from 32.1.2 to 33.0.0 ([#5457](https://github.com/ZcashFoundation/zebra/pull/5457))
+- build(deps): bump tj-actions/changed-files from 33.0.0 to 34.0.0 ([#5483](https://github.com/ZcashFoundation/zebra/pull/5483))
+- ci(sync): increase the height of blocks for some full sync jobs ([#5391](https://github.com/ZcashFoundation/zebra/pull/5391))
+- ci(getblocktemplate): run getblocktemplate-rpcs feature tests in CI ([#5435](https://github.com/ZcashFoundation/zebra/pull/5435))
+- change(ci): Add patch jobs for lightwalletd build and getblocktemplate-rpcs tests ([#5474](https://github.com/ZcashFoundation/zebra/pull/5474))
+- suggestions for list of dependencies ([#5471](https://github.com/ZcashFoundation/zebra/pull/5471))
+- refactor(config): Move configs to components ([#5460](https://github.com/ZcashFoundation/zebra/pull/5460))
+- add(doc): Add draft audit process, and update some support docs ([#5433](https://github.com/ZcashFoundation/zebra/pull/5433))
+- build(deps): Remove `arrayvec` and `itoa` from `skip-tree` ([#5410](https://github.com/ZcashFoundation/zebra/pull/5410))
+- build(deps): bump actions/github-script from 6.3.1 to 6.3.2 ([#5387](https://github.com/ZcashFoundation/zebra/pull/5387))
+- build(deps): bump actions/github-script from 6.3.2 to 6.3.3 ([#5409](https://github.com/ZcashFoundation/zebra/pull/5409))
+- build(deps): bump docker/build-push-action from 3.1.1 to 3.2.0 ([#5389](https://github.com/ZcashFoundation/zebra/pull/5389))
+- build(deps): bump docker/login-action from 2.0.0 to 2.1.0 ([#5388](https://github.com/ZcashFoundation/zebra/pull/5388))
+- build(deps): bump docker/metadata-action from 4.0.1 to 4.1.1 ([#5417](https://github.com/ZcashFoundation/zebra/pull/5417))
+- build(deps): bump futures from 0.3.24 to 0.3.25 ([#5438](https://github.com/ZcashFoundation/zebra/pull/5438))
+- build(deps): bump futures-core from 0.3.24 to 0.3.25 ([#5440](https://github.com/ZcashFoundation/zebra/pull/5440))
+- build(deps): bump futures-util from 0.3.24 to 0.3.25 ([#5441](https://github.com/ZcashFoundation/zebra/pull/5441))
+- build(deps): bump google-github-actions/auth from 0.8.1 to 0.8.2 ([#5404](https://github.com/ZcashFoundation/zebra/pull/5404))
+- build(deps): bump google-github-actions/auth from 0.8.2 to 0.8.3 ([#5413](https://github.com/ZcashFoundation/zebra/pull/5413))
+- build(deps): bump inferno from 0.11.10 to 0.11.11 ([#5415](https://github.com/ZcashFoundation/zebra/pull/5415))
+- build(deps): bump inferno from 0.11.11 to 0.11.12 ([#5479](https://github.com/ZcashFoundation/zebra/pull/5479))
+- build(deps): bump inferno from 0.11.9 to 0.11.10 ([#5381](https://github.com/ZcashFoundation/zebra/pull/5381))
+- build(deps): bump peaceiris/actions-mdbook from 1.1.14 to 1.2.0 ([#5467](https://github.com/ZcashFoundation/zebra/pull/5467))
+- build(deps): bump reviewdog/action-actionlint from 1.33.0 to 1.33.1 ([#5478](https://github.com/ZcashFoundation/zebra/pull/5478))
+- build(deps): bump serde from 1.0.145 to 1.0.147 ([#5459](https://github.com/ZcashFoundation/zebra/pull/5459))
+- build(deps): bump serde\_json from 1.0.85 to 1.0.86 ([#5369](https://github.com/ZcashFoundation/zebra/pull/5369))
+- build(deps): bump serde\_json from 1.0.86 to 1.0.87 ([#5437](https://github.com/ZcashFoundation/zebra/pull/5437))
+- build(deps): bump tj-actions/changed-files from 32.0.0 to 32.1.0 ([#5403](https://github.com/ZcashFoundation/zebra/pull/5403))
+- build(deps): bump tj-actions/changed-files from 32.1.0 to 32.1.2 ([#5414](https://github.com/ZcashFoundation/zebra/pull/5414))
+- build(deps): bump tj-actions/changed-files from 32.1.2 to 33.0.0 ([#5457](https://github.com/ZcashFoundation/zebra/pull/5457))
+- build(deps): bump tj-actions/changed-files from 33.0.0 to 34.0.0 ([#5483](https://github.com/ZcashFoundation/zebra/pull/5483))
+- build(deps): bump tokio-stream from 0.1.10 to 0.1.11 ([#5380](https://github.com/ZcashFoundation/zebra/pull/5380))
+- build(deps): bump tracing from 0.1.36 to 0.1.37 ([#5363](https://github.com/ZcashFoundation/zebra/pull/5363))
+- build(deps): bump tracing-subscriber from 0.3.15 to 0.3.16 ([#5364](https://github.com/ZcashFoundation/zebra/pull/5364))
+- change(ci): Add patch jobs for lightwalletd build and getblocktemplate-rpcs tests ([#5474](https://github.com/ZcashFoundation/zebra/pull/5474))
+- change(ci): only run the send transaction test on the main branch ([#5480](https://github.com/ZcashFoundation/zebra/pull/5480))
+- change(doc): Refactor `README.md` ([#5443](https://github.com/ZcashFoundation/zebra/pull/5443))
+- change(state): Add block channel metrics, in preparation for block fork metrics ([#5327](https://github.com/ZcashFoundation/zebra/pull/5327))
+- chore(clippy): Fix clippy cast and closure warnings ([#5378](https://github.com/ZcashFoundation/zebra/pull/5378))
+- ci(disk): use an official GCP image on CI VMs for disk auto-resizing, make CI \& CD disks 300GB ([#5371](https://github.com/ZcashFoundation/zebra/pull/5371))
+- ci(getblocktemplate): run getblocktemplate-rpcs feature tests in CI ([#5435](https://github.com/ZcashFoundation/zebra/pull/5435))
+- ci(sync): increase the height of blocks for some full sync jobs ([#5391](https://github.com/ZcashFoundation/zebra/pull/5391))
+- ci(sync): only run the `lightwalletd` full sync on the `main` branch ([#5393](https://github.com/ZcashFoundation/zebra/pull/5393))
+- fix(ci): Use correct lwd full sync patch job name ([#5448](https://github.com/ZcashFoundation/zebra/pull/5448))
+- fix(doc): resolve some doc warnings about unquoted HTML tags ([#5477](https://github.com/ZcashFoundation/zebra/pull/5477))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @dependabot[bot], @gustavovalverde, @mergify[bot], @oxarbitrage, @teor2345 and @upbqdn
+
+
 ## [Zebra 1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.0) - 2022-10-12
 
 This is the first Zebra release candidate. Zebra's consensus rules, node sync, and `lightwalletd` RPCs are ready for user testing and experimental use. Zebra has not been audited yet.
