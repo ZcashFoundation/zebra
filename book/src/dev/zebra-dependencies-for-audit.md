@@ -47,10 +47,11 @@ Test code, deployment configurations, and other configuration files in the `zebr
 ---
 ## Out of Scope
 
-All versions of these dependencies are out of scope for the audit.
-(Some of the dependency versions in these tables might be outdated.)
+The following list of dependencies is out of scope for the audit. 
 
-The latest versions of Zebra's dependencies are in [`Cargo.lock`](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/Cargo.lock), including transitive dependencies.
+Please ignore the dependency versions in these tables, some of them are are outdated. All versions of these dependencies are out of scope.
+
+The latest versions of Zebra's dependencies are in [`Cargo.lock`](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/Cargo.lock), including transitive dependencies. They can be viewed using `cargo tree`.
 
 Click the triangle for details:
 <details>
