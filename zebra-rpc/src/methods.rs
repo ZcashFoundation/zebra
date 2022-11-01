@@ -35,7 +35,7 @@ use zebra_state::{OutputIndex, OutputLocation, TransactionLocation};
 use crate::queue::Queue;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-mod get_block_template_rpcs;
+pub mod get_block_template_rpcs;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use get_block_template_rpcs::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};

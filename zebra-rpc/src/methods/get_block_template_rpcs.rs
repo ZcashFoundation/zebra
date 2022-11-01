@@ -16,6 +16,7 @@ use crate::methods::{
     GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
 
+pub mod config;
 pub(crate) mod types;
 
 /// getblocktemplate RPC method signatures.
