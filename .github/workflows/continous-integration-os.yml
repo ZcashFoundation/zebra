@@ -161,17 +161,20 @@ jobs:
         working-directory: ./zebra-consensus
         run: cargo run --example download-params
 
-      - name: Run tests
+      # Run unit and basic acceptance tests, only showing command output if the test fails.
+      #
+      # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
+      - name: Run basic tests
         uses: actions-rs/cargo@v1.0.3
         with:
           command: test
-          args: --verbose --workspace -- --nocapture
+          args: --verbose --workspace
 
-      - name: Run tests with getblocktemplate-rpcs feature
+      - name: Run basic tests with getblocktemplate-rpcs feature
         uses: actions-rs/cargo@v1.0.3
         with:
           command: test
-          args: --features getblocktemplate-rpcs --verbose --workspace -- --nocapture
+          args: --features getblocktemplate-rpcs --verbose --workspace
 
       # Explicitly run any tests that are usually #[ignored]
 
