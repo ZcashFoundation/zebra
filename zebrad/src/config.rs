@@ -37,4 +37,8 @@ pub struct ZebradConfig {
 
     /// RPC configuration
     pub rpc: zebra_rpc::config::Config,
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Mining configuration
+    pub mining: zebra_rpc::methods::get_block_template_rpcs::config::Config,
 }
