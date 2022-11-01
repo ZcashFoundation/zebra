@@ -37,7 +37,7 @@ This release has the following breaking changes:
 ### Contributors
 
 Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
-@arya2, @dependabot[bot], @gustavovalverde, @mergify[bot], @oxarbitrage, @teor2345 and @upbqdn
+@arya2, @gustavovalverde, @oxarbitrage, @teor2345 and @upbqdn
 
 
 ## [Zebra 1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.0) - 2022-10-12
