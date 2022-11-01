@@ -42,7 +42,7 @@ zebrad (rc):
 - [ ] zebrad `Cargo.toml`
 - [ ] `zebra-network` protocol user agent: https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/constants.rs
 - [ ] `README.md`
-- [ ] `book/src/user/install.md`
+- [ ] `book/src/user/docker.md`
 
 crates (pre-release):
 - [ ] zebra-* `Cargo.toml`s
@@ -59,7 +59,7 @@ You can use `fastmod` to interactively find and replace versions.
 
 For example, you can do something like:
 ```
-fastmod --extensions rs,toml,md --fixed-strings '1.0.0-rc.0' '1.0.0-rc.1' zebrad README.md book/src/user/install.md zebra-network/src/constants.rs
+fastmod --extensions rs,toml,md --fixed-strings '1.0.0-rc.0' '1.0.0-rc.1' zebrad README.md zebra-network/src/constants.rs
 fastmod --extensions rs,toml,md --fixed-strings '1.0.0-beta.15' '1.0.0-beta.16' zebra-*
 fastmod --extensions rs,toml,md --fixed-strings '0.2.30' '0.2.31' tower-batch tower-fallback
 ```
@@ -118,7 +118,7 @@ After you have the version increments, the updated checkpoints and the updated c
 
 - [ ] Make sure the PR with the new checkpoint hashes is already merged, or make it part of the changelog PR
 - [ ] Push the version increments and the updated changelog into a branch
-      (name suggestion, example: `v100-rc0-release`)
+      (name suggestion, example: `v1.0.0-rc.X`)
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the
       comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v100-alpha0-release?expand=1&template=release-checklist.md)).
   - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.
