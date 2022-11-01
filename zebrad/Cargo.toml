@@ -15,6 +15,7 @@ default-run = "zebrad"
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
 default = ["release_max_level_info"]
+getblocktemplate-rpcs = ["zebra-rpc/getblocktemplate-rpcs"]
 
 # Production features that activate extra dependencies
 
