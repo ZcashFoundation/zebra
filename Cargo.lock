@@ -5396,6 +5396,7 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "zebra-chain",
+ "zebra-consensus",
  "zebra-network",
  "zebra-node-services",
  "zebra-state",

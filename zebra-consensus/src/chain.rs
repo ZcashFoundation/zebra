@@ -56,7 +56,7 @@ mod tests;
 ///
 /// We deliberately add extra slots, because they only cost a small amount of
 /// memory, but missing slots can significantly slow down Zebra.
-const VERIFIER_BUFFER_BOUND: usize = 5;
+pub const VERIFIER_BUFFER_BOUND: usize = 5;
 
 /// The chain verifier routes requests to either the checkpoint verifier or the
 /// block verifier, depending on the maximum checkpoint height.

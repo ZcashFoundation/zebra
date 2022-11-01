@@ -13,6 +13,8 @@ pub mod cached_state;
 pub mod check;
 pub mod config;
 pub mod failure_messages;
+#[cfg(feature = "getblocktemplate-rpcs")]
+pub mod getblocktemplate;
 pub mod launch;
 pub mod lightwalletd;
 pub mod sync;

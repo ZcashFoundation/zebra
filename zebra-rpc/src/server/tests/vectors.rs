@@ -54,6 +54,8 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
             "RPC server test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            None,
             NoChainTip,
             Mainnet,
         );
@@ -121,6 +123,8 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool) {
             "RPC server test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            None,
             NoChainTip,
             Mainnet,
         );
@@ -175,6 +179,8 @@ fn rpc_server_spawn_port_conflict() {
             "RPC server 1 test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            None,
             NoChainTip,
             Mainnet,
         );
@@ -188,6 +194,8 @@ fn rpc_server_spawn_port_conflict() {
             "RPC server 2 conflict test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            None,
             NoChainTip,
             Mainnet,
         );
@@ -271,6 +279,8 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
             "RPC server 1 test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            None,
             NoChainTip,
             Mainnet,
         );
@@ -284,6 +294,8 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
             "RPC server 2 conflict test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            None,
             NoChainTip,
             Mainnet,
         );

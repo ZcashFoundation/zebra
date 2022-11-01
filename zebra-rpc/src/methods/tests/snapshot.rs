@@ -46,7 +46,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     let mut mempool: MockService<_, _, _, zebra_node_services::BoxError> =
         MockService::build().for_unit_tests();
     // Create a populated state service
-    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), network).await;
 
     // Start snapshots of RPC responses.
@@ -57,6 +57,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     #[cfg(feature = "getblocktemplate-rpcs")]
     get_block_template_rpcs::test_responses(
         mempool.clone(),
+        state.clone(),
         read_state.clone(),
         latest_chain_tip.clone(),
         settings.clone(),

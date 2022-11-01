@@ -39,6 +39,7 @@ mod subsidy;
 mod tests;
 
 /// Asynchronous block verification.
+#[cfg_attr(feature = "getblocktemplate-rpcs", derive(Clone))]
 #[derive(Debug)]
 pub struct BlockVerifier<S, V> {
     /// The network to be verified.
@@ -93,6 +94,7 @@ where
     V: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     V::Future: Send + 'static,
 {
+    /// Creates a new BlockVerifier
     pub fn new(network: Network, state_service: S, transaction_verifier: V) -> Self {
         Self {
             network,

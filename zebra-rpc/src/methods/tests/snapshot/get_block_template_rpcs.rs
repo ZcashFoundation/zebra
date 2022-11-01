@@ -8,6 +8,8 @@
 use insta::Settings;
 use tower::{buffer::Buffer, Service};
 
+use zebra_chain::parameters::Network;
+use zebra_consensus::{chain::VERIFIER_BUFFER_BOUND, BlockVerifier, TransactionVerifier};
 use zebra_node_services::mempool;
 use zebra_state::LatestChainTip;
 
@@ -15,18 +17,28 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::methods::{GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
-pub async fn test_responses<State>(
+pub async fn test_responses<State, ReadState>(
     mempool: MockService<
         mempool::Request,
         mempool::Response,
         PanicAssertion,
         zebra_node_services::BoxError,
     >,
-    read_state: State,
+    state: State,
+    read_state: ReadState,
     latest_chain_tip: LatestChainTip,
     settings: Settings,
 ) where
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::Request>>::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -34,12 +46,19 @@ pub async fn test_responses<State>(
         + Send
         + Sync
         + 'static,
-    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
 {
+    let tx_verifier = TransactionVerifier::new(Network::Mainnet, state.clone());
+    let tx_verifier = Buffer::new(
+        tower::util::BoxService::new(tx_verifier),
+        VERIFIER_BUFFER_BOUND,
+    );
+    let block_verifier = BlockVerifier::new(Network::Mainnet, state, tx_verifier);
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
+        tower::ServiceBuilder::new().service(block_verifier),
     );
 
     // `getblockcount`
