@@ -1,16 +1,26 @@
 //! RPC methods related to mining only available with `getblocktemplate-rpcs` rust feature.
 
+use std::sync::Arc;
+
 use futures::{FutureExt, TryFutureExt};
+use zebra_chain::{
+    block::{self, Block, Height},
+    chain_tip::ChainTip,
+    serialization::ZcashDeserializeInto,
+};
+
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{amount::Amount, block::Height, chain_tip::ChainTip};
+use zebra_consensus::{BlockError, VerifyBlockError};
 use zebra_node_services::mempool;
 
 use crate::methods::{
     get_block_template_rpcs::types::{
-        default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
+        coinbase::Coinbase, default_roots::DefaultRoots, default_roots::DefaultRoots,
+        get_block_template::GetBlockTemplate, get_block_template::GetBlockTemplate, submit_block,
         transaction::TransactionTemplate,
     },
     GetBlockHash, MISSING_BLOCK_ERROR_CODE,
@@ -74,10 +84,26 @@ pub trait GetBlockTemplateRpc {
     /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[rpc(name = "getblocktemplate")]
     fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>>;
+
+    /// Submits block to the node to be validated and committed.
+    /// Returns the [`SentTransactionHash`] for the transaction, as a JSON string.
+    ///
+    /// zcashd reference: [`submitblock`](https://zcash.github.io/rpc/submitblock.html)
+    ///
+    /// # Parameters
+    /// - `hexdata` (string, required)
+    /// - `jsonparametersobject` (string, optional) - currently ignored
+    ///  - holds a single field, workid, that must be included in submissions if provided by the server.
+    #[rpc(name = "submitblock")]
+    fn submit_block(
+        &self,
+        hex_data: String,
+        _options: Option<submit_block::JsonParameters>,
+    ) -> BoxFuture<Result<submit_block::Response>>;
 }
 
 /// RPC method implementations.
-pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip>
+pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifier>
 where
     Mempool: Service<
         mempool::Request,
@@ -89,7 +115,11 @@ where
         Response = zebra_state::ReadResponse,
         Error = zebra_state::BoxError,
     >,
-    Tip: ChainTip,
+    BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = VerifyBlockError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     // TODO: Add the other fields from the [`Rpc`] struct as-needed
 
@@ -107,9 +137,12 @@ where
 
     /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: Tip,
+
+    /// The full block verifier, used for submitting blocks.
+    block_verifier: BlockVerifier,
 }
 
-impl<Mempool, State, Tip> GetBlockTemplateRpcImpl<Mempool, State, Tip>
+impl<Mempool, State, Tip, BlockVerifier> GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifier>
 where
     Mempool: Service<
             mempool::Request,
@@ -125,22 +158,30 @@ where
         + Sync
         + 'static,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = VerifyBlockError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     /// Create a new instance of the handler for getblocktemplate RPCs.
     pub fn new(
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
+        block_verifier: BlockVerifier,
     ) -> Self {
         Self {
             mempool,
             state,
             latest_chain_tip,
+            block_verifier,
         }
     }
 }
 
-impl<Mempool, State, Tip> GetBlockTemplateRpc for GetBlockTemplateRpcImpl<Mempool, State, Tip>
+impl<Mempool, State, Tip, BlockVerifier> GetBlockTemplateRpc
+    for GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifier>
 where
     Mempool: Service<
             mempool::Request,
@@ -158,6 +199,12 @@ where
         + 'static,
     <State as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Send + Sync + 'static,
+    BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = VerifyBlockError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <BlockVerifier as Service<Arc<Block>>>::Future: Send,
 {
     fn get_block_count(&self) -> Result<u32> {
         self.latest_chain_tip
@@ -299,6 +346,51 @@ where
 
                 height: 0,
             })
+        }
+        .boxed()
+    }
+
+    fn submit_block(
+        &self,
+        hex_data: String,
+        _options: Option<submit_block::JsonParameters>,
+    ) -> BoxFuture<Result<submit_block::Response>> {
+        let mut block_verifier = self.block_verifier.clone();
+
+        async move {
+            let block = hex::decode(hex_data).map_err(|error| Error {
+                code: ErrorCode::ServerError(0),
+                message: format!("failed to decode hexdata, error msg: {error}"),
+                data: None,
+            })?;
+
+            let block: Block = block.zcash_deserialize_into().map_err(|error| Error {
+                code: ErrorCode::ServerError(0),
+                message: format!("failed to deserialize into block, error msg: {error}"),
+                data: None,
+            })?;
+
+            let block_verifier_response: std::result::Result<block::Hash, VerifyBlockError> =
+                block_verifier
+                    .ready()
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?
+                    .call(Arc::new(block))
+                    .await;
+
+            let submit_block_response = match block_verifier_response {
+                Ok(_block_hash) => submit_block::Response::Accepted,
+                Err(VerifyBlockError::Block {
+                    source: BlockError::AlreadyInChain(..),
+                }) => submit_block::Response::Duplicate,
+                Err(_) => submit_block::Response::Rejected,
+            };
+
+            Ok(submit_block_response)
         }
         .boxed()
     }

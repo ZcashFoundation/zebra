@@ -13,11 +13,18 @@ use jsonrpc_core::{Compatibility, MetaIoHandler};
 use jsonrpc_http_server::ServerBuilder;
 use tokio::task::JoinHandle;
 use tower::{buffer::Buffer, Service};
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+use tower::{util::BoxService, ServiceBuilder};
+
 use tracing::*;
 use tracing_futures::Instrument;
 
 use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 use zebra_node_services::{mempool, BoxError};
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+use zebra_consensus::{error::TransactionError, transaction, BlockVerifier};
 
 use crate::{
     config::Config,
@@ -45,6 +52,23 @@ impl RpcServer {
         app_version: Version,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
+        // TODO: use cfg-if to apply trait constraints behind feature flag and remove the `Option`.
+        #[cfg(feature = "getblocktemplate-rpcs")] block_verifier: Option<
+            BlockVerifier<
+                Buffer<
+                    BoxService<
+                        zebra_state::Request,
+                        zebra_state::Response,
+                        Box<dyn std::error::Error + Send + Sync>,
+                    >,
+                    zebra_state::Request,
+                >,
+                Buffer<
+                    BoxService<transaction::Request, transaction::Response, TransactionError>,
+                    transaction::Request,
+                >,
+            >,
+        >,
         latest_chain_tip: Tip,
         network: Network,
     ) -> (JoinHandle<()>, JoinHandle<()>)
@@ -73,14 +97,19 @@ impl RpcServer {
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             {
-                // Initialize the getblocktemplate rpc method handler
-                let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
-                    mempool.clone(),
-                    state.clone(),
-                    latest_chain_tip.clone(),
-                );
+                if let Some(block_verifier) = block_verifier {
+                    let block_verifier = ServiceBuilder::new().service(block_verifier);
 
-                io.extend_with(get_block_template_rpc_impl.to_delegate());
+                    // Initialize the getblocktemplate rpc methods
+                    let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
+                        mempool.clone(),
+                        state.clone(),
+                        latest_chain_tip.clone(),
+                        block_verifier,
+                    );
+
+                    io.extend_with(get_block_template_rpc_impl.to_delegate());
+                }
             }
 
             // Initialize the rpc methods with the zebra version
