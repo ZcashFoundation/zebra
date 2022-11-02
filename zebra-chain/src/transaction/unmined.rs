@@ -301,7 +301,7 @@ impl fmt::Display for VerifiedUnminedTx {
 }
 
 impl VerifiedUnminedTx {
-    /// Create a new verified unmined transaction from a transaction and its fee.
+    /// Create a new verified unmined transaction from a transaction, its fee and the legacy sigop count.
     pub fn new(
         transaction: UnminedTx,
         miner_fee: Amount<NonNegative>,
