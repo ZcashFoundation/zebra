@@ -1120,9 +1120,10 @@ where
             BlockDownloadVerifyError::Invalid {
                 error: VerifyChainError::Block(VerifyBlockError::Commit(ref source)),
                 ..
-            } if format!("{source:?}").contains("block is already committed to the state") => {
+            } if format!("{source:?}").contains("block is already committed to the state") ||
+                 format!("{source:?}").contains("block has already been sent to be committed to the state") => {
                 // TODO: improve this by checking the type (#2908)
-                debug!(error = ?e, "block is already committed, possibly from a previous sync run, continuing");
+                debug!(error = ?e, "block is already committed or pending a commit, possibly from a previous sync run, continuing");
                 false
             }
             BlockDownloadVerifyError::DownloadFailed { ref error, .. }
@@ -1152,6 +1153,7 @@ where
                 if err_str.contains("AlreadyVerified")
                     || err_str.contains("AlreadyInChain")
                     || err_str.contains("block is already committed to the state")
+                    || err_str.contains("block has already been sent to be committed to the state")
                     || err_str.contains("NotFound")
                 {
                     error!(?e,
