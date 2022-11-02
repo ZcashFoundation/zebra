@@ -417,7 +417,10 @@ where
                 // might require architectural changes to Zebra, so we should only do it
                 // if mining pools really need it.
                 Ok(_verify_chain_error) => Ok(submit_block::Response::Rejected),
-                Err(_boxed_string_error) => Ok(submit_block::Response::Rejected),
+
+                // This match arm is currently unreachable, but if future changes add extra error types,
+                // we want to turn them into `Rejected`.
+                Err(_unknown_error_type) => Ok(submit_block::Response::Rejected),
             }
         }
         .boxed()
