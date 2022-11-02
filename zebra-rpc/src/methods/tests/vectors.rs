@@ -5,9 +5,6 @@ use std::{ops::RangeInclusive, sync::Arc};
 use jsonrpc_core::ErrorCode;
 use tower::buffer::Buffer;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
-use tower::util::BoxService;
-
 use zebra_chain::{
     block::Block,
     chain_tip::NoChainTip,
@@ -20,9 +17,6 @@ use zebra_network::constants::USER_AGENT;
 use zebra_node_services::BoxError;
 
 use zebra_test::mock_service::MockService;
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-use zebra_consensus::{chain::VERIFIER_BUFFER_BOUND, BlockVerifier, TransactionVerifier};
 
 use super::super::*;
 
@@ -641,15 +635,25 @@ async fn rpc_getblockcount() {
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
+    let (
+        block_verifier,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::chain::init(
+        zebra_consensus::Config::default(),
+        Mainnet,
+        state.clone(),
+        true,
+    )
+    .await;
+
     // Init RPC
-    let tx_verifier = TransactionVerifier::new(Mainnet, state.clone());
-    let tx_verifier = Buffer::new(BoxService::new(tx_verifier), VERIFIER_BUFFER_BOUND);
-    let block_verifier = BlockVerifier::new(Mainnet, state, tx_verifier);
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        tower::ServiceBuilder::new().service(block_verifier),
+        block_verifier,
     );
 
     // Get the tip height using RPC method `get_block_count`
@@ -674,10 +678,20 @@ async fn rpc_getblockcount_empty_state() {
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::init_test_services(Mainnet);
 
+    let (
+        block_verifier,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::chain::init(
+        zebra_consensus::Config::default(),
+        Mainnet,
+        state.clone(),
+        true,
+    )
+    .await;
+
     // Init RPC
-    let tx_verifier = TransactionVerifier::new(Mainnet, state.clone());
-    let tx_verifier = Buffer::new(BoxService::new(tx_verifier), VERIFIER_BUFFER_BOUND);
-    let block_verifier = BlockVerifier::new(Mainnet, state, tx_verifier);
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -713,10 +727,20 @@ async fn rpc_getblockhash() {
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
+    let (
+        block_verifier,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::chain::init(
+        zebra_consensus::Config::default(),
+        Mainnet,
+        state.clone(),
+        true,
+    )
+    .await;
+
     // Init RPC
-    let tx_verifier = TransactionVerifier::new(Mainnet, state.clone());
-    let tx_verifier = Buffer::new(BoxService::new(tx_verifier), VERIFIER_BUFFER_BOUND);
-    let block_verifier = BlockVerifier::new(Mainnet, state, tx_verifier);
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -766,10 +790,20 @@ async fn rpc_getblocktemplate() {
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
+    let (
+        block_verifier,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::chain::init(
+        zebra_consensus::Config::default(),
+        Mainnet,
+        state.clone(),
+        true,
+    )
+    .await;
+
     // Init RPC
-    let tx_verifier = TransactionVerifier::new(Mainnet, state.clone());
-    let tx_verifier = Buffer::new(BoxService::new(tx_verifier), VERIFIER_BUFFER_BOUND);
-    let block_verifier = BlockVerifier::new(Mainnet, state, tx_verifier);
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
         read_state,
@@ -831,10 +865,20 @@ async fn rpc_submitblock_errors() {
         latest_chain_tip.clone(),
     );
 
+    let (
+        block_verifier,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::chain::init(
+        zebra_consensus::Config::default(),
+        Mainnet,
+        state.clone(),
+        true,
+    )
+    .await;
+
     // Init RPC
-    let tx_verifier = TransactionVerifier::new(Mainnet, state.clone());
-    let tx_verifier = Buffer::new(BoxService::new(tx_verifier), VERIFIER_BUFFER_BOUND);
-    let block_verifier = BlockVerifier::new(Mainnet, state, tx_verifier);
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
         read_state,

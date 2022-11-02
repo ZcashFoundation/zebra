@@ -46,6 +46,8 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
     rt.block_on(async {
         let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut block_verifier: MockService<_, _, _, BoxError> =
+            MockService::build().for_unit_tests();
 
         info!("spawning RPC server...");
 
@@ -54,8 +56,7 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
             "RPC server test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            None,
+            Buffer::new(block_verifier.clone(), 1),
             NoChainTip,
             Mainnet,
         );
@@ -64,6 +65,7 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
 
         mempool.expect_no_requests().await;
         state.expect_no_requests().await;
+        block_verifier.expect_no_requests().await;
 
         // The server and queue tasks should continue without errors or panics
         let rpc_server_task_result = rpc_server_task_handle.now_or_never();
@@ -115,6 +117,8 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool) {
     rt.block_on(async {
         let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut block_verifier: MockService<_, _, _, BoxError> =
+            MockService::build().for_unit_tests();
 
         info!("spawning RPC server...");
 
@@ -123,8 +127,7 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool) {
             "RPC server test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            None,
+            Buffer::new(block_verifier.clone(), 1),
             NoChainTip,
             Mainnet,
         );
@@ -133,6 +136,7 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool) {
 
         mempool.expect_no_requests().await;
         state.expect_no_requests().await;
+        block_verifier.expect_no_requests().await;
 
         // The server and queue tasks should continue without errors or panics
         let rpc_server_task_result = rpc_server_task_handle.now_or_never();
@@ -171,6 +175,8 @@ fn rpc_server_spawn_port_conflict() {
     let test_task_handle = rt.spawn(async {
         let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut block_verifier: MockService<_, _, _, BoxError> =
+            MockService::build().for_unit_tests();
 
         info!("spawning RPC server 1...");
 
@@ -179,8 +185,7 @@ fn rpc_server_spawn_port_conflict() {
             "RPC server 1 test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            None,
+            Buffer::new(block_verifier.clone(), 1),
             NoChainTip,
             Mainnet,
         );
@@ -194,8 +199,7 @@ fn rpc_server_spawn_port_conflict() {
             "RPC server 2 conflict test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            None,
+            Buffer::new(block_verifier.clone(), 1),
             NoChainTip,
             Mainnet,
         );
@@ -204,6 +208,7 @@ fn rpc_server_spawn_port_conflict() {
 
         mempool.expect_no_requests().await;
         state.expect_no_requests().await;
+        block_verifier.expect_no_requests().await;
 
         // Because there is a panic inside a multi-threaded executor,
         // we can't depend on the exact behaviour of the other tasks,
@@ -271,6 +276,8 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
     let test_task_handle = rt.spawn(async {
         let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut block_verifier: MockService<_, _, _, BoxError> =
+            MockService::build().for_unit_tests();
 
         info!("spawning parallel RPC server 1...");
 
@@ -279,8 +286,7 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
             "RPC server 1 test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            None,
+            Buffer::new(block_verifier.clone(), 1),
             NoChainTip,
             Mainnet,
         );
@@ -294,8 +300,7 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
             "RPC server 2 conflict test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            None,
+            Buffer::new(block_verifier.clone(), 1),
             NoChainTip,
             Mainnet,
         );
@@ -304,6 +309,7 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
 
         mempool.expect_no_requests().await;
         state.expect_no_requests().await;
+        block_verifier.expect_no_requests().await;
 
         // Because there might be a panic inside a multi-threaded executor,
         // we can't depend on the exact behaviour of the other tasks,

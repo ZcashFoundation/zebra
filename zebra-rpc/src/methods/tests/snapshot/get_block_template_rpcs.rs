@@ -9,7 +9,6 @@ use insta::Settings;
 use tower::{buffer::Buffer, Service};
 
 use zebra_chain::parameters::Network;
-use zebra_consensus::{chain::VERIFIER_BUFFER_BOUND, BlockVerifier, TransactionVerifier};
 use zebra_node_services::mempool;
 use zebra_state::LatestChainTip;
 
@@ -18,6 +17,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 use crate::methods::{GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
 pub async fn test_responses<State, ReadState>(
+    network: Network,
     mempool: MockService<
         mempool::Request,
         mempool::Response,
@@ -48,17 +48,24 @@ pub async fn test_responses<State, ReadState>(
         + 'static,
     <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
 {
-    let tx_verifier = TransactionVerifier::new(Network::Mainnet, state.clone());
-    let tx_verifier = Buffer::new(
-        tower::util::BoxService::new(tx_verifier),
-        VERIFIER_BUFFER_BOUND,
-    );
-    let block_verifier = BlockVerifier::new(Network::Mainnet, state, tx_verifier);
+    let (
+        block_verifier,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::chain::init(
+        zebra_consensus::Config::default(),
+        network,
+        state.clone(),
+        true,
+    )
+    .await;
+
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
-        tower::ServiceBuilder::new().service(block_verifier),
+        block_verifier,
     );
 
     // `getblockcount`
