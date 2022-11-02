@@ -12,7 +12,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
     serialization::ZcashDeserializeInto,
 };
-use zebra_consensus::{BlockError, VerifyBlockError};
+use zebra_consensus::{BlockError, VerifyBlockError, VerifyChainError};
 use zebra_node_services::mempool;
 
 use crate::methods::{
@@ -97,7 +97,7 @@ where
         Response = zebra_state::ReadResponse,
         Error = zebra_state::BoxError,
     >,
-    BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = VerifyBlockError>
+    BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
@@ -141,7 +141,7 @@ where
         + Sync
         + 'static,
     Tip: ChainTip + Clone + Send + Sync + 'static,
-    BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = VerifyBlockError>
+    BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
@@ -182,7 +182,7 @@ where
         + 'static,
     <State as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Send + Sync + 'static,
-    BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = VerifyBlockError>
+    BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
@@ -292,27 +292,56 @@ where
                 data: None,
             })?;
 
-            let block_verifier_response: std::result::Result<block::Hash, VerifyBlockError> =
-                block_verifier
-                    .ready()
-                    .await
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?
-                    .call(Arc::new(block))
-                    .await;
+            let block_verifier_response = block_verifier
+                .ready()
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?
+                .call(Arc::new(block))
+                .await;
 
-            let submit_block_response = match block_verifier_response {
-                Ok(_block_hash) => submit_block::Response::Accepted,
-                Err(VerifyBlockError::Block {
-                    source: BlockError::AlreadyInChain(..),
-                }) => submit_block::Response::Duplicate,
-                Err(_) => submit_block::Response::Rejected,
+            let chain_error = match block_verifier_response {
+                // Currently, this match arm returns `null` (Accepted) for blocks committed
+                // to any chain, but Accepted is only for blocks in the best chain.
+                //
+                // TODO (#5487):
+                // - Inconclusive: check if the block is on a side-chain
+                // The difference is important to miners, because they want to mine on the best chain.
+                Ok(_block_hash) => return Ok(submit_block::Response::Accepted),
+
+                // Turns BoxError into Result<VerifyChainError, BoxError>,
+                // by downcasting from Any to VerifyChainError.
+                Err(box_error) => box_error
+                    .downcast::<VerifyChainError>()
+                    .map(|boxed_chain_error| *boxed_chain_error),
             };
 
-            Ok(submit_block_response)
+            match chain_error {
+                Ok(VerifyChainError::Block(VerifyBlockError::Block {
+                    source: BlockError::AlreadyInChain(..),
+                })) => Ok(submit_block::Response::Duplicate),
+
+                // Currently, these match arms return Reject for the older duplicate in a queue,
+                // but queued duplicates should be DuplicateInconclusive.
+                //
+                // Optional TODO (#5487):
+                // - DuplicateInconclusive: turn these non-finalized state duplicate block errors
+                //   into BlockError enum variants, and handle them as DuplicateInconclusive:
+                //   - "block already sent to be committed to the state"
+                //   - "replaced by newer request"
+                // - keep the older request in the queue,
+                //   and return a duplicate error for the newer request immediately.
+                //   This improves the speed of the RPC response.
+                //
+                // Checking the download queues and ChainVerifier buffer for duplicates
+                // might require architectural changes to Zebra, so we should only do it
+                // if mining pools really need it.
+                Ok(_verify_chain_error) => Ok(submit_block::Response::Rejected),
+                Err(_boxed_string_error) => Ok(submit_block::Response::Rejected),
+            }
         }
         .boxed()
     }

@@ -73,8 +73,7 @@ use futures::FutureExt;
 use tokio::{pin, select, sync::oneshot};
 use tower::{builder::ServiceBuilder, util::BoxService};
 use tracing_futures::Instrument;
-#[cfg(feature = "getblocktemplate-rpcs")]
-use zebra_consensus::BlockVerifier;
+
 use zebra_rpc::server::RpcServer;
 
 use crate::{
@@ -151,10 +150,6 @@ impl StartCmd {
             )
             .await;
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        let block_verifier =
-            BlockVerifier::new(config.network.network, state.clone(), tx_verifier.clone());
-
         info!("initializing syncer");
         let (syncer, sync_status) = ChainSync::new(
             &config,
@@ -186,8 +181,7 @@ impl StartCmd {
             app_version(),
             mempool.clone(),
             read_only_state_service,
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            Some(block_verifier),
+            chain_verifier.clone(),
             latest_chain_tip.clone(),
             config.network.network,
         );

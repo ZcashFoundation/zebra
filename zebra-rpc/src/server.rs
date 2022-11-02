@@ -7,24 +7,22 @@
 //! See the full list of
 //! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
-use std::panic;
+use std::{panic, sync::Arc};
 
 use jsonrpc_core::{Compatibility, MetaIoHandler};
 use jsonrpc_http_server::ServerBuilder;
 use tokio::task::JoinHandle;
 use tower::{buffer::Buffer, Service};
 
-#[cfg(feature = "getblocktemplate-rpcs")]
-use tower::{util::BoxService, ServiceBuilder};
-
 use tracing::*;
 use tracing_futures::Instrument;
 
-use zebra_chain::{chain_tip::ChainTip, parameters::Network};
-use zebra_node_services::{mempool, BoxError};
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-use zebra_consensus::{error::TransactionError, transaction, BlockVerifier};
+use zebra_chain::{
+    block::{self, Block},
+    chain_tip::ChainTip,
+    parameters::Network,
+};
+use zebra_node_services::mempool;
 
 use crate::{
     config::Config,
@@ -47,35 +45,22 @@ pub struct RpcServer;
 
 impl RpcServer {
     /// Start a new RPC server endpoint
-    pub fn spawn<Version, Mempool, State, Tip>(
+    pub fn spawn<Version, Mempool, State, Tip, BlockVerifier>(
         config: Config,
         app_version: Version,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
-        // TODO: use cfg-if to apply trait constraints behind feature flag and remove the `Option`.
-        #[cfg(feature = "getblocktemplate-rpcs")] block_verifier: Option<
-            BlockVerifier<
-                Buffer<
-                    BoxService<
-                        zebra_state::Request,
-                        zebra_state::Response,
-                        Box<dyn std::error::Error + Send + Sync>,
-                    >,
-                    zebra_state::Request,
-                >,
-                Buffer<
-                    BoxService<transaction::Request, transaction::Response, TransactionError>,
-                    transaction::Request,
-                >,
-            >,
-        >,
+        #[allow(unused_variables)] block_verifier: BlockVerifier,
         latest_chain_tip: Tip,
         network: Network,
     ) -> (JoinHandle<()>, JoinHandle<()>)
     where
         Version: ToString + Clone,
-        Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
-            + 'static,
+        Mempool: tower::Service<
+                mempool::Request,
+                Response = mempool::Response,
+                Error = zebra_node_services::BoxError,
+            > + 'static,
         Mempool::Future: Send,
         State: Service<
                 zebra_state::ReadRequest,
@@ -87,6 +72,12 @@ impl RpcServer {
             + 'static,
         State::Future: Send,
         Tip: ChainTip + Clone + Send + Sync + 'static,
+        BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        <BlockVerifier as Service<Arc<Block>>>::Future: Send,
     {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
@@ -97,19 +88,15 @@ impl RpcServer {
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             {
-                if let Some(block_verifier) = block_verifier {
-                    let block_verifier = ServiceBuilder::new().service(block_verifier);
+                // Initialize the getblocktemplate rpc methods
+                let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
+                    mempool.clone(),
+                    state.clone(),
+                    latest_chain_tip.clone(),
+                    block_verifier,
+                );
 
-                    // Initialize the getblocktemplate rpc methods
-                    let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
-                        mempool.clone(),
-                        state.clone(),
-                        latest_chain_tip.clone(),
-                        block_verifier,
-                    );
-
-                    io.extend_with(get_block_template_rpc_impl.to_delegate());
-                }
+                io.extend_with(get_block_template_rpc_impl.to_delegate());
             }
 
             // Initialize the rpc methods with the zebra version

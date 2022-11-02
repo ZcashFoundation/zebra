@@ -57,6 +57,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // Test getblocktemplate-rpcs snapshots
     #[cfg(feature = "getblocktemplate-rpcs")]
     get_block_template_rpcs::test_responses(
+        network,
         mempool.clone(),
         state,
         read_state.clone(),
