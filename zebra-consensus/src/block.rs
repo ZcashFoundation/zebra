@@ -39,7 +39,6 @@ mod subsidy;
 mod tests;
 
 /// Asynchronous block verification.
-#[cfg_attr(feature = "getblocktemplate-rpcs", derive(Clone))]
 #[derive(Debug)]
 pub struct BlockVerifier<S, V> {
     /// The network to be verified.

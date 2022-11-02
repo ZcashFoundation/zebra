@@ -14,6 +14,9 @@ getblocktemplate-rpcs = ["zebra-state/getblocktemplate-rpcs", "zebra-node-servic
 # Test-only features
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
 
+# Test-only features
+proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
+
 [dependencies]
 chrono = { version = "0.4.22", default-features = false, features = ["clock", "std"] }
 futures = "0.3.25"
