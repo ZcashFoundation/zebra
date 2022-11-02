@@ -105,8 +105,7 @@ pub async fn test_responses<State, ReadState>(
     let submit_block = get_block_template_rpc
         .submit_block("".to_string(), None)
         .await;
-
-    snapshot_rpc_submitblock(submit_block, &settings);
+    snapshot_rpc_submit_block_deserialization_error(submit_block, &settings);
 }
 
 /// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
@@ -128,9 +127,11 @@ fn snapshot_rpc_getblocktemplate(
 }
 
 /// Snapshot `submitblock` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_submitblock(
+fn snapshot_rpc_submit_block_deserialization_error(
     submit_block_response: jsonrpc_core::Result<submit_block::Response>,
     settings: &insta::Settings,
 ) {
-    settings.bind(|| insta::assert_json_snapshot!("submit_block", submit_block_response));
+    settings.bind(|| {
+        insta::assert_json_snapshot!("submit_block_deserialization_error", submit_block_response)
+    });
 }
