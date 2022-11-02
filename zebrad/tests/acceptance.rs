@@ -1364,7 +1364,12 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     Ok(())
 }
 
+/// Test that Zebra's non-blocking logger works, by creating lots of debug output, but not reading the logs.
+/// Then make sure Zebra drops excess log lines. (Previously, it would block waiting for logs to be read.)
+///
+/// This test is unreliable and sometimes hangs on macOS.
 #[test]
+#[cfg(not(target_os = "macos"))]
 fn non_blocking_logger() -> Result<()> {
     use futures::FutureExt;
     use std::{sync::mpsc, time::Duration};
