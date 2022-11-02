@@ -17,7 +17,7 @@ docker run --detach zfnd/zebra:1.0.0-rc.1
 ### Build it locally
 
 ```shell
-git clone --depth 1 --branch v1.0.0-rc.1 git@github.com:ZcashFoundation/zebra.git
+git clone --depth 1 --branch v1.0.0-rc.1 https://github.com/ZcashFoundation/zebra.git
 docker build --file docker/Dockerfile --target runtime --tag zebra:local
 docker run --detach zebra:local
 ```
