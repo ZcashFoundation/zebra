@@ -18,7 +18,7 @@ pub struct DefaultRoots {
     #[serde(with = "hex")]
     pub chain_history_root: ChainHistoryMmrRootHash,
 
-    /// The merkle root of the authorizine data hashes of the transactions in the block.
+    /// The merkle root of the authorizing data hashes of the transactions in the block.
     #[serde(rename = "authdataroot")]
     #[serde(with = "hex")]
     pub auth_data_root: AuthDataRoot,
