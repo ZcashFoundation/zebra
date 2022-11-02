@@ -64,7 +64,7 @@ pub trait GetBlockTemplateRpc {
     /// Long polling, block proposals, server lists, and work IDs are not supported.
     ///
     /// Miners can make arbitrary changes to blocks, as long as:
-    /// - the data set to `submitblock` is a valid Zcash block, and
+    /// - the data sent to `submitblock` is a valid Zcash block, and
     /// - the parent block is a valid block that Zebra already has, or will receive soon.
     ///
     /// Zebra verifies blocks in parallel, and keeps recent chains in parallel,
