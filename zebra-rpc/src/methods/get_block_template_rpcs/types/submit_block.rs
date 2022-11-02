@@ -1,12 +1,20 @@
+//! Parameter and response types for the `submitblock` RPC.
+
+// Allow doc links to these imports.
+#[allow(unused_imports)]
+use crate::methods::get_block_template_rpcs::GetBlockTemplateRpc;
+
 /// Optional argument `jsonparametersobject` for `submitblock` RPC request
 ///
-/// See notes for [`Rpc::submit_block`] method
+/// See notes for [`GetBlockTemplateRpc::submit_block`] method
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct JsonParameters {
     pub(crate) work_id: String,
 }
 
-/// Response to a `submitblock` RPC request
+/// Response to a `submitblock` RPC request.
+///
+/// Zebra never returns "duplicate-invalid", because it does not store invalid blocks.
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Response {
