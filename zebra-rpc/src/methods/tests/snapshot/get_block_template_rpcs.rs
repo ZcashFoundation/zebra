@@ -52,7 +52,7 @@ pub async fn test_responses<State, ReadState>(
     <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
 {
     let (
-        block_verifier,
+        chain_verifier,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
@@ -68,7 +68,7 @@ pub async fn test_responses<State, ReadState>(
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
-        block_verifier,
+        chain_verifier,
     );
 
     // `getblockcount`

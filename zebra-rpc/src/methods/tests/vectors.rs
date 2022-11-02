@@ -636,7 +636,7 @@ async fn rpc_getblockcount() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let (
-        block_verifier,
+        chain_verifier,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
@@ -653,7 +653,7 @@ async fn rpc_getblockcount() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        block_verifier,
+        chain_verifier,
     );
 
     // Get the tip height using RPC method `get_block_count`
@@ -679,7 +679,7 @@ async fn rpc_getblockcount_empty_state() {
         zebra_state::init_test_services(Mainnet);
 
     let (
-        block_verifier,
+        chain_verifier,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
@@ -696,7 +696,7 @@ async fn rpc_getblockcount_empty_state() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        tower::ServiceBuilder::new().service(block_verifier),
+        tower::ServiceBuilder::new().service(chain_verifier),
     );
 
     // Get the tip height using RPC method `get_block_count
@@ -728,7 +728,7 @@ async fn rpc_getblockhash() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let (
-        block_verifier,
+        chain_verifier,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
@@ -745,7 +745,7 @@ async fn rpc_getblockhash() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        tower::ServiceBuilder::new().service(block_verifier),
+        tower::ServiceBuilder::new().service(chain_verifier),
     );
 
     // Query the hashes using positive indexes
@@ -791,7 +791,7 @@ async fn rpc_getblocktemplate() {
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let (
-        block_verifier,
+        chain_verifier,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
@@ -808,7 +808,7 @@ async fn rpc_getblocktemplate() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        tower::ServiceBuilder::new().service(block_verifier),
+        tower::ServiceBuilder::new().service(chain_verifier),
     );
 
     let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
@@ -866,7 +866,7 @@ async fn rpc_submitblock_errors() {
     );
 
     let (
-        block_verifier,
+        chain_verifier,
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
@@ -883,7 +883,7 @@ async fn rpc_submitblock_errors() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        tower::ServiceBuilder::new().service(block_verifier),
+        tower::ServiceBuilder::new().service(chain_verifier),
     );
 
     // Try to submit pre-populated blocks and assert that it responds with duplicate.

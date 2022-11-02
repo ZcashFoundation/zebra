@@ -102,7 +102,7 @@ pub trait GetBlockTemplateRpc {
 }
 
 /// RPC method implementations.
-pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifier>
+pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier>
 where
     Mempool: Service<
         mempool::Request,
@@ -114,7 +114,7 @@ where
         Response = zebra_state::ReadResponse,
         Error = zebra_state::BoxError,
     >,
-    BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+    ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
@@ -138,10 +138,10 @@ where
     latest_chain_tip: Tip,
 
     /// The full block verifier, used for submitting blocks.
-    block_verifier: BlockVerifier,
+    chain_verifier: ChainVerifier,
 }
 
-impl<Mempool, State, Tip, BlockVerifier> GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifier>
+impl<Mempool, State, Tip, ChainVerifier> GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier>
 where
     Mempool: Service<
             mempool::Request,
@@ -157,7 +157,7 @@ where
         + Sync
         + 'static,
     Tip: ChainTip + Clone + Send + Sync + 'static,
-    BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+    ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
@@ -168,19 +168,19 @@ where
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
-        block_verifier: BlockVerifier,
+        chain_verifier: ChainVerifier,
     ) -> Self {
         Self {
             mempool,
             state,
             latest_chain_tip,
-            block_verifier,
+            chain_verifier,
         }
     }
 }
 
-impl<Mempool, State, Tip, BlockVerifier> GetBlockTemplateRpc
-    for GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifier>
+impl<Mempool, State, Tip, ChainVerifier> GetBlockTemplateRpc
+    for GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier>
 where
     Mempool: Service<
             mempool::Request,
@@ -198,12 +198,12 @@ where
         + 'static,
     <State as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Send + Sync + 'static,
-    BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+    ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <BlockVerifier as Service<Arc<Block>>>::Future: Send,
+    <ChainVerifier as Service<Arc<Block>>>::Future: Send,
 {
     fn get_block_count(&self) -> Result<u32> {
         self.latest_chain_tip
@@ -354,7 +354,7 @@ where
         hex_data: String,
         _options: Option<submit_block::JsonParameters>,
     ) -> BoxFuture<Result<submit_block::Response>> {
-        let mut block_verifier = self.block_verifier.clone();
+        let mut chain_verifier = self.chain_verifier.clone();
 
         async move {
             let block = hex::decode(hex_data).map_err(|error| Error {
@@ -369,7 +369,7 @@ where
                 data: None,
             })?;
 
-            let block_verifier_response = block_verifier
+            let chain_verifier_response = chain_verifier
                 .ready()
                 .await
                 .map_err(|error| Error {
@@ -380,7 +380,7 @@ where
                 .call(Arc::new(block))
                 .await;
 
-            let chain_error = match block_verifier_response {
+            let chain_error = match chain_verifier_response {
                 // Currently, this match arm returns `null` (Accepted) for blocks committed
                 // to any chain, but Accepted is only for blocks in the best chain.
                 //

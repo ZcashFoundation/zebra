@@ -45,13 +45,13 @@ pub struct RpcServer;
 
 impl RpcServer {
     /// Start a new RPC server endpoint
-    pub fn spawn<Version, Mempool, State, Tip, BlockVerifier>(
+    pub fn spawn<Version, Mempool, State, Tip, ChainVerifier>(
         config: Config,
         app_version: Version,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
-        block_verifier: BlockVerifier,
+        chain_verifier: ChainVerifier,
         latest_chain_tip: Tip,
         network: Network,
     ) -> (JoinHandle<()>, JoinHandle<()>)
@@ -73,12 +73,12 @@ impl RpcServer {
             + 'static,
         State::Future: Send,
         Tip: ChainTip + Clone + Send + Sync + 'static,
-        BlockVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+        ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
             + Clone
             + Send
             + Sync
             + 'static,
-        <BlockVerifier as Service<Arc<Block>>>::Future: Send,
+        <ChainVerifier as Service<Arc<Block>>>::Future: Send,
     {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
@@ -94,7 +94,7 @@ impl RpcServer {
                     mempool.clone(),
                     state.clone(),
                     latest_chain_tip.clone(),
-                    block_verifier,
+                    chain_verifier,
                 );
 
                 io.extend_with(get_block_template_rpc_impl.to_delegate());
