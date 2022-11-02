@@ -85,7 +85,7 @@ pub trait GetBlockTemplateRpc {
     fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>>;
 
     /// Submits block to the node to be validated and committed.
-    /// Returns the [`SentTransactionHash`] for the transaction, as a JSON string.
+    /// Returns the [`submit_block::Response`] for the transaction, as a JSON string.
     ///
     /// zcashd reference: [`submitblock`](https://zcash.github.io/rpc/submitblock.html)
     ///
