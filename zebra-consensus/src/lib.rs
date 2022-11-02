@@ -57,8 +57,3 @@ pub use primitives::{ed25519, groth16, halo2, redjubjub, redpallas};
 
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-pub use block::BlockVerifier;
-#[cfg(feature = "getblocktemplate-rpcs")]
-pub use transaction::Verifier as TransactionVerifier;
