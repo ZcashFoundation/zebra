@@ -117,7 +117,7 @@ After you have the version increments, the updated checkpoints and the updated c
 
 - [ ] Make sure the PR with the new checkpoint hashes is already merged, or make it part of the changelog PR
 - [ ] Push the version increments and the updated changelog into a branch
-      (for example: `v1.0.0-rc.0-release` - this needs to be different to the tag name)
+      (for example: `bump-v1.0.0-rc.0` - this needs to be different to the tag name)
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the
       comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-rc.0-release?expand=1&template=release-checklist.md)).
   - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.
