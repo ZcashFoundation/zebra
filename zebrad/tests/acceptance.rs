@@ -101,6 +101,11 @@
 //! $ cargo test lightwalletd_wallet_grpc_tests --features lightwalletd-grpc-tests -- --ignored --nocapture
 //! ```
 //!
+//! ## Getblocktemplate tests
+//!
+//! Example of how to run the submit_block test:
+//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/chain cargo test submit_block --features getblocktemplate-rpcs --release  -- --ignored --nocapture
+//!
 //! Please refer to the documentation of each test for more information.
 //!
 //! ## Disk Space for Testing
