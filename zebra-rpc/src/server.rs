@@ -50,7 +50,8 @@ impl RpcServer {
         app_version: Version,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
-        #[allow(unused_variables)] block_verifier: BlockVerifier,
+        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
+        block_verifier: BlockVerifier,
         latest_chain_tip: Tip,
         network: Network,
     ) -> (JoinHandle<()>, JoinHandle<()>)

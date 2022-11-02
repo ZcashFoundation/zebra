@@ -1,3 +1,6 @@
+//! Example of how to run the submit_block test:
+//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/chain cargo test submit_block --features getblocktemplate-rpcs --release  -- --ignored --nocapture
+
 use super::*;
 
 pub(crate) mod submit_block {

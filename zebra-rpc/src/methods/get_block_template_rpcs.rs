@@ -14,7 +14,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
     serialization::ZcashDeserializeInto,
 };
-use zebra_consensus::{BlockError, VerifyBlockError, VerifyChainError};
+use zebra_consensus::{BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError};
 use zebra_node_services::mempool;
 
 use crate::methods::{
@@ -396,10 +396,13 @@ where
                     .map(|boxed_chain_error| *boxed_chain_error),
             };
 
-            match chain_error {
-                Ok(VerifyChainError::Block(VerifyBlockError::Block {
-                    source: BlockError::AlreadyInChain(..),
-                })) => Ok(submit_block::Response::Duplicate),
+            Ok(match chain_error {
+                Ok(
+                    VerifyChainError::Checkpoint(VerifyCheckpointError::AlreadyVerified { .. })
+                    | VerifyChainError::Block(VerifyBlockError::Block {
+                        source: BlockError::AlreadyInChain(..),
+                    }),
+                ) => submit_block::ErrorResponse::Duplicate,
 
                 // Currently, these match arms return Reject for the older duplicate in a queue,
                 // but queued duplicates should be DuplicateInconclusive.
@@ -416,12 +419,13 @@ where
                 // Checking the download queues and ChainVerifier buffer for duplicates
                 // might require architectural changes to Zebra, so we should only do it
                 // if mining pools really need it.
-                Ok(_verify_chain_error) => Ok(submit_block::Response::Rejected),
+                Ok(_verify_chain_error) => submit_block::ErrorResponse::Rejected,
 
                 // This match arm is currently unreachable, but if future changes add extra error types,
                 // we want to turn them into `Rejected`.
-                Err(_unknown_error_type) => Ok(submit_block::Response::Rejected),
+                Err(_unknown_error_type) => submit_block::ErrorResponse::Rejected,
             }
+            .into())
         }
         .boxed()
     }

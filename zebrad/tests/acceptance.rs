@@ -2165,5 +2165,5 @@ async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
 #[ignore]
 #[cfg(feature = "getblocktemplate-rpcs")]
 async fn submit_block() -> Result<()> {
-    common::getblocktemplate::submit_block::run().await
+    common::get_block_template_rpcs::submit_block::run().await
 }

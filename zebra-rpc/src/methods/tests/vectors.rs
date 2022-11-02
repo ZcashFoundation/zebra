@@ -890,14 +890,11 @@ async fn rpc_submitblock_errors() {
     for (_height, block_bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter() {
         let hex_data = hex::encode(block_bytes);
 
-        let submit_block_response = get_block_template_rpc
-            .submit_block(hex_data, None)
-            .await
-            .expect("We should have a GetBlockHash struct");
+        let submit_block_response = get_block_template_rpc.submit_block(hex_data, None).await;
 
         assert_eq!(
             submit_block_response,
-            get_block_template_rpcs::types::submit_block::Response::Duplicate
+            Ok(get_block_template_rpcs::types::submit_block::ErrorResponse::Duplicate.into())
         );
     }
 

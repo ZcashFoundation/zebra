@@ -14,7 +14,10 @@ use zebra_state::LatestChainTip;
 
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
-use crate::methods::{GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
+use crate::methods::{
+    get_block_template_rpcs::types::submit_block, GetBlockHash, GetBlockTemplateRpc,
+    GetBlockTemplateRpcImpl,
+};
 
 pub async fn test_responses<State, ReadState>(
     network: Network,
@@ -97,6 +100,13 @@ pub async fn test_responses<State, ReadState>(
         .expect("unexpected error in getblocktemplate RPC call");
 
     snapshot_rpc_getblocktemplate(get_block_template, &settings);
+
+    // `submitblock`
+    let submit_block = get_block_template_rpc
+        .submit_block("".to_string(), None)
+        .await;
+
+    snapshot_rpc_submitblock(submit_block, &settings);
 }
 
 /// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
@@ -115,4 +125,12 @@ fn snapshot_rpc_getblocktemplate(
     settings: &insta::Settings,
 ) {
     settings.bind(|| insta::assert_json_snapshot!("get_block_template", block_template));
+}
+
+/// Snapshot `submitblock` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_submitblock(
+    submit_block_response: jsonrpc_core::Result<submit_block::Response>,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| insta::assert_json_snapshot!("submit_block", submit_block_response));
 }

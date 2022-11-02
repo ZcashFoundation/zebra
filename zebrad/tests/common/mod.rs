@@ -14,7 +14,7 @@ pub mod check;
 pub mod config;
 pub mod failure_messages;
 #[cfg(feature = "getblocktemplate-rpcs")]
-pub mod getblocktemplate;
+pub mod get_block_template_rpcs;
 pub mod launch;
 pub mod lightwalletd;
 pub mod sync;
