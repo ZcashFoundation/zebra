@@ -9,7 +9,7 @@ use crate::methods::get_block_template_rpcs::GetBlockTemplateRpc;
 /// See notes for [`GetBlockTemplateRpc::submit_block`] method
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct JsonParameters {
-    pub(crate) work_id: String,
+    pub(crate) work_id: Option<String>,
 }
 
 /// Response to a `submitblock` RPC request.
