@@ -49,7 +49,7 @@ pub struct GetBlockTemplate {
     /// TODO: select these transactions using ZIP-317 (#5473)
     pub transactions: Vec<TransactionTemplate<amount::NonNegative>>,
 
-    /// The coinbase transactions generated from `transactions` and `height`.
+    /// The coinbase transaction generated from `transactions` and `height`.
     #[serde(rename = "coinbasetxn")]
     pub coinbase_txn: TransactionTemplate<amount::NegativeOrZero>,
 
