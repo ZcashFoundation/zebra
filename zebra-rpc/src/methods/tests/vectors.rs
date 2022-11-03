@@ -887,16 +887,33 @@ async fn rpc_submitblock_errors() {
     );
 
     // Try to submit pre-populated blocks and assert that it responds with duplicate.
-    for (_height, block_bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter() {
-        let hex_data = hex::encode(block_bytes);
-
-        let submit_block_response = get_block_template_rpc.submit_block(hex_data, None).await;
+    for (_height, &block_bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter() {
+        let submit_block_response = get_block_template_rpc
+            .submit_block(
+                get_block_template_rpcs::types::submit_block::HexData(block_bytes.into()),
+                None,
+            )
+            .await;
 
         assert_eq!(
             submit_block_response,
             Ok(get_block_template_rpcs::types::submit_block::ErrorResponse::Duplicate.into())
         );
     }
+
+    let submit_block_response = get_block_template_rpc
+        .submit_block(
+            get_block_template_rpcs::types::submit_block::HexData(
+                zebra_test::vectors::BAD_BLOCK_MAINNET_202_BYTES.to_vec(),
+            ),
+            None,
+        )
+        .await;
+
+    assert_eq!(
+        submit_block_response,
+        Ok(get_block_template_rpcs::types::submit_block::ErrorResponse::Rejected.into())
+    );
 
     mempool.expect_no_requests().await;
 

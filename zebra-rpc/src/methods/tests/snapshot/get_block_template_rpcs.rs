@@ -21,7 +21,7 @@ use crate::methods::{
 
 pub async fn test_responses<State, ReadState>(
     network: Network,
-    mempool: MockService<
+    mut mempool: MockService<
         mempool::Request,
         mempool::Response,
         PanicAssertion,
@@ -103,9 +103,9 @@ pub async fn test_responses<State, ReadState>(
 
     // `submitblock`
     let submit_block = get_block_template_rpc
-        .submit_block("".to_string(), None)
+        .submit_block(submit_block::HexData("".into()), None)
         .await;
-    snapshot_rpc_submit_block_deserialization_error(submit_block, &settings);
+    snapshot_rpc_submit_block_invalid(submit_block, &settings);
 }
 
 /// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
@@ -127,11 +127,11 @@ fn snapshot_rpc_getblocktemplate(
 }
 
 /// Snapshot `submitblock` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_submit_block_deserialization_error(
+fn snapshot_rpc_submit_block_invalid(
     submit_block_response: jsonrpc_core::Result<submit_block::Response>,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
-        insta::assert_json_snapshot!("submit_block_deserialization_error", submit_block_response)
+        insta::assert_json_snapshot!("snapshot_rpc_submit_block_invalid", submit_block_response)
     });
 }

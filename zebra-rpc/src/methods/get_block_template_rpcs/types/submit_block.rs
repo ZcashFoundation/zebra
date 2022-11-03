@@ -7,15 +7,15 @@ use crate::methods::get_block_template_rpcs::GetBlockTemplateRpc;
 /// Optional argument `jsonparametersobject` for `submitblock` RPC request
 ///
 /// See notes for [`GetBlockTemplateRpc::submit_block`] method
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 pub struct JsonParameters {
-    pub(crate) work_id: Option<String>,
+    pub(crate) _work_id: Option<String>,
 }
 
 /// Response to a `submitblock` RPC request.
 ///
 /// Zebra never returns "duplicate-invalid", because it does not store invalid blocks.
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ErrorResponse {
     /// Block was already committed to the non-finalized or finalized state
@@ -31,7 +31,7 @@ pub enum ErrorResponse {
 /// Response to a `submitblock` RPC request.
 ///
 /// Zebra never returns "duplicate-invalid", because it does not store invalid blocks.
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(untagged)]
 pub enum Response {
     /// Block was not successfully submitted, return error
@@ -45,3 +45,5 @@ impl From<ErrorResponse> for Response {
         Self::ErrorResponse(error_response)
     }
 }
+#[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+pub struct HexData(#[serde(with = "hex")] pub Vec<u8>);

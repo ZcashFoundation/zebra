@@ -17,12 +17,15 @@ use zebra_chain::{
 use zebra_consensus::{BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError};
 use zebra_node_services::mempool;
 
-use crate::methods::{
-    get_block_template_rpcs::types::{
-        default_roots::DefaultRoots, get_block_template::GetBlockTemplate, submit_block,
-        transaction::TransactionTemplate,
+use crate::{
+    errors::make_server_error,
+    methods::{
+        get_block_template_rpcs::types::{
+            default_roots::DefaultRoots, get_block_template::GetBlockTemplate, submit_block,
+            transaction::TransactionTemplate,
+        },
+        GetBlockHash, MISSING_BLOCK_ERROR_CODE,
     },
-    GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
 
 pub mod config;
@@ -96,7 +99,7 @@ pub trait GetBlockTemplateRpc {
     #[rpc(name = "submitblock")]
     fn submit_block(
         &self,
-        hex_data: String,
+        hex_data: submit_block::HexData,
         _options: Option<submit_block::JsonParameters>,
     ) -> BoxFuture<Result<submit_block::Response>>;
 }
@@ -137,7 +140,7 @@ where
     /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: Tip,
 
-    /// The full block verifier, used for submitting blocks.
+    /// The chain verifier, used for submitting blocks.
     chain_verifier: ChainVerifier,
 }
 
@@ -351,32 +354,21 @@ where
 
     fn submit_block(
         &self,
-        hex_data: String,
+        submit_block::HexData(block_bytes): submit_block::HexData,
         _options: Option<submit_block::JsonParameters>,
     ) -> BoxFuture<Result<submit_block::Response>> {
         let mut chain_verifier = self.chain_verifier.clone();
 
         async move {
-            let block = hex::decode(hex_data).map_err(|error| Error {
-                code: ErrorCode::ServerError(0),
-                message: format!("failed to decode hexdata, error msg: {error}"),
-                data: None,
-            })?;
-
-            let block: Block = block.zcash_deserialize_into().map_err(|error| Error {
-                code: ErrorCode::ServerError(0),
-                message: format!("failed to deserialize into block, error msg: {error}"),
-                data: None,
-            })?;
+            let block: Block = match block_bytes.zcash_deserialize_into() {
+                Ok(block_bytes) => block_bytes,
+                Err(_) => return Ok(submit_block::ErrorResponse::Rejected.into()),
+            };
 
             let chain_verifier_response = chain_verifier
                 .ready()
                 .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?
+                .map_err(make_server_error)?
                 .call(Arc::new(block))
                 .await;
 
