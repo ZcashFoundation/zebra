@@ -14,7 +14,7 @@ on:
 
 jobs:
   build:
-    name: Build images
+    name: Build lightwalletd Docker
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
