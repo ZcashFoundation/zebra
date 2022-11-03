@@ -88,7 +88,6 @@ Click the triangle for details:
 | [ripemd](https://github.com/RustCrypto/hashes) | 0.1.3 | no audits, but seems widely used
 | [secp256k1](https://github.com/rust-bitcoin/rust-secp256k1/) | 0.21.3 | no audits, but seems widely used
 | [subtle](https://github.com/dalek-cryptography/subtle) | [2.4.1](https://github.com/dalek-cryptography/subtle/releases/tag/2.4.1) | no audits, but seems widely used
-| [fpe](https://github.com/str4d/fpe) | 0.5.1 |  I think it's not being used yet
 | [group](https://github.com/zkcrypto/group) | [0.12.0](https://github.com/zkcrypto/group/releases/tag/0.12.0) | no audits but it's just traits, seems widely used
 | [x25519-dalek](https://github.com/dalek-cryptography/x25519-dalek) | [1.2.0](https://github.com/dalek-cryptography/x25519-dalek/releases/tag/1.2.0) | no audits, but seems widely used
 | [jubjub](https://github.com/zkcrypto/jubjub) | [0.9.0](https://github.com/zkcrypto/jubjub/releases/tag/0.9.0) | not sure if were covered by ECC audits. Seem widely used.
