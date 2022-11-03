@@ -696,7 +696,7 @@ async fn rpc_getblockcount_empty_state() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        tower::ServiceBuilder::new().service(chain_verifier),
+        chain_verifier,
     );
 
     // Get the tip height using RPC method `get_block_count

@@ -89,7 +89,7 @@ impl RpcServer {
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             {
-                // Initialize the getblocktemplate rpc methods
+                // Initialize the getblocktemplate rpc method handler
                 let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
                     mempool.clone(),
                     state.clone(),
