@@ -229,9 +229,7 @@ where
                     response
                 );
 
-                legacy_sigop_count += response
-                    .legacy_sigop_count()
-                    .expect("block transaction responses must have a legacy sigop count");
+                legacy_sigop_count += response.legacy_sigop_count();
 
                 // Coinbase transactions consume the miner fee,
                 // so they don't add any value to the block's total miner fee.

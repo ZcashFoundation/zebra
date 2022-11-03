@@ -3,7 +3,7 @@
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
     block::merkle::AUTH_DIGEST_PLACEHOLDER,
-    transaction::{self, SerializedTransaction, UnminedTx},
+    transaction::{self, SerializedTransaction, VerifiedUnminedTx},
 };
 
 /// Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.
@@ -39,13 +39,9 @@ where
     /// Non-coinbase transactions must be `NonNegative`.
     /// The Coinbase transaction `fee` is the negative sum of the fees of the transactions in
     /// the block, so their fee must be `NegativeOrZero`.
-    //
-    // TODO: add a fee field to mempool transactions, based on the verifier response.
     pub(crate) fee: Amount<FeeConstraint>,
 
     /// The number of transparent signature operations in this transaction.
-    //
-    // TODO: add a sigops field to mempool transactions, based on the verifier response.
     pub(crate) sigops: u64,
 
     /// Is this transaction required in the block?
@@ -55,21 +51,23 @@ where
 }
 
 // Convert from a mempool transaction to a transaction template.
-impl From<&UnminedTx> for TransactionTemplate<NonNegative> {
-    fn from(tx: &UnminedTx) -> Self {
+impl From<&VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
+    fn from(tx: &VerifiedUnminedTx) -> Self {
         Self {
-            data: tx.transaction.as_ref().into(),
-            hash: tx.id.mined_id(),
-            auth_digest: tx.id.auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER),
+            data: tx.transaction.transaction.as_ref().into(),
+            hash: tx.transaction.id.mined_id(),
+            auth_digest: tx
+                .transaction
+                .id
+                .auth_digest()
+                .unwrap_or(AUTH_DIGEST_PLACEHOLDER),
 
             // Always empty, not supported by Zebra's mempool.
             depends: Vec::new(),
 
-            // TODO: add a fee field to mempool transactions, based on the verifier response.
-            fee: Amount::zero(),
+            fee: tx.miner_fee,
 
-            // TODO: add a sigops field to mempool transactions, based on the verifier response.
-            sigops: 0,
+            sigops: tx.legacy_sigop_count,
 
             // Zebra does not require any transactions except the coinbase transaction.
             required: false,
@@ -77,8 +75,8 @@ impl From<&UnminedTx> for TransactionTemplate<NonNegative> {
     }
 }
 
-impl From<UnminedTx> for TransactionTemplate<NonNegative> {
-    fn from(tx: UnminedTx) -> Self {
+impl From<VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
+    fn from(tx: VerifiedUnminedTx) -> Self {
         Self::from(&tx)
     }
 }
