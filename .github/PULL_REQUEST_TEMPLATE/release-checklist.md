@@ -118,9 +118,9 @@ After you have the version increments, the updated checkpoints and the updated c
 
 - [ ] Make sure the PR with the new checkpoint hashes is already merged, or make it part of the changelog PR
 - [ ] Push the version increments and the updated changelog into a branch
-      (name suggestion, example: `v1.0.0-rc.X`)
+      (for example: `bump-v1.0.0-rc.0` - this needs to be different to the tag name)
 - [ ] Create a release PR by adding `&template=release-checklist.md` to the
-      comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v100-alpha0-release?expand=1&template=release-checklist.md)).
+      comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/v1.0.0-rc.0-release?expand=1&template=release-checklist.md)).
   - [ ] Add the list of deleted changelog entries as a comment to make reviewing easier.
 - [ ] Turn on [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches).
 - [ ] Once the PR is ready to be merged, unfreeze it [here](https://www.mergefreeze.com/installations/3676/branches).
@@ -148,7 +148,7 @@ After you have the version increments, the updated checkpoints and the updated c
       (You can ignore the full sync and `lightwalletd` tests, because they take about a day to run.)
 - [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Publish Release"
 - [ ] Wait until [the Docker images have been published](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml)
-- [ ] Test the Docker image using `docker run zfnd/zebra:1.0.0-rc.<version>` <!-- TODO: replace with `docker run zfnd/zebra` when we release 1.0.0 -->
+- [ ] Test the Docker image using `docker run --tty --interactive zfnd/zebra:1.0.0-rc.<version>` <!-- TODO: replace with `zfnd/zebra` when we release 1.0.0 -->
 - [ ] Turn off [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches) for the whole repository
 
 
