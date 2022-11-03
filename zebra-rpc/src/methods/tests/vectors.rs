@@ -755,32 +755,21 @@ async fn rpc_getblocktemplate() {
         latest_chain_tip.clone(),
     );
 
-    let get_block_template = get_block_template_rpc
-        .get_block_template()
+    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
+
+    mempool
+        .expect_request(mempool::Request::Transactions)
         .await
-        .expect("We should have a GetBlockTemplate struct");
+        .respond(mempool::Response::Transactions(vec![]));
+
+    let get_block_template = get_block_template
+        .await
+        .expect("unexpected panic in getblocktemplate RPC task")
+        .expect("unexpected error in getblocktemplate RPC call");
 
     assert!(get_block_template.capabilities.is_empty());
     assert_eq!(get_block_template.version, 0);
-    assert!(get_block_template.previous_block_hash.is_empty());
-    assert!(get_block_template.block_commitments_hash.is_empty());
-    assert!(get_block_template.light_client_root_hash.is_empty());
-    assert!(get_block_template.final_sapling_root_hash.is_empty());
-    assert!(get_block_template.default_roots.merkle_root.is_empty());
-    assert!(get_block_template
-        .default_roots
-        .chain_history_root
-        .is_empty());
-    assert!(get_block_template.default_roots.auth_data_root.is_empty());
-    assert!(get_block_template
-        .default_roots
-        .block_commitments_hash
-        .is_empty());
     assert!(get_block_template.transactions.is_empty());
-    assert_eq!(
-        get_block_template.coinbase_txn,
-        get_block_template_rpcs::types::coinbase::Coinbase {}
-    );
     assert!(get_block_template.target.is_empty());
     assert_eq!(get_block_template.min_time, 0);
     assert!(get_block_template.mutable.is_empty());

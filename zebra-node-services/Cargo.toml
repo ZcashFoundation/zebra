@@ -6,5 +6,9 @@ version = "1.0.0-beta.17"
 edition = "2021"
 repository = "https://github.com/ZcashFoundation/zebra"
 
+[features]
+default = []
+getblocktemplate-rpcs = []
+
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }

@@ -9,6 +9,7 @@ use zebra_chain::transaction::{Hash, UnminedTx, UnminedTxId};
 use crate::BoxError;
 
 mod gossip;
+
 pub use self::gossip::Gossip;
 
 /// A mempool service request.
@@ -20,7 +21,6 @@ pub use self::gossip::Gossip;
 /// Requests can't modify the mempool directly,
 /// because all mempool transactions must be verified.
 #[derive(Debug, Eq, PartialEq)]
-#[allow(dead_code)]
 pub enum Request {
     /// Query all transaction IDs in the mempool.
     TransactionIds,
@@ -34,6 +34,12 @@ pub enum Request {
     /// directly; V5 transaction are matched just by the Hash, disregarding
     /// the [`AuthDigest`](zebra_chain::transaction::AuthDigest).
     TransactionsByMinedId(HashSet<Hash>),
+
+    /// Get all the transactions in the mempool.
+    ///
+    /// Equivalent to `TransactionsById(TransactionIds)`.
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    Transactions,
 
     /// Query matching cached rejected transaction IDs in the mempool,
     /// using a unique set of [`UnminedTxId`]s.
