@@ -45,5 +45,3 @@ impl From<ErrorResponse> for Response {
         Self::ErrorResponse(error_response)
     }
 }
-#[derive(Debug, PartialEq, Eq, serde::Deserialize)]
-pub struct HexData(#[serde(with = "hex")] pub Vec<u8>);

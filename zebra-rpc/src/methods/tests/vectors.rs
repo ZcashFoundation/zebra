@@ -890,7 +890,7 @@ async fn rpc_submitblock_errors() {
     for (_height, &block_bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter() {
         let submit_block_response = get_block_template_rpc
             .submit_block(
-                get_block_template_rpcs::types::submit_block::HexData(block_bytes.into()),
+                get_block_template_rpcs::types::hex_data::HexData(block_bytes.into()),
                 None,
             )
             .await;
@@ -903,7 +903,7 @@ async fn rpc_submitblock_errors() {
 
     let submit_block_response = get_block_template_rpc
         .submit_block(
-            get_block_template_rpcs::types::submit_block::HexData(
+            get_block_template_rpcs::types::hex_data::HexData(
                 zebra_test::vectors::BAD_BLOCK_MAINNET_202_BYTES.to_vec(),
             ),
             None,

@@ -1,3 +1,13 @@
+//! Test submitblock RPC method.
+//!
+//! This test requires a cached chain state that is partially synchronized close to the
+//! network chain tip height, and will finish the sync and update the cached chain state.
+//!
+//! After finishing the sync, it will get the first 20 blocks in the non-finalized state
+//! (past the MAX_BLOCK_REORG_HEIGHT) via getblock rpc calls, get the finalized tip height
+//! of the updated cached state, restart zebra without peers, and submit blocks above the
+//! finalized tip height.
+
 use std::path::PathBuf;
 
 use color_eyre::eyre::{eyre, Context, Result};

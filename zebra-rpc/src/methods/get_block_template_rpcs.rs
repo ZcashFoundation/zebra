@@ -17,15 +17,12 @@ use zebra_chain::{
 use zebra_consensus::{BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError};
 use zebra_node_services::mempool;
 
-use crate::{
-    errors::make_server_error,
-    methods::{
-        get_block_template_rpcs::types::{
-            default_roots::DefaultRoots, get_block_template::GetBlockTemplate, submit_block,
-            transaction::TransactionTemplate,
-        },
-        GetBlockHash, MISSING_BLOCK_ERROR_CODE,
+use crate::methods::{
+    get_block_template_rpcs::types::{
+        default_roots::DefaultRoots, get_block_template::GetBlockTemplate, hex_data::HexData,
+        submit_block, transaction::TransactionTemplate,
     },
+    GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
 
 pub mod config;
@@ -99,7 +96,7 @@ pub trait GetBlockTemplateRpc {
     #[rpc(name = "submitblock")]
     fn submit_block(
         &self,
-        hex_data: submit_block::HexData,
+        hex_data: HexData,
         _options: Option<submit_block::JsonParameters>,
     ) -> BoxFuture<Result<submit_block::Response>>;
 }
@@ -354,7 +351,7 @@ where
 
     fn submit_block(
         &self,
-        submit_block::HexData(block_bytes): submit_block::HexData,
+        HexData(block_bytes): HexData,
         _options: Option<submit_block::JsonParameters>,
     ) -> BoxFuture<Result<submit_block::Response>> {
         let mut chain_verifier = self.chain_verifier.clone();
@@ -368,7 +365,11 @@ where
             let chain_verifier_response = chain_verifier
                 .ready()
                 .await
-                .map_err(make_server_error)?
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?
                 .call(Arc::new(block))
                 .await;
 

@@ -15,8 +15,8 @@ use zebra_state::LatestChainTip;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::methods::{
-    get_block_template_rpcs::types::submit_block, GetBlockHash, GetBlockTemplateRpc,
-    GetBlockTemplateRpcImpl,
+    get_block_template_rpcs::types::{hex_data::HexData, submit_block},
+    GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
 };
 
 pub async fn test_responses<State, ReadState>(
@@ -103,8 +103,10 @@ pub async fn test_responses<State, ReadState>(
 
     // `submitblock`
     let submit_block = get_block_template_rpc
-        .submit_block(submit_block::HexData("".into()), None)
-        .await;
+        .submit_block(HexData("".into()), None)
+        .await
+        .expect("unexpected error in submitblock RPC call");
+
     snapshot_rpc_submit_block_invalid(submit_block, &settings);
 }
 
@@ -128,7 +130,7 @@ fn snapshot_rpc_getblocktemplate(
 
 /// Snapshot `submitblock` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_submit_block_invalid(
-    submit_block_response: jsonrpc_core::Result<submit_block::Response>,
+    submit_block_response: submit_block::Response,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
