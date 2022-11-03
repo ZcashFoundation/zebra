@@ -4,8 +4,6 @@ name: zcash-lightwalletd
 # run a fake CI job to satisfy the branch protection rules.
 on:
   pull_request:
-    branches:
-      - main
     paths-ignore:
       - 'zebra-rpc/**'
       - 'zebrad/tests/acceptance.rs'

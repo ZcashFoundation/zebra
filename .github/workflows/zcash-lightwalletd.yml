@@ -31,8 +31,6 @@ on:
 
   # Update the lightwalletd image when each related PR changes
   pull_request:
-    branches:
-      - main
     paths:
       # rebuild lightwalletd whenever the related Zebra code changes
       # (this code isn't actually compiled in this docker image)
