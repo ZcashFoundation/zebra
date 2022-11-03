@@ -214,18 +214,18 @@ where
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
             // TODO: put this in a separate get_mempool_transactions() function
-            let request = mempool::Request::Transactions;
+            let request = mempool::Request::FullTransactions;
             let response = mempool.oneshot(request).await.map_err(|error| Error {
                 code: ErrorCode::ServerError(0),
                 message: error.to_string(),
                 data: None,
             })?;
 
-            let transactions = if let mempool::Response::Transactions(transactions) = response {
+            let transactions = if let mempool::Response::FullTransactions(transactions) = response {
                 // TODO: select transactions according to ZIP-317 (#5473)
                 transactions
             } else {
-                unreachable!("unmatched response to a mempool::Transactions request");
+                unreachable!("unmatched response to a mempool::FullTransactions request");
             };
 
             let merkle_root;

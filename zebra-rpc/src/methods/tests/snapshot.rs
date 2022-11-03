@@ -128,7 +128,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // - as we have the mempool mocked we need to expect a request and wait for a response,
     // which will be an empty mempool in this case.
     let mempool_req = mempool
-        .expect_request_that(|_request| true)
+        .expect_request_that(|request| matches!(request, mempool::Request::TransactionIds))
         .map(|responder| {
             responder.respond(mempool::Response::TransactionIds(
                 std::collections::HashSet::new(),
@@ -152,9 +152,11 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // `getrawtransaction`
     //
     // - similar to `getrawmempool` described above, a mempool request will be made to get the requested
-    // transaction from the mempoo, response will be empty as we have this transaction in state
+    // transaction from the mempool, response will be empty as we have this transaction in state
     let mempool_req = mempool
-        .expect_request_that(|_request| true)
+        .expect_request_that(|request| {
+            matches!(request, mempool::Request::TransactionsByMinedId(_))
+        })
         .map(|responder| {
             responder.respond(mempool::Response::Transactions(vec![]));
         });

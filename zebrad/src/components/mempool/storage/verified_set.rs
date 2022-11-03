@@ -54,9 +54,20 @@ impl Drop for VerifiedSet {
 }
 
 impl VerifiedSet {
-    /// Returns an iterator over the transactions in the set.
+    /// Returns an iterator over the [`UnminedTx`] in the set.
+    //
+    // TODO: make the transactions() method return VerifiedUnminedTx,
+    //       and remove the full_transactions() method
     pub fn transactions(&self) -> impl Iterator<Item = &UnminedTx> + '_ {
         self.transactions.iter().map(|tx| &tx.transaction)
+    }
+
+    /// Returns an iterator over the [`VerifiedUnminedTx`] in the set.
+    ///
+    /// Each [`VerifiedUnminedTx`] contains an [`UnminedTx`],
+    /// and adds extra fields from the transaction verifier result.
+    pub fn full_transactions(&self) -> impl Iterator<Item = &VerifiedUnminedTx> + '_ {
+        self.transactions.iter()
     }
 
     /// Returns the number of verified transactions in the set.
