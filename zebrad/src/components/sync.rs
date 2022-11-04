@@ -990,6 +990,7 @@ where
     /// Handles a response for a requested block.
     ///
     /// See [`Self::handle_response`] for more details.
+    #[allow(unknown_lints)]
     #[allow(clippy::result_large_err)]
     fn handle_block_response(
         &mut self,
@@ -1008,6 +1009,7 @@ where
     /// Handles a response to block hash submission, passing through any extra hashes.
     ///
     /// See [`Self::handle_response`] for more details.
+    #[allow(unknown_lints)]
     #[allow(clippy::result_large_err)]
     fn handle_hash_response(
         response: Result<IndexSet<block::Hash>, BlockDownloadVerifyError>,
@@ -1024,6 +1026,7 @@ where
     /// so that the synchronization can continue normally.
     ///
     /// Returns `Err` if an unexpected error occurred, to force the synchronizer to restart.
+    #[allow(unknown_lints)]
     #[allow(clippy::result_large_err)]
     fn handle_response<T>(
         response: Result<T, BlockDownloadVerifyError>,
