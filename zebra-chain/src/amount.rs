@@ -7,7 +7,6 @@
 
 use std::{
     cmp::Ordering,
-    convert::{TryFrom, TryInto},
     hash::{Hash, Hasher},
     marker::PhantomData,
     ops::RangeInclusive,
@@ -28,7 +27,8 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// A runtime validated type for representing amounts of zatoshis
 #[derive(Clone, Copy, Serialize, Deserialize)]
 #[serde(try_from = "i64")]
-#[serde(bound = "C: Constraint")]
+#[serde(into = "i64")]
+#[serde(bound = "C: Constraint + Clone")]
 pub struct Amount<C = NegativeAllowed>(
     /// The inner amount value.
     i64,
@@ -495,6 +495,26 @@ pub struct NonNegative;
 impl Constraint for NonNegative {
     fn valid_range() -> RangeInclusive<i64> {
         0..=MAX_MONEY
+    }
+}
+
+/// Marker type for `Amount` that requires negative or zero values.
+///
+/// Used for coinbase transactions in `getblocktemplate` RPCs.
+///
+/// ```
+/// # use zebra_chain::amount::{Constraint, MAX_MONEY, NegativeOrZero};
+/// assert_eq!(
+///     NegativeOrZero::valid_range(),
+///     -MAX_MONEY..=0,
+/// );
+/// ```
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct NegativeOrZero;
+
+impl Constraint for NegativeOrZero {
+    fn valid_range() -> RangeInclusive<i64> {
+        -MAX_MONEY..=0
     }
 }
 

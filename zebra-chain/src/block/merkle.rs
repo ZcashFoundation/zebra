@@ -1,14 +1,16 @@
 //! The Bitcoin-inherited Merkle tree of transactions.
-#![allow(clippy::unit_arg)]
 
-use std::iter;
-use std::{fmt, io::Write};
+use std::{fmt, io::Write, iter};
+
+use hex::{FromHex, ToHex};
+
+use crate::{
+    serialization::sha256d,
+    transaction::{self, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
+};
 
 #[cfg(any(any(test, feature = "proptest-impl"), feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-
-use crate::serialization::sha256d;
-use crate::transaction::{self, Transaction};
 
 /// The root of the Bitcoin-inherited transaction Merkle tree, binding the
 /// block header to the transactions in the block.
@@ -77,6 +79,72 @@ impl fmt::Debug for Root {
     }
 }
 
+impl From<[u8; 32]> for Root {
+    fn from(hash: [u8; 32]) -> Self {
+        Root(hash)
+    }
+}
+
+impl From<Root> for [u8; 32] {
+    fn from(hash: Root) -> Self {
+        hash.0
+    }
+}
+
+impl Root {
+    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        let mut reversed_bytes = self.0;
+        reversed_bytes.reverse();
+        reversed_bytes
+    }
+
+    /// Convert bytes in big-endian byte-order into a [`merkle::Root`](crate::block::merkle::Root).
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> Root {
+        let mut internal_byte_order = *bytes_in_display_order;
+        internal_byte_order.reverse();
+
+        Root(internal_byte_order)
+    }
+}
+
+impl ToHex for &Root {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
+    }
+}
+
+impl ToHex for Root {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
+    }
+}
+
+impl FromHex for Root {
+    type Error = <[u8; 32] as FromHex>::Error;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let mut hash = <[u8; 32]>::from_hex(hex)?;
+        hash.reverse();
+
+        Ok(hash.into())
+    }
+}
+
 fn hash(h1: &[u8; 32], h2: &[u8; 32]) -> [u8; 32] {
     let mut w = sha256d::Writer::default();
     w.write_all(h1).unwrap();
@@ -115,7 +183,44 @@ where
     }
 }
 
+impl std::iter::FromIterator<UnminedTx> for Root {
+    fn from_iter<I>(transactions: I) -> Self
+    where
+        I: IntoIterator<Item = UnminedTx>,
+    {
+        transactions
+            .into_iter()
+            .map(|tx| tx.id.mined_id())
+            .collect()
+    }
+}
+
+impl std::iter::FromIterator<UnminedTxId> for Root {
+    fn from_iter<I>(tx_ids: I) -> Self
+    where
+        I: IntoIterator<Item = UnminedTxId>,
+    {
+        tx_ids.into_iter().map(|tx_id| tx_id.mined_id()).collect()
+    }
+}
+
+impl std::iter::FromIterator<VerifiedUnminedTx> for Root {
+    fn from_iter<I>(transactions: I) -> Self
+    where
+        I: IntoIterator<Item = VerifiedUnminedTx>,
+    {
+        transactions
+            .into_iter()
+            .map(|tx| tx.transaction.id.mined_id())
+            .collect()
+    }
+}
+
 impl std::iter::FromIterator<transaction::Hash> for Root {
+    /// # Panics
+    ///
+    /// When there are no transactions in the iterator.
+    /// This is impossible, because every block must have a coinbase transaction.
     fn from_iter<I>(hashes: I) -> Self
     where
         I: IntoIterator<Item = transaction::Hash>,
@@ -166,6 +271,71 @@ impl From<AuthDataRoot> for [u8; 32] {
     }
 }
 
+impl AuthDataRoot {
+    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        let mut reversed_bytes = self.0;
+        reversed_bytes.reverse();
+        reversed_bytes
+    }
+
+    /// Convert bytes in big-endian byte-order into a [`merkle::AuthDataRoot`](crate::block::merkle::AuthDataRoot).
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> AuthDataRoot {
+        let mut internal_byte_order = *bytes_in_display_order;
+        internal_byte_order.reverse();
+
+        AuthDataRoot(internal_byte_order)
+    }
+}
+
+impl ToHex for &AuthDataRoot {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
+    }
+}
+
+impl ToHex for AuthDataRoot {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
+    }
+}
+
+impl FromHex for AuthDataRoot {
+    type Error = <[u8; 32] as FromHex>::Error;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let mut hash = <[u8; 32]>::from_hex(hex)?;
+        hash.reverse();
+
+        Ok(hash.into())
+    }
+}
+
+/// The placeholder used for the [`AuthDigest`](transaction::AuthDigest) of pre-v5 transactions.
+///
+/// # Consensus
+///
+/// > For transaction versions before v5, a placeholder value consisting
+/// > of 32 bytes of 0xFF is used in place of the authorizing data commitment.
+/// > This is only used in the tree committed to by hashAuthDataRoot.
+///
+/// <https://zips.z.cash/zip-0244#authorizing-data-commitment>
+pub const AUTH_DIGEST_PLACEHOLDER: transaction::AuthDigest = transaction::AuthDigest([0xFF; 32]);
+
 impl<T> std::iter::FromIterator<T> for AuthDataRoot
 where
     T: std::convert::AsRef<Transaction>,
@@ -174,17 +344,50 @@ where
     where
         I: IntoIterator<Item = T>,
     {
-        // > For transaction versions before v5, a placeholder value consisting
-        // > of 32 bytes of 0xFF is used in place of the authorizing data commitment.
-        // > This is only used in the tree committed to by hashAuthDataRoot.
-        // https://zips.z.cash/zip-0244#authorizing-data-commitment
+        transactions
+            .into_iter()
+            .map(|tx| tx.as_ref().auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER))
+            .collect()
+    }
+}
+
+impl std::iter::FromIterator<UnminedTx> for AuthDataRoot {
+    fn from_iter<I>(transactions: I) -> Self
+    where
+        I: IntoIterator<Item = UnminedTx>,
+    {
+        transactions
+            .into_iter()
+            .map(|tx| tx.id.auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER))
+            .collect()
+    }
+}
+
+impl std::iter::FromIterator<VerifiedUnminedTx> for AuthDataRoot {
+    fn from_iter<I>(transactions: I) -> Self
+    where
+        I: IntoIterator<Item = VerifiedUnminedTx>,
+    {
         transactions
             .into_iter()
             .map(|tx| {
-                tx.as_ref()
+                tx.transaction
+                    .id
                     .auth_digest()
-                    .unwrap_or(transaction::AuthDigest([0xFF; 32]))
+                    .unwrap_or(AUTH_DIGEST_PLACEHOLDER)
             })
+            .collect()
+    }
+}
+
+impl std::iter::FromIterator<UnminedTxId> for AuthDataRoot {
+    fn from_iter<I>(tx_ids: I) -> Self
+    where
+        I: IntoIterator<Item = UnminedTxId>,
+    {
+        tx_ids
+            .into_iter()
+            .map(|tx_id| tx_id.auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER))
             .collect()
     }
 }

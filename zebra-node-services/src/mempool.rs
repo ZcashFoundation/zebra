@@ -4,11 +4,15 @@
 
 use std::collections::HashSet;
 
-use zebra_chain::transaction::{Hash, UnminedTx, UnminedTxId};
+use zebra_chain::transaction::{self, UnminedTx, UnminedTxId};
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+use zebra_chain::transaction::VerifiedUnminedTx;
 
 use crate::BoxError;
 
 mod gossip;
+
 pub use self::gossip::Gossip;
 
 /// A mempool service request.
@@ -20,20 +24,29 @@ pub use self::gossip::Gossip;
 /// Requests can't modify the mempool directly,
 /// because all mempool transactions must be verified.
 #[derive(Debug, Eq, PartialEq)]
-#[allow(dead_code)]
 pub enum Request {
-    /// Query all transaction IDs in the mempool.
+    /// Query all [`UnminedTxId`]s in the mempool.
     TransactionIds,
 
-    /// Query matching  transactions in the mempool,
+    /// Query matching [`UnminedTx`] in the mempool,
     /// using a unique set of [`UnminedTxId`]s.
     TransactionsById(HashSet<UnminedTxId>),
 
-    /// Query matching  transactions in the mempool,
-    /// using a unique set of [`struct@Hash`]s. Pre-V5 transactions are matched
+    /// Query matching [`UnminedTx`] in the mempool,
+    /// using a unique set of [`transaction::Hash`]es. Pre-V5 transactions are matched
     /// directly; V5 transaction are matched just by the Hash, disregarding
     /// the [`AuthDigest`](zebra_chain::transaction::AuthDigest).
-    TransactionsByMinedId(HashSet<Hash>),
+    TransactionsByMinedId(HashSet<transaction::Hash>),
+
+    /// Get all the [`VerifiedUnminedTx`] in the mempool.
+    ///
+    /// Equivalent to `TransactionsById(TransactionIds)`,
+    /// but each transaction also includes the `miner_fee` and `legacy_sigop_count` fields.
+    //
+    // TODO: make the Transactions response return VerifiedUnminedTx,
+    //       and remove the FullTransactions variant
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    FullTransactions,
 
     /// Query matching cached rejected transaction IDs in the mempool,
     /// using a unique set of [`UnminedTxId`]s.
@@ -74,10 +87,10 @@ pub enum Request {
 /// confirm that the mempool has been checked for newly verified transactions.
 #[derive(Debug)]
 pub enum Response {
-    /// Returns all transaction IDs from the mempool.
+    /// Returns all [`UnminedTxId`]s from the mempool.
     TransactionIds(HashSet<UnminedTxId>),
 
-    /// Returns matching transactions from the mempool.
+    /// Returns matching [`UnminedTx`] from the mempool.
     ///
     /// Since the [`Request::TransactionsById`] request is unique,
     /// the response transactions are also unique. The same applies to
@@ -85,7 +98,14 @@ pub enum Response {
     /// different transactions with different mined IDs.
     Transactions(Vec<UnminedTx>),
 
-    /// Returns matching cached rejected transaction IDs from the mempool,
+    /// Returns all [`VerifiedUnminedTx`] in the mempool.
+    //
+    // TODO: make the Transactions response return VerifiedUnminedTx,
+    //       and remove the FullTransactions variant
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    FullTransactions(Vec<VerifiedUnminedTx>),
+
+    /// Returns matching cached rejected [`UnminedTxId`]s from the mempool,
     RejectedTransactionIds(HashSet<UnminedTxId>),
 
     /// Returns a list of queue results.

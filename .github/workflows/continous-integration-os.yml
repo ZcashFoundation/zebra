@@ -53,7 +53,7 @@ env:
 
 jobs:
   test:
-    name: Test ${{ matrix.rust }} on ${{ matrix.os }}
+    name: Test ${{ matrix.rust }} on ${{ matrix.os }}${{ matrix.features }}
     # The large timeout is to accommodate:
     # - Windows builds (75 minutes, typically 30-50 minutes), and
     # - parameter downloads (an extra 90 minutes, but only when the cache expires)
@@ -65,6 +65,7 @@ jobs:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
         os: [ubuntu-latest, macos-latest]
         rust: [stable, beta]
+        features: ["", " --features getblocktemplate-rpcs"]
         exclude:
         # We're excluding macOS for the following reasons:
         # - the concurrent macOS runner limit is much lower than the Linux limit
@@ -72,6 +73,8 @@ jobs:
         # - macOS is a second-tier Zebra support platform
           - os: macos-latest
             rust: beta
+          - os: macos-latest
+            features: " --features getblocktemplate-rpcs"
 
     steps:
       - uses: actions/checkout@v3.1.0
@@ -139,9 +142,11 @@ jobs:
       # Modified from:
       # https://github.com/zcash/librustzcash/blob/c48bb4def2e122289843ddb3cb2984c325c03ca0/.github/workflows/ci.yml#L20-L33
       #
-      # TODO: split get-params-path and download-params examples into their own crate,
-      #       to speed up compilation
-      #       compile examples in release mode, to speed up downloads
+      # TODO:
+      # - split Fetch/Cache Zcash parameters into their own job,
+      #   and use `concurrency:` to limit it to one job per OS
+      # - split get-params-path and download-params examples into their own crate,
+      #   to speed up compilation
       - name: Fetch path to Zcash parameters
         working-directory: ./zebra-consensus
         shell: bash
@@ -160,28 +165,24 @@ jobs:
       # Run unit and basic acceptance tests, only showing command output if the test fails.
       #
       # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
-      - name: Run basic tests
+      - name: Run tests${{ matrix.features }}
         uses: actions-rs/cargo@v1.0.3
         with:
           command: test
-          args: --verbose --workspace
-
-      - name: Run basic tests with getblocktemplate-rpcs feature
-        uses: actions-rs/cargo@v1.0.3
-        with:
-          command: test
-          args: --features getblocktemplate-rpcs --verbose --workspace
+          args: ${{ matrix.features }} --verbose --workspace
 
       # Explicitly run any tests that are usually #[ignored]
 
-      - name: Run zebrad large sync tests
+      - name: Run zebrad large sync tests${{ matrix.features }}
         # Skip the entire step on Ubuntu and Windows, because the test would be skipped anyway due to ZEBRA_SKIP_NETWORK_TESTS
+        # Currently, this also skips large sync with `getblocktemplate-rpcs`,
+        # but that is already covered by the Docker tests.
         if: matrix.os == 'macos-latest'
         uses: actions-rs/cargo@v1.0.3
         with:
           command: test
           # Note: this only runs the zebrad acceptance tests, because re-running all the test binaries is slow on Windows
-          args: --verbose --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
+          args: ${{ matrix.features }} --verbose --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
 
   # Install Zebra with lockfile dependencies, with no caching and default features
   install-from-lockfile-no-cache:
