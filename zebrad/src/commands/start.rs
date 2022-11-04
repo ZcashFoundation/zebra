@@ -181,6 +181,7 @@ impl StartCmd {
             app_version(),
             mempool.clone(),
             read_only_state_service,
+            chain_verifier.clone(),
             latest_chain_tip.clone(),
             config.network.network,
         );

@@ -93,6 +93,7 @@ where
     V: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     V::Future: Send + 'static,
 {
+    /// Creates a new BlockVerifier
     pub fn new(network: Network, state_service: S, transaction_verifier: V) -> Self {
         Self {
             network,

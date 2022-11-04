@@ -47,6 +47,7 @@ pub mod chain;
 pub mod error;
 
 pub use block::VerifyBlockError;
+pub use chain::VerifyChainError;
 pub use checkpoint::{
     CheckpointList, VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP,
 };

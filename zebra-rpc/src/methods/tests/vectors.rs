@@ -632,14 +632,28 @@ async fn rpc_getblockcount() {
     // Get a mempool handle
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service, the tip will be in `NUMBER_OF_BLOCKS`.
-    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    let (
+        chain_verifier,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::chain::init(
+        zebra_consensus::Config::default(),
+        Mainnet,
+        state.clone(),
+        true,
+    )
+    .await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
+        chain_verifier,
     );
 
     // Get the tip height using RPC method `get_block_count`
@@ -661,14 +675,28 @@ async fn rpc_getblockcount_empty_state() {
     // Get a mempool handle
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create an empty state
-    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::init_test_services(Mainnet);
+
+    let (
+        chain_verifier,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::chain::init(
+        zebra_consensus::Config::default(),
+        Mainnet,
+        state.clone(),
+        true,
+    )
+    .await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
+        chain_verifier,
     );
 
     // Get the tip height using RPC method `get_block_count
@@ -696,14 +724,28 @@ async fn rpc_getblockhash() {
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
-    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    let (
+        chain_verifier,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::chain::init(
+        zebra_consensus::Config::default(),
+        Mainnet,
+        state.clone(),
+        true,
+    )
+    .await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
+        tower::ServiceBuilder::new().service(chain_verifier),
     );
 
     // Query the hashes using positive indexes
@@ -745,14 +787,28 @@ async fn rpc_getblocktemplate() {
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
-    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    let (
+        chain_verifier,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::chain::init(
+        zebra_consensus::Config::default(),
+        Mainnet,
+        state.clone(),
+        true,
+    )
+    .await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
+        tower::ServiceBuilder::new().service(chain_verifier),
     );
 
     let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
@@ -781,4 +837,85 @@ async fn rpc_getblocktemplate() {
     assert_eq!(get_block_template.height, 0);
 
     mempool.expect_no_requests().await;
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_submitblock_errors() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create a populated state service
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks, Mainnet).await;
+
+    // Init RPCs
+    let _rpc = RpcImpl::new(
+        "RPC test",
+        Mainnet,
+        false,
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        latest_chain_tip.clone(),
+    );
+
+    let (
+        chain_verifier,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::chain::init(
+        zebra_consensus::Config::default(),
+        Mainnet,
+        state.clone(),
+        true,
+    )
+    .await;
+
+    // Init RPC
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Buffer::new(mempool.clone(), 1),
+        read_state,
+        latest_chain_tip.clone(),
+        tower::ServiceBuilder::new().service(chain_verifier),
+    );
+
+    // Try to submit pre-populated blocks and assert that it responds with duplicate.
+    for (_height, &block_bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter() {
+        let submit_block_response = get_block_template_rpc
+            .submit_block(
+                get_block_template_rpcs::types::hex_data::HexData(block_bytes.into()),
+                None,
+            )
+            .await;
+
+        assert_eq!(
+            submit_block_response,
+            Ok(get_block_template_rpcs::types::submit_block::ErrorResponse::Duplicate.into())
+        );
+    }
+
+    let submit_block_response = get_block_template_rpc
+        .submit_block(
+            get_block_template_rpcs::types::hex_data::HexData(
+                zebra_test::vectors::BAD_BLOCK_MAINNET_202_BYTES.to_vec(),
+            ),
+            None,
+        )
+        .await;
+
+    assert_eq!(
+        submit_block_response,
+        Ok(get_block_template_rpcs::types::submit_block::ErrorResponse::Rejected.into())
+    );
+
+    mempool.expect_no_requests().await;
+
+    // See zebrad::tests::acceptance::submit_block for success case.
 }
