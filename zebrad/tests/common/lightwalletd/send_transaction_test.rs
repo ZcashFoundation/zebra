@@ -1,12 +1,15 @@
 //! Test sending transactions using a lightwalletd instance connected to a zebrad instance.
 //!
-//! This test requires a cached chain state that is partially synchronized, i.e., it should be a
-//! few blocks below the network chain tip height. We open this state during the test, but we don't
-//! add any blocks to it.
+//! This test requires a cached chain state that is partially synchronized close to the
+//! network chain tip height. It will finish the sync and update the cached chain state.
 //!
-//! The transactions to use to send are obtained from the blocks synchronized by a temporary zebrad
-//! instance that are higher than the chain tip of the cached state. This instance uses a copy of
-//! the state.
+//! After finishing the sync, it will get the first 20 blocks in the non-finalized state
+//! (past the MAX_BLOCK_REORG_HEIGHT) via getblock rpc calls, shuts down the zebrad instance
+//! so that the retrieved blocks aren't finalized into the cached state, and get the finalized
+//! tip height of the updated cached state.
+//!
+//! The transactions to use to send are obtained from those blocks that are above the finalized
+//! tip height of the updated cached state.
 //!
 //! The zebrad instance connected to lightwalletd uses the cached state and does not connect to any
 //! external peers, which prevents it from downloading the blocks from where the test transactions
