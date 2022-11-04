@@ -52,12 +52,10 @@ zebra-state = { path = "../zebra-state" }
 insta = { version = "1.21.0", features = ["redactions", "json"] }
 proptest = "0.10.1"
 proptest-derive = "0.3.0"
-serde_json = "1.0.87"
 thiserror = "1.0.37"
 
 tokio = { version = "1.21.2", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
-zebra-consensus = { path = "../zebra-consensus" }
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test/" }
+zebra-test = { path = "../zebra-test" }
