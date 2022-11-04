@@ -16,6 +16,7 @@ use zebra_chain::{
         Block,
     },
     chain_tip::ChainTip,
+    parameters::Network,
     serialization::ZcashDeserializeInto,
     transaction::{UnminedTx, VerifiedUnminedTx},
 };
@@ -131,6 +132,9 @@ where
     // Configuration
     //
     // TODO: add mining config for getblocktemplate RPC miner address
+    //
+    /// The configured network for this RPC service.
+    _network: Network,
 
     // Services
     //
@@ -171,12 +175,14 @@ where
 {
     /// Create a new instance of the handler for getblocktemplate RPCs.
     pub fn new(
+        network: Network,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
         chain_verifier: ChainVerifier,
     ) -> Self {
         Self {
+            _network: network,
             mempool,
             state,
             latest_chain_tip,
@@ -259,7 +265,9 @@ where
 
             let miner_fee = miner_fee(&mempool_txs);
 
-            /*Transaction::new_v5_coinbase(network, tip_height, miner_fee);*/
+            /*
+            TODO: create a method Transaction::new_v5_coinbase(network, tip_height, miner_fee);
+            */
             let coinbase_tx = mempool_txs[0].transaction.clone();
 
             let (merkle_root, auth_data_root) =

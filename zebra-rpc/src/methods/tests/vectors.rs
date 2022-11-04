@@ -650,6 +650,7 @@ async fn rpc_getblockcount() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -693,6 +694,7 @@ async fn rpc_getblockcount_empty_state() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -742,6 +744,7 @@ async fn rpc_getblockhash() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -805,6 +808,7 @@ async fn rpc_getblocktemplate() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -880,6 +884,7 @@ async fn rpc_submitblock_errors() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
