@@ -16,7 +16,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 use crate::methods::{GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
 pub async fn test_responses<State>(
-    mempool: MockService<
+    mut mempool: MockService<
         mempool::Request,
         mempool::Response,
         PanicAssertion,
@@ -58,10 +58,18 @@ pub async fn test_responses<State>(
     snapshot_rpc_getblockhash(get_block_hash, &settings);
 
     // `getblocktemplate`
-    let get_block_template = get_block_template_rpc
-        .get_block_template()
+    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
+
+    mempool
+        .expect_request(mempool::Request::FullTransactions)
         .await
-        .expect("We should have a GetBlockTemplate struct");
+        .respond(mempool::Response::FullTransactions(vec![]));
+
+    let get_block_template = get_block_template
+        .await
+        .expect("unexpected panic in getblocktemplate RPC task")
+        .expect("unexpected error in getblocktemplate RPC call");
+
     snapshot_rpc_getblocktemplate(get_block_template, &settings);
 }
 

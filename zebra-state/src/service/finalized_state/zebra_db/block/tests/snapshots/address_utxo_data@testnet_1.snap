@@ -5,7 +5,7 @@ expression: stored_address_utxos
 [
   ("t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi", [
     Output(
-      value: Amount(12500),
+      value: 12500,
       lock_script: Script("a914ef775f1f997f122a062fff1a2d7443abd1f9c64287"),
     ),
   ]),

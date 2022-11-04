@@ -5,6 +5,7 @@ use std::{borrow::Borrow, convert::TryInto, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use halo2::pasta::{group::ff::PrimeField, pallas};
+use hex::FromHex;
 
 use crate::{
     amount,
@@ -1016,5 +1017,15 @@ impl AsRef<[u8]> for SerializedTransaction {
 impl From<Vec<u8>> for SerializedTransaction {
     fn from(bytes: Vec<u8>) -> Self {
         Self { bytes }
+    }
+}
+
+impl FromHex for SerializedTransaction {
+    type Error = <Vec<u8> as FromHex>::Error;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let bytes = <Vec<u8>>::from_hex(hex)?;
+
+        Ok(bytes.into())
     }
 }
