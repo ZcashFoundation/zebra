@@ -433,7 +433,7 @@ pub fn miner_fee(mempool_txs: &[VerifiedUnminedTx]) -> Amount<NonNegative> {
 
     miner_fee.expect(
         "invalid selected transactions: \
-         must not spend more than MAX_MONEY",
+         fees in a valid block can not be more than MAX_MONEY",
     )
 }
 
