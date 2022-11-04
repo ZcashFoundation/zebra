@@ -9,12 +9,14 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
     amount::Amount,
-    block::Height,
     block::{self, Block},
+    block::{Height, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
     chain_tip::ChainTip,
     serialization::ZcashDeserializeInto,
 };
-use zebra_consensus::{BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError};
+use zebra_consensus::{
+    BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError, MAX_BLOCK_SIGOPS,
+};
 use zebra_node_services::mempool;
 
 use crate::methods::{
@@ -26,6 +28,7 @@ use crate::methods::{
 };
 
 pub mod config;
+pub mod constants;
 pub(crate) mod types;
 
 /// getblocktemplate RPC method signatures.
@@ -292,7 +295,8 @@ where
             Ok(GetBlockTemplate {
                 capabilities: vec![],
 
-                version: 0,
+                // The block version
+                version: ZCASH_BLOCK_VERSION,
 
                 previous_block_hash: GetBlockHash([0; 32].into()),
                 block_commitments_hash: [0; 32].into(),
@@ -332,12 +336,17 @@ where
 
                 min_time: 0,
 
-                mutable: vec![],
+                // Hardcoded list of block fields the miner is allowed to change.
+                mutable: constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD.to_vec(),
 
-                nonce_range: empty_string.clone(),
+                // A range of valid nonces that goes from `u32::MIN` to `u32::MAX`.
+                nonce_range: constants::GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
 
-                sigop_limit: 0,
-                size_limit: 0,
+                // Max legacy signature operations in the block.
+                sigop_limit: MAX_BLOCK_SIGOPS,
+
+                // Max block size in bytes
+                size_limit: MAX_BLOCK_BYTES,
 
                 cur_time: 0,
 

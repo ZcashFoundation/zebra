@@ -777,6 +777,12 @@ async fn rpc_getblockhash() {
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblocktemplate() {
+    use crate::methods::get_block_template_rpcs::constants::{
+        GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+    };
+    use zebra_chain::block::{MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION};
+    use zebra_consensus::MAX_BLOCK_SIGOPS;
+
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -824,14 +830,20 @@ async fn rpc_getblocktemplate() {
         .expect("unexpected error in getblocktemplate RPC call");
 
     assert!(get_block_template.capabilities.is_empty());
-    assert_eq!(get_block_template.version, 0);
+    assert_eq!(get_block_template.version, ZCASH_BLOCK_VERSION);
     assert!(get_block_template.transactions.is_empty());
     assert!(get_block_template.target.is_empty());
     assert_eq!(get_block_template.min_time, 0);
-    assert!(get_block_template.mutable.is_empty());
-    assert!(get_block_template.nonce_range.is_empty());
-    assert_eq!(get_block_template.sigop_limit, 0);
-    assert_eq!(get_block_template.size_limit, 0);
+    assert_eq!(
+        get_block_template.mutable,
+        GET_BLOCK_TEMPLATE_MUTABLE_FIELD.to_vec()
+    );
+    assert_eq!(
+        get_block_template.nonce_range,
+        GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD
+    );
+    assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
+    assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
     assert_eq!(get_block_template.cur_time, 0);
     assert!(get_block_template.bits.is_empty());
     assert_eq!(get_block_template.height, 0);
