@@ -360,7 +360,7 @@ where
         + Sync
         + 'static,
     State::Future: Send,
-    Tip: ChainTip + Send + Sync + 'static,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     fn get_info(&self) -> Result<GetInfo> {
         let response = GetInfo {
@@ -869,18 +869,16 @@ where
         request: GetAddressTxIdsRequest,
     ) -> BoxFuture<Result<Vec<String>>> {
         let mut state = self.state.clone();
+        let latest_chain_tip = self.latest_chain_tip.clone();
+
         let start = Height(request.start);
         let end = Height(request.end);
 
-        let chain_height = self.latest_chain_tip.best_tip_height().ok_or(Error {
-            code: ErrorCode::ServerError(0),
-            message: "No blocks in state".to_string(),
-            data: None,
-        });
-
         async move {
+            let chain_height = best_chain_tip_height(&latest_chain_tip)?;
+
             // height range checks
-            check_height_range(start, end, chain_height?)?;
+            check_height_range(start, end, chain_height)?;
 
             let valid_addresses = AddressStrings {
                 addresses: request.addresses,
@@ -992,6 +990,19 @@ where
         }
         .boxed()
     }
+}
+
+/// Returns the best chain tip height of `latest_chain_tip`,
+/// or an RPC error if there are no blocks in the state.
+pub fn best_chain_tip_height<Tip>(latest_chain_tip: &Tip) -> Result<Height>
+where
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+{
+    latest_chain_tip.best_tip_height().ok_or(Error {
+        code: ErrorCode::ServerError(0),
+        message: "No blocks in state".to_string(),
+        data: None,
+    })
 }
 
 /// Response to a `getinfo` RPC request.
