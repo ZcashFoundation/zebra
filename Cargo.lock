@@ -5241,7 +5241,6 @@ dependencies = [
  "displaydoc",
  "ed25519-zebra",
  "equihash",
- "fpe",
  "futures",
  "group",
  "halo2_proofs",

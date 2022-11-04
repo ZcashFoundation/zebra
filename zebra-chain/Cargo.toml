@@ -25,7 +25,6 @@ bls12_381 = "0.7.0"
 bs58 = { version = "0.4.0", features = ["check"] }
 byteorder = "1.4.3"
 equihash = "0.2.0"
-fpe = "0.5.1"
 group = "0.12.0"
 incrementalmerkletree = "0.3.0"
 jubjub = "0.9.0"
