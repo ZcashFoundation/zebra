@@ -1,6 +1,6 @@
 //! RPC methods related to mining only available with `getblocktemplate-rpcs` rust feature.
 
-use std::sync::Arc;
+use std::{iter, sync::Arc};
 
 use futures::{FutureExt, TryFutureExt};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
@@ -8,12 +8,16 @@ use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
-    amount::Amount,
+    amount::{self, Amount, NonNegative},
     block::Height,
-    block::{self, Block},
+    block::{
+        self,
+        merkle::{self, AuthDataRoot},
+        Block,
+    },
     chain_tip::ChainTip,
     serialization::ZcashDeserializeInto,
-    transaction::VerifiedUnminedTx,
+    transaction::{UnminedTx, VerifiedUnminedTx},
 };
 use zebra_consensus::{BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError};
 use zebra_node_services::mempool;
@@ -251,25 +255,18 @@ where
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
             let _tip_height = best_chain_tip_height(&latest_chain_tip)?;
-            let mempool_transactions = select_mempool_transactions(mempool).await?;
+            let mempool_txs = select_mempool_transactions(mempool).await?;
 
-            //let coinbase_transaction = Transaction::new_v5_coinbase(network, tip_height, miner_fee);
+            let miner_fee = miner_fee(&mempool_txs);
 
-            let merkle_root;
-            let auth_data_root;
+            /*Transaction::new_v5_coinbase(network, tip_height, miner_fee);*/
+            let coinbase_tx = mempool_txs[0].transaction.clone();
 
-            // TODO:
-            // - add the coinbase transaction to these lists, and delete the is_empty() check
-            // - split this out into its own function
-            if !mempool_transactions.is_empty() {
-                merkle_root = mempool_transactions.iter().cloned().collect();
-                auth_data_root = mempool_transactions.iter().cloned().collect();
-            } else {
-                merkle_root = [0; 32].into();
-                auth_data_root = [0; 32].into();
-            }
+            let (merkle_root, auth_data_root) =
+                calculate_transaction_roots(&coinbase_tx, &mempool_txs);
 
-            let mempool_transactions = mempool_transactions.iter().map(Into::into).collect();
+            // Convert into TransactionTemplates
+            let mempool_txs = mempool_txs.iter().map(Into::into).collect();
 
             let empty_string = String::from("");
             Ok(GetBlockTemplate {
@@ -288,28 +285,9 @@ where
                     block_commitments_hash: [0; 32].into(),
                 },
 
-                transactions: mempool_transactions,
+                transactions: mempool_txs,
 
-                // TODO: move to a separate function in the transactions module
-                coinbase_txn: TransactionTemplate {
-                    // TODO: generate coinbase transaction data
-                    data: vec![].into(),
-
-                    // TODO: calculate from transaction data
-                    hash: [0; 32].into(),
-                    auth_digest: [0; 32].into(),
-
-                    // Always empty for coinbase transactions.
-                    depends: Vec::new(),
-
-                    // TODO: negative sum of transactions.*.fee
-                    fee: Amount::zero(),
-
-                    // TODO: sigops used by the generated transaction data
-                    sigops: 0,
-
-                    required: true,
-                },
+                coinbase_txn: TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee),
 
                 target: empty_string.clone(),
 
@@ -407,7 +385,7 @@ where
     }
 }
 
-// Utility methods
+// get_block_template support methods
 
 /// Returns selected transactions in the `mempool`, or an error if the mempool has failed.
 ///
@@ -439,6 +417,37 @@ where
         unreachable!("unmatched response to a mempool::FullTransactions request");
     }
 }
+
+/// Returns the total miner fee for `mempool_txs`.
+pub fn miner_fee(mempool_txs: &[VerifiedUnminedTx]) -> Amount<NonNegative> {
+    let miner_fee: amount::Result<Amount<NonNegative>> =
+        mempool_txs.iter().map(|tx| tx.miner_fee).sum();
+
+    miner_fee.expect(
+        "invalid selected transactions: \
+         must not spend more than MAX_MONEY",
+    )
+}
+
+/// Returns the transaction effecting and authorizing roots
+/// for `coinbase_tx` and `mempool_txs`.
+//
+// TODO: should this be spawned into a cryptographic operations pool?
+//       (it would only matter if there were a lot of small transactions in a block)
+pub fn calculate_transaction_roots(
+    coinbase_tx: &UnminedTx,
+    mempool_txs: &[VerifiedUnminedTx],
+) -> (merkle::Root, AuthDataRoot) {
+    let block_transactions =
+        || iter::once(coinbase_tx).chain(mempool_txs.iter().map(|tx| &tx.transaction));
+
+    let merkle_root = block_transactions().cloned().collect();
+    let auth_data_root = block_transactions().cloned().collect();
+
+    (merkle_root, auth_data_root)
+}
+
+// get_block_hash support methods
 
 /// Given a potentially negative index, find the corresponding `Height`.
 ///

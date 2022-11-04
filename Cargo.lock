@@ -5398,6 +5398,7 @@ dependencies = [
  "zebra-consensus",
  "zebra-network",
  "zebra-node-services",
+ "zebra-script",
  "zebra-state",
  "zebra-test",
 ]
