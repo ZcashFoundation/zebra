@@ -253,10 +253,14 @@ where
             let _tip_height = best_chain_tip_height(&latest_chain_tip)?;
             let mempool_transactions = select_mempool_transactions(mempool).await?;
 
+            //let coinbase_transaction = Transaction::new_v5_coinbase(network, tip_height, miner_fee);
+
             let merkle_root;
             let auth_data_root;
 
-            // TODO: add the coinbase transaction to these lists, and delete the is_empty() check
+            // TODO:
+            // - add the coinbase transaction to these lists, and delete the is_empty() check
+            // - split this out into its own function
             if !mempool_transactions.is_empty() {
                 merkle_root = mempool_transactions.iter().cloned().collect();
                 auth_data_root = mempool_transactions.iter().cloned().collect();
