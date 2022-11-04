@@ -187,6 +187,8 @@ jobs:
   #
   # - We run all the tests behind the `getblocktemplate-rpcs` feature as a separated step.
   # - We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.
+  #
+  # TODO: turn this test and the getblocktemplate test into a matrix, so the jobs use exactly the same diagnostics settings
   test-all:
     name: Test all
     runs-on: ubuntu-latest
@@ -198,13 +200,21 @@ jobs:
         with:
           short-length: 7
 
-      - name: Run all zebrad tests
+      # Run unit and basic acceptance tests, only showing command output if the test fails.
+      #
+      # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
+      - name: Run basic zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace -- --nocapture --include-ignored
+          docker run --name zebrad-tests --tty ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace
+
+      # Run ignored by default acceptance tests, only showing command output if the test fails.
+      - name: Run ignored zebrad tests
+        run: |
+          docker run --name zebrad-tests-ignored --tty ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace -- --ignored --nocapture
 
   # zebrad tests without cached state with `getblocktemplate-rpcs` feature
-
+  #
   # Same as above but we run all the tests behind the `getblocktemplate-rpcs` feature.
   test-all-getblocktemplate-rpcs:
     name: Test all with getblocktemplate-rpcs feature
@@ -217,10 +227,15 @@ jobs:
         with:
           short-length: 7
 
-      - name: Run all zebrad tests
+      - name: Run basic zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace -- --nocapture --include-ignored
+          docker run --name zebrad-tests --tty ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace
+
+      - name: Run ignored zebrad tests
+        run: |
+          docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run --name zebrad-tests-ignored --tty ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace -- --ignored --nocapture
 
   # Run state tests with fake activation heights.
   #
