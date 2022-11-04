@@ -61,9 +61,9 @@ pub async fn test_responses<State>(
     let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
 
     mempool
-        .expect_request(mempool::Request::Transactions)
+        .expect_request(mempool::Request::FullTransactions)
         .await
-        .respond(mempool::Response::Transactions(vec![]));
+        .respond(mempool::Response::FullTransactions(vec![]));
 
     let get_block_template = get_block_template
         .await
