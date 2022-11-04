@@ -1,17 +1,26 @@
 //! RPC methods related to mining only available with `getblocktemplate-rpcs` rust feature.
 
+use std::sync::Arc;
+
 use futures::{FutureExt, TryFutureExt};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
-use zebra_chain::{amount::Amount, block::Height, chain_tip::ChainTip};
+use zebra_chain::{
+    amount::Amount,
+    block::Height,
+    block::{self, Block},
+    chain_tip::ChainTip,
+    serialization::ZcashDeserializeInto,
+};
+use zebra_consensus::{BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError};
 use zebra_node_services::mempool;
 
 use crate::methods::{
     get_block_template_rpcs::types::{
-        default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
-        transaction::TransactionTemplate,
+        default_roots::DefaultRoots, get_block_template::GetBlockTemplate, hex_data::HexData,
+        submit_block, transaction::TransactionTemplate,
     },
     GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
@@ -74,10 +83,26 @@ pub trait GetBlockTemplateRpc {
     /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[rpc(name = "getblocktemplate")]
     fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>>;
+
+    /// Submits block to the node to be validated and committed.
+    /// Returns the [`submit_block::Response`] for the operation, as a JSON string.
+    ///
+    /// zcashd reference: [`submitblock`](https://zcash.github.io/rpc/submitblock.html)
+    ///
+    /// # Parameters
+    /// - `hexdata` (string, required)
+    /// - `jsonparametersobject` (string, optional) - currently ignored
+    ///  - holds a single field, workid, that must be included in submissions if provided by the server.
+    #[rpc(name = "submitblock")]
+    fn submit_block(
+        &self,
+        hex_data: HexData,
+        _options: Option<submit_block::JsonParameters>,
+    ) -> BoxFuture<Result<submit_block::Response>>;
 }
 
 /// RPC method implementations.
-pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip>
+pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier>
 where
     Mempool: Service<
         mempool::Request,
@@ -89,7 +114,11 @@ where
         Response = zebra_state::ReadResponse,
         Error = zebra_state::BoxError,
     >,
-    Tip: ChainTip,
+    ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     // TODO: Add the other fields from the [`Rpc`] struct as-needed
 
@@ -107,9 +136,12 @@ where
 
     /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: Tip,
+
+    /// The chain verifier, used for submitting blocks.
+    chain_verifier: ChainVerifier,
 }
 
-impl<Mempool, State, Tip> GetBlockTemplateRpcImpl<Mempool, State, Tip>
+impl<Mempool, State, Tip, ChainVerifier> GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier>
 where
     Mempool: Service<
             mempool::Request,
@@ -125,22 +157,30 @@ where
         + Sync
         + 'static,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     /// Create a new instance of the handler for getblocktemplate RPCs.
     pub fn new(
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
+        chain_verifier: ChainVerifier,
     ) -> Self {
         Self {
             mempool,
             state,
             latest_chain_tip,
+            chain_verifier,
         }
     }
 }
 
-impl<Mempool, State, Tip> GetBlockTemplateRpc for GetBlockTemplateRpcImpl<Mempool, State, Tip>
+impl<Mempool, State, Tip, ChainVerifier> GetBlockTemplateRpc
+    for GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier>
 where
     Mempool: Service<
             mempool::Request,
@@ -158,6 +198,12 @@ where
         + 'static,
     <State as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Send + Sync + 'static,
+    ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <ChainVerifier as Service<Arc<Block>>>::Future: Send,
 {
     fn get_block_count(&self) -> Result<u32> {
         self.latest_chain_tip
@@ -299,6 +345,80 @@ where
 
                 height: 0,
             })
+        }
+        .boxed()
+    }
+
+    fn submit_block(
+        &self,
+        HexData(block_bytes): HexData,
+        _options: Option<submit_block::JsonParameters>,
+    ) -> BoxFuture<Result<submit_block::Response>> {
+        let mut chain_verifier = self.chain_verifier.clone();
+
+        async move {
+            let block: Block = match block_bytes.zcash_deserialize_into() {
+                Ok(block_bytes) => block_bytes,
+                Err(_) => return Ok(submit_block::ErrorResponse::Rejected.into()),
+            };
+
+            let chain_verifier_response = chain_verifier
+                .ready()
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?
+                .call(Arc::new(block))
+                .await;
+
+            let chain_error = match chain_verifier_response {
+                // Currently, this match arm returns `null` (Accepted) for blocks committed
+                // to any chain, but Accepted is only for blocks in the best chain.
+                //
+                // TODO (#5487):
+                // - Inconclusive: check if the block is on a side-chain
+                // The difference is important to miners, because they want to mine on the best chain.
+                Ok(_block_hash) => return Ok(submit_block::Response::Accepted),
+
+                // Turns BoxError into Result<VerifyChainError, BoxError>,
+                // by downcasting from Any to VerifyChainError.
+                Err(box_error) => box_error
+                    .downcast::<VerifyChainError>()
+                    .map(|boxed_chain_error| *boxed_chain_error),
+            };
+
+            Ok(match chain_error {
+                Ok(
+                    VerifyChainError::Checkpoint(VerifyCheckpointError::AlreadyVerified { .. })
+                    | VerifyChainError::Block(VerifyBlockError::Block {
+                        source: BlockError::AlreadyInChain(..),
+                    }),
+                ) => submit_block::ErrorResponse::Duplicate,
+
+                // Currently, these match arms return Reject for the older duplicate in a queue,
+                // but queued duplicates should be DuplicateInconclusive.
+                //
+                // Optional TODO (#5487):
+                // - DuplicateInconclusive: turn these non-finalized state duplicate block errors
+                //   into BlockError enum variants, and handle them as DuplicateInconclusive:
+                //   - "block already sent to be committed to the state"
+                //   - "replaced by newer request"
+                // - keep the older request in the queue,
+                //   and return a duplicate error for the newer request immediately.
+                //   This improves the speed of the RPC response.
+                //
+                // Checking the download queues and ChainVerifier buffer for duplicates
+                // might require architectural changes to Zebra, so we should only do it
+                // if mining pools really need it.
+                Ok(_verify_chain_error) => submit_block::ErrorResponse::Rejected,
+
+                // This match arm is currently unreachable, but if future changes add extra error types,
+                // we want to turn them into `Rejected`.
+                Err(_unknown_error_type) => submit_block::ErrorResponse::Rejected,
+            }
+            .into())
         }
         .boxed()
     }

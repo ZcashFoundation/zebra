@@ -7,17 +7,22 @@
 //! See the full list of
 //! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
-use std::panic;
+use std::{panic, sync::Arc};
 
 use jsonrpc_core::{Compatibility, MetaIoHandler};
 use jsonrpc_http_server::ServerBuilder;
 use tokio::task::JoinHandle;
 use tower::{buffer::Buffer, Service};
+
 use tracing::*;
 use tracing_futures::Instrument;
 
-use zebra_chain::{chain_tip::ChainTip, parameters::Network};
-use zebra_node_services::{mempool, BoxError};
+use zebra_chain::{
+    block::{self, Block},
+    chain_tip::ChainTip,
+    parameters::Network,
+};
+use zebra_node_services::mempool;
 
 use crate::{
     config::Config,
@@ -40,18 +45,23 @@ pub struct RpcServer;
 
 impl RpcServer {
     /// Start a new RPC server endpoint
-    pub fn spawn<Version, Mempool, State, Tip>(
+    pub fn spawn<Version, Mempool, State, Tip, ChainVerifier>(
         config: Config,
         app_version: Version,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
+        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
+        chain_verifier: ChainVerifier,
         latest_chain_tip: Tip,
         network: Network,
     ) -> (JoinHandle<()>, JoinHandle<()>)
     where
         Version: ToString + Clone,
-        Mempool: tower::Service<mempool::Request, Response = mempool::Response, Error = BoxError>
-            + 'static,
+        Mempool: tower::Service<
+                mempool::Request,
+                Response = mempool::Response,
+                Error = zebra_node_services::BoxError,
+            > + 'static,
         Mempool::Future: Send,
         State: Service<
                 zebra_state::ReadRequest,
@@ -63,6 +73,12 @@ impl RpcServer {
             + 'static,
         State::Future: Send,
         Tip: ChainTip + Clone + Send + Sync + 'static,
+        ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        <ChainVerifier as Service<Arc<Block>>>::Future: Send,
     {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
@@ -78,6 +94,7 @@ impl RpcServer {
                     mempool.clone(),
                     state.clone(),
                     latest_chain_tip.clone(),
+                    chain_verifier,
                 );
 
                 io.extend_with(get_block_template_rpc_impl.to_delegate());
