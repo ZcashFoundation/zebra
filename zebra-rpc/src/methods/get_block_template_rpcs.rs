@@ -20,6 +20,7 @@ use zebra_consensus::{
 use zebra_node_services::mempool;
 
 use crate::methods::{
+    best_chain_tip_height,
     get_block_template_rpcs::types::{
         default_roots::DefaultRoots, get_block_template::GetBlockTemplate, hex_data::HexData,
         submit_block, transaction::TransactionTemplate,
@@ -200,7 +201,7 @@ where
         + Sync
         + 'static,
     <State as Service<zebra_state::ReadRequest>>::Future: Send,
-    Tip: ChainTip + Send + Sync + 'static,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
     ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
@@ -209,27 +210,15 @@ where
     <ChainVerifier as Service<Arc<Block>>>::Future: Send,
 {
     fn get_block_count(&self) -> Result<u32> {
-        self.latest_chain_tip
-            .best_tip_height()
-            .map(|height| height.0)
-            .ok_or(Error {
-                code: ErrorCode::ServerError(0),
-                message: "No blocks in state".to_string(),
-                data: None,
-            })
+        best_chain_tip_height(&self.latest_chain_tip).map(|height| height.0)
     }
 
     fn get_block_hash(&self, index: i32) -> BoxFuture<Result<GetBlockHash>> {
         let mut state = self.state.clone();
-
-        let maybe_tip_height = self.latest_chain_tip.best_tip_height();
+        let latest_chain_tip = self.latest_chain_tip.clone();
 
         async move {
-            let tip_height = maybe_tip_height.ok_or(Error {
-                code: ErrorCode::ServerError(0),
-                message: "No blocks in state".to_string(),
-                data: None,
-            })?;
+            let tip_height = best_chain_tip_height(&latest_chain_tip)?;
 
             let height = get_height_from_int(index, tip_height)?;
 
@@ -259,9 +248,12 @@ where
 
     fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>> {
         let mempool = self.mempool.clone();
+        let latest_chain_tip = self.latest_chain_tip.clone();
 
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
+            let _tip_height = best_chain_tip_height(&latest_chain_tip)?;
+
             // TODO: put this in a separate get_mempool_transactions() function
             let request = mempool::Request::FullTransactions;
             let response = mempool.oneshot(request).await.map_err(|error| Error {
