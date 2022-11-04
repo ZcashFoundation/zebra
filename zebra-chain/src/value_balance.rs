@@ -142,7 +142,7 @@ where
 }
 
 impl ValueBalance<NegativeAllowed> {
-    /// Assumes that this value balance is a transaction value balance,
+    /// Assumes that this value balance is a non-coinbase transaction value balance,
     /// and returns the remaining value in the transaction value pool.
     ///
     /// # Consensus
