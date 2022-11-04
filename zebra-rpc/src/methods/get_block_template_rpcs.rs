@@ -13,6 +13,7 @@ use zebra_chain::{
     block::{self, Block},
     chain_tip::ChainTip,
     serialization::ZcashDeserializeInto,
+    transaction::VerifiedUnminedTx,
 };
 use zebra_consensus::{BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError};
 use zebra_node_services::mempool;
@@ -250,35 +251,21 @@ where
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
             let _tip_height = best_chain_tip_height(&latest_chain_tip)?;
-
-            // TODO: put this in a separate get_mempool_transactions() function
-            let request = mempool::Request::FullTransactions;
-            let response = mempool.oneshot(request).await.map_err(|error| Error {
-                code: ErrorCode::ServerError(0),
-                message: error.to_string(),
-                data: None,
-            })?;
-
-            let transactions = if let mempool::Response::FullTransactions(transactions) = response {
-                // TODO: select transactions according to ZIP-317 (#5473)
-                transactions
-            } else {
-                unreachable!("unmatched response to a mempool::FullTransactions request");
-            };
+            let mempool_transactions = select_mempool_transactions(mempool).await?;
 
             let merkle_root;
             let auth_data_root;
 
             // TODO: add the coinbase transaction to these lists, and delete the is_empty() check
-            if !transactions.is_empty() {
-                merkle_root = transactions.iter().cloned().collect();
-                auth_data_root = transactions.iter().cloned().collect();
+            if !mempool_transactions.is_empty() {
+                merkle_root = mempool_transactions.iter().cloned().collect();
+                auth_data_root = mempool_transactions.iter().cloned().collect();
             } else {
                 merkle_root = [0; 32].into();
                 auth_data_root = [0; 32].into();
             }
 
-            let transactions = transactions.iter().map(Into::into).collect();
+            let mempool_transactions = mempool_transactions.iter().map(Into::into).collect();
 
             let empty_string = String::from("");
             Ok(GetBlockTemplate {
@@ -297,7 +284,7 @@ where
                     block_commitments_hash: [0; 32].into(),
                 },
 
-                transactions,
+                transactions: mempool_transactions,
 
                 // TODO: move to a separate function in the transactions module
                 coinbase_txn: TransactionTemplate {
@@ -413,6 +400,39 @@ where
             .into())
         }
         .boxed()
+    }
+}
+
+// Utility methods
+
+/// Returns selected transactions in the `mempool`, or an error if the mempool has failed.
+///
+/// TODO: select transactions according to ZIP-317 (#5473)
+pub async fn select_mempool_transactions<Mempool>(
+    mempool: Mempool,
+) -> Result<Vec<VerifiedUnminedTx>>
+where
+    Mempool: Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
+    Mempool::Future: Send,
+{
+    let response = mempool
+        .oneshot(mempool::Request::FullTransactions)
+        .await
+        .map_err(|error| Error {
+            code: ErrorCode::ServerError(0),
+            message: error.to_string(),
+            data: None,
+        })?;
+
+    if let mempool::Response::FullTransactions(transactions) = response {
+        // TODO: select transactions according to ZIP-317 (#5473)
+        Ok(transactions)
+    } else {
+        unreachable!("unmatched response to a mempool::FullTransactions request");
     }
 }
 
