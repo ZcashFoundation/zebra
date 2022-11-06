@@ -780,6 +780,8 @@ async fn rpc_getblockhash() {
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblocktemplate() {
+    use std::panic;
+
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -824,7 +826,12 @@ async fn rpc_getblocktemplate() {
 
     let get_block_template = get_block_template
         .await
-        .expect("unexpected panic in getblocktemplate RPC task")
+        .unwrap_or_else(|error| match error.try_into_panic() {
+            Ok(panic_object) => panic::resume_unwind(panic_object),
+            Err(cancelled_error) => {
+                panic!("getblocktemplate task was unexpectedly cancelled: {cancelled_error:?}")
+            }
+        })
         .expect("unexpected error in getblocktemplate RPC call");
 
     assert!(get_block_template.capabilities.is_empty());
