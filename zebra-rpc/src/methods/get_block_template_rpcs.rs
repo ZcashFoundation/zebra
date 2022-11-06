@@ -266,9 +266,52 @@ where
             let miner_fee = miner_fee(&mempool_txs);
 
             /*
-            TODO: create a method Transaction::new_v5_coinbase(network, tip_height, miner_fee);
-            */
-            let coinbase_tx = mempool_txs[0].transaction.clone();
+            Fake a "coinbase" transaction by duplicating a mempool transaction,
+            or fake a response.
+
+            This is temporarily required for the tests to pass.
+
+            TODO: create a method Transaction::new_v5_coinbase(network, tip_height, miner_fee),
+                  and call it here.
+             */
+            let coinbase_tx = if mempool_txs.is_empty() {
+                let empty_string = String::from("");
+                return Ok(GetBlockTemplate {
+                    capabilities: vec![],
+                    version: 0,
+                    previous_block_hash: GetBlockHash([0; 32].into()),
+                    block_commitments_hash: [0; 32].into(),
+                    light_client_root_hash: [0; 32].into(),
+                    final_sapling_root_hash: [0; 32].into(),
+                    default_roots: DefaultRoots {
+                        merkle_root: [0; 32].into(),
+                        chain_history_root: [0; 32].into(),
+                        auth_data_root: [0; 32].into(),
+                        block_commitments_hash: [0; 32].into(),
+                    },
+                    transactions: Vec::new(),
+                    coinbase_txn: TransactionTemplate {
+                        data: Vec::new().into(),
+                        hash: [0; 32].into(),
+                        auth_digest: [0; 32].into(),
+                        depends: Vec::new(),
+                        fee: Amount::zero(),
+                        sigops: 0,
+                        required: true,
+                    },
+                    target: empty_string.clone(),
+                    min_time: 0,
+                    mutable: vec![],
+                    nonce_range: empty_string.clone(),
+                    sigop_limit: 0,
+                    size_limit: 0,
+                    cur_time: 0,
+                    bits: empty_string,
+                    height: 0,
+                });
+            } else {
+                mempool_txs[0].transaction.clone()
+            };
 
             let (merkle_root, auth_data_root) =
                 calculate_transaction_roots(&coinbase_tx, &mempool_txs);
