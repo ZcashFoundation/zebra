@@ -257,13 +257,11 @@ pub async fn run() -> Result<()> {
 
 /// Loads transactions from a block that's after the chain tip of the cached state.
 ///
-/// We copy the cached state to avoid modifying `zebrad_state_path`.
-/// This copy is used to launch a `zebrad` instance connected to the network,
-/// which finishes synchronizing the chain.
-/// Then we load transactions from this updated state.
+/// Then we load transactions from the non-finalized state of the fully synced cache directory
+/// with the getblock RPC, check the finalized tip height of the cached state.
 ///
-/// Returns a list of valid transactions that are not in any of the blocks present in the
-/// original `zebrad_state_path`.
+/// Returns a list of valid transactions that are not in any of the blocks finalized to disk
+/// in the original `zebrad_state_path`.
 #[tracing::instrument]
 async fn load_transactions_from_future_blocks(
     network: Network,
