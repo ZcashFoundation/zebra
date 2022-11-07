@@ -1041,7 +1041,6 @@ jobs:
   # If `inputs.is_long_test` is `false`, the Rust test harness mostly runs in this job.
   # Otherwise, it mostly runs in the "logs" jobs.
   test-result:
-    # TODO: update the job name here, and in the branch protection rules
     name: Run ${{ inputs.test_id }} test
     needs: [ logs-checkpoint ]
     # If the previous job fails, we also want to run and fail this job,
@@ -1095,6 +1094,7 @@ jobs:
           set -e;
           sudo docker logs \
           --tail all \
+          --follow \
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
