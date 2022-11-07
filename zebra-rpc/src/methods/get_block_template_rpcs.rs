@@ -329,7 +329,10 @@ where
                 min_time: 0,
 
                 // Hardcoded list of block fields the miner is allowed to change.
-                mutable: constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD.to_vec(),
+                mutable: constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
 
                 // A range of valid nonces that goes from `u32::MIN` to `u32::MAX`.
                 nonce_range: constants::GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
