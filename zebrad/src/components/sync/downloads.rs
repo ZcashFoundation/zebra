@@ -4,10 +4,7 @@ use std::{
     collections::HashMap,
     convert::{self, TryFrom},
     pin::Pin,
-    sync::{
-        atomic::{self, AtomicBool},
-        Arc,
-    },
+    sync::{Arc, TryLockError},
     task::{Context, Poll},
 };
 
@@ -18,7 +15,11 @@ use futures::{
 };
 use pin_project::pin_project;
 use thiserror::Error;
-use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
+use tokio::{
+    sync::{oneshot, watch},
+    task::JoinHandle,
+    time::timeout,
+};
 use tower::{hedge, Service, ServiceExt};
 use tracing_futures::Instrument;
 
@@ -45,8 +46,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// to hold a few extra tips responses worth of blocks,
 /// even if the syncer queue is full. Any unused capacity is shared between both queues.
 ///
-/// If this capacity is exceeded, the downloader will start failing download blocks with
-/// [`BlockDownloadVerifyError::AboveLookaheadHeightLimit`], and the syncer will reset.
+/// If this capacity is exceeded, the downloader will tell the syncer to pause new downloads.
 ///
 /// Since the syncer queue is limited to the `lookahead_limit`,
 /// the rest of the capacity is reserved for the other queues.
@@ -89,12 +89,6 @@ pub enum BlockDownloadVerifyError {
     DownloadFailed {
         #[source]
         error: BoxError,
-        hash: block::Hash,
-    },
-
-    #[error("downloaded block was too far ahead of the chain tip: {height:?} {hash:?}")]
-    AboveLookaheadHeightLimit {
-        height: block::Height,
         hash: block::Hash,
     },
 
@@ -179,6 +173,15 @@ where
     /// The largest block height for the checkpoint verifier, based on the current config.
     max_checkpoint_height: Height,
 
+    // Shared syncer state
+    //
+    /// Sender that is set to `true` when the downloader is past the lookahead limit.
+    /// This is based on the downloaded block height and the state tip height.
+    past_lookahead_limit_sender: Arc<std::sync::Mutex<watch::Sender<bool>>>,
+
+    /// Receiver for `past_lookahead_limit_sender`, which is used to avoid accessing the mutex.
+    past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
+
     // Internal downloads state
     //
     /// A list of pending block download and verify tasks.
@@ -190,11 +193,6 @@ where
     /// A list of channels that can be used to cancel pending block download and
     /// verify tasks.
     cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
-
-    // Logging
-    //
-    /// Have we already logged a lookahead error?
-    logged_lookahead_error: Arc<AtomicBool>,
 }
 
 impl<ZN, ZV, ZSTip> Stream for Downloads<ZN, ZV, ZSTip>
@@ -270,18 +268,25 @@ where
         network: ZN,
         verifier: ZV,
         latest_chain_tip: ZSTip,
+        past_lookahead_limit_sender: watch::Sender<bool>,
         lookahead_limit: usize,
         max_checkpoint_height: Height,
     ) -> Self {
+        let past_lookahead_limit_receiver =
+            zs::WatchReceiver::new(past_lookahead_limit_sender.subscribe());
+
         Self {
             network,
             verifier,
             latest_chain_tip,
             lookahead_limit,
             max_checkpoint_height,
+            past_lookahead_limit_sender: Arc::new(std::sync::Mutex::new(
+                past_lookahead_limit_sender,
+            )),
+            past_lookahead_limit_receiver,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
-            logged_lookahead_error: Arc::new(false.into()),
         }
     }
 
@@ -319,9 +324,12 @@ where
 
         let mut verifier = self.verifier.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
+
         let lookahead_limit = self.lookahead_limit;
         let max_checkpoint_height = self.max_checkpoint_height;
-        let logged_lookahead_error = self.logged_lookahead_error.clone();
+
+        let past_lookahead_limit_sender = self.past_lookahead_limit_sender.clone();
+        let past_lookahead_limit_receiver = self.past_lookahead_limit_receiver.clone();
 
         let task = tokio::spawn(
             async move {
@@ -360,18 +368,22 @@ where
                 let tip_height = latest_chain_tip.best_tip_height();
 
                 // TODO: don't use VERIFICATION_PIPELINE_SCALING_MULTIPLIER for full verification?
-                let max_lookahead_height = if let Some(tip_height) = tip_height {
+                let (max_lookahead_height, lookahead_reset_height) = if let Some(tip_height) = tip_height {
                     // Scale the height limit with the lookahead limit,
                     // so users with low capacity or under DoS can reduce them both.
                     let lookahead = i32::try_from(
                         lookahead_limit + lookahead_limit * VERIFICATION_PIPELINE_SCALING_MULTIPLIER,
                     )
-                    .expect("fits in i32");
-                    (tip_height + lookahead).expect("tip is much lower than Height::MAX")
+                        .expect("fits in i32");
+
+                    ((tip_height + lookahead).expect("tip is much lower than Height::MAX"),
+                     (tip_height + lookahead/2).expect("tip is much lower than Height::MAX"))
                 } else {
                     let genesis_lookahead =
                         u32::try_from(lookahead_limit - 1).expect("fits in u32");
-                    block::Height(genesis_lookahead)
+
+                    (block::Height(genesis_lookahead),
+                     block::Height(genesis_lookahead/2))
                 };
 
                 // Get the finalized tip height, assuming we're using the non-finalized state.
@@ -403,18 +415,23 @@ where
 
                 if block_height > max_lookahead_height {
                     // This log can be very verbose, usually hundreds of blocks are dropped.
-                    //
-                    // Sets the atomic to true if it is false, and returns Ok.
-                    // Ordering and spurious failures don't matter here, because it is just a log.
-                    if logged_lookahead_error.compare_exchange_weak(false, true, atomic::Ordering::Relaxed, atomic::Ordering::Relaxed).is_ok() {
+                    // So we only log at info level for the first above-height block.
+                    if !past_lookahead_limit_receiver.cloned_watch_data() {
                         info!(
                             ?hash,
                             ?block_height,
                             ?tip_height,
                             ?max_lookahead_height,
                             lookahead_limit = ?lookahead_limit,
-                            "synced block height too far ahead of the tip: dropped downloaded block",
+                            "synced block height too far ahead of the tip: \
+                             waiting for downloaded blocks to commit to the state",
                         );
+
+                        // Set the watched value to true, since we're over the limit.
+                        //
+                        // It is ok to block here, because we're going to pause new downloads anyway.
+                        // But if Zebra is shutting down, ignore the send error.
+                        let _ = past_lookahead_limit_sender.lock().expect("thread panicked while holding the past_lookahead_limit_sender mutex guard").send(true);
                     } else {
                         debug!(
                             ?hash,
@@ -422,23 +439,29 @@ where
                             ?tip_height,
                             ?max_lookahead_height,
                             lookahead_limit = ?lookahead_limit,
-                            "synced block height too far ahead of the tip: dropped downloaded block",
+                            "synced block height too far ahead of the tip: \
+                             waiting for downloaded blocks to commit to the state",
                         );
                     }
 
-                    metrics::counter!("sync.max.height.limit.dropped.block.count", 1);
+                    metrics::counter!("sync.max.height.limit.paused.count", 1);
+                } else if block_height <= lookahead_reset_height && past_lookahead_limit_receiver.cloned_watch_data() {
+                    // Try to reset the watched value to false, since we're well under the limit.
+                    match past_lookahead_limit_sender.try_lock() {
+                        Ok(watch_sender_guard) => {
+                            // If Zebra is shutting down, ignore the send error.
+                            let _ = watch_sender_guard.send(true);
+                            metrics::counter!("sync.max.height.limit.reset.count", 1);
+                        },
+                        Err(TryLockError::Poisoned(_)) => panic!("thread panicked while holding the past_lookahead_limit_sender mutex guard"),
+                        // We'll try allowing new downloads when we get the next block
+                        Err(TryLockError::WouldBlock) => {}
+                    }
 
-                    // This error should be very rare during normal operation.
-                    //
-                    // We need to reset the syncer on this error,
-                    // to allow the verifier and state to catch up,
-                    // or prevent it following a bad chain.
-                    //
-                    // If we don't reset the syncer on this error,
-                    // it will continue downloading blocks from a bad chain,
-                    // (or blocks far ahead of the current state tip).
-                    Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit { height: block_height, hash })?;
-                } else if block_height < min_accepted_height {
+                    metrics::counter!("sync.max.height.limit.reset.attempt.count", 1);
+                }
+
+                if block_height < min_accepted_height {
                     debug!(
                         ?hash,
                         ?block_height,
@@ -533,8 +556,13 @@ where
         assert!(self.cancel_handles.is_empty());
     }
 
-    /// Get the number of currently in-flight download tasks.
+    /// Get the number of currently in-flight download and verify tasks.
     pub fn in_flight(&mut self) -> usize {
         self.pending.len()
+    }
+
+    /// Returns true if there are no in-flight download and verify tasks.
+    pub fn is_empty(&mut self) -> bool {
+        self.pending.is_empty()
     }
 }

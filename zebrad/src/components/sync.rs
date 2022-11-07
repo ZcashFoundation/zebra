@@ -8,7 +8,7 @@ use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use tokio::time::sleep;
+use tokio::{sync::watch, time::sleep};
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
     Service, ServiceExt,
@@ -358,6 +358,10 @@ where
 
     /// The lengths of recent sync responses.
     recent_syncs: RecentSyncLengths,
+
+    /// Receiver that is `true` when the downloader is past the lookahead limit.
+    /// This is based on the downloaded block height and the state tip height.
+    past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -437,6 +441,7 @@ where
         }
 
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
+
         // The Hedge middleware is the outermost layer, hedging requests
         // between two retry-wrapped networks.  The innermost timeout
         // layer is relatively unimportant, because slow requests will
@@ -463,27 +468,33 @@ where
 
         let (sync_status, recent_syncs) = SyncStatus::new();
 
+        let (past_lookahead_limit_sender, past_lookahead_limit_receiver) = watch::channel(false);
+        let past_lookahead_limit_receiver = zs::WatchReceiver::new(past_lookahead_limit_receiver);
+
+        let downloads = Box::pin(Downloads::new(
+            block_network,
+            verifier,
+            latest_chain_tip.clone(),
+            past_lookahead_limit_sender,
+            max(
+                checkpoint_verify_concurrency_limit,
+                full_verify_concurrency_limit,
+            ),
+            max_checkpoint_height,
+        ));
+
         let new_syncer = Self {
             genesis_hash: genesis_hash(config.network.network),
             max_checkpoint_height,
             checkpoint_verify_concurrency_limit,
             full_verify_concurrency_limit,
             tip_network,
-            downloads: Box::pin(Downloads::new(
-                block_network,
-                verifier,
-                latest_chain_tip.clone(),
-                // TODO: change the download lookahead for full verification?
-                max(
-                    checkpoint_verify_concurrency_limit,
-                    full_verify_concurrency_limit,
-                ),
-                max_checkpoint_height,
-            )),
+            downloads,
             state,
             latest_chain_tip,
             prospective_tips: HashSet::new(),
             recent_syncs,
+            past_lookahead_limit_receiver,
         };
 
         (new_syncer, sync_status)
@@ -544,7 +555,11 @@ where
             }
             self.update_metrics();
 
-            while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) {
+            // Pause new downloads while the syncer or downloader are past their lookahead limits.
+            while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len())
+                || (!self.downloads.is_empty()
+                    && self.past_lookahead_limit_receiver.cloned_watch_data())
+            {
                 trace!(
                     tips.len = self.prospective_tips.len(),
                     in_flight = self.downloads.in_flight(),
@@ -956,7 +971,7 @@ where
     }
 
     /// The configured lookahead limit, based on the currently verified height,
-    /// and the number of hashes we haven't queued yet..
+    /// and the number of hashes we haven't queued yet.
     fn lookahead_limit(&self, new_hashes: usize) -> usize {
         let max_checkpoint_height: usize = self
             .max_checkpoint_height
