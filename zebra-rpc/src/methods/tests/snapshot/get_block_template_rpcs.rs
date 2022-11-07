@@ -15,7 +15,9 @@ use zebra_state::LatestChainTip;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::methods::{
-    get_block_template_rpcs::types::{hex_data::HexData, submit_block},
+    get_block_template_rpcs::types::{
+        get_block_template::GetBlockTemplate, hex_data::HexData, submit_block,
+    },
     GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
 };
 
@@ -122,10 +124,7 @@ fn snapshot_rpc_getblockhash(block_hash: GetBlockHash, settings: &insta::Setting
 }
 
 /// Snapshot `getblocktemplate` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getblocktemplate(
-    block_template: crate::methods::get_block_template_rpcs::types::get_block_template::GetBlockTemplate,
-    settings: &insta::Settings,
-) {
+fn snapshot_rpc_getblocktemplate(block_template: GetBlockTemplate, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_block_template", block_template));
 }
 

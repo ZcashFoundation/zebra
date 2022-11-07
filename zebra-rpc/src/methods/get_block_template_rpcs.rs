@@ -276,7 +276,7 @@ where
 
             TODO: create a method Transaction::new_v5_coinbase(network, tip_height, miner_fee),
                   and call it here.
-             */
+            */
             let coinbase_tx = if mempool_txs.is_empty() {
                 let empty_string = String::from("");
                 return Ok(GetBlockTemplate {
