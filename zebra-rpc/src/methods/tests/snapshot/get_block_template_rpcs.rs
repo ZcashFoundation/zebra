@@ -65,6 +65,7 @@ pub async fn test_responses<State, ReadState>(
     .await;
 
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
+        network,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,

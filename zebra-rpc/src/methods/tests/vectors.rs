@@ -650,6 +650,7 @@ async fn rpc_getblockcount() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -693,6 +694,7 @@ async fn rpc_getblockcount_empty_state() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -742,6 +744,7 @@ async fn rpc_getblockhash() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -777,6 +780,8 @@ async fn rpc_getblockhash() {
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblocktemplate() {
+    use std::panic;
+
     use crate::methods::get_block_template_rpcs::constants::{
         GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
     };
@@ -811,6 +816,7 @@ async fn rpc_getblocktemplate() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -826,7 +832,12 @@ async fn rpc_getblocktemplate() {
 
     let get_block_template = get_block_template
         .await
-        .expect("unexpected panic in getblocktemplate RPC task")
+        .unwrap_or_else(|error| match error.try_into_panic() {
+            Ok(panic_object) => panic::resume_unwind(panic_object),
+            Err(cancelled_error) => {
+                panic!("getblocktemplate task was unexpectedly cancelled: {cancelled_error:?}")
+            }
+        })
         .expect("unexpected error in getblocktemplate RPC call");
 
     assert!(get_block_template.capabilities.is_empty());
@@ -892,6 +903,7 @@ async fn rpc_submitblock_errors() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),

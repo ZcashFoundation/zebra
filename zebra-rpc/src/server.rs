@@ -91,6 +91,7 @@ impl RpcServer {
             {
                 // Initialize the getblocktemplate rpc method handler
                 let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
+                    network,
                     mempool.clone(),
                     state.clone(),
                     latest_chain_tip.clone(),
