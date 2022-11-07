@@ -8,7 +8,7 @@
 //! of the updated cached state, restart zebra without peers, and submit blocks above the
 //! finalized tip height.
 
-use color_eyre::eyre::{Context, Result};
+use color_eyre::eyre::{eyre, Context, Result};
 
 use reqwest::Client;
 use zebra_chain::parameters::Network;
@@ -16,6 +16,7 @@ use zebra_chain::parameters::Network;
 use crate::common::{
     launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
     lightwalletd::LightwalletdTestType,
+    sync::{check_sync_logs_until, MempoolBehavior, SYNC_FINISHED_REGEX},
 };
 
 #[allow(clippy::print_stderr)]
@@ -109,5 +110,25 @@ async fn get_raw_future_blocks(
     test_type: LightwalletdTestType,
     test_name: &str,
 ) -> Result<Vec<String>> {
-    todo!()
+    let should_sync = true;
+    let (mut zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
+            .ok_or_else(|| eyre!("get_raw_future_blocks requires a cached state"))?;
+    let rpc_address = zebra_rpc_address.expect("test type must have RPC port");
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {rpc_address}"))?;
+
+    let mut zebrad = check_sync_logs_until(
+        zebrad,
+        network,
+        SYNC_FINISHED_REGEX,
+        MempoolBehavior::ShouldAutomaticallyActivate,
+        true,
+    )?;
+
+    // Create an http client
+    let client = Client::new();
+
+    zebrad.kill(true)?;
+
+    Ok(vec![])
 }

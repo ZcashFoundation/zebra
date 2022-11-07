@@ -34,6 +34,7 @@ use super::{
         ZebradTestDirExt, LIGHTWALLETD_DELAY, LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
         LIGHTWALLETD_UPDATE_TIP_DELAY,
     },
+    sync::FINISH_PARTIAL_SYNC_TIMEOUT,
 };
 
 use LightwalletdTestType::*;
@@ -503,9 +504,8 @@ impl LightwalletdTestType {
         match self {
             LaunchWithEmptyState => LIGHTWALLETD_DELAY,
             FullSyncFromGenesis { .. } => LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
-            UpdateCachedState | UpdateZebraCachedStateNoRpc | UpdateZebraCachedState => {
-                LIGHTWALLETD_UPDATE_TIP_DELAY
-            }
+            UpdateCachedState | UpdateZebraCachedStateNoRpc => LIGHTWALLETD_UPDATE_TIP_DELAY,
+            UpdateZebraCachedState => FINISH_PARTIAL_SYNC_TIMEOUT,
         }
     }
 
