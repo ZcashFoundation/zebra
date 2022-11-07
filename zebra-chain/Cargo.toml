@@ -9,7 +9,23 @@ edition = "2021"
 
 [features]
 default = []
-proptest-impl = ["proptest", "proptest-derive", "zebra-test", "rand", "rand_chacha", "tokio"]
+
+# Production features that activate extra functionality
+
+# Experimental mining RPC support
+getblocktemplate-rpcs = []
+
+# Test-only features
+
+proptest-impl = [
+    "proptest",
+    "proptest-derive",
+    "rand",
+    "rand_chacha",
+    "tokio",
+    "zebra-test",
+]
+
 bench = ["zebra-test"]
 
 [dependencies]

@@ -6,8 +6,21 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [features]
-proptest-impl = ["proptest", "proptest-derive", "zebra-test", "zebra-chain/proptest-impl"]
-getblocktemplate-rpcs = []
+
+# Production features that activate extra dependencies, or extra features in dependencies
+
+# Experimental mining RPC support
+getblocktemplate-rpcs = [
+    "zebra-chain/getblocktemplate-rpcs",
+]
+
+# Test-only features
+proptest-impl = [
+    "proptest",
+    "proptest-derive",
+    "zebra-test",
+    "zebra-chain/proptest-impl"
+]
 
 [dependencies]
 bincode = "1.3.3"
