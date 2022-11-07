@@ -332,7 +332,7 @@ jobs:
     # because we might never get a finished sync.
     #
     # See the concurrency comment on the zebrad test-full-sync job for details.
-    concurrency: 
+    concurrency:
       group: ${{ github.workflow }}−${{ github.ref }}-regenerate-stateful-disks
       cancel-in-progress: false
 
@@ -387,7 +387,7 @@ jobs:
     # We want to prevent multiple full zebrad syncs running at the same time,
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
     # because we might never get a finished sync.
-    # 
+    #
     # Instead, we let the first sync complete, then queue the latest pending sync, cancelling any syncs in between.
     # (As the general workflow concurrency group just gets matched in Pull Requests,
     # it has no impact on this job.)
@@ -395,7 +395,7 @@ jobs:
     # TODO:
     # - allow multiple manual syncs on a branch, and isolate manual syncs from automatic syncs, by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
     # - stop multiple automatic full syncs across different PRs by removing '−${{ github.ref }}' when needs.get-available-disks.outputs.zebra_tip_disk is true
-    concurrency: 
+    concurrency:
       group: ${{ github.workflow }}−${{ github.ref }}-test-full-sync
       cancel-in-progress: false
 
@@ -462,7 +462,7 @@ jobs:
     # because we might never get a finished sync.
     #
     # See the concurrency comment on the zebrad test-full-sync job for details.
-    concurrency: 
+    concurrency:
       group: ${{ github.workflow }}−${{ github.ref }}-lightwalletd-full-sync
       cancel-in-progress: false
 
@@ -548,7 +548,7 @@ jobs:
     # because we might never get a finished test.
     #
     # See the concurrency comment on the zebrad test-full-sync job for details.
-    concurrency: 
+    concurrency:
       group: ${{ github.workflow }}−${{ github.ref }}-lightwalletd-transactions-test
       cancel-in-progress: false
 
