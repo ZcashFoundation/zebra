@@ -4,7 +4,10 @@ use std::{
     collections::HashMap,
     convert::{self, TryFrom},
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{self, AtomicBool},
+        Arc,
+    },
     task::{Context, Poll},
 };
 
@@ -157,6 +160,7 @@ where
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     // Services
+    //
     /// A service that forwards requests to connected peers, and returns their
     /// responses.
     network: ZN,
@@ -168,6 +172,7 @@ where
     latest_chain_tip: ZSTip,
 
     // Configuration
+    //
     /// The configured lookahead limit, after applying the minimum limit.
     lookahead_limit: usize,
 
@@ -175,6 +180,7 @@ where
     max_checkpoint_height: Height,
 
     // Internal downloads state
+    //
     /// A list of pending block download and verify tasks.
     #[pin]
     pending: FuturesUnordered<
@@ -184,6 +190,11 @@ where
     /// A list of channels that can be used to cancel pending block download and
     /// verify tasks.
     cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
+
+    // Logging
+    //
+    /// Have we already logged a lookahead error?
+    logged_lookahead_error: Arc<AtomicBool>,
 }
 
 impl<ZN, ZV, ZSTip> Stream for Downloads<ZN, ZV, ZSTip>
@@ -270,6 +281,7 @@ where
             max_checkpoint_height,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
+            logged_lookahead_error: Arc::new(false.into()),
         }
     }
 
@@ -309,6 +321,7 @@ where
         let latest_chain_tip = self.latest_chain_tip.clone();
         let lookahead_limit = self.lookahead_limit;
         let max_checkpoint_height = self.max_checkpoint_height;
+        let logged_lookahead_error = self.logged_lookahead_error.clone();
 
         let task = tokio::spawn(
             async move {
@@ -389,14 +402,30 @@ where
                 };
 
                 if block_height > max_lookahead_height {
-                    info!(
-                        ?hash,
-                        ?block_height,
-                        ?tip_height,
-                        ?max_lookahead_height,
-                        lookahead_limit = ?lookahead_limit,
-                        "synced block height too far ahead of the tip: dropped downloaded block",
-                    );
+                    // This log can be very verbose, usually hundreds of blocks are dropped.
+                    //
+                    // Sets the atomic to true if it is false, and returns Ok.
+                    // Ordering and spurious failures don't matter here, because it is just a log.
+                    if logged_lookahead_error.compare_exchange_weak(false, true, atomic::Ordering::Relaxed, atomic::Ordering::Relaxed).is_ok() {
+                        info!(
+                            ?hash,
+                            ?block_height,
+                            ?tip_height,
+                            ?max_lookahead_height,
+                            lookahead_limit = ?lookahead_limit,
+                            "synced block height too far ahead of the tip: dropped downloaded block",
+                        );
+                    } else {
+                        debug!(
+                            ?hash,
+                            ?block_height,
+                            ?tip_height,
+                            ?max_lookahead_height,
+                            lookahead_limit = ?lookahead_limit,
+                            "synced block height too far ahead of the tip: dropped downloaded block",
+                        );
+                    }
+
                     metrics::counter!("sync.max.height.limit.dropped.block.count", 1);
 
                     // This error should be very rare during normal operation.
