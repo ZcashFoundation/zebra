@@ -385,7 +385,6 @@ where
                 // that will timeout before being verified.
                 let tip_height = latest_chain_tip.best_tip_height();
 
-                // TODO: don't use VERIFICATION_PIPELINE_SCALING_MULTIPLIER for full verification?
                 let (lookahead_drop_height, lookahead_pause_height, lookahead_reset_height) = if let Some(tip_height) = tip_height {
                     // Scale the height limit with the lookahead limit,
                     // so users with low capacity or under DoS can reduce them both.
