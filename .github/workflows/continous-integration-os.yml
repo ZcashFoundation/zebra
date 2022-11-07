@@ -28,7 +28,7 @@ on:
       - '.cargo/config.toml'
       - '**/clippy.toml'
       # workflow definitions
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/continous-integration-os.yml'
   pull_request:
     paths:
       # code and tests
