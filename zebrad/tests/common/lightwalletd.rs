@@ -360,6 +360,17 @@ impl LightwalletdTestType {
         }
     }
 
+    /// Does this test need a Zebra rpc server?
+    pub fn needs_zebra_rpc_server(&self) -> bool {
+        match self {
+            UpdateZebraCachedState => true,
+            UpdateZebraCachedStateNoRpc
+            | LaunchWithEmptyState
+            | FullSyncFromGenesis { .. }
+            | UpdateCachedState => self.launches_lightwalletd(),
+        }
+    }
+
     /// Does this test launch `lightwalletd`?
     pub fn launches_lightwalletd(&self) -> bool {
         match self {
@@ -425,7 +436,7 @@ impl LightwalletdTestType {
     /// Returns `None` if the test should be skipped,
     /// and `Some(Err(_))` if the config could not be created.
     pub fn zebrad_config<S: AsRef<str>>(&self, test_name: S) -> Option<Result<ZebradConfig>> {
-        let config = if self.launches_lightwalletd() {
+        let config = if self.needs_zebra_rpc_server() {
             // This is what we recommend our users configure.
             random_known_rpc_port_config(true)
         } else {

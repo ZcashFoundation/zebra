@@ -99,7 +99,7 @@ pub(crate) async fn run() -> Result<()> {
     Ok(())
 }
 
-/// Accepts a network and a path to a cached zebra state.
+/// Accepts a network, a test_type, and test_name.
 ///
 /// Syncs zebra until the tip, gets some blocks near the tip, via getblock rpc calls,
 /// shuts down zebra, and gets the finalized tip height of the updated cached state.
@@ -110,6 +110,11 @@ async fn get_raw_future_blocks(
     test_type: LightwalletdTestType,
     test_name: &str,
 ) -> Result<Vec<String>> {
+    assert!(
+        test_type.needs_zebra_cached_state() && test_type.needs_zebra_rpc_server(),
+        "get_raw_future_blocks needs zebra cached state and rpc server"
+    );
+
     let should_sync = true;
     let (mut zebrad, zebra_rpc_address) =
         spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
