@@ -9,10 +9,25 @@ edition = "2021"
 
 [features]
 default = []
-getblocktemplate-rpcs = ["zebra-state/getblocktemplate-rpcs", "zebra-node-services/getblocktemplate-rpcs", "zebra-consensus/getblocktemplate-rpcs"]
+
+# Production features that activate extra dependencies, or extra features in dependencies
+
+# Experimental mining RPC support
+getblocktemplate-rpcs = [
+    "zebra-consensus/getblocktemplate-rpcs",
+    "zebra-state/getblocktemplate-rpcs",
+    "zebra-node-services/getblocktemplate-rpcs",
+    "zebra-chain/getblocktemplate-rpcs",
+]
 
 # Test-only features
-proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
+proptest-impl = [
+    "proptest",
+    "proptest-derive",
+    "zebra-consensus/proptest-impl",
+    "zebra-state/proptest-impl",
+    "zebra-chain/proptest-impl",
+]
 
 [dependencies]
 chrono = { version = "0.4.22", default-features = false, features = ["clock", "std"] }
