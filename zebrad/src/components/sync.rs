@@ -556,8 +556,11 @@ where
             self.update_metrics();
 
             // Pause new downloads while the syncer or downloader are past their lookahead limits.
+            //
+            // To avoid a deadlock or long waits for blocks to expire, we ignore the download
+            // lookahead limit when there are only a small number of blocks waiting.
             while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len())
-                || (!self.downloads.is_empty()
+                || (self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) / 2
                     && self.past_lookahead_limit_receiver.cloned_watch_data())
             {
                 trace!(
