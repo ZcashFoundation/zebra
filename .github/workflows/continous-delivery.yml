@@ -65,6 +65,7 @@ jobs:
   #
   # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
   build:
+    name: Build CD Docker
     uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
