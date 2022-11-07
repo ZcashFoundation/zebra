@@ -83,8 +83,7 @@ pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize = zebra_consensus::MAX_CHECKPO
 /// The default for the user-specified lookahead limit.
 ///
 /// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
-pub const DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT: usize =
-    zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
+pub const DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT: usize = MAX_TIPS_RESPONSE_HASH_COUNT * 2;
 
 /// A lower bound on the user-specified concurrency limit.
 ///
