@@ -52,7 +52,11 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// the rest of the capacity is reserved for the other queues.
 /// There is no reserved capacity for the syncer queue:
 /// if the other queues stay full, the syncer will eventually time out and reset.
-pub const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 5;
+pub const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 2;
+
+/// The maximum height difference between Zebra's state tip and a downloaded block.
+/// Blocks higher than this will get dropped and return an error.
+pub const VERIFICATION_PIPELINE_DROP_LIMIT: i32 = 50_000;
 
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
@@ -89,6 +93,20 @@ pub enum BlockDownloadVerifyError {
     DownloadFailed {
         #[source]
         error: BoxError,
+        hash: block::Hash,
+    },
+
+    /// A downloaded block was a long way ahead of the state chain tip.
+    /// This error should be very rare during normal operation.
+    ///
+    /// We need to reset the syncer on this error, to allow the verifier and state to catch up,
+    /// or prevent it following a bad chain.
+    ///
+    /// If we don't reset the syncer on this error, it will continue downloading blocks from a bad
+    /// chain, or blocks far ahead of the current state tip.
+    #[error("downloaded block was too far ahead of the chain tip: {height:?} {hash:?}")]
+    AboveLookaheadHeightLimit {
+        height: block::Height,
         hash: block::Hash,
     },
 
@@ -368,21 +386,25 @@ where
                 let tip_height = latest_chain_tip.best_tip_height();
 
                 // TODO: don't use VERIFICATION_PIPELINE_SCALING_MULTIPLIER for full verification?
-                let (max_lookahead_height, lookahead_reset_height) = if let Some(tip_height) = tip_height {
+                let (lookahead_drop_height, lookahead_pause_height, lookahead_reset_height) = if let Some(tip_height) = tip_height {
                     // Scale the height limit with the lookahead limit,
                     // so users with low capacity or under DoS can reduce them both.
-                    let lookahead = i32::try_from(
+                    let lookahead_pause = i32::try_from(
                         lookahead_limit + lookahead_limit * VERIFICATION_PIPELINE_SCALING_MULTIPLIER,
                     )
                         .expect("fits in i32");
 
-                    ((tip_height + lookahead).expect("tip is much lower than Height::MAX"),
-                     (tip_height + lookahead/2).expect("tip is much lower than Height::MAX"))
+
+                    ((tip_height + VERIFICATION_PIPELINE_DROP_LIMIT).expect("tip is much lower than Height::MAX"),
+                     (tip_height + lookahead_pause).expect("tip is much lower than Height::MAX"),
+                     (tip_height + lookahead_pause/2).expect("tip is much lower than Height::MAX"))
                 } else {
+                    let genesis_drop = VERIFICATION_PIPELINE_DROP_LIMIT.try_into().expect("fits in u32");
                     let genesis_lookahead =
                         u32::try_from(lookahead_limit - 1).expect("fits in u32");
 
-                    (block::Height(genesis_lookahead),
+                    (block::Height(genesis_drop),
+                     block::Height(genesis_lookahead),
                      block::Height(genesis_lookahead/2))
                 };
 
@@ -413,7 +435,9 @@ where
                     return Err(BlockDownloadVerifyError::InvalidHeight { hash });
                 };
 
-                if block_height > max_lookahead_height {
+                if block_height > lookahead_drop_height {
+                    Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit { height: block_height, hash })?;
+                } else if block_height > lookahead_pause_height {
                     // This log can be very verbose, usually hundreds of blocks are dropped.
                     // So we only log at info level for the first above-height block.
                     if !past_lookahead_limit_receiver.cloned_watch_data() {
@@ -421,7 +445,8 @@ where
                             ?hash,
                             ?block_height,
                             ?tip_height,
-                            ?max_lookahead_height,
+                            ?lookahead_pause_height,
+                            ?lookahead_reset_height,
                             lookahead_limit = ?lookahead_limit,
                             "synced block height too far ahead of the tip: \
                              waiting for downloaded blocks to commit to the state",
@@ -437,7 +462,8 @@ where
                             ?hash,
                             ?block_height,
                             ?tip_height,
-                            ?max_lookahead_height,
+                            ?lookahead_pause_height,
+                            ?lookahead_reset_height,
                             lookahead_limit = ?lookahead_limit,
                             "synced block height too far ahead of the tip: \
                              waiting for downloaded blocks to commit to the state",
