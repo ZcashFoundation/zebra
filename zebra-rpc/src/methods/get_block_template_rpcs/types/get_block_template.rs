@@ -74,22 +74,18 @@ pub struct GetBlockTemplate {
     // TODO: use DateTime32 type?
     pub min_time: u32,
 
-    /// Add documentation.
+    /// Hardcoded list of block fields the miner is allowed to change.
     pub mutable: Vec<String>,
 
-    /// Add documentation.
+    /// A range of valid nonces that goes from `u32::MIN` to `u32::MAX`.
     #[serde(rename = "noncerange")]
     pub nonce_range: String,
 
-    /// Add documentation.
-    ///
-    /// The same as `MAX_BLOCK_SIGOPS`.
+    /// Max legacy signature operations in the block.
     #[serde(rename = "sigoplimit")]
     pub sigop_limit: u64,
 
-    /// Add documentation.
-    ///
-    /// The same as `MAX_BLOCK_BYTES`.
+    /// Max block size in bytes
     #[serde(rename = "sizelimit")]
     pub size_limit: u64,
 

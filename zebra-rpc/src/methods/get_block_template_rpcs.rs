@@ -326,7 +326,6 @@ where
             Ok(GetBlockTemplate {
                 capabilities: vec![],
 
-                // The block version
                 version: ZCASH_BLOCK_VERSION,
 
                 previous_block_hash: GetBlockHash([0; 32].into()),
@@ -348,19 +347,15 @@ where
 
                 min_time: 0,
 
-                // Hardcoded list of block fields the miner is allowed to change.
                 mutable: constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD
                     .iter()
                     .map(ToString::to_string)
                     .collect(),
 
-                // A range of valid nonces that goes from `u32::MIN` to `u32::MAX`.
                 nonce_range: constants::GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
 
-                // Max legacy signature operations in the block.
                 sigop_limit: MAX_BLOCK_SIGOPS,
 
-                // Max block size in bytes
                 size_limit: MAX_BLOCK_BYTES,
 
                 cur_time: 0,
