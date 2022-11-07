@@ -18,7 +18,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::Network,
     serialization::ZcashDeserializeInto,
-    transaction::{UnminedTx, VerifiedUnminedTx},
+    transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
 };
 use zebra_consensus::{
     BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError, MAX_BLOCK_SIGOPS,
@@ -137,7 +137,7 @@ where
     // TODO: add mining config for getblocktemplate RPC miner address
     //
     /// The configured network for this RPC service.
-    _network: Network,
+    network: Network,
 
     // Services
     //
@@ -185,7 +185,7 @@ where
         chain_verifier: ChainVerifier,
     ) -> Self {
         Self {
-            _network: network,
+            network,
             mempool,
             state,
             latest_chain_tip,
@@ -258,66 +258,19 @@ where
     }
 
     fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>> {
+        let network = self.network;
         let mempool = self.mempool.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
-            let _tip_height = best_chain_tip_height(&latest_chain_tip)?;
+            let tip_height = best_chain_tip_height(&latest_chain_tip)?;
             let mempool_txs = select_mempool_transactions(mempool).await?;
 
             let miner_fee = miner_fee(&mempool_txs);
 
-            /*
-            Fake a "coinbase" transaction by duplicating a mempool transaction,
-            or fake a response.
-
-            This is temporarily required for the tests to pass.
-
-            TODO: create a method Transaction::new_v5_coinbase(network, tip_height, miner_fee),
-                  and call it here.
-            */
-            let coinbase_tx = if mempool_txs.is_empty() {
-                let empty_string = String::from("");
-                return Ok(GetBlockTemplate {
-                    capabilities: vec![],
-                    version: ZCASH_BLOCK_VERSION,
-                    previous_block_hash: GetBlockHash([0; 32].into()),
-                    block_commitments_hash: [0; 32].into(),
-                    light_client_root_hash: [0; 32].into(),
-                    final_sapling_root_hash: [0; 32].into(),
-                    default_roots: DefaultRoots {
-                        merkle_root: [0; 32].into(),
-                        chain_history_root: [0; 32].into(),
-                        auth_data_root: [0; 32].into(),
-                        block_commitments_hash: [0; 32].into(),
-                    },
-                    transactions: Vec::new(),
-                    coinbase_txn: TransactionTemplate {
-                        data: Vec::new().into(),
-                        hash: [0; 32].into(),
-                        auth_digest: [0; 32].into(),
-                        depends: Vec::new(),
-                        fee: Amount::zero(),
-                        sigops: 0,
-                        required: true,
-                    },
-                    target: empty_string.clone(),
-                    min_time: 0,
-                    mutable: constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect(),
-                    nonce_range: constants::GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
-                    sigop_limit: MAX_BLOCK_SIGOPS,
-                    size_limit: MAX_BLOCK_BYTES,
-                    cur_time: 0,
-                    bits: empty_string,
-                    height: 0,
-                });
-            } else {
-                mempool_txs[0].transaction.clone()
-            };
+            let block_height = (tip_height + 1).expect("tip is far below Height::MAX");
+            let coinbase_tx = Transaction::new_v5_coinbase(network, block_height, miner_fee).into();
 
             let (merkle_root, auth_data_root) =
                 calculate_transaction_roots(&coinbase_tx, &mempool_txs);
