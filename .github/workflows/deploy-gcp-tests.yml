@@ -125,11 +125,6 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -198,11 +193,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -421,11 +411,6 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -553,11 +538,6 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -622,11 +602,6 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -680,11 +655,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -741,11 +711,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -805,11 +770,6 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -867,11 +827,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -932,11 +887,6 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -995,11 +945,6 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -1054,11 +999,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -1121,11 +1061,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
