@@ -27,21 +27,14 @@ pub(crate) async fn run() -> Result<()> {
     let test_name = "submit_block_test";
     let network = Network::Mainnet;
 
-    // Skip the test unless the user specifically asked for it
+    // Skip the test unless the user specifically asked for it and there is a zebrad_state_path
     if !can_spawn_zebrad_for_rpc(test_name, test_type) {
         return Ok(());
     }
 
-    let zebrad_state_path = test_type.zebrad_state_path(test_name);
-    let zebrad_state_path = match zebrad_state_path {
-        Some(zebrad_state_path) => zebrad_state_path,
-        None => return Ok(()),
-    };
-
     tracing::info!(
         ?network,
         ?test_type,
-        ?zebrad_state_path,
         "running submitblock test using zebrad",
     );
 
@@ -51,25 +44,15 @@ pub(crate) async fn run() -> Result<()> {
     // - get first X blocks in non-finalized state via getblock rpc calls
     // - restart zebra without peers
     // - submit block(s) above the finalized tip height
-    let raw_blocks: Vec<String> = get_raw_future_blocks(network, zebrad_state_path.clone()).await?;
+    let raw_blocks: Vec<String> = get_raw_future_blocks(network, test_type, test_name).await?;
 
-    tracing::info!(
-        partial_sync_path = ?zebrad_state_path,
-        "got blocks to submit, spawning isolated zebrad...",
-    );
+    tracing::info!("got raw future blocks, spawning isolated zebrad...",);
 
     // Start zebrad with no peers, we run the rest of the submitblock test without syncing.
     let should_sync = false;
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
+    let (mut zebrad, zebra_rpc_address) =
         spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
-    {
-        zebrad_and_address
-    } else {
-        // Skip the test, we don't have the required cached state
-        return Ok(());
-    };
-
-    // Submitblock test
+            .expect("Already checked zebra state path with can_spawn_zebrad_for_rpc");
 
     let rpc_address = zebra_rpc_address.expect("submitblock test must have RPC port");
 
@@ -123,7 +106,8 @@ pub(crate) async fn run() -> Result<()> {
 /// Returns retrieved blocks that are above the finalized tip height of the cached state.
 async fn get_raw_future_blocks(
     network: Network,
-    zebra_state_path: std::path::PathBuf,
+    test_type: LightwalletdTestType,
+    test_name: &str,
 ) -> Result<Vec<String>> {
     todo!()
 }
