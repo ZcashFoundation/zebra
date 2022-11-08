@@ -44,9 +44,9 @@ use crate::common::{
         can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
         sync::wait_for_zebrad_and_lightwalletd_sync,
         wallet_grpc::{self, connect_to_lightwalletd, Empty, Exclude},
-        TestType::*,
     },
     sync::copy_state_and_perform_full_sync,
+    test_type::TestType::*,
 };
 
 /// The maximum number of transactions we want to send in the test.

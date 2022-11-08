@@ -12,10 +12,8 @@ use zebra_test::prelude::*;
 
 use crate::common::{
     launch::ZebradTestDirExt,
-    lightwalletd::{
-        wallet_grpc::{connect_to_lightwalletd, ChainSpec},
-        TestType,
-    },
+    lightwalletd::wallet_grpc::{connect_to_lightwalletd, ChainSpec},
+    test_type::TestType,
 };
 
 /// The amount of time we wait between each tip check.

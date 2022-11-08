@@ -54,8 +54,8 @@ use crate::common::{
             connect_to_lightwalletd, Address, AddressList, BlockId, BlockRange, ChainSpec, Empty,
             GetAddressUtxosArg, TransparentAddressBlockFilter, TxFilter,
         },
-        TestType::UpdateCachedState,
     },
+    test_type::TestType::UpdateCachedState,
 };
 
 /// The test entry point.

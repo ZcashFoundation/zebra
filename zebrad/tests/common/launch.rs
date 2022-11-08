@@ -25,9 +25,8 @@ use zebra_test::{
 use zebrad::config::ZebradConfig;
 
 use crate::common::{
-    config::testdir,
-    lightwalletd::{zebra_skip_lightwalletd_tests, TestType},
-    sync::FINISH_PARTIAL_SYNC_TIMEOUT,
+    config::testdir, lightwalletd::zebra_skip_lightwalletd_tests,
+    sync::FINISH_PARTIAL_SYNC_TIMEOUT, test_type::TestType,
 };
 
 /// After we launch `zebrad`, wait this long for the command to start up,

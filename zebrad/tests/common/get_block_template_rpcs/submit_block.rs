@@ -19,8 +19,8 @@ use zebra_state::MAX_BLOCK_REORG_HEIGHT;
 use crate::common::{
     cached_state::load_tip_height_from_state_directory,
     launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
-    lightwalletd::TestType,
     sync::{check_sync_logs_until, MempoolBehavior, SYNC_FINISHED_REGEX},
+    test_type::TestType,
 };
 
 #[allow(clippy::print_stderr)]
