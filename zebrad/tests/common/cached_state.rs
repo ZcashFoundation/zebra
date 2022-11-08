@@ -16,6 +16,8 @@ use tempfile::TempDir;
 use tokio::fs;
 use tower::{util::BoxService, Service};
 
+use zebra_chain::block::Block;
+use zebra_chain::serialization::ZcashDeserializeInto;
 use zebra_chain::{
     block::{self, Height},
     chain_tip::ChainTip,
@@ -162,13 +164,50 @@ async fn copy_directory(
 /// Syncs zebra until the tip, gets some blocks near the tip, via getblock rpc calls,
 /// shuts down zebra, and gets the finalized tip height of the updated cached state.
 ///
-/// Returns retrieved blocks that are above the finalized tip height of the cached state.
+/// Returns retrieved and deserialized blocks that are above the finalized tip height of the cached state.
+///
+/// ## Panics
+///
+/// If the provided `test_type` doesn't need an rpc server and cached state, or if `max_num_blocks` is 0
+pub async fn get_future_blocks(
+    network: Network,
+    test_type: TestType,
+    test_name: &str,
+    max_num_blocks: u32,
+) -> Result<Vec<Block>> {
+    let blocks: Vec<Block> = get_raw_future_blocks(network, test_type, test_name, max_num_blocks)
+        .await?
+        .into_iter()
+        .map(hex::decode)
+        .map(|block_bytes| {
+            block_bytes
+                .expect("getblock rpc calls in get_raw_future_blocks should return valid hexdata")
+                .zcash_deserialize_into()
+                .expect("decoded hex data from getblock rpc calls should deserialize into blocks")
+        })
+        .collect();
+
+    Ok(blocks)
+}
+
+/// Accepts a network, test_type, test_name, and num_blocks (how many blocks past the finalized tip to try getting)
+///
+/// Syncs zebra until the tip, gets some blocks near the tip, via getblock rpc calls,
+/// shuts down zebra, and gets the finalized tip height of the updated cached state.
+///
+/// Returns hexdata of retrieved blocks that are above the finalized tip height of the cached state.
+///
+/// ## Panics
+///
+/// If the provided `test_type` doesn't need an rpc server and cached state, or if `max_num_blocks` is 0
 pub async fn get_raw_future_blocks(
     network: Network,
     test_type: TestType,
     test_name: &str,
     max_num_blocks: u32,
 ) -> Result<Vec<String>> {
+    assert!(max_num_blocks > 0);
+
     let max_num_blocks = max_num_blocks.min(MAX_BLOCK_REORG_HEIGHT);
     let mut raw_blocks = Vec::with_capacity(max_num_blocks as usize);
 
