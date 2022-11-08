@@ -11,6 +11,8 @@ use tower::{buffer::Buffer, Service};
 use zebra_chain::{
     chain_tip::mock::MockChainTip,
     parameters::{Network, NetworkUpgrade},
+    serialization::ZcashDeserializeInto,
+    transaction::Transaction,
     transparent,
 };
 use zebra_node_services::mempool;
@@ -115,7 +117,14 @@ pub async fn test_responses<State, ReadState>(
         .expect("unexpected panic in getblocktemplate RPC task")
         .expect("unexpected error in getblocktemplate RPC call");
 
-    snapshot_rpc_getblocktemplate(get_block_template, &settings);
+    let coinbase_tx: Transaction = get_block_template
+        .coinbase_txn
+        .data
+        .as_ref()
+        .zcash_deserialize_into()
+        .expect("coinbase bytes are valid");
+
+    snapshot_rpc_getblocktemplate(get_block_template, coinbase_tx, &settings);
 
     // `submitblock`
     let submit_block = get_block_template_rpc
@@ -137,8 +146,13 @@ fn snapshot_rpc_getblockhash(block_hash: GetBlockHash, settings: &insta::Setting
 }
 
 /// Snapshot `getblocktemplate` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getblocktemplate(block_template: GetBlockTemplate, settings: &insta::Settings) {
+fn snapshot_rpc_getblocktemplate(
+    block_template: GetBlockTemplate,
+    coinbase_tx: Transaction,
+    settings: &insta::Settings,
+) {
     settings.bind(|| insta::assert_json_snapshot!("get_block_template", block_template));
+    settings.bind(|| insta::assert_json_snapshot!("get_block_template.coinbase_tx", coinbase_tx));
 }
 
 /// Snapshot `submitblock` response, using `cargo insta` and JSON serialization.
