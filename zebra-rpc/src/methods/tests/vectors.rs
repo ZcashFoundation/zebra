@@ -791,6 +791,7 @@ async fn rpc_getblocktemplate() {
     use zebra_chain::{
         amount::{Amount, NonNegative},
         block::{MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
+        chain_tip::mock::MockChainTip,
     };
     use zebra_consensus::MAX_BLOCK_SIGOPS;
 
@@ -804,7 +805,7 @@ async fn rpc_getblocktemplate() {
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
-    let (state, read_state, latest_chain_tip, _chain_tip_change) =
+    let (state, read_state, _latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let (
@@ -824,13 +825,16 @@ async fn rpc_getblocktemplate() {
         miner_address: Some(transparent::Address::from_script_hash(Mainnet, [0x7e; 20])),
     };
 
+    let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
+    mock_chain_tip_sender.send_best_tip_height(NetworkUpgrade::Nu5.activation_height(Mainnet));
+
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Mainnet,
         mining_config,
         Buffer::new(mempool.clone(), 1),
         read_state,
-        latest_chain_tip.clone(),
+        mock_chain_tip,
         tower::ServiceBuilder::new().service(chain_verifier),
     );
 
@@ -873,8 +877,9 @@ async fn rpc_getblocktemplate() {
     // Coinbase transaction checks.
     assert!(get_block_template.coinbase_txn.required);
     assert!(!get_block_template.coinbase_txn.data.as_ref().is_empty());
-    assert!(get_block_template.coinbase_txn.sigops > 0);
     assert_eq!(get_block_template.coinbase_txn.depends.len(), 0);
+    // TODO: should a coinbase transaction have sigops?
+    assert_eq!(get_block_template.coinbase_txn.sigops, 0);
     // Coinbase transaction checks for empty blocks.
     assert_eq!(
         get_block_template.coinbase_txn.fee,

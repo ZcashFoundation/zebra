@@ -8,7 +8,11 @@
 use insta::Settings;
 use tower::{buffer::Buffer, Service};
 
-use zebra_chain::{parameters::Network, transparent};
+use zebra_chain::{
+    chain_tip::mock::MockChainTip,
+    parameters::{Network, NetworkUpgrade},
+    transparent,
+};
 use zebra_node_services::mempool;
 use zebra_state::LatestChainTip;
 
@@ -32,7 +36,7 @@ pub async fn test_responses<State, ReadState>(
     >,
     state: State,
     read_state: ReadState,
-    latest_chain_tip: LatestChainTip,
+    _latest_chain_tip: LatestChainTip,
     settings: Settings,
 ) where
     State: Service<
@@ -71,12 +75,15 @@ pub async fn test_responses<State, ReadState>(
         miner_address: Some(transparent::Address::from_script_hash(network, [0xad; 20])),
     };
 
+    let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
+    mock_chain_tip_sender.send_best_tip_height(NetworkUpgrade::Nu5.activation_height(network));
+
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         network,
         mining_config,
         Buffer::new(mempool.clone(), 1),
         read_state,
-        latest_chain_tip,
+        mock_chain_tip,
         chain_verifier,
     );
 
