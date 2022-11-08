@@ -5,7 +5,10 @@ use zebra_chain::block::{
     ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash,
 };
 
-/// Documentation to be added in #5452 or #5455.
+/// The block header roots for [`GetBlockTemplate.transactions`].
+///
+/// If the transactions in the block template are modified, these roots must be recalculated
+/// [according to the specification](https://zcash.github.io/rpc/getblocktemplate.html).
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DefaultRoots {
     /// The merkle root of the transaction IDs in the block.
