@@ -20,16 +20,16 @@ expression: coinbase_tx
     ],
     "outputs": [
       {
-        "value": 25000000,
-        "lock_script": "1cba71e1df05024288a00802de81e08c437859586c87"
-      },
-      {
         "value": 15625000,
         "lock_script": "1cba0c0bcca02f3cba01a5d7423ac3903d40586399eb"
       },
       {
         "value": 21875000,
         "lock_script": "1cba4e3f0d9a33a2721604cbae2de8d9171e21f8fbe4"
+      },
+      {
+        "value": 25000000,
+        "lock_script": "1cba71e1df05024288a00802de81e08c437859586c87"
       },
       {
         "value": 250000000,
