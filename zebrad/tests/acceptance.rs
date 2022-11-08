@@ -152,7 +152,7 @@ use common::{
     launch::{spawn_zebrad_for_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY},
     lightwalletd::{
         can_spawn_lightwalletd_for_rpc, random_known_rpc_port_config, spawn_lightwalletd_for_rpc,
-        LightwalletdTestType::{self, *},
+        TestType::{self, *},
     },
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
@@ -1571,7 +1571,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
 /// If the `test_type` requires `--features=lightwalletd-grpc-tests`,
 /// but Zebra was not compiled with that feature.
 #[tracing::instrument]
-fn lightwalletd_integration_test(test_type: LightwalletdTestType) -> Result<()> {
+fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // We run these sync tests with a network connection, for better test coverage.
@@ -2015,7 +2015,7 @@ async fn fully_synced_rpc_test() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // We're only using cached Zebra state here, so this test type is the most similar
-    let test_type = LightwalletdTestType::UpdateCachedState;
+    let test_type = TestType::UpdateCachedState;
     let network = Network::Mainnet;
 
     let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =

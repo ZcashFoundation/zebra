@@ -44,7 +44,7 @@ use crate::common::{
         can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
         sync::wait_for_zebrad_and_lightwalletd_sync,
         wallet_grpc::{self, connect_to_lightwalletd, Empty, Exclude},
-        LightwalletdTestType::*,
+        TestType::*,
     },
     sync::copy_state_and_perform_full_sync,
 };

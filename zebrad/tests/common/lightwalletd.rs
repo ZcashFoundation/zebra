@@ -37,7 +37,7 @@ use super::{
     sync::FINISH_PARTIAL_SYNC_TIMEOUT,
 };
 
-use LightwalletdTestType::*;
+use TestType::*;
 
 #[cfg(feature = "lightwalletd-grpc-tests")]
 pub mod send_transaction_test;
@@ -61,7 +61,7 @@ pub const ZEBRA_TEST_LIGHTWALLETD: &str = "ZEBRA_TEST_LIGHTWALLETD";
 
 /// Optional environment variable with the cached state for lightwalletd.
 ///
-/// Required for [`LightwalletdTestType::UpdateCachedState`],
+/// Required for [`TestType::UpdateCachedState`],
 /// so we can test lightwalletd RPC integration with a populated state.
 ///
 /// Can also be used to speed up the [`sending_transactions_using_lightwalletd`] test,
@@ -127,7 +127,7 @@ pub fn random_known_rpc_port_config(parallel_cpu_threads: bool) -> Result<Zebrad
 pub fn spawn_lightwalletd_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     network: Network,
     test_name: S,
-    test_type: LightwalletdTestType,
+    test_type: TestType,
     zebrad_rpc_address: SocketAddr,
 ) -> Result<Option<(TestChild<TempDir>, u16)>> {
     assert_eq!(network, Mainnet, "this test only supports Mainnet for now");
@@ -166,7 +166,7 @@ pub fn spawn_lightwalletd_for_rpc<S: AsRef<str> + std::fmt::Debug>(
 #[tracing::instrument]
 pub fn can_spawn_lightwalletd_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     test_name: S,
-    test_type: LightwalletdTestType,
+    test_type: TestType,
 ) -> bool {
     if zebra_test::net::zebra_skip_network_tests() {
         return false;
@@ -308,7 +308,7 @@ where
 
 /// The type of lightwalletd integration test that we're running.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum LightwalletdTestType {
+pub enum TestType {
     /// Launch with an empty Zebra and lightwalletd state.
     LaunchWithEmptyState,
 
@@ -344,7 +344,7 @@ pub enum LightwalletdTestType {
     UpdateZebraCachedState,
 }
 
-impl LightwalletdTestType {
+impl TestType {
     /// Does this test need a Zebra cached state?
     pub fn needs_zebra_cached_state(&self) -> bool {
         // Handle the Zebra state directory based on the test type:

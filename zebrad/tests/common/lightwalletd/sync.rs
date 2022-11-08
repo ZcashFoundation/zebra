@@ -14,7 +14,7 @@ use crate::common::{
     launch::ZebradTestDirExt,
     lightwalletd::{
         wallet_grpc::{connect_to_lightwalletd, ChainSpec},
-        LightwalletdTestType,
+        TestType,
     },
 };
 
@@ -33,7 +33,7 @@ pub fn wait_for_zebrad_and_lightwalletd_sync<
     lightwalletd_rpc_port: u16,
     mut zebrad: TestChild<P>,
     zebra_rpc_address: SocketAddr,
-    test_type: LightwalletdTestType,
+    test_type: TestType,
     wait_for_zebrad_mempool: bool,
     wait_for_zebrad_tip: bool,
 ) -> Result<(TestChild<TempDir>, TestChild<P>)> {

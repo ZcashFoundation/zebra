@@ -19,7 +19,7 @@ use zebra_state::MAX_BLOCK_REORG_HEIGHT;
 use crate::common::{
     cached_state::load_tip_height_from_state_directory,
     launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
-    lightwalletd::LightwalletdTestType,
+    lightwalletd::TestType,
     sync::{check_sync_logs_until, MempoolBehavior, SYNC_FINISHED_REGEX},
 };
 
@@ -28,7 +28,7 @@ pub(crate) async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // We want a zebra state dir in place,
-    let test_type = LightwalletdTestType::UpdateZebraCachedState;
+    let test_type = TestType::UpdateZebraCachedState;
     let test_name = "submit_block_test";
     let network = Network::Mainnet;
 
@@ -105,7 +105,7 @@ pub(crate) async fn run() -> Result<()> {
 /// Returns retrieved blocks that are above the finalized tip height of the cached state.
 async fn get_raw_future_blocks(
     network: Network,
-    test_type: LightwalletdTestType,
+    test_type: TestType,
     test_name: &str,
     max_num_blocks: u32,
 ) -> Result<Vec<String>> {
