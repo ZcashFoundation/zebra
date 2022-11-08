@@ -78,6 +78,10 @@ case "$1" in
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
             ls -lhR "$LIGHTWALLETD_DATA_DIR/db" || (echo "No $LIGHTWALLETD_DATA_DIR/db"; ls -lhR "$LIGHTWALLETD_DATA_DIR" | head -50 || echo "No $LIGHTWALLETD_DATA_DIR directory")
             cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored sending_transactions_using_lightwalletd
+        elif [[ "$TEST_SUBMIT_BLOCK" -eq "1" ]]; then
+            # Starting with a cached Zebra and lightwalletd tip, test sending transactions gRPC call to lightwalletd, which calls Zebra.
+            ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
+            cargo test --locked --release --features getblocktemplate --package zebrad --test acceptance -- --nocapture --include-ignored submit_block
 
         # These command-lines are provided by the caller.
         #
