@@ -57,7 +57,7 @@ const FANOUT: usize = 3;
 ///
 /// We also hedge requests, so we may retry up to twice this many times. Hedged
 /// retries may be concurrent, inner retries are sequential.
-const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
+const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 4;
 
 /// A lower bound on the user-specified checkpoint verification concurrency limit.
 ///
@@ -124,7 +124,7 @@ pub const TIPS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(6);
 /// failure loop.
 ///
 /// We set the timeout so that it requires under 1 Mbps bandwidth for a full 2 MB block.
-pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
+pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = zn::constants::REQUEST_TIMEOUT;
 
 /// Controls how long we wait for a block verify request to complete.
 ///
