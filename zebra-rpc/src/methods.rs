@@ -14,7 +14,7 @@ use hex::{FromHex, ToHex};
 use indexmap::IndexMap;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
-use tokio::{sync::broadcast::Sender, task::JoinHandle};
+use tokio::{sync::broadcast, task::JoinHandle};
 use tower::{buffer::Buffer, Service, ServiceExt};
 use tracing::Instrument;
 
@@ -279,7 +279,7 @@ where
     // Tasks
     //
     /// A sender component of a channel used to send transactions to the mempool queue.
-    queue_sender: Sender<UnminedTx>,
+    queue_sender: broadcast::Sender<UnminedTx>,
 }
 
 impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>

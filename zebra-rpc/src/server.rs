@@ -119,28 +119,28 @@ impl RpcServer {
                 parallel_cpu_threads = num_cpus::get();
             }
 
+            // Use a different tokio executor from the rest of Zebra,
+            // so that large RPCs and any task handling bugs don't impact Zebra.
+            //
+            // TODO:
+            // - return server.close_handle(), which can shut down the RPC server,
+            //   and add it to the server tests
+            let server = ServerBuilder::new(io)
+                .threads(parallel_cpu_threads)
+                // TODO: disable this security check if we see errors from lightwalletd
+                //.allowed_hosts(DomainsValidation::Disabled)
+                .request_middleware(FixHttpRequestMiddleware)
+                .start_http(&listen_addr)
+                .expect("Unable to start RPC server");
+
+            info!("Opened RPC endpoint at {}", server.address());
+
             // The server is a blocking task, which blocks on executor shutdown.
-            // So we need to create and spawn it on a std::thread, inside a tokio blocking task.
+            // So we need to wait on it on a std::thread, inside a tokio blocking task.
             // (Otherwise tokio panics when we shut down the RPC server.)
             let span = Span::current();
-            let server = move || {
+            let wait_on_server = move || {
                 span.in_scope(|| {
-                    // Use a different tokio executor from the rest of Zebra,
-                    // so that large RPCs and any task handling bugs don't impact Zebra.
-                    //
-                    // TODO:
-                    // - return server.close_handle(), which can shut down the RPC server,
-                    //   and add it to the server tests
-                    let server = ServerBuilder::new(io)
-                        .threads(parallel_cpu_threads)
-                        // TODO: disable this security check if we see errors from lightwalletd
-                        //.allowed_hosts(DomainsValidation::Disabled)
-                        .request_middleware(FixHttpRequestMiddleware)
-                        .start_http(&listen_addr)
-                        .expect("Unable to start RPC server");
-
-                    info!("Opened RPC endpoint at {}", server.address());
-
                     server.wait();
 
                     info!("Stopping RPC endpoint");
@@ -149,7 +149,7 @@ impl RpcServer {
 
             (
                 tokio::task::spawn_blocking(|| {
-                    let thread_handle = std::thread::spawn(server);
+                    let thread_handle = std::thread::spawn(wait_on_server);
 
                     // Propagate panics from the inner std::thread to the outer tokio blocking task
                     match thread_handle.join() {
