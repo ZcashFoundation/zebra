@@ -10,7 +10,7 @@
 use std::{panic, sync::Arc};
 
 use jsonrpc_core::{Compatibility, MetaIoHandler};
-use jsonrpc_http_server::ServerBuilder;
+use jsonrpc_http_server::{CloseHandle, ServerBuilder};
 use tokio::task::JoinHandle;
 use tower::{buffer::Buffer, Service};
 
@@ -44,7 +44,11 @@ mod tests;
 pub struct RpcServer;
 
 impl RpcServer {
-    /// Start a new RPC server endpoint
+    /// Start a new RPC server endpoint using the supplied configs and services.
+    /// `app_version` is a version string for the application, which is used in RPC responses.
+    ///
+    /// Returns [`JoinHandle`]s for the RPC server and `sendrawtransaction` queue tasks,
+    /// and a [`CloseHandle`] for shutting down the RPC server task.
     pub fn spawn<Version, Mempool, State, Tip, ChainVerifier>(
         config: Config,
         app_version: Version,
@@ -54,7 +58,7 @@ impl RpcServer {
         chain_verifier: ChainVerifier,
         latest_chain_tip: Tip,
         network: Network,
-    ) -> (JoinHandle<()>, JoinHandle<()>)
+    ) -> (JoinHandle<()>, JoinHandle<()>, Option<CloseHandle>)
     where
         Version: ToString + Clone,
         Mempool: tower::Service<
@@ -135,6 +139,8 @@ impl RpcServer {
 
             info!("Opened RPC endpoint at {}", server.address());
 
+            let server_close_handle = server.close_handle();
+
             // The server is a blocking task, which blocks on executor shutdown.
             // So we need to wait on it on a std::thread, inside a tokio blocking task.
             // (Otherwise tokio panics when we shut down the RPC server.)
@@ -158,12 +164,14 @@ impl RpcServer {
                     }
                 }),
                 rpc_tx_queue_task_handle,
+                Some(server_close_handle),
             )
         } else {
             // There is no RPC port, so the RPC tasks do nothing.
             (
                 tokio::task::spawn(futures::future::pending().in_current_span()),
                 tokio::task::spawn(futures::future::pending().in_current_span()),
+                None,
             )
         }
     }
