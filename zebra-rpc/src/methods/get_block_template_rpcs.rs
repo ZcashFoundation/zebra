@@ -19,6 +19,7 @@ use zebra_chain::{
     parameters::Network,
     serialization::ZcashDeserializeInto,
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
+    transparent,
 };
 use zebra_consensus::{
     BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError, MAX_BLOCK_SIGOPS,
@@ -134,10 +135,13 @@ where
 
     // Configuration
     //
-    // TODO: add mining config for getblocktemplate RPC miner address
-    //
     /// The configured network for this RPC service.
     network: Network,
+
+    /// The configured miner address for this RPC service.
+    ///
+    /// Zebra currently only supports single-signature P2SH transparent addresses.
+    miner_address: Option<transparent::Address>,
 
     // Services
     //
@@ -179,6 +183,7 @@ where
     /// Create a new instance of the handler for getblocktemplate RPCs.
     pub fn new(
         network: Network,
+        mining_config: config::Config,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
@@ -186,6 +191,7 @@ where
     ) -> Self {
         Self {
             network,
+            miner_address: mining_config.miner_address,
             mempool,
             state,
             latest_chain_tip,
@@ -259,11 +265,21 @@ where
 
     fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>> {
         let network = self.network;
+        let miner_address = self.miner_address;
+
         let mempool = self.mempool.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
+            let miner_address = miner_address.ok_or_else(|| Error {
+                code: ErrorCode::ServerError(0),
+                message: "configure mining.miner_address in zebrad.toml \
+                          with a transparent P2SH single signature address"
+                    .to_string(),
+                data: None,
+            })?;
+
             let tip_height = best_chain_tip_height(&latest_chain_tip)?;
             let mempool_txs = select_mempool_transactions(mempool).await?;
 

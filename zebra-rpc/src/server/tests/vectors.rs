@@ -53,6 +53,7 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
 
         let (rpc_server_task_handle, rpc_tx_queue_task_handle) = RpcServer::spawn(
             config,
+            Default::default(),
             "RPC server test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
@@ -124,6 +125,7 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool) {
 
         let (rpc_server_task_handle, rpc_tx_queue_task_handle) = RpcServer::spawn(
             config,
+            Default::default(),
             "RPC server test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
@@ -182,6 +184,7 @@ fn rpc_server_spawn_port_conflict() {
 
         let (_rpc_server_1_task_handle, _rpc_tx_queue_1_task_handle) = RpcServer::spawn(
             config.clone(),
+            Default::default(),
             "RPC server 1 test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
@@ -196,6 +199,7 @@ fn rpc_server_spawn_port_conflict() {
 
         let (rpc_server_2_task_handle, _rpc_tx_queue_2_task_handle) = RpcServer::spawn(
             config,
+            Default::default(),
             "RPC server 2 conflict test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
@@ -283,6 +287,7 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
 
         let (_rpc_server_1_task_handle, _rpc_tx_queue_1_task_handle) = RpcServer::spawn(
             config.clone(),
+            Default::default(),
             "RPC server 1 test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),
@@ -297,6 +302,7 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
 
         let (rpc_server_2_task_handle, _rpc_tx_queue_2_task_handle) = RpcServer::spawn(
             config,
+            Default::default(),
             "RPC server 2 conflict test",
             Buffer::new(mempool.clone(), 1),
             Buffer::new(state.clone(), 1),

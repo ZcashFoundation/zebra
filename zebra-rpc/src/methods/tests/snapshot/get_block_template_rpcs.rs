@@ -8,15 +8,16 @@
 use insta::Settings;
 use tower::{buffer::Buffer, Service};
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{parameters::Network, transparent};
 use zebra_node_services::mempool;
 use zebra_state::LatestChainTip;
 
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::methods::{
-    get_block_template_rpcs::types::{
-        get_block_template::GetBlockTemplate, hex_data::HexData, submit_block,
+    get_block_template_rpcs::{
+        self,
+        types::{get_block_template::GetBlockTemplate, hex_data::HexData, submit_block},
     },
     GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
 };
@@ -66,8 +67,13 @@ pub async fn test_responses<State, ReadState>(
     )
     .await;
 
+    let mining_config = get_block_template_rpcs::config::Config {
+        miner_address: Some(transparent::Address::from_script_hash(network, [0xad; 20])),
+    };
+
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         network,
+        mining_config,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,

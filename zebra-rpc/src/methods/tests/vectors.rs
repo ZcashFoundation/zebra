@@ -651,6 +651,7 @@ async fn rpc_getblockcount() {
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Mainnet,
+        Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -695,6 +696,7 @@ async fn rpc_getblockcount_empty_state() {
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Mainnet,
+        Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -745,6 +747,7 @@ async fn rpc_getblockhash() {
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Mainnet,
+        Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -814,9 +817,14 @@ async fn rpc_getblocktemplate() {
     )
     .await;
 
+    let mining_config = get_block_template_rpcs::config::Config {
+        miner_address: Some(transparent::Address::from_script_hash(Mainnet, [0x7e; 20])),
+    };
+
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Mainnet,
+        mining_config,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -879,15 +887,6 @@ async fn rpc_submitblock_errors() {
         zebra_state::populated_state(blocks, Mainnet).await;
 
     // Init RPCs
-    let _rpc = RpcImpl::new(
-        "RPC test",
-        Mainnet,
-        false,
-        Buffer::new(mempool.clone(), 1),
-        Buffer::new(read_state.clone(), 1),
-        latest_chain_tip.clone(),
-    );
-
     let (
         chain_verifier,
         _transaction_verifier,
@@ -904,6 +903,7 @@ async fn rpc_submitblock_errors() {
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Mainnet,
+        Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),

@@ -2,16 +2,16 @@
 
 use serde::{Deserialize, Serialize};
 
-use zebra_chain::transparent::Address;
+use zebra_chain::transparent;
 
 /// Mining configuration section.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The address used for miner payouts.
-    /// Currently, Zebra only supports transparent addresses.
+    /// Zebra currently only supports single-signature P2SH transparent addresses.
     ///
     /// Zebra sends mining fees and miner rewards to this address in the
     /// `getblocktemplate` RPC coinbase transaction.
-    pub miner_address: Option<Address>,
+    pub miner_address: Option<transparent::Address>,
 }
