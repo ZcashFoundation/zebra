@@ -120,8 +120,8 @@ num-integer = "0.1.45"
 rand = { version = "0.8.5", package = "rand" }
 
 # prod feature sentry
-sentry-tracing = { version = "0.27.0", optional = true }
-sentry = { version = "0.27.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"], optional = true }
+sentry-tracing = { version = "0.28.0", optional = true }
+sentry = { version = "0.28.0", default-features = false, features = ["backtrace", "contexts", "reqwest", "rustls"], optional = true }
 
 # prod feature flamegraph
 tracing-flame = { version = "0.2.0", optional = true }
