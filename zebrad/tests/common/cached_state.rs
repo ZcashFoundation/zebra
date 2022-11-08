@@ -7,6 +7,10 @@
 
 use std::path::{Path, PathBuf};
 
+use std::time::Duration;
+
+use reqwest::Client;
+
 use color_eyre::eyre::{eyre, Result};
 use tempfile::TempDir;
 use tokio::fs;
@@ -20,6 +24,14 @@ use zebra_chain::{
 use zebra_state::{ChainTipChange, LatestChainTip};
 
 use crate::common::config::testdir;
+
+use zebra_state::MAX_BLOCK_REORG_HEIGHT;
+
+use crate::common::{
+    launch::spawn_zebrad_for_rpc,
+    sync::{check_sync_logs_until, MempoolBehavior, SYNC_FINISHED_REGEX},
+    test_type::TestType,
+};
 
 /// Path to a directory containing a cached Zebra state.
 pub const ZEBRA_CACHED_STATE_DIR: &str = "ZEBRA_CACHED_STATE_DIR";
@@ -143,4 +155,113 @@ async fn copy_directory(
     }
 
     Ok(sub_directories)
+}
+
+/// Accepts a network, test_type, test_name, and num_blocks (how many blocks past the finalized tip to try getting)
+///
+/// Syncs zebra until the tip, gets some blocks near the tip, via getblock rpc calls,
+/// shuts down zebra, and gets the finalized tip height of the updated cached state.
+///
+/// Returns retrieved blocks that are above the finalized tip height of the cached state.
+pub async fn get_raw_future_blocks(
+    network: Network,
+    test_type: TestType,
+    test_name: &str,
+    max_num_blocks: u32,
+) -> Result<Vec<String>> {
+    let max_num_blocks = max_num_blocks.min(MAX_BLOCK_REORG_HEIGHT);
+    let mut raw_blocks = Vec::with_capacity(max_num_blocks as usize);
+
+    assert!(
+        test_type.needs_zebra_cached_state() && test_type.needs_zebra_rpc_server(),
+        "get_raw_future_blocks needs zebra cached state and rpc server"
+    );
+
+    let should_sync = true;
+    let (zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
+            .ok_or_else(|| eyre!("get_raw_future_blocks requires a cached state"))?;
+    let rpc_address = zebra_rpc_address.expect("test type must have RPC port");
+
+    let mut zebrad = check_sync_logs_until(
+        zebrad,
+        network,
+        SYNC_FINISHED_REGEX,
+        MempoolBehavior::ShouldAutomaticallyActivate,
+        true,
+    )?;
+
+    // Create an http client
+    let client = Client::new();
+
+    let send_rpc_request = |method, params| {
+        client
+            .post(format!("http://{}", &rpc_address))
+            .body(format!(
+                r#"{{"jsonrpc": "2.0", "method": "{method}", "params": {params}, "id":123 }}"#
+            ))
+            .header("Content-Type", "application/json")
+            .send()
+    };
+
+    let blockchain_info: serde_json::Value = serde_json::from_str(
+        &send_rpc_request("getblockchaininfo", "[]".to_string())
+            .await?
+            .text()
+            .await?,
+    )?;
+
+    let tip_height: u32 = blockchain_info["result"]["blocks"]
+        .as_u64()
+        .expect("unexpected block height: doesn't fit in u64")
+        .try_into()
+        .expect("unexpected block height: doesn't fit in u32");
+
+    let estimated_finalized_tip_height = tip_height - MAX_BLOCK_REORG_HEIGHT;
+
+    tracing::info!(
+        ?estimated_finalized_tip_height,
+        "got tip height from blockchaininfo",
+    );
+
+    for block_height in (0..max_num_blocks).map(|idx| idx + estimated_finalized_tip_height) {
+        let raw_block: serde_json::Value = serde_json::from_str(
+            &send_rpc_request("getblock", format!(r#"["{block_height}", 0]"#))
+                .await?
+                .text()
+                .await?,
+        )?;
+
+        raw_blocks.push((
+            block_height,
+            raw_block["result"]
+                .as_str()
+                .expect("unexpected getblock result: not a string")
+                .to_string(),
+        ));
+    }
+
+    zebrad.kill(true)?;
+
+    // Sleep for a few seconds to make sure zebrad releases lock on cached state directory
+    std::thread::sleep(Duration::from_secs(3));
+
+    let zebrad_state_path = test_type
+        .zebrad_state_path(test_name)
+        .expect("already checked that there is a cached state path");
+
+    let Height(finalized_tip_height) =
+        load_tip_height_from_state_directory(network, zebrad_state_path.as_ref()).await?;
+
+    tracing::info!(
+        ?finalized_tip_height,
+        "finalized tip height from state directory"
+    );
+
+    let raw_future_blocks = raw_blocks
+        .into_iter()
+        .filter_map(|(height, raw_block)| height.gt(&finalized_tip_height).then_some(raw_block))
+        .collect();
+
+    Ok(raw_future_blocks)
 }
