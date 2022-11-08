@@ -19,19 +19,22 @@ use super::{CoinbaseData, Input, OutPoint, Output, Script};
 ///
 /// Includes the encoded coinbase height, if any.
 ///
-/// > The number of bytes in the coinbase script, up to a maximum of 100 bytes.
+/// # Consensus
 ///
-/// <https://developer.bitcoin.org/reference/transactions.html#coinbase-input-the-input-of-the-first-transaction-in-a-block>
+/// > A coinbase transaction script MUST have length in {2 .. 100} bytes.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 pub const MAX_COINBASE_DATA_LEN: usize = 100;
 
 /// The minimum length of the coinbase data.
 ///
 /// Includes the encoded coinbase height, if any.
 ///
-// TODO: Update the link below once the constant is documented in the
-// protocol.
+/// # Consensus
 ///
-/// <https://github.com/zcash/zips/issues/589>
+/// > A coinbase transaction script MUST have length in {2 .. 100} bytes.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 pub const MIN_COINBASE_DATA_LEN: usize = 2;
 
 /// The coinbase data for a genesis block.
