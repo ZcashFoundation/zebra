@@ -98,6 +98,10 @@ jobs:
         #       or remove this workaround once the build is more efficient (#3005).
         #with:
         #  workspaces: ". -> C:\\zebra-target"
+        with:
+          # Split the getblocktemplate-rpcs cache from the regular cache, to avoid linker errors.
+          # (These might be "disk full" errors, or they might be dependency resolution issues.)
+          key: ${{ matrix.features }}
 
       - name: Change target output directory on Windows
         # Windows doesn't have enough space on the D: drive, so we redirect the build output to the

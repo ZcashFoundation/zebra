@@ -650,6 +650,7 @@ async fn rpc_getblockcount() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -693,6 +694,7 @@ async fn rpc_getblockcount_empty_state() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -742,6 +744,7 @@ async fn rpc_getblockhash() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -777,6 +780,14 @@ async fn rpc_getblockhash() {
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblocktemplate() {
+    use std::panic;
+
+    use crate::methods::get_block_template_rpcs::constants::{
+        GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+    };
+    use zebra_chain::block::{MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION};
+    use zebra_consensus::MAX_BLOCK_SIGOPS;
+
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -805,6 +816,7 @@ async fn rpc_getblocktemplate() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -820,18 +832,29 @@ async fn rpc_getblocktemplate() {
 
     let get_block_template = get_block_template
         .await
-        .expect("unexpected panic in getblocktemplate RPC task")
+        .unwrap_or_else(|error| match error.try_into_panic() {
+            Ok(panic_object) => panic::resume_unwind(panic_object),
+            Err(cancelled_error) => {
+                panic!("getblocktemplate task was unexpectedly cancelled: {cancelled_error:?}")
+            }
+        })
         .expect("unexpected error in getblocktemplate RPC call");
 
     assert!(get_block_template.capabilities.is_empty());
-    assert_eq!(get_block_template.version, 0);
+    assert_eq!(get_block_template.version, ZCASH_BLOCK_VERSION);
     assert!(get_block_template.transactions.is_empty());
     assert!(get_block_template.target.is_empty());
     assert_eq!(get_block_template.min_time, 0);
-    assert!(get_block_template.mutable.is_empty());
-    assert!(get_block_template.nonce_range.is_empty());
-    assert_eq!(get_block_template.sigop_limit, 0);
-    assert_eq!(get_block_template.size_limit, 0);
+    assert_eq!(
+        get_block_template.mutable,
+        GET_BLOCK_TEMPLATE_MUTABLE_FIELD.to_vec()
+    );
+    assert_eq!(
+        get_block_template.nonce_range,
+        GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD
+    );
+    assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
+    assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
     assert_eq!(get_block_template.cur_time, 0);
     assert!(get_block_template.bits.is_empty());
     assert_eq!(get_block_template.height, 0);
@@ -880,6 +903,7 @@ async fn rpc_submitblock_errors() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),

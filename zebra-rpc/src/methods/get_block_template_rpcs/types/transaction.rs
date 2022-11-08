@@ -1,10 +1,11 @@
 //! The `TransactionTemplate` type is part of the `getblocktemplate` RPC method output.
 
 use zebra_chain::{
-    amount::{self, Amount, NonNegative},
+    amount::{self, Amount, NegativeOrZero, NonNegative},
     block::merkle::AUTH_DIGEST_PLACEHOLDER,
-    transaction::{self, SerializedTransaction, VerifiedUnminedTx},
+    transaction::{self, SerializedTransaction, UnminedTx, VerifiedUnminedTx},
 };
+use zebra_script::CachedFfiTransaction;
 
 /// Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -50,9 +51,14 @@ where
     pub(crate) required: bool,
 }
 
-// Convert from a mempool transaction to a transaction template.
+// Convert from a mempool transaction to a non-coinbase transaction template.
 impl From<&VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
     fn from(tx: &VerifiedUnminedTx) -> Self {
+        assert!(
+            !tx.transaction.transaction.is_coinbase(),
+            "unexpected coinbase transaction in mempool"
+        );
+
         Self {
             data: tx.transaction.transaction.as_ref().into(),
             hash: tx.transaction.id.mined_id(),
@@ -78,5 +84,47 @@ impl From<&VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
 impl From<VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
     fn from(tx: VerifiedUnminedTx) -> Self {
         Self::from(&tx)
+    }
+}
+
+impl TransactionTemplate<NegativeOrZero> {
+    /// Convert from a generated coinbase transaction into a coinbase transaction template.
+    ///
+    /// `miner_fee` is the total miner fees for the block, excluding newly created block rewards.
+    //
+    // TODO: use a different type for generated coinbase transactions?
+    pub fn from_coinbase(tx: &UnminedTx, miner_fee: Amount<NonNegative>) -> Self {
+        assert!(
+            tx.transaction.is_coinbase(),
+            "invalid generated coinbase transaction: \
+             must have exactly one input, which must be a coinbase input",
+        );
+
+        let miner_fee = miner_fee
+            .constrain()
+            .expect("negating a NonNegative amount always results in a valid NegativeOrZero");
+
+        let legacy_sigop_count = CachedFfiTransaction::new(tx.transaction.clone(), Vec::new())
+            .legacy_sigop_count()
+            .expect(
+                "invalid generated coinbase transaction: \
+                 failure in zcash_script sigop count",
+            );
+
+        Self {
+            data: tx.transaction.as_ref().into(),
+            hash: tx.id.mined_id(),
+            auth_digest: tx.id.auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER),
+
+            // Always empty, coinbase transactions never have inputs.
+            depends: Vec::new(),
+
+            fee: miner_fee,
+
+            sigops: legacy_sigop_count,
+
+            // Zcash requires a coinbase transaction.
+            required: true,
+        }
     }
 }

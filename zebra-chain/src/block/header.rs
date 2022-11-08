@@ -146,6 +146,12 @@ const BLOCK_HEADER_LENGTH: usize =
 /// A CountedHeader has BLOCK_HEADER_LENGTH bytes + 1 or more bytes for the transaction count
 pub(crate) const MIN_COUNTED_HEADER_LEN: usize = BLOCK_HEADER_LENGTH + 1;
 
+/// The Zcash accepted block version.
+///
+/// The consensus rules do not force the block version to be this value but just equal or greater than it.
+/// However, it is suggested that submitted block versions to be of this exact value.
+pub const ZCASH_BLOCK_VERSION: u32 = 4;
+
 impl TrustedPreallocate for CountedHeader {
     fn max_allocation() -> u64 {
         // Every vector type requires a length field of at least one byte for de/serialization.
