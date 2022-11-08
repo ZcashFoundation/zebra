@@ -124,20 +124,43 @@ pub fn funding_stream_address(
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 pub fn check_script_form(lock_script: &Script, address: Address) -> bool {
-    let mut address_hash = address
+    // TODO: Verify P2SH multisig funding stream addresses (#5577).
+    //       As of NU5, the funding streams do not use multisig addresses,
+    //       so this is optional.
+    //
+    // # Consensus
+    //
+    // > The standard redeem script hash is specified in [Bitcoin-Multisig] for P2SH multisig
+    // > addresses...
+    // [protocol specification §7.10][7.10]
+    //
+    // [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+    // [Bitcoin-Multisig]: https://developer.bitcoin.org/ devguide/transactions.html#multisig
+
+    // Verify a Bitcoin P2SH single address.
+    let standard_script_hash = new_coinbase_script(address);
+
+    lock_script == &standard_script_hash
+}
+
+/// Returns a new funding stream coinbase output lock script, which pays to `address`.
+pub fn new_coinbase_script(address: Address) -> Script {
+    let address_hash = address
         .zcash_serialize_to_vec()
         .expect("we should get address bytes here");
 
-    address_hash = address_hash[2..22].to_vec();
-    address_hash.insert(0, OpCode::Push20Bytes as u8);
-    address_hash.insert(0, OpCode::Hash160 as u8);
-    address_hash.insert(address_hash.len(), OpCode::Equal as u8);
-    if lock_script.as_raw_bytes().len() == address_hash.len()
-        && *lock_script == Script::new(&address_hash)
-    {
-        return true;
-    }
-    false
+    // > The “prescribed way” to pay a transparent P2SH address is to use a standard P2SH script
+    // > of the form OP_HASH160 fs.RedeemScriptHash(height) OP_EQUAL as the scriptPubKey.
+    //
+    // [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+    let mut script_hash = Vec::new();
+
+    script_hash.push(OpCode::Hash160 as u8);
+    script_hash.push(OpCode::Push20Bytes as u8);
+    script_hash.extend(&address_hash[2..22]);
+    script_hash.push(OpCode::Equal as u8);
+
+    Script::new(&address_hash)
 }
 
 /// Returns a list of outputs in `Transaction`, which have a script address equal to `Address`.
