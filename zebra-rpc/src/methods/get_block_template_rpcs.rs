@@ -475,10 +475,13 @@ pub fn standard_coinbase_outputs(
     let funding_streams = funding_stream_values(height, network)
         .expect("funding stream value calculations are valid for reasonable chain heights");
 
-    let funding_streams: Vec<(Amount<NonNegative>, transparent::Address)> = funding_streams
+    let mut funding_streams: Vec<(Amount<NonNegative>, transparent::Address)> = funding_streams
         .iter()
         .map(|(receiver, amount)| (*amount, funding_stream_address(height, network, *receiver)))
         .collect();
+    // The HashMap returns funding streams in an arbitrary order,
+    // but Zebra's snapshot tests expect the same order every time.
+    funding_streams.sort_by_key(|(amount, _address)| *amount);
 
     let miner_reward = miner_subsidy(height, network)
         .expect("reward calculations are valid for reasonable chain heights")
