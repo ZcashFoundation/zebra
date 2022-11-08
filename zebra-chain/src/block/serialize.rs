@@ -13,7 +13,7 @@ use crate::{
     work::{difficulty::CompactDifficulty, equihash},
 };
 
-use super::{merkle, Block, CountedHeader, Hash, Header};
+use super::{header::ZCASH_BLOCK_VERSION, merkle, Block, CountedHeader, Hash, Header};
 
 /// The maximum size of a Zcash block, in bytes.
 ///
@@ -77,7 +77,7 @@ impl ZcashDeserialize for Header {
         // > The block version number MUST be greater than or equal to 4.
         //
         // https://zips.z.cash/protocol/protocol.pdf#blockheader
-        if version < 4 {
+        if version < ZCASH_BLOCK_VERSION {
             return Err(SerializationError::Parse("version must be at least 4"));
         }
 

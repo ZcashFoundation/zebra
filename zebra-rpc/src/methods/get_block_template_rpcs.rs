@@ -13,14 +13,16 @@ use zebra_chain::{
     block::{
         self,
         merkle::{self, AuthDataRoot},
-        Block,
+        Block, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
     },
     chain_tip::ChainTip,
     parameters::Network,
     serialization::ZcashDeserializeInto,
     transaction::{UnminedTx, VerifiedUnminedTx},
 };
-use zebra_consensus::{BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError};
+use zebra_consensus::{
+    BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError, MAX_BLOCK_SIGOPS,
+};
 use zebra_node_services::mempool;
 
 use crate::methods::{
@@ -33,6 +35,7 @@ use crate::methods::{
 };
 
 pub mod config;
+pub mod constants;
 pub(crate) mod types;
 
 /// getblocktemplate RPC method signatures.
@@ -273,12 +276,12 @@ where
 
             TODO: create a method Transaction::new_v5_coinbase(network, tip_height, miner_fee),
                   and call it here.
-             */
+            */
             let coinbase_tx = if mempool_txs.is_empty() {
                 let empty_string = String::from("");
                 return Ok(GetBlockTemplate {
                     capabilities: vec![],
-                    version: 0,
+                    version: ZCASH_BLOCK_VERSION,
                     previous_block_hash: GetBlockHash([0; 32].into()),
                     block_commitments_hash: [0; 32].into(),
                     light_client_root_hash: [0; 32].into(),
@@ -301,10 +304,13 @@ where
                     },
                     target: empty_string.clone(),
                     min_time: 0,
-                    mutable: vec![],
-                    nonce_range: empty_string.clone(),
-                    sigop_limit: 0,
-                    size_limit: 0,
+                    mutable: constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect(),
+                    nonce_range: constants::GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
+                    sigop_limit: MAX_BLOCK_SIGOPS,
+                    size_limit: MAX_BLOCK_BYTES,
                     cur_time: 0,
                     bits: empty_string,
                     height: 0,
@@ -323,7 +329,7 @@ where
             Ok(GetBlockTemplate {
                 capabilities: vec![],
 
-                version: 0,
+                version: ZCASH_BLOCK_VERSION,
 
                 previous_block_hash: GetBlockHash([0; 32].into()),
                 block_commitments_hash: [0; 32].into(),
@@ -344,12 +350,16 @@ where
 
                 min_time: 0,
 
-                mutable: vec![],
+                mutable: constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
 
-                nonce_range: empty_string.clone(),
+                nonce_range: constants::GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
 
-                sigop_limit: 0,
-                size_limit: 0,
+                sigop_limit: MAX_BLOCK_SIGOPS,
+
+                size_limit: MAX_BLOCK_BYTES,
 
                 cur_time: 0,
 
