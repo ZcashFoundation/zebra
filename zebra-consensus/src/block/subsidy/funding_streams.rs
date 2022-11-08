@@ -153,14 +153,14 @@ pub fn new_coinbase_script(address: Address) -> Script {
     // > of the form OP_HASH160 fs.RedeemScriptHash(height) OP_EQUAL as the scriptPubKey.
     //
     // [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-    let mut script_hash = Vec::new();
+    let mut script_bytes = Vec::new();
 
-    script_hash.push(OpCode::Hash160 as u8);
-    script_hash.push(OpCode::Push20Bytes as u8);
-    script_hash.extend(&address_hash[2..22]);
-    script_hash.push(OpCode::Equal as u8);
+    script_bytes.push(OpCode::Hash160 as u8);
+    script_bytes.push(OpCode::Push20Bytes as u8);
+    script_bytes.extend(&address_hash[2..22]);
+    script_bytes.push(OpCode::Equal as u8);
 
-    Script::new(&address_hash)
+    Script::new(&script_bytes)
 }
 
 /// Returns a list of outputs in `Transaction`, which have a script address equal to `Address`.
