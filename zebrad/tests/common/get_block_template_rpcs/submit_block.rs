@@ -8,6 +8,8 @@
 //! of the updated cached state, restart zebra without peers, and submit blocks above the
 //! finalized tip height.
 
+use std::time::Duration;
+
 use color_eyre::eyre::{eyre, Context, Result};
 
 use reqwest::Client;
@@ -41,12 +43,6 @@ pub(crate) async fn run() -> Result<()> {
         "running submitblock test using zebrad",
     );
 
-    // TODO: As part of or as a pre-cursor to issue #5015,
-    // - Use only original cached state,
-    // - sync until the tip
-    // - get first X blocks in non-finalized state via getblock rpc calls
-    // - restart zebra without peers
-    // - submit block(s) above the finalized tip height
     let raw_blocks: Vec<String> = get_raw_future_blocks(network, test_type, test_name, 3).await?;
 
     tracing::info!("got raw future blocks, spawning isolated zebrad...",);
@@ -85,7 +81,7 @@ pub(crate) async fn run() -> Result<()> {
         let res_text = res.text().await?;
 
         // Test rpc endpoint response
-        assert!(res_text.contains(r#""result":"null""#));
+        assert!(res_text.contains(r#""result":null"#));
     }
 
     zebrad.kill(false)?;
@@ -122,11 +118,10 @@ async fn get_raw_future_blocks(
     );
 
     let should_sync = true;
-    let (mut zebrad, zebra_rpc_address) =
+    let (zebrad, zebra_rpc_address) =
         spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
             .ok_or_else(|| eyre!("get_raw_future_blocks requires a cached state"))?;
     let rpc_address = zebra_rpc_address.expect("test type must have RPC port");
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {rpc_address}"))?;
 
     let mut zebrad = check_sync_logs_until(
         zebrad,
@@ -149,12 +144,12 @@ async fn get_raw_future_blocks(
             .send()
     };
 
-    let blockchain_info: serde_json::Value =
-        send_rpc_request("getblockchaininfo", "[]".to_string())
+    let blockchain_info: serde_json::Value = serde_json::from_str(
+        &send_rpc_request("getblockchaininfo", "[]".to_string())
             .await?
             .text()
-            .await?
-            .try_into()?;
+            .await?,
+    )?;
 
     let tip_height: u32 = blockchain_info["result"]["blocks"]
         .as_u64()
@@ -164,13 +159,18 @@ async fn get_raw_future_blocks(
 
     let estimated_finalized_tip_height = tip_height - MAX_BLOCK_REORG_HEIGHT;
 
+    tracing::info!(
+        ?estimated_finalized_tip_height,
+        "got tip height from blockchaininfo",
+    );
+
     for block_height in (0..max_num_blocks).map(|idx| idx + estimated_finalized_tip_height) {
-        let raw_block: serde_json::Value =
-            send_rpc_request("getblock", format!(r#"["{block_height}", 0]"#))
+        let raw_block: serde_json::Value = serde_json::from_str(
+            &send_rpc_request("getblock", format!(r#"["{block_height}", 0]"#))
                 .await?
                 .text()
-                .await?
-                .try_into()?;
+                .await?,
+        )?;
 
         raw_blocks.push((
             block_height,
@@ -183,12 +183,20 @@ async fn get_raw_future_blocks(
 
     zebrad.kill(true)?;
 
+    // Sleep for a few seconds to make sure zebrad releases lock on cached state directory
+    std::thread::sleep(Duration::from_secs(3));
+
     let zebrad_state_path = test_type
         .zebrad_state_path(test_name)
         .expect("already checked that there is a cached state path");
 
     let Height(finalized_tip_height) =
         load_tip_height_from_state_directory(network, zebrad_state_path.as_ref()).await?;
+
+    tracing::info!(
+        ?finalized_tip_height,
+        "finalized tip height from state directory"
+    );
 
     let raw_future_blocks = raw_blocks
         .into_iter()
