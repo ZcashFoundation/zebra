@@ -281,7 +281,7 @@ where
                 let empty_string = String::from("");
                 return Ok(GetBlockTemplate {
                     capabilities: vec![],
-                    version: 0,
+                    version: ZCASH_BLOCK_VERSION,
                     previous_block_hash: GetBlockHash([0; 32].into()),
                     block_commitments_hash: [0; 32].into(),
                     light_client_root_hash: [0; 32].into(),
@@ -304,10 +304,13 @@ where
                     },
                     target: empty_string.clone(),
                     min_time: 0,
-                    mutable: vec![],
-                    nonce_range: empty_string.clone(),
-                    sigop_limit: 0,
-                    size_limit: 0,
+                    mutable: constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect(),
+                    nonce_range: constants::GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
+                    sigop_limit: MAX_BLOCK_SIGOPS,
+                    size_limit: MAX_BLOCK_BYTES,
                     cur_time: 0,
                     bits: empty_string,
                     height: 0,
