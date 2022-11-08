@@ -22,7 +22,8 @@ use zebra_chain::{
     transparent,
 };
 use zebra_consensus::{
-    BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError, MAX_BLOCK_SIGOPS,
+    funding_stream_address, funding_stream_values, miner_subsidy, new_coinbase_script, BlockError,
+    VerifyBlockError, VerifyChainError, VerifyCheckpointError, MAX_BLOCK_SIGOPS,
 };
 use zebra_node_services::mempool;
 
@@ -286,7 +287,9 @@ where
             let miner_fee = miner_fee(&mempool_txs);
 
             let block_height = (tip_height + 1).expect("tip is far below Height::MAX");
-            let coinbase_tx = Transaction::new_v5_coinbase(network, block_height, miner_fee).into();
+            let outputs =
+                standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
+            let coinbase_tx = Transaction::new_v5_coinbase(network, block_height, outputs).into();
 
             let (merkle_root, auth_data_root) =
                 calculate_transaction_roots(&coinbase_tx, &mempool_txs);
@@ -457,6 +460,39 @@ pub fn miner_fee(mempool_txs: &[VerifiedUnminedTx]) -> Amount<NonNegative> {
         "invalid selected transactions: \
          fees in a valid block can not be more than MAX_MONEY",
     )
+}
+
+/// Returns the standard funding stream and miner reward transparent output scripts
+/// for `network`, `height` and `miner_fee`.
+///
+/// Only works for post-Canopy heights.
+pub fn standard_coinbase_outputs(
+    network: Network,
+    height: Height,
+    miner_address: transparent::Address,
+    miner_fee: Amount<NonNegative>,
+) -> Vec<(Amount<NonNegative>, transparent::Script)> {
+    let funding_streams = funding_stream_values(height, network)
+        .expect("funding stream value calculations are valid for reasonable chain heights");
+
+    let funding_streams: Vec<(Amount<NonNegative>, transparent::Address)> = funding_streams
+        .iter()
+        .map(|(receiver, amount)| (*amount, funding_stream_address(height, network, *receiver)))
+        .collect();
+
+    let miner_reward = miner_subsidy(height, network)
+        .expect("reward calculations are valid for reasonable chain heights")
+        + miner_fee;
+    let miner_reward =
+        miner_reward.expect("reward calculations are valid for reasonable chain heights");
+
+    let mut coinbase_outputs = funding_streams;
+    coinbase_outputs.push((miner_reward, miner_address));
+
+    coinbase_outputs
+        .iter()
+        .map(|(amount, address)| (*amount, new_coinbase_script(*address)))
+        .collect()
 }
 
 /// Returns the transaction effecting and authorizing roots

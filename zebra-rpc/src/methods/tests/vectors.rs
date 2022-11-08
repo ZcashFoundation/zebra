@@ -788,7 +788,10 @@ async fn rpc_getblocktemplate() {
     use crate::methods::get_block_template_rpcs::constants::{
         GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
     };
-    use zebra_chain::block::{MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION};
+    use zebra_chain::{
+        amount::{Amount, NonNegative},
+        block::{MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
+    };
     use zebra_consensus::MAX_BLOCK_SIGOPS;
 
     let _init_guard = zebra_test::init();
@@ -866,6 +869,17 @@ async fn rpc_getblocktemplate() {
     assert_eq!(get_block_template.cur_time, 0);
     assert!(get_block_template.bits.is_empty());
     assert_eq!(get_block_template.height, 0);
+
+    // Coinbase transaction checks.
+    assert!(get_block_template.coinbase_txn.required);
+    assert!(!get_block_template.coinbase_txn.data.as_ref().is_empty());
+    assert!(get_block_template.coinbase_txn.sigops > 0);
+    assert_eq!(get_block_template.coinbase_txn.depends.len(), 0);
+    // Coinbase transaction checks for empty blocks.
+    assert_eq!(
+        get_block_template.coinbase_txn.fee,
+        Amount::<NonNegative>::zero()
+    );
 
     mempool.expect_no_requests().await;
 }
