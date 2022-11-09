@@ -35,7 +35,9 @@ pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, ReadRequest, Requ
 pub use response::{ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipChange, LatestChainTip, TipAction},
-    init, spawn_init, OutputIndex, OutputLocation, TransactionLocation,
+    init, spawn_init,
+    watch_receiver::WatchReceiver,
+    OutputIndex, OutputLocation, TransactionLocation,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]

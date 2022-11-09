@@ -377,7 +377,8 @@ jobs:
       app_name: zebrad
       test_id: full-sync-to-tip
       test_description: Test a full sync up to the tip
-      test_variables: '-e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600'
+      # The value of FULL_SYNC_MAINNET_TIMEOUT_MINUTES is currently ignored.
+      test_variables: '-e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=0'
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: false

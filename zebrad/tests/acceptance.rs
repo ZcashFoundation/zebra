@@ -169,6 +169,9 @@ use common::{
 /// This limit only applies to some tests.
 pub const MAX_ASYNC_BLOCKING_TIME: Duration = zebra_test::mock_service::DEFAULT_MAX_REQUEST_DELAY;
 
+/// The test config file prefix for `--feature getblocktemplate-rpcs` configs.
+pub const GET_BLOCK_TEMPLATE_CONFIG_PREFIX: &str = "getblocktemplate-";
+
 #[test]
 fn generate_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -702,11 +705,22 @@ fn last_config_is_stored() -> Result<()> {
 
     Err(eyre!(
         "latest zebrad config is not being tested for compatibility.\n\
-         Run:\n\
-         zebrad generate |\n\
-         sed \"s/cache_dir = '.*'/cache_dir = 'cache_dir'/\" >\n\
-         zebrad/tests/common/configs/<next-release-tag>.toml\n\
-         and commit the latest config to Zebra's git repository"
+         Run: \n\
+         cargo build {}--bin zebrad && \n\
+         zebrad generate | \n\
+         sed \"s/cache_dir = '.*'/cache_dir = 'cache_dir'/\" > \n\
+         zebrad/tests/common/configs/{}<next-release-tag>.toml \n\
+         and commit the latest config to Zebra's git repository",
+        if cfg!(feature = "getblocktemplate-rpcs") {
+            "--features=getblocktemplate-rpcs "
+        } else {
+            ""
+        },
+        if cfg!(feature = "getblocktemplate-rpcs") {
+            GET_BLOCK_TEMPLATE_CONFIG_PREFIX
+        } else {
+            ""
+        },
     ))
 }
 
@@ -799,7 +813,7 @@ fn stored_configs_works() -> Result<()> {
             .file_name()
             .into_string()
             .expect("all files names should be string convertible")
-            .starts_with("getblocktemplate-")
+            .starts_with(GET_BLOCK_TEMPLATE_CONFIG_PREFIX)
         {
             continue;
         }
