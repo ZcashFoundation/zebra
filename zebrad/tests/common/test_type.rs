@@ -1,3 +1,5 @@
+//! Provides TestType enum with methods for shared code for acceptance tests
+
 use std::{env, path::PathBuf, time::Duration};
 
 use zebra_test::{command::NO_MATCHES_REGEX_ITER, prelude::*};
@@ -52,7 +54,8 @@ pub enum TestType {
     /// Launch `zebrad` and sync it to the tip, but don't launch `lightwalletd`.
     ///
     /// This test requires a cached Zebra state.
-    UpdateZebraCachedState,
+    #[allow(dead_code)]
+    UpdateZebraCachedStateWithRpc,
 }
 
 impl TestType {
@@ -67,14 +70,14 @@ impl TestType {
             FullSyncFromGenesis { .. }
             | UpdateCachedState
             | UpdateZebraCachedStateNoRpc
-            | UpdateZebraCachedState => true,
+            | UpdateZebraCachedStateWithRpc => true,
         }
     }
 
     /// Does this test need a Zebra rpc server?
     pub fn needs_zebra_rpc_server(&self) -> bool {
         match self {
-            UpdateZebraCachedState => true,
+            UpdateZebraCachedStateWithRpc => true,
             UpdateZebraCachedStateNoRpc
             | LaunchWithEmptyState
             | FullSyncFromGenesis { .. }
@@ -85,7 +88,7 @@ impl TestType {
     /// Does this test launch `lightwalletd`?
     pub fn launches_lightwalletd(&self) -> bool {
         match self {
-            UpdateZebraCachedStateNoRpc | UpdateZebraCachedState => false,
+            UpdateZebraCachedStateNoRpc | UpdateZebraCachedStateWithRpc => false,
             LaunchWithEmptyState | FullSyncFromGenesis { .. } | UpdateCachedState => true,
         }
     }
@@ -100,7 +103,7 @@ impl TestType {
             LaunchWithEmptyState
             | FullSyncFromGenesis { .. }
             | UpdateZebraCachedStateNoRpc
-            | UpdateZebraCachedState => false,
+            | UpdateZebraCachedStateWithRpc => false,
             UpdateCachedState => true,
         }
     }
@@ -112,7 +115,7 @@ impl TestType {
             FullSyncFromGenesis {
                 allow_lightwalletd_cached_state,
             } => *allow_lightwalletd_cached_state,
-            UpdateCachedState | UpdateZebraCachedStateNoRpc | UpdateZebraCachedState => true,
+            UpdateCachedState | UpdateZebraCachedStateNoRpc | UpdateZebraCachedStateWithRpc => true,
         }
     }
 
@@ -121,7 +124,7 @@ impl TestType {
         match self {
             LaunchWithEmptyState => false,
             FullSyncFromGenesis { .. } | UpdateCachedState => true,
-            UpdateZebraCachedStateNoRpc | UpdateZebraCachedState => false,
+            UpdateZebraCachedStateNoRpc | UpdateZebraCachedStateWithRpc => false,
         }
     }
 
@@ -227,7 +230,7 @@ impl TestType {
             LaunchWithEmptyState => LIGHTWALLETD_DELAY,
             FullSyncFromGenesis { .. } => LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
             UpdateCachedState | UpdateZebraCachedStateNoRpc => LIGHTWALLETD_UPDATE_TIP_DELAY,
-            UpdateZebraCachedState => FINISH_PARTIAL_SYNC_TIMEOUT,
+            UpdateZebraCachedStateWithRpc => FINISH_PARTIAL_SYNC_TIMEOUT,
         }
     }
 
@@ -243,7 +246,7 @@ impl TestType {
         match self {
             LaunchWithEmptyState => LIGHTWALLETD_DELAY,
             FullSyncFromGenesis { .. } => LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
-            UpdateCachedState | UpdateZebraCachedStateNoRpc | UpdateZebraCachedState => {
+            UpdateCachedState | UpdateZebraCachedStateNoRpc | UpdateZebraCachedStateWithRpc => {
                 LIGHTWALLETD_UPDATE_TIP_DELAY
             }
         }

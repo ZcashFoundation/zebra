@@ -48,6 +48,9 @@ fn max_sent_transactions() -> usize {
     min(CHANNEL_AND_QUEUE_CAPACITY, MAX_INBOUND_CONCURRENCY) - 1
 }
 
+/// Number of blocks past the finalized to load transactions from.
+const MAX_NUM_FUTURE_BLOCKS: u32 = 50;
+
 /// The test entry point.
 //
 // TODO:
@@ -259,18 +262,13 @@ async fn load_transactions_from_future_blocks(
     test_type: TestType,
     test_name: &str,
 ) -> Result<Vec<Arc<Transaction>>> {
-    let transactions = get_future_blocks(network, test_type, test_name, 3)
+    let transactions = get_future_blocks(network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS)
         .await?
         .into_iter()
-        .map(|block| block.transactions)
-        .reduce(|mut p, mut n| {
-            if (p.len() + n.len()) < max_sent_transactions() {
-                p.append(&mut n)
-            };
-
-            p
-        })
-        .expect("get_future_blocks should return at least 1 block");
+        .flat_map(|block| block.transactions)
+        .filter(|block| !block.is_coinbase())
+        .take(max_sent_transactions())
+        .collect();
 
     Ok(transactions)
 }

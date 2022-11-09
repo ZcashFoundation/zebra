@@ -19,12 +19,15 @@ use crate::common::{
     test_type::TestType,
 };
 
+/// Number of blocks past the finalized to retrieve and submit.
+const MAX_NUM_FUTURE_BLOCKS: u32 = 3;
+
 #[allow(clippy::print_stderr)]
 pub(crate) async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // We want a zebra state dir in place,
-    let test_type = TestType::UpdateZebraCachedState;
+    let test_type = TestType::UpdateZebraCachedStateWithRpc;
     let test_name = "submit_block_test";
     let network = Network::Mainnet;
 
@@ -39,7 +42,8 @@ pub(crate) async fn run() -> Result<()> {
         "running submitblock test using zebrad",
     );
 
-    let raw_blocks: Vec<String> = get_raw_future_blocks(network, test_type, test_name, 3).await?;
+    let raw_blocks: Vec<String> =
+        get_raw_future_blocks(network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS).await?;
 
     tracing::info!("got raw future blocks, spawning isolated zebrad...",);
 

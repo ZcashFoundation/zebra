@@ -91,7 +91,7 @@ jobs:
       - run: 'echo "No build required"'
 
   submit-block-test:
-    name: submit block test
+    name: submit block / Run submit-block test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
