@@ -268,7 +268,7 @@ impl Drop for RpcServer {
         // Block on shutting down, propagating panics.
         // This can take around 150 seconds.
         //
-        // Zebra sometimes crashes with memory errors if we do not do this.
+        // Without this shutdown, Zebra's RPC unit tests sometimes crashed with memory errors.
         self.shutdown_blocking();
     }
 }

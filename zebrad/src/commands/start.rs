@@ -338,13 +338,6 @@ impl StartCmd {
 
         info!("exiting Zebra because an ongoing task exited: stopping other tasks");
 
-        // We don't want to wait until the RPC server shuts down before aborting other tasks.
-        //
-        // TODO: do we need to wait on this task with a timeout?
-        if let Some(rpc_server) = rpc_server {
-            let _rpc_shutdown_task_handle = rpc_server.shutdown();
-        }
-
         // ongoing tasks
         rpc_task_handle.abort();
         rpc_tx_queue_task_handle.abort();
@@ -358,6 +351,14 @@ impl StartCmd {
         // startup tasks
         groth16_download_handle.abort();
         old_databases_task_handle.abort();
+
+        // Wait until the RPC server shuts down.
+        // This can take around 150 seconds.
+        //
+        // Without this shutdown, Zebra's RPC unit tests sometimes crashed with memory errors.
+        if let Some(rpc_server) = rpc_server {
+            rpc_server.shutdown_blocking();
+        }
 
         exit_status
     }
