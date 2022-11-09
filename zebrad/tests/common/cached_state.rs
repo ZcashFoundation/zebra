@@ -259,6 +259,7 @@ pub async fn get_raw_future_blocks(
     let estimated_finalized_tip_height = tip_height - MAX_BLOCK_REORG_HEIGHT;
 
     tracing::info!(
+        ?tip_height,
         ?estimated_finalized_tip_height,
         "got tip height from blockchaininfo",
     );
@@ -294,7 +295,9 @@ pub async fn get_raw_future_blocks(
 
     tracing::info!(
         ?finalized_tip_height,
-        "finalized tip height from state directory"
+        non_finalized_tip_height = ?tip_height,
+        ?estimated_finalized_tip_height,
+        "got finalized tip height from state directory"
     );
 
     let raw_future_blocks = raw_blocks

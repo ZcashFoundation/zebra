@@ -245,10 +245,10 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
-/// Loads transactions from 1-3 block(s) after the chain tip of the cached state.
+/// Loads transactions from a few block(s) after the chain tip of the cached state.
 ///
-/// Returns a list of valid transactions that are not in any of the blocks finalized to disk
-/// in the original `zebrad_state_path`.
+/// Returns a list of non-coinbase transactions from blocks that have not been finalized to disk
+/// in the `ZEBRA_CACHED_STATE_DIR`.
 ///
 /// ## Panics
 ///
