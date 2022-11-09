@@ -1,4 +1,4 @@
-//! Provides TestType enum with methods for shared code for acceptance tests
+//! Provides TestType enum with shared code for acceptance tests
 
 use std::{env, path::PathBuf, time::Duration};
 
