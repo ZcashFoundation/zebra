@@ -8,7 +8,13 @@ repository = "https://github.com/ZcashFoundation/zebra"
 
 [features]
 default = []
-getblocktemplate-rpcs = []
+
+# Production features that activate extra dependencies, or extra features in dependencies
+
+# Experimental mining RPC support
+getblocktemplate-rpcs = [
+    "zebra-chain/getblocktemplate-rpcs",
+]
 
 [dependencies]
 zebra-chain = { path = "../zebra-chain" }
