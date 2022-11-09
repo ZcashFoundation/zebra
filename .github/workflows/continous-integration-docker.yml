@@ -550,31 +550,6 @@ jobs:
       group: ${{ github.workflow }}−${{ github.ref }}-lightwalletd-transactions-test
       cancel-in-progress: false
 
-  # Test that Zebra can handle a submit block RPC call, using a cached Zebra tip state
-  #
-  # Runs:
-  # - after every PR is merged to `main`
-  #
-  # If the state version has changed, waits for the new cached states to be created.
-  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
-  # TODO: move this job under lightwalletd-full-sync to have a sequential logic
-  submit-block-test:
-    name: submit block test
-    needs: test-full-sync
-    uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() }}
-    with:
-      app_name: zebrad
-      test_id: submit-block-test
-      test_description: Test submitting blocks via Zebra's rpc server
-      test_variables: '-e TEST_SUBMIT_BLOCK=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
-      needs_zebra_state: true
-      needs_lwd_state: false
-      saves_to_disk: false
-      disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
-
   # Test that Zebra can handle gRPC wallet calls, using a cached Zebra tip state
   #
   # Runs:
@@ -600,3 +575,28 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
+
+  # Test that Zebra can handle a submit block RPC call, using a cached Zebra tip state
+  #
+  # Runs:
+  # - after every PR is merged to `main`
+  # - on every PR update
+  #
+  # If the state version has changed, waits for the new cached states to be created.
+  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
+  submit-block-test:
+    name: submit block test
+    needs: test-full-sync
+    uses: ./.github/workflows/deploy-gcp-tests.yml
+    if: ${{ !cancelled() && !failure() }}
+    with:
+      app_name: zebrad
+      test_id: submit-block-test
+      test_description: Test submitting blocks via Zebra's rpc server
+      test_variables: '-e TEST_SUBMIT_BLOCK=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      needs_zebra_state: true
+      needs_lwd_state: false
+      saves_to_disk: false
+      disk_suffix: tip
+      root_state_path: '/var/cache'
+      zebra_state_dir: 'zebrad-cache'
