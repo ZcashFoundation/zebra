@@ -176,7 +176,7 @@ impl StartCmd {
             .service(mempool);
 
         // Launch RPC server
-        let (rpc_task_handle, rpc_tx_queue_task_handle) = RpcServer::spawn(
+        let (rpc_task_handle, rpc_tx_queue_task_handle, rpc_server) = RpcServer::spawn(
             config.rpc,
             app_version(),
             mempool.clone(),
@@ -337,6 +337,13 @@ impl StartCmd {
         };
 
         info!("exiting Zebra because an ongoing task exited: stopping other tasks");
+
+        // We don't want to wait until the RPC server shuts down before aborting other tasks.
+        //
+        // TODO: do we need to wait on this task with a timeout?
+        if let Some(rpc_server) = rpc_server {
+            let _rpc_shutdown_task_handle = rpc_server.shutdown();
+        }
 
         // ongoing tasks
         rpc_task_handle.abort();

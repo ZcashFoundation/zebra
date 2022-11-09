@@ -51,16 +51,15 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
 
         info!("spawning RPC server...");
 
-        let (rpc_server_task_handle, rpc_tx_queue_task_handle, _rpc_server_close_handle) =
-            RpcServer::spawn(
-                config,
-                "RPC server test",
-                Buffer::new(mempool.clone(), 1),
-                Buffer::new(state.clone(), 1),
-                Buffer::new(chain_verifier.clone(), 1),
-                NoChainTip,
-                Mainnet,
-            );
+        let (rpc_server_task_handle, rpc_tx_queue_task_handle, _rpc_server) = RpcServer::spawn(
+            config,
+            "RPC server test",
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state.clone(), 1),
+            Buffer::new(chain_verifier.clone(), 1),
+            NoChainTip,
+            Mainnet,
+        );
 
         info!("spawned RPC server, checking services...");
 
@@ -135,16 +134,15 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool, do_shutdown: bo
 
         info!("spawning RPC server...");
 
-        let (rpc_server_task_handle, rpc_tx_queue_task_handle, rpc_server_close_handle) =
-            RpcServer::spawn(
-                config,
-                "RPC server test",
-                Buffer::new(mempool.clone(), 1),
-                Buffer::new(state.clone(), 1),
-                Buffer::new(chain_verifier.clone(), 1),
-                NoChainTip,
-                Mainnet,
-            );
+        let (rpc_server_task_handle, rpc_tx_queue_task_handle, rpc_server) = RpcServer::spawn(
+            config,
+            "RPC server test",
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state.clone(), 1),
+            Buffer::new(chain_verifier.clone(), 1),
+            NoChainTip,
+            Mainnet,
+        );
 
         info!("spawned RPC server, checking services...");
 
@@ -153,21 +151,23 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool, do_shutdown: bo
         chain_verifier.expect_no_requests().await;
 
         if do_shutdown {
-            rpc_server_close_handle
-                .expect("unexpected missing close handle for configured RPC port")
-                .close();
+            rpc_server
+                .expect("unexpected missing RpcServer for configured RPC port")
+                .shutdown()
+                .await
+                .expect("unexpected panic during RpcServer shutdown");
 
             // The server and queue tasks should shut down without errors or panics
             let rpc_server_task_result = rpc_server_task_handle.await;
             assert!(
                 matches!(rpc_server_task_result, Ok(())),
-                "unexpected server task outcome: {rpc_server_task_result:?}"
+                "unexpected server task panic during shutdown: {rpc_server_task_result:?}"
             );
 
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.await;
             assert!(
                 matches!(rpc_tx_queue_task_result, Ok(())),
-                "unexpected queue task outcome: {rpc_tx_queue_task_result:?}"
+                "unexpected queue task panic during shutdown: {rpc_tx_queue_task_result:?}"
             );
         } else {
             // The server and queue tasks should continue without errors or panics
@@ -210,7 +210,7 @@ fn rpc_server_spawn_port_conflict() {
 
         info!("spawning RPC server 1...");
 
-        let (_rpc_server_1_task_handle, _rpc_tx_queue_1_task_handle, _rpc_server_close_handle) =
+        let (_rpc_server_1_task_handle, _rpc_tx_queue_1_task_handle, _rpc_server) =
             RpcServer::spawn(
                 config.clone(),
                 "RPC server 1 test",
@@ -225,16 +225,15 @@ fn rpc_server_spawn_port_conflict() {
 
         info!("spawning conflicted RPC server 2...");
 
-        let (rpc_server_2_task_handle, _rpc_tx_queue_2_task_handle, _rpc_server_close_handle) =
-            RpcServer::spawn(
-                config,
-                "RPC server 2 conflict test",
-                Buffer::new(mempool.clone(), 1),
-                Buffer::new(state.clone(), 1),
-                Buffer::new(chain_verifier.clone(), 1),
-                NoChainTip,
-                Mainnet,
-            );
+        let (rpc_server_2_task_handle, _rpc_tx_queue_2_task_handle, _rpc_server) = RpcServer::spawn(
+            config,
+            "RPC server 2 conflict test",
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state.clone(), 1),
+            Buffer::new(chain_verifier.clone(), 1),
+            NoChainTip,
+            Mainnet,
+        );
 
         info!("spawned RPC servers, checking services...");
 
@@ -313,7 +312,7 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
 
         info!("spawning parallel RPC server 1...");
 
-        let (_rpc_server_1_task_handle, _rpc_tx_queue_1_task_handle, _rpc_server_close_handle) =
+        let (_rpc_server_1_task_handle, _rpc_tx_queue_1_task_handle, _rpc_server) =
             RpcServer::spawn(
                 config.clone(),
                 "RPC server 1 test",
@@ -328,16 +327,15 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
 
         info!("spawning parallel conflicted RPC server 2...");
 
-        let (rpc_server_2_task_handle, _rpc_tx_queue_2_task_handle, _rpc_server_close_handle) =
-            RpcServer::spawn(
-                config,
-                "RPC server 2 conflict test",
-                Buffer::new(mempool.clone(), 1),
-                Buffer::new(state.clone(), 1),
-                Buffer::new(chain_verifier.clone(), 1),
-                NoChainTip,
-                Mainnet,
-            );
+        let (rpc_server_2_task_handle, _rpc_tx_queue_2_task_handle, _rpc_server) = RpcServer::spawn(
+            config,
+            "RPC server 2 conflict test",
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state.clone(), 1),
+            Buffer::new(chain_verifier.clone(), 1),
+            NoChainTip,
+            Mainnet,
+        );
 
         info!("spawned RPC servers, checking services...");
 
