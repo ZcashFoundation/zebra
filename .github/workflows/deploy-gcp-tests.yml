@@ -158,6 +158,8 @@ jobs:
       # SSH into the just created VM, and create a docker volume with the newly created disk.
       - name: Create ${{ inputs.test_id }} Docker volume
         run: |
+          gcloud auth list
+
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --zone ${{ env.ZONE }} \
@@ -375,6 +377,8 @@ jobs:
       # but the cached state can be smaller if we just increased the disk size.)
       - name: Create ${{ inputs.test_id }} Docker volume
         run: |
+          gcloud auth list
+
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
