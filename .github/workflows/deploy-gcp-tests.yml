@@ -146,7 +146,7 @@ jobs:
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
-          --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
+          --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE,enable-oslogin=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
@@ -368,7 +368,7 @@ jobs:
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
-          --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
+          --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE,enable-oslogin=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
