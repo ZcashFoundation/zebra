@@ -46,7 +46,8 @@ pub mod chain;
 #[allow(missing_docs)]
 pub mod error;
 
-pub use block::VerifyBlockError;
+pub use block::{VerifyBlockError, MAX_BLOCK_SIGOPS};
+pub use chain::VerifyChainError;
 pub use checkpoint::{
     CheckpointList, VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP,
 };

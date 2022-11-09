@@ -93,6 +93,7 @@ where
     V: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     V::Future: Send + 'static,
 {
+    /// Creates a new BlockVerifier
     pub fn new(network: Network, state_service: S, transaction_verifier: V) -> Self {
         Self {
             network,
@@ -229,9 +230,7 @@ where
                     response
                 );
 
-                legacy_sigop_count += response
-                    .legacy_sigop_count()
-                    .expect("block transaction responses must have a legacy sigop count");
+                legacy_sigop_count += response.legacy_sigop_count();
 
                 // Coinbase transactions consume the miner fee,
                 // so they don't add any value to the block's total miner fee.

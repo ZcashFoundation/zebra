@@ -424,6 +424,7 @@ impl Service<Request> for Mempool {
 
                     async move { Ok(Response::TransactionIds(res)) }.boxed()
                 }
+
                 Request::TransactionsById(ref ids) => {
                     trace!(?req, "got mempool request");
 
@@ -445,6 +446,18 @@ impl Service<Request> for Mempool {
 
                     async move { Ok(Response::Transactions(res)) }.boxed()
                 }
+
+                #[cfg(feature = "getblocktemplate-rpcs")]
+                Request::FullTransactions => {
+                    trace!(?req, "got mempool request");
+
+                    let res: Vec<_> = storage.full_transactions().cloned().collect();
+
+                    trace!(?req, res_count = ?res.len(), "answered mempool request");
+
+                    async move { Ok(Response::FullTransactions(res)) }.boxed()
+                }
+
                 Request::RejectedTransactionIds(ref ids) => {
                     trace!(?req, "got mempool request");
 
@@ -489,15 +502,19 @@ impl Service<Request> for Mempool {
                 // by the peer connection handler. Therefore, return successful
                 // empty responses.
                 let resp = match req {
-                    // Empty Queries
+                    // Return empty responses for queries.
                     Request::TransactionIds => Response::TransactionIds(Default::default()),
+
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
+                    #[cfg(feature = "getblocktemplate-rpcs")]
+                    Request::FullTransactions => Response::FullTransactions(Default::default()),
+
                     Request::RejectedTransactionIds(_) => {
                         Response::RejectedTransactionIds(Default::default())
                     }
 
-                    // Don't queue mempool candidates
+                    // Don't queue mempool candidates, because there is no queue.
                     Request::Queue(gossiped_txs) => Response::Queued(
                         // Special case; we can signal the error inside the response,
                         // because the inbound service ignores inner errors.

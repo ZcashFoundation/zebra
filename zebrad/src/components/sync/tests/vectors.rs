@@ -495,9 +495,9 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
-/// Test that zebra-network rejects blocks with the wrong hash.
+/// Test that zebra-network rejects blocks that are a long way ahead of the state tip.
 #[tokio::test]
-async fn sync_block_wrong_hash() -> Result<(), crate::BoxError> {
+async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
     // Get services
     let (
         chain_sync_future,
@@ -526,13 +526,15 @@ async fn sync_block_wrong_hash() -> Result<(), crate::BoxError> {
         .await
         .respond(zs::Response::Depth(None));
 
-    // Block 0 is fetched, but the peer returns a much higher block
+    // Block 0 is fetched, but the peer returns a much higher block.
+    // (Mismatching hashes are usually ignored by the network service,
+    // but we use them here to test the syncer lookahead.)
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
         .await
         .respond(zn::Response::Blocks(vec![Available(block982k.clone())]));
 
-    // Block is dropped because it has the wrong hash.
+    // Block is dropped because it is too far ahead of the tip.
     // We expect more requests to the state service, because the syncer keeps on running.
     peer_set.expect_no_requests().await;
     chain_verifier.expect_no_requests().await;

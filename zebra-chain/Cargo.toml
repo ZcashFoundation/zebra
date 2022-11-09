@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-beta.16"
+version = "1.0.0-beta.17"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -9,7 +9,23 @@ edition = "2021"
 
 [features]
 default = []
-proptest-impl = ["proptest", "proptest-derive", "zebra-test", "rand", "rand_chacha", "tokio"]
+
+# Production features that activate extra functionality
+
+# Experimental mining RPC support
+getblocktemplate-rpcs = []
+
+# Test-only features
+
+proptest-impl = [
+    "proptest",
+    "proptest-derive",
+    "rand",
+    "rand_chacha",
+    "tokio",
+    "zebra-test",
+]
+
 bench = ["zebra-test"]
 
 [dependencies]
@@ -25,7 +41,6 @@ bls12_381 = "0.7.0"
 bs58 = { version = "0.4.0", features = ["check"] }
 byteorder = "1.4.3"
 equihash = "0.2.0"
-fpe = "0.5.1"
 group = "0.12.0"
 incrementalmerkletree = "0.3.0"
 jubjub = "0.9.0"

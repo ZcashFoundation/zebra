@@ -249,7 +249,9 @@ impl Response {
 
     /// The miner fee for the transaction in this response.
     ///
-    /// Coinbase transactions do not have a miner fee.
+    /// Coinbase transactions do not have a miner fee,
+    /// and they don't need UTXOs to calculate their value balance,
+    /// because they don't spend any inputs.
     pub fn miner_fee(&self) -> Option<Amount<NonNegative>> {
         match self {
             Response::Block { miner_fee, .. } => *miner_fee,
@@ -259,15 +261,12 @@ impl Response {
 
     /// The number of legacy transparent signature operations in this transaction's
     /// inputs and outputs.
-    ///
-    /// Zebra does not check the legacy sigop count for mempool transactions,
-    /// because it is a standard rule (not a consensus rule).
-    pub fn legacy_sigop_count(&self) -> Option<u64> {
+    pub fn legacy_sigop_count(&self) -> u64 {
         match self {
             Response::Block {
                 legacy_sigop_count, ..
-            } => Some(*legacy_sigop_count),
-            Response::Mempool { .. } => None,
+            } => *legacy_sigop_count,
+            Response::Mempool { transaction, .. } => transaction.legacy_sigop_count,
         }
     }
 
@@ -420,11 +419,13 @@ where
                 };
             }
 
+            let legacy_sigop_count = cached_ffi_transaction.legacy_sigop_count()?;
+
             let rsp = match req {
                 Request::Block { .. } => Response::Block {
                     tx_id,
                     miner_fee,
-                    legacy_sigop_count: cached_ffi_transaction.legacy_sigop_count()?,
+                    legacy_sigop_count,
                 },
                 Request::Mempool { transaction, .. } => Response::Mempool {
                     transaction: VerifiedUnminedTx::new(
@@ -432,6 +433,7 @@ where
                         miner_fee.expect(
                             "unexpected mempool coinbase transaction: should have already rejected",
                         ),
+                        legacy_sigop_count,
                     ),
                 },
             };

@@ -8,7 +8,7 @@ use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use tokio::time::sleep;
+use tokio::{sync::watch, time::sleep};
 use tower::{
     builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
     Service, ServiceExt,
@@ -83,8 +83,7 @@ pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize = zebra_consensus::MAX_CHECKPO
 /// The default for the user-specified lookahead limit.
 ///
 /// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
-pub const DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT: usize =
-    zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP * 2;
+pub const DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT: usize = MAX_TIPS_RESPONSE_HASH_COUNT * 2;
 
 /// A lower bound on the user-specified concurrency limit.
 ///
@@ -359,6 +358,10 @@ where
 
     /// The lengths of recent sync responses.
     recent_syncs: RecentSyncLengths,
+
+    /// Receiver that is `true` when the downloader is past the lookahead limit.
+    /// This is based on the downloaded block height and the state tip height.
+    past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -438,6 +441,7 @@ where
         }
 
         let tip_network = Timeout::new(peers.clone(), TIPS_RESPONSE_TIMEOUT);
+
         // The Hedge middleware is the outermost layer, hedging requests
         // between two retry-wrapped networks.  The innermost timeout
         // layer is relatively unimportant, because slow requests will
@@ -464,27 +468,33 @@ where
 
         let (sync_status, recent_syncs) = SyncStatus::new();
 
+        let (past_lookahead_limit_sender, past_lookahead_limit_receiver) = watch::channel(false);
+        let past_lookahead_limit_receiver = zs::WatchReceiver::new(past_lookahead_limit_receiver);
+
+        let downloads = Box::pin(Downloads::new(
+            block_network,
+            verifier,
+            latest_chain_tip.clone(),
+            past_lookahead_limit_sender,
+            max(
+                checkpoint_verify_concurrency_limit,
+                full_verify_concurrency_limit,
+            ),
+            max_checkpoint_height,
+        ));
+
         let new_syncer = Self {
             genesis_hash: genesis_hash(config.network.network),
             max_checkpoint_height,
             checkpoint_verify_concurrency_limit,
             full_verify_concurrency_limit,
             tip_network,
-            downloads: Box::pin(Downloads::new(
-                block_network,
-                verifier,
-                latest_chain_tip.clone(),
-                // TODO: change the download lookahead for full verification?
-                max(
-                    checkpoint_verify_concurrency_limit,
-                    full_verify_concurrency_limit,
-                ),
-                max_checkpoint_height,
-            )),
+            downloads,
             state,
             latest_chain_tip,
             prospective_tips: HashSet::new(),
             recent_syncs,
+            past_lookahead_limit_receiver,
         };
 
         (new_syncer, sync_status)
@@ -545,7 +555,14 @@ where
             }
             self.update_metrics();
 
-            while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) {
+            // Pause new downloads while the syncer or downloader are past their lookahead limits.
+            //
+            // To avoid a deadlock or long waits for blocks to expire, we ignore the download
+            // lookahead limit when there are only a small number of blocks waiting.
+            while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len())
+                || (self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) / 2
+                    && self.past_lookahead_limit_receiver.cloned_watch_data())
+            {
                 trace!(
                     tips.len = self.prospective_tips.len(),
                     in_flight = self.downloads.in_flight(),
@@ -957,7 +974,7 @@ where
     }
 
     /// The configured lookahead limit, based on the currently verified height,
-    /// and the number of hashes we haven't queued yet..
+    /// and the number of hashes we haven't queued yet.
     fn lookahead_limit(&self, new_hashes: usize) -> usize {
         let max_checkpoint_height: usize = self
             .max_checkpoint_height
@@ -990,6 +1007,8 @@ where
     /// Handles a response for a requested block.
     ///
     /// See [`Self::handle_response`] for more details.
+    #[allow(unknown_lints)]
+    #[allow(clippy::result_large_err)]
     fn handle_block_response(
         &mut self,
         response: Result<(Height, block::Hash), BlockDownloadVerifyError>,
@@ -1007,6 +1026,8 @@ where
     /// Handles a response to block hash submission, passing through any extra hashes.
     ///
     /// See [`Self::handle_response`] for more details.
+    #[allow(unknown_lints)]
+    #[allow(clippy::result_large_err)]
     fn handle_hash_response(
         response: Result<IndexSet<block::Hash>, BlockDownloadVerifyError>,
     ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
@@ -1022,6 +1043,8 @@ where
     /// so that the synchronization can continue normally.
     ///
     /// Returns `Err` if an unexpected error occurred, to force the synchronizer to restart.
+    #[allow(unknown_lints)]
+    #[allow(clippy::result_large_err)]
     fn handle_response<T>(
         response: Result<T, BlockDownloadVerifyError>,
     ) -> Result<(), BlockDownloadVerifyError> {
@@ -1120,9 +1143,12 @@ where
             BlockDownloadVerifyError::Invalid {
                 error: VerifyChainError::Block(VerifyBlockError::Commit(ref source)),
                 ..
-            } if format!("{source:?}").contains("block is already committed to the state") => {
+            } if format!("{source:?}").contains("block is already committed to the state")
+                || format!("{source:?}")
+                    .contains("block has already been sent to be committed to the state") =>
+            {
                 // TODO: improve this by checking the type (#2908)
-                debug!(error = ?e, "block is already committed, possibly from a previous sync run, continuing");
+                debug!(error = ?e, "block is already committed or pending a commit, possibly from a previous sync run, continuing");
                 false
             }
             BlockDownloadVerifyError::DownloadFailed { ref error, .. }
@@ -1152,6 +1178,7 @@ where
                 if err_str.contains("AlreadyVerified")
                     || err_str.contains("AlreadyInChain")
                     || err_str.contains("block is already committed to the state")
+                    || err_str.contains("block has already been sent to be committed to the state")
                     || err_str.contains("NotFound")
                 {
                     error!(?e,

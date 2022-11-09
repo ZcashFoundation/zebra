@@ -55,6 +55,10 @@
 //!
 //! The following `zebrad` feature flags are available at compile time:
 //!
+//! ### JSON-RPC
+//!
+//! * `getblocktemplate-rpcs`: Experimental mining pool RPC support (currently incomplete)
+//!
 //! ### Metrics
 //!
 //! * `prometheus`: export metrics to prometheus.

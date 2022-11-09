@@ -4,6 +4,42 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-rc.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.1) - 2022-11-02
+
+This is the second Zebra release candidate. Zebra's consensus rules, node sync, and `lightwalletd` RPCs are ready for user testing and experimental use. Zebra has not been audited yet.
+
+This release starts work on mining pool RPCs, including some mempool fixes. It also restores support for Rust 1.64.
+
+### Breaking Changes
+
+This release has the following breaking changes:
+- Remove unused buggy cryptographic code from zebra-chain ([#5464](https://github.com/ZcashFoundation/zebra/pull/5464)). This code was never used in production, and it had known bugs. Anyone using it should migrate to `librustzcash` instead.
+
+### Added
+
+- Introduce `getblocktemplate-rpcs` feature ([#5357](https://github.com/ZcashFoundation/zebra/pull/5357))
+  - Add getblockcount rpc method ([#5357](https://github.com/ZcashFoundation/zebra/pull/5357))
+  - Add getblockhash rpc method ([#4967](https://github.com/ZcashFoundation/zebra/pull/4967))
+  - Add getblocktemplate rpc call with stub fields ([#5462](https://github.com/ZcashFoundation/zebra/pull/5462))
+- Add block commit task metrics ([#5327](https://github.com/ZcashFoundation/zebra/pull/5327))
+- Document how we tag and release Zebra ([#5392](https://github.com/ZcashFoundation/zebra/pull/5392))
+- Document how to use Zebra with Docker ([#5504](https://github.com/ZcashFoundation/zebra/pull/5504))
+
+### Changed
+
+- Update mainnet and testnet checkpoints ([#5512](https://github.com/ZcashFoundation/zebra/pull/5512))
+
+### Fixed
+
+- Reject mempool transactions with spent outpoints or nullifiers ([#5434](https://github.com/ZcashFoundation/zebra/pull/5434))
+- Allow extra lookahead blocks in the verifier, state, and block commit task queues. This reduces the number of downloaded blocks that are dropped due to the lookahead limit. ([#5465](https://github.com/ZcashFoundation/zebra/pull/5465))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @gustavovalverde, @oxarbitrage, @teor2345 and @upbqdn
+
+
 ## [Zebra 1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.0) - 2022-10-12
 
 This is the first Zebra release candidate. Zebra's consensus rules, node sync, and `lightwalletd` RPCs are ready for user testing and experimental use. Zebra has not been audited yet.

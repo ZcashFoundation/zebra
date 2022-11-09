@@ -166,10 +166,11 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
             .into_mempool_transaction()
             .expect("unexpected non-mempool request");
 
-        // Set a dummy fee.
+        // Set a dummy fee and sigops.
         responder.respond(transaction::Response::from(VerifiedUnminedTx::new(
             transaction,
             Amount::zero(),
+            0,
         )));
     });
 
@@ -269,10 +270,11 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
             .into_mempool_transaction()
             .expect("unexpected non-mempool request");
 
-        // Set a dummy fee.
+        // Set a dummy fee and sigops.
         responder.respond(transaction::Response::from(VerifiedUnminedTx::new(
             transaction,
             Amount::zero(),
+            0,
         )));
     });
 
@@ -369,10 +371,11 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .into_mempool_transaction()
             .expect("unexpected non-mempool request");
 
-        // Set a dummy fee.
+        // Set a dummy fee and sigops.
         responder.respond(transaction::Response::from(VerifiedUnminedTx::new(
             transaction,
             Amount::zero(),
+            0,
         )));
     });
 
@@ -502,10 +505,11 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .into_mempool_transaction()
             .expect("unexpected non-mempool request");
 
-        // Set a dummy fee.
+        // Set a dummy fee and sigops.
         responder.respond(transaction::Response::from(VerifiedUnminedTx::new(
             transaction,
             Amount::zero(),
+            0,
         )));
     });
 

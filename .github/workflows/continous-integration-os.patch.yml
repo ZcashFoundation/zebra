@@ -15,16 +15,21 @@ on:
 
 jobs:
   test:
-    name: Test ${{ matrix.rust }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Test ${{ matrix.rust }} on ${{ matrix.os }}${{ matrix.features }}
+    # We're just doing this job for the name, the platform doesn't matter.
+    # So we use the platform with the most concurrent instances.
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
         os: [ubuntu-latest, macos-latest]
         rust: [stable, beta]
+        features: ["", " --features getblocktemplate-rpcs"]
         exclude:
           - os: macos-latest
             rust: beta
+          - os: macos-latest
+            features: " --features getblocktemplate-rpcs"
 
     steps:
       - run: 'echo "No build required"'

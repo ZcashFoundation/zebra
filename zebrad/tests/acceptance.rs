@@ -101,6 +101,14 @@
 //! $ cargo test lightwalletd_wallet_grpc_tests --features lightwalletd-grpc-tests -- --ignored --nocapture
 //! ```
 //!
+//! ## Getblocktemplate tests
+//!
+//! Example of how to run the submit_block test:
+//!
+//! ```console
+//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/chain cargo test submit_block --features getblocktemplate-rpcs --release  -- --ignored --nocapture
+//! ```
+//!
 //! Please refer to the documentation of each test for more information.
 //!
 //! ## Disk Space for Testing
@@ -160,6 +168,9 @@ use common::{
 ///
 /// This limit only applies to some tests.
 pub const MAX_ASYNC_BLOCKING_TIME: Duration = zebra_test::mock_service::DEFAULT_MAX_REQUEST_DELAY;
+
+/// The test config file prefix for `--feature getblocktemplate-rpcs` configs.
+pub const GET_BLOCK_TEMPLATE_CONFIG_PREFIX: &str = "getblocktemplate-";
 
 #[test]
 fn generate_no_args() -> Result<()> {
@@ -694,11 +705,22 @@ fn last_config_is_stored() -> Result<()> {
 
     Err(eyre!(
         "latest zebrad config is not being tested for compatibility.\n\
-         Run:\n\
-         zebrad generate |\n\
-         sed \"s/cache_dir = '.*'/cache_dir = 'cache_dir'/\" >\n\
-         zebrad/tests/common/configs/<next-release-tag>.toml\n\
-         and commit the latest config to Zebra's git repository"
+         Run: \n\
+         cargo build {}--bin zebrad && \n\
+         zebrad generate | \n\
+         sed \"s/cache_dir = '.*'/cache_dir = 'cache_dir'/\" > \n\
+         zebrad/tests/common/configs/{}<next-release-tag>.toml \n\
+         and commit the latest config to Zebra's git repository",
+        if cfg!(feature = "getblocktemplate-rpcs") {
+            "--features=getblocktemplate-rpcs "
+        } else {
+            ""
+        },
+        if cfg!(feature = "getblocktemplate-rpcs") {
+            GET_BLOCK_TEMPLATE_CONFIG_PREFIX
+        } else {
+            ""
+        },
     ))
 }
 
@@ -791,7 +813,7 @@ fn stored_configs_works() -> Result<()> {
             .file_name()
             .into_string()
             .expect("all files names should be string convertible")
-            .starts_with("getblocktemplate-")
+            .starts_with(GET_BLOCK_TEMPLATE_CONFIG_PREFIX)
         {
             continue;
         }
@@ -1364,7 +1386,12 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     Ok(())
 }
 
+/// Test that Zebra's non-blocking logger works, by creating lots of debug output, but not reading the logs.
+/// Then make sure Zebra drops excess log lines. (Previously, it would block waiting for logs to be read.)
+///
+/// This test is unreliable and sometimes hangs on macOS.
 #[test]
+#[cfg(not(target_os = "macos"))]
 fn non_blocking_logger() -> Result<()> {
     use futures::FutureExt;
     use std::{sync::mpsc, time::Duration};
@@ -2151,4 +2178,14 @@ async fn sending_transactions_using_lightwalletd() -> Result<()> {
 #[cfg(not(target_os = "windows"))]
 async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
     common::lightwalletd::wallet_grpc_test::run().await
+}
+
+/// Test successful submitblock rpc call
+///
+/// See [`common::getblocktemplate`] for more information.
+#[tokio::test]
+#[ignore]
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn submit_block() -> Result<()> {
+    common::get_block_template_rpcs::submit_block::run().await
 }

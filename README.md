@@ -71,8 +71,8 @@ Currently, Zebra validates all of the Zcash consensus rules for the NU5 network 
 You can run Zebra using our Docker image.
 This command will run our latest release, and sync it to the tip:
 
-```shell
-docker run --detach zfnd/zebra:1.0.0-rc.0
+```sh
+docker run zfnd/zebra:1.0.0-rc.1
 ```
 
 For more information, read our [Docker documentation](book/src/user/docker.md).
@@ -92,9 +92,10 @@ for your platform:
      Any Zebra release can remove support for older Rust versions, without any notice.
      (Rust 1.59 and earlier are definitely not supported, due to missing features.)
 2. Install Zebra's build dependencies:
-   - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages, depending on your package manager
-   - **clang** or another C++ compiler: `g++`, `Xcode`, or `MSVC`
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.0 zebrad`
+   - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages
+     (these packages will have different names depending on your package manager)
+   - **clang** or another C++ compiler: `g++` (all platforms) or `Xcode` (macOS)
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.1 zebrad`
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 For more detailed instructions, refer to the [documentation](https://zebra.zfnd.org/user/install.html).
@@ -177,10 +178,13 @@ defaults write com.apple.CrashReporter DialogType none
 
 ### Network Ports and Data Usage
 
-By default, Zebra uses the following inbound TCP listener ports:
+Zebra uses the following inbound and outbound TCP ports:
 
 - 8233 on Mainnet
 - 18233 on Testnet
+
+Outbound connections are required to sync, inbound connections are optional.
+Zebra also needs access to the Zcash DNS seeders, via the OS DNS resolver (usually port 53).
 
 Zebra needs some peers which have a round-trip latency of 2 seconds or less.
 If this is a problem for you, please

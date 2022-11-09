@@ -1,12 +1,13 @@
 [package]
 name = "zebra-consensus"
-version = "1.0.0-beta.16"
+version = "1.0.0-beta.17"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [features]
 default = []
+getblocktemplate-rpcs = []
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
 
 [dependencies]

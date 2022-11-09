@@ -18,7 +18,7 @@ expression: stored_utxos
     output_index: OutputIndex(0),
   ), Some(Utxo(
     output: Output(
-      value: Amount(50000),
+      value: 50000,
       lock_script: Script("21025229e1240a21004cf8338db05679fa34753706e84f6aebba086ba04317fd8f99ac"),
     ),
     height: Height(1),
@@ -32,7 +32,7 @@ expression: stored_utxos
     output_index: OutputIndex(1),
   ), Some(Utxo(
     output: Output(
-      value: Amount(12500),
+      value: 12500,
       lock_script: Script("a914ef775f1f997f122a062fff1a2d7443abd1f9c64287"),
     ),
     height: Height(1),

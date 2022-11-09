@@ -46,7 +46,8 @@ async fn test_rpc_response_data_for_network(network: Network) {
     let mut mempool: MockService<_, _, _, zebra_node_services::BoxError> =
         MockService::build().for_unit_tests();
     // Create a populated state service
-    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+    #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), network).await;
 
     // Start snapshots of RPC responses.
@@ -56,7 +57,9 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // Test getblocktemplate-rpcs snapshots
     #[cfg(feature = "getblocktemplate-rpcs")]
     get_block_template_rpcs::test_responses(
+        network,
         mempool.clone(),
+        state,
         read_state.clone(),
         latest_chain_tip.clone(),
         settings.clone(),
@@ -128,7 +131,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // - as we have the mempool mocked we need to expect a request and wait for a response,
     // which will be an empty mempool in this case.
     let mempool_req = mempool
-        .expect_request_that(|_request| true)
+        .expect_request_that(|request| matches!(request, mempool::Request::TransactionIds))
         .map(|responder| {
             responder.respond(mempool::Response::TransactionIds(
                 std::collections::HashSet::new(),
@@ -152,9 +155,11 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // `getrawtransaction`
     //
     // - similar to `getrawmempool` described above, a mempool request will be made to get the requested
-    // transaction from the mempoo, response will be empty as we have this transaction in state
+    // transaction from the mempool, response will be empty as we have this transaction in state
     let mempool_req = mempool
-        .expect_request_that(|_request| true)
+        .expect_request_that(|request| {
+            matches!(request, mempool::Request::TransactionsByMinedId(_))
+        })
         .map(|responder| {
             responder.respond(mempool::Response::Transactions(vec![]));
         });

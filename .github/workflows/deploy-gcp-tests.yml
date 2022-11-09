@@ -12,6 +12,11 @@ on:
         required: true
         type: string
         description: 'Explains what the test does'
+      height_grep_text:
+        required: false
+        type: string
+        description: 'Regular expression to find the tip height in test logs, and add it to newly created cached state image metadata'
+
       # Test selection and parameters
       test_variables:
         required: true
@@ -22,6 +27,12 @@ on:
         type: string
         default: Mainnet
         description: 'Zcash network to test against'
+      is_long_test:
+        required: false
+        type: boolean
+        default: false
+        description: 'Does this test need multiple run jobs? (Does it run longer than 6 hours?)'
+
       # Cached state
       #
       # TODO: find a better name
@@ -69,11 +80,6 @@ on:
         required: true
         type: boolean
         description: 'Does the test create a new cached state disk?'
-      # Metadata
-      height_grep_text:
-        required: false
-        type: string
-        description: 'Regular expression to find the tip height in test logs, and add it to newly created cached state image metadata'
       app_name:
         required: false
         type: string
@@ -118,11 +124,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -192,11 +193,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -411,11 +407,6 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -516,12 +507,14 @@ jobs:
 
 
   # follow the logs of the test we just launched, up to Sapling activation (or the test finishing)
+  #
+  # If `inputs.is_long_test` is `false`, this job is skipped.
   logs-sprout:
     name: Log ${{ inputs.test_id }} test (sprout)
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     needs: [ launch-with-cached-state, launch-without-cached-state ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -536,11 +529,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -588,7 +576,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (heartwood)
     needs: [ logs-sprout ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -603,11 +591,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -645,7 +628,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (canopy)
     needs: [ logs-heartwood ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -660,11 +643,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -704,7 +682,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (1740k)
     needs: [ logs-canopy ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -719,11 +697,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -765,7 +738,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (1760k)
     needs: [ logs-1740k ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -780,11 +753,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -826,7 +794,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (1780k)
     needs: [ logs-1760k ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -841,11 +809,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -888,7 +851,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (1800k)
     needs: [ logs-1780k ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -903,11 +866,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -949,7 +907,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (1820k)
     needs: [ logs-1800k ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -964,11 +922,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -1007,7 +960,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (checkpoint)
     needs: [ logs-1820k ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -1022,11 +975,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -1060,67 +1008,15 @@ jobs:
           -e 'test result:.*finished in' \
           "
 
-  # follow the logs of the test we just launched, until it finishes
-  logs-end:
-    name: Log ${{ inputs.test_id }} test (end)
-    needs: [ logs-checkpoint ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.1.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
 
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v0.8.3
-        with:
-          retries: '3'
-          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
-          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
-
-      # Show recent logs, following until the test finishes
-      - name: Show logs for ${{ inputs.test_id }} test (end)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail ${{ env.EXTRA_LOG_LINES }} \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          'test result:.*finished in' \
-          "
-
-
-  # check the results of the test, and show all of the test logs
+  # Show all the test logs, then follow the logs of the test we just launched, until it finishes.
+  # Then check the result of the test.
+  #
+  # If `inputs.is_long_test` is `false`, the Rust test harness mostly runs in this job.
+  # Otherwise, it mostly runs in the "logs" jobs.
   test-result:
-    # TODO: update the job name here, and in the branch protection rules
     name: Run ${{ inputs.test_id }} test
-    needs: [ logs-end ]
+    needs: [ logs-checkpoint ]
     # If the previous job fails, we also want to run and fail this job,
     # so that the branch protection rule fails in Mergify and GitHub.
     if: ${{ !cancelled() }}
@@ -1138,11 +1034,6 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -1175,6 +1066,7 @@ jobs:
           set -e;
           sudo docker logs \
           --tail all \
+          --follow \
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \

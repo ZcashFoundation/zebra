@@ -165,7 +165,7 @@ jobs:
           fi
 
   build:
-    name: Build
+    name: Build CI Docker
     uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
@@ -187,6 +187,8 @@ jobs:
   #
   # - We run all the tests behind the `getblocktemplate-rpcs` feature as a separated step.
   # - We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.
+  #
+  # TODO: turn this test and the getblocktemplate test into a matrix, so the jobs use exactly the same diagnostics settings
   test-all:
     name: Test all
     runs-on: ubuntu-latest
@@ -198,13 +200,21 @@ jobs:
         with:
           short-length: 7
 
-      - name: Run all zebrad tests
+      # Run unit and basic acceptance tests, only showing command output if the test fails.
+      #
+      # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
+      - name: Run basic zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace -- --nocapture --include-ignored
+          docker run --name zebrad-tests --tty ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace
+
+      # Run ignored by default acceptance tests, only showing command output if the test fails.
+      - name: Run ignored zebrad tests
+        run: |
+          docker run --name zebrad-tests-ignored --tty ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests" --workspace -- --ignored --nocapture
 
   # zebrad tests without cached state with `getblocktemplate-rpcs` feature
-
+  #
   # Same as above but we run all the tests behind the `getblocktemplate-rpcs` feature.
   test-all-getblocktemplate-rpcs:
     name: Test all with getblocktemplate-rpcs feature
@@ -217,10 +227,15 @@ jobs:
         with:
           short-length: 7
 
-      - name: Run all zebrad tests
+      - name: Run basic zebrad tests
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --name zebrad-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace -- --nocapture --include-ignored
+          docker run --name zebrad-tests --tty ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace
+
+      - name: Run ignored zebrad tests
+        run: |
+          docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run --name zebrad-tests-ignored --tty ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} cargo test --locked --release --features "lightwalletd-grpc-tests getblocktemplate-rpcs" --workspace -- --ignored --nocapture
 
   # Run state tests with fake activation heights.
   #
@@ -317,7 +332,7 @@ jobs:
     # because we might never get a finished sync.
     #
     # See the concurrency comment on the zebrad test-full-sync job for details.
-    concurrency: 
+    concurrency:
       group: ${{ github.workflow }}−${{ github.ref }}-regenerate-stateful-disks
       cancel-in-progress: false
 
@@ -362,7 +377,10 @@ jobs:
       app_name: zebrad
       test_id: full-sync-to-tip
       test_description: Test a full sync up to the tip
-      test_variables: '-e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600'
+      # The value of FULL_SYNC_MAINNET_TIMEOUT_MINUTES is currently ignored.
+      test_variables: '-e TEST_FULL_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=0'
+      # This test runs for longer than 6 hours, so it needs multiple jobs
+      is_long_test: true
       needs_zebra_state: false
       saves_to_disk: true
       disk_suffix: tip
@@ -370,7 +388,7 @@ jobs:
     # We want to prevent multiple full zebrad syncs running at the same time,
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
     # because we might never get a finished sync.
-    # 
+    #
     # Instead, we let the first sync complete, then queue the latest pending sync, cancelling any syncs in between.
     # (As the general workflow concurrency group just gets matched in Pull Requests,
     # it has no impact on this job.)
@@ -378,7 +396,7 @@ jobs:
     # TODO:
     # - allow multiple manual syncs on a branch, and isolate manual syncs from automatic syncs, by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
     # - stop multiple automatic full syncs across different PRs by removing '−${{ github.ref }}' when needs.get-available-disks.outputs.zebra_tip_disk is true
-    concurrency: 
+    concurrency:
       group: ${{ github.workflow }}−${{ github.ref }}-test-full-sync
       cancel-in-progress: false
 
@@ -445,7 +463,7 @@ jobs:
     # because we might never get a finished sync.
     #
     # See the concurrency comment on the zebrad test-full-sync job for details.
-    concurrency: 
+    concurrency:
       group: ${{ github.workflow }}−${{ github.ref }}-lightwalletd-full-sync
       cancel-in-progress: false
 
@@ -531,7 +549,7 @@ jobs:
     # because we might never get a finished test.
     #
     # See the concurrency comment on the zebrad test-full-sync job for details.
-    concurrency: 
+    concurrency:
       group: ${{ github.workflow }}−${{ github.ref }}-lightwalletd-transactions-test
       cancel-in-progress: false
 

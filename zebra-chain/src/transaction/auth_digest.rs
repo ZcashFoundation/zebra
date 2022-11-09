@@ -2,8 +2,7 @@
 
 use std::{fmt, sync::Arc};
 
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
+use hex::{FromHex, ToHex};
 
 use crate::{
     primitives::zcash_primitives::auth_digest,
@@ -14,6 +13,9 @@ use crate::{
 
 use super::Transaction;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 /// An authorizing data commitment hash as specified in [ZIP-244].
 ///
 /// Note: Zebra displays transaction and block hashes in big-endian byte-order,
@@ -23,6 +25,29 @@ use super::Transaction;
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct AuthDigest(pub [u8; 32]);
+
+impl AuthDigest {
+    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        let mut reversed_bytes = self.0;
+        reversed_bytes.reverse();
+        reversed_bytes
+    }
+
+    /// Convert bytes in big-endian byte-order into a [`transaction::AuthDigest`](crate::transaction::AuthDigest).
+    ///
+    /// Zebra displays transaction and block hashes in big-endian byte-order,
+    /// following the u256 convention set by Bitcoin and zcashd.
+    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> AuthDigest {
+        let mut internal_byte_order = *bytes_in_display_order;
+        internal_byte_order.reverse();
+
+        AuthDigest(internal_byte_order)
+    }
+}
 
 impl From<Transaction> for AuthDigest {
     /// Computes the authorizing data commitment for a transaction.
@@ -76,20 +101,47 @@ impl From<&AuthDigest> for [u8; 32] {
     }
 }
 
+impl ToHex for &AuthDigest {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
+    }
+}
+
+impl ToHex for AuthDigest {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
+    }
+}
+
+impl FromHex for AuthDigest {
+    type Error = <[u8; 32] as FromHex>::Error;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let mut hash = <[u8; 32]>::from_hex(hex)?;
+        hash.reverse();
+
+        Ok(hash.into())
+    }
+}
+
 impl fmt::Display for AuthDigest {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut reversed_bytes = self.0;
-        reversed_bytes.reverse();
-        f.write_str(&hex::encode(reversed_bytes))
+        f.write_str(&self.encode_hex::<String>())
     }
 }
 
 impl fmt::Debug for AuthDigest {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut reversed_bytes = self.0;
-        reversed_bytes.reverse();
         f.debug_tuple("AuthDigest")
-            .field(&hex::encode(reversed_bytes))
+            .field(&self.encode_hex::<String>())
             .finish()
     }
 }

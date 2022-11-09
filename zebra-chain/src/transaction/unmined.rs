@@ -193,11 +193,11 @@ impl UnminedTxId {
 /// (But it might still need semantic or contextual verification.)
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnminedTx {
-    /// A unique identifier for this unmined transaction.
-    pub id: UnminedTxId,
-
     /// The unmined transaction itself.
     pub transaction: Arc<Transaction>,
+
+    /// A unique identifier for this unmined transaction.
+    pub id: UnminedTxId,
 
     /// The size in bytes of the serialized transaction data
     pub size: usize,
@@ -284,6 +284,10 @@ pub struct VerifiedUnminedTx {
 
     /// The transaction fee for this unmined transaction.
     pub miner_fee: Amount<NonNegative>,
+
+    /// The number of legacy signature operations in this transaction's
+    /// transparent inputs and outputs.
+    pub legacy_sigop_count: u64,
 }
 
 impl fmt::Display for VerifiedUnminedTx {
@@ -291,16 +295,22 @@ impl fmt::Display for VerifiedUnminedTx {
         f.debug_struct("VerifiedUnminedTx")
             .field("transaction", &self.transaction)
             .field("miner_fee", &self.miner_fee)
+            .field("legacy_sigop_count", &self.legacy_sigop_count)
             .finish()
     }
 }
 
 impl VerifiedUnminedTx {
-    /// Create a new verified unmined transaction from a transaction and its fee.
-    pub fn new(transaction: UnminedTx, miner_fee: Amount<NonNegative>) -> Self {
+    /// Create a new verified unmined transaction from a transaction, its fee and the legacy sigop count.
+    pub fn new(
+        transaction: UnminedTx,
+        miner_fee: Amount<NonNegative>,
+        legacy_sigop_count: u64,
+    ) -> Self {
         Self {
             transaction,
             miner_fee,
+            legacy_sigop_count,
         }
     }
 
