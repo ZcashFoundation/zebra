@@ -178,6 +178,10 @@ impl StartCmd {
         // Launch RPC server
         let (rpc_task_handle, rpc_tx_queue_task_handle) = RpcServer::spawn(
             config.rpc,
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            config.mining,
+            #[cfg(not(feature = "getblocktemplate-rpcs"))]
+            (),
             app_version(),
             mempool.clone(),
             read_only_state_service,
