@@ -266,7 +266,7 @@ async fn load_transactions_from_future_blocks(
         .await?
         .into_iter()
         .flat_map(|block| block.transactions)
-        .filter(|block| !block.is_coinbase())
+        .filter(|transaction| !transaction.is_coinbase())
         .take(max_sent_transactions())
         .collect();
 
