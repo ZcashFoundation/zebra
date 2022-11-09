@@ -220,13 +220,10 @@ impl RpcServer {
 
     /// Shut down this RPC server, blocking the current thread.
     ///
-    /// # Panics
-    ///
-    /// If called in an async context.
+    /// This method can be called from within a tokio executor without panicking.
+    /// But it is blocking, so `shutdown()` should be used instead.
     pub fn shutdown_blocking(&self) {
-        info!("Stopping RPC server");
-        self.close_handle.clone().close();
-        info!("Stopped RPC server");
+        Self::shutdown_blocking_inner(self.close_handle.clone())
     }
 
     /// Shut down this RPC server asynchronously.
@@ -234,8 +231,18 @@ impl RpcServer {
     pub fn shutdown(&self) -> JoinHandle<()> {
         let close_handle = self.close_handle.clone();
 
+        let span = Span::current();
+        tokio::task::spawn_blocking(move || {
+            span.in_scope(|| Self::shutdown_blocking_inner(close_handle))
+        })
+    }
+
+    /// Shuts down this RPC server using its `close_handle`.
+    ///
+    /// See `shutdown_blocking()` for details.
+    fn shutdown_blocking_inner(close_handle: CloseHandle) {
         // The server is a blocking task, so it can't run inside a tokio thread.
-        // See the note at wait_on_shutdown.
+        // See the note at wait_on_server.
         let span = Span::current();
         let wait_on_shutdown = move || {
             span.in_scope(|| {
@@ -246,14 +253,22 @@ impl RpcServer {
         };
 
         let span = Span::current();
-        tokio::task::spawn_blocking(move || {
-            let thread_handle = std::thread::spawn(wait_on_shutdown);
+        let thread_handle = std::thread::spawn(wait_on_shutdown);
 
-            // Propagate panics from the inner std::thread to the outer tokio blocking task
-            span.in_scope(|| match thread_handle.join() {
-                Ok(()) => (),
-                Err(panic_object) => panic::resume_unwind(panic_object),
-            })
+        // Propagate panics from the inner std::thread to the outer tokio blocking task
+        span.in_scope(|| match thread_handle.join() {
+            Ok(()) => (),
+            Err(panic_object) => panic::resume_unwind(panic_object),
         })
+    }
+}
+
+impl Drop for RpcServer {
+    fn drop(&mut self) {
+        // Block on shutting down, propagating panics.
+        // This can take around 150 seconds.
+        //
+        // Zebra sometimes crashes with memory errors if we do not do this.
+        self.shutdown_blocking();
     }
 }
