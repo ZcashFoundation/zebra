@@ -25,9 +25,8 @@ use zebra_test::{
 use zebrad::config::ZebradConfig;
 
 use crate::common::{
-    config::testdir,
-    lightwalletd::{zebra_skip_lightwalletd_tests, LightwalletdTestType},
-    sync::FINISH_PARTIAL_SYNC_TIMEOUT,
+    config::testdir, lightwalletd::zebra_skip_lightwalletd_tests,
+    sync::FINISH_PARTIAL_SYNC_TIMEOUT, test_type::TestType,
 };
 
 /// After we launch `zebrad`, wait this long for the command to start up,
@@ -213,7 +212,7 @@ where
 pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     network: Network,
     test_name: S,
-    test_type: LightwalletdTestType,
+    test_type: TestType,
     use_internet_connection: bool,
 ) -> Result<Option<(TestChild<TempDir>, Option<SocketAddr>)>> {
     let test_name = test_name.as_ref();
@@ -255,7 +254,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
 #[tracing::instrument]
 pub fn can_spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     test_name: S,
-    test_type: LightwalletdTestType,
+    test_type: TestType,
 ) -> bool {
     if zebra_test::net::zebra_skip_network_tests() {
         return false;
