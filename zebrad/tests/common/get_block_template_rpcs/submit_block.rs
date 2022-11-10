@@ -1,170 +1,92 @@
 //! Test submitblock RPC method.
 //!
-//! This test requires a cached chain state that is synchronized past the max checkpoint height,
-//! and will sync to the next block without updating the cached chain state.
+//! This test requires a cached chain state that is partially synchronized close to the
+//! network chain tip height. It will finish the sync and update the cached chain state.
+//!
+//! After finishing the sync, it will get the first few blocks in the non-finalized state
+//! (past the MAX_BLOCK_REORG_HEIGHT) via getblock rpc calls, get the finalized tip height
+//! of the updated cached state, restart zebra without peers, and submit blocks above the
+//! finalized tip height.
 
-// TODO: Update this test and the doc to:
-//
-//         This test requires a cached chain state that is partially synchronized close to the
-//         network chain tip height, and will finish the sync and update the cached chain state.
-//
-//         After finishing the sync, it will get the first 20 blocks in the non-finalized state
-//         (past the MAX_BLOCK_REORG_HEIGHT) via getblock rpc calls, get the finalized tip height
-//         of the updated cached state, restart zebra without peers, and submit blocks above the
-//         finalized tip height.
+use color_eyre::eyre::{Context, Result};
 
-use std::path::PathBuf;
-
-use color_eyre::eyre::{eyre, Context, Result};
-
-use futures::TryFutureExt;
-use indexmap::IndexSet;
 use reqwest::Client;
-use tower::{Service, ServiceExt};
-use zebra_chain::{block::Height, parameters::Network, serialization::ZcashSerialize};
-use zebra_state::HashOrHeight;
-use zebra_test::args;
+use zebra_chain::parameters::Network;
 
 use crate::common::{
-    cached_state::{copy_state_directory, start_state_service_with_cache_dir},
-    config::{persistent_test_config, testdir},
-    launch::ZebradTestDirExt,
-    lightwalletd::random_known_rpc_port_config,
+    cached_state::get_raw_future_blocks,
+    launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
+    test_type::TestType,
 };
 
-use super::cached_state::{load_tip_height_from_state_directory, ZEBRA_CACHED_STATE_DIR};
-
-async fn get_future_block_hex_data(
-    network: Network,
-    zebrad_state_path: &PathBuf,
-) -> Result<Option<String>> {
-    tracing::info!(
-        ?zebrad_state_path,
-        "getting cached sync height from ZEBRA_CACHED_STATE_DIR path"
-    );
-
-    let cached_sync_height =
-        load_tip_height_from_state_directory(network, zebrad_state_path.as_ref()).await?;
-
-    let future_block_height = Height(cached_sync_height.0 + 1);
-
-    tracing::info!(
-        ?cached_sync_height,
-        ?future_block_height,
-        "got cached sync height, copying state dir to tempdir"
-    );
-
-    let copied_state_path = copy_state_directory(network, &zebrad_state_path).await?;
-
-    let mut config = persistent_test_config()?;
-    config.state.debug_stop_at_height = Some(future_block_height.0);
-
-    let mut child = copied_state_path
-        .with_config(&mut config)?
-        .spawn_child(args!["start"])?
-        .bypass_test_capture(true);
-
-    while child.is_running() {
-        tokio::task::yield_now().await;
-    }
-
-    let _ = child.kill(true);
-    let copied_state_path = child.dir.take().unwrap();
-
-    let (_read_write_state_service, mut state, _latest_chain_tip, _chain_tip_change) =
-        start_state_service_with_cache_dir(network, copied_state_path.as_ref()).await?;
-    let request = zebra_state::ReadRequest::Block(HashOrHeight::Height(future_block_height));
-
-    let response = state
-        .ready()
-        .and_then(|ready_service| ready_service.call(request))
-        .map_err(|error| eyre!(error))
-        .await?;
-
-    let block_hex_data = match response {
-        zebra_state::ReadResponse::Block(Some(block)) => {
-            hex::encode(block.zcash_serialize_to_vec()?)
-        }
-        zebra_state::ReadResponse::Block(None) => {
-            tracing::info!(
-            "Reached the end of the finalized chain, state is missing block at {future_block_height:?}",
-        );
-            return Ok(None);
-        }
-        _ => unreachable!("Incorrect response from state service: {response:?}"),
-    };
-
-    Ok(Some(block_hex_data))
-}
+/// Number of blocks past the finalized to retrieve and submit.
+const MAX_NUM_FUTURE_BLOCKS: u32 = 3;
 
 #[allow(clippy::print_stderr)]
-pub(crate) async fn run() -> Result<(), color_eyre::Report> {
+pub(crate) async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let mut config = random_known_rpc_port_config(true)?;
-    let network = config.network.network;
-    let rpc_address = config.rpc.listen_addr.unwrap();
+    // We want a zebra state dir in place,
+    let test_type = TestType::UpdateZebraCachedStateWithRpc;
+    let test_name = "submit_block_test";
+    let network = Network::Mainnet;
 
-    config.state.cache_dir = match std::env::var_os(ZEBRA_CACHED_STATE_DIR) {
-        Some(path) => path.into(),
-        None => {
-            eprintln!(
-                "skipped submitblock test, \
-                 set the {ZEBRA_CACHED_STATE_DIR:?} environment variable to run the test",
-            );
+    // Skip the test unless the user specifically asked for it and there is a zebrad_state_path
+    if !can_spawn_zebrad_for_rpc(test_name, test_type) {
+        return Ok(());
+    }
 
-            return Ok(());
-        }
-    };
+    tracing::info!(
+        ?network,
+        ?test_type,
+        "running submitblock test using zebrad",
+    );
 
-    // TODO: As part of or as a pre-cursor to issue #5015,
-    // - Use only original cached state,
-    // - sync until the tip
-    // - get first 3 blocks in non-finalized state via getblock rpc calls
-    // - restart zebra without peers
-    // - submit block(s) above the finalized tip height
-    let block_hex_data = get_future_block_hex_data(network, &config.state.cache_dir)
-        .await?
-        .expect(
-            "spawned zebrad in get_future_block_hex_data should live until it gets the next block",
-        );
+    let raw_blocks: Vec<String> =
+        get_raw_future_blocks(network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS).await?;
 
-    // Runs the rest of this test without an internet connection
-    config.network.initial_mainnet_peers = IndexSet::new();
-    config.network.initial_testnet_peers = IndexSet::new();
-    config.mempool.debug_enable_at_height = Some(0);
+    tracing::info!("got raw future blocks, spawning isolated zebrad...",);
 
-    // We're using the cached state
-    config.state.ephemeral = false;
+    // Start zebrad with no peers, we run the rest of the submitblock test without syncing.
+    let should_sync = false;
+    let (mut zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
+            .expect("Already checked zebra state path with can_spawn_zebrad_for_rpc");
 
-    let mut child = testdir()?
-        .with_exact_config(&config)?
-        .spawn_child(args!["start"])?
-        .bypass_test_capture(true);
+    let rpc_address = zebra_rpc_address.expect("submitblock test must have RPC port");
 
-    child.expect_stdout_line_matches(&format!("Opened RPC endpoint at {rpc_address}"))?;
+    tracing::info!(
+        ?test_type,
+        ?rpc_address,
+        "spawned isolated zebrad with shorter chain, waiting for zebrad to open its RPC port..."
+    );
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {rpc_address}"))?;
+
+    tracing::info!(?rpc_address, "zebrad opened its RPC port",);
 
     // Create an http client
     let client = Client::new();
 
-    let res = client
-        .post(format!("http://{}", &rpc_address))
-        .body(format!(
-            r#"{{"jsonrpc": "2.0", "method": "submitblock", "params": ["{block_hex_data}"], "id":123 }}"#
-        ))
-        .header("Content-Type", "application/json")
-        .send()
-        .await?;
+    for raw_block in raw_blocks {
+        let res = client
+            .post(format!("http://{}", &rpc_address))
+            .body(format!(
+                r#"{{"jsonrpc": "2.0", "method": "submitblock", "params": ["{raw_block}"], "id":123 }}"#
+            ))
+            .header("Content-Type", "application/json")
+            .send()
+            .await?;
 
-    assert!(res.status().is_success());
-    let res_text = res.text().await?;
+        assert!(res.status().is_success());
+        let res_text = res.text().await?;
 
-    // Test rpc endpoint response
-    assert!(res_text.contains(r#""result":"null""#));
+        // Test rpc endpoint response
+        assert!(res_text.contains(r#""result":null"#));
+    }
 
-    child.kill(false)?;
+    zebrad.kill(false)?;
 
-    let output = child.wait_with_output()?;
+    let output = zebrad.wait_with_output()?;
     let output = output.assert_failure()?;
 
     // [Note on port conflict](#Note on port conflict)
