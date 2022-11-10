@@ -462,10 +462,7 @@ pub enum Request {
     /// returning `None` immediately if it is unknown.
     ///
     /// Checks verified blocks in the finalized chain and the _best_ non-finalized chain.
-    ///
-    /// This request is purely informational, there is no guarantee that
-    /// the UTXO remains unspent in the best chain.
-    BestChainUtxo(transparent::OutPoint),
+    UnspentBestChainUtxo(transparent::OutPoint),
 
     /// Looks up a block by hash or height in the current best chain.
     ///
@@ -554,7 +551,7 @@ impl Request {
             Request::Tip => "tip",
             Request::BlockLocator => "block_locator",
             Request::Transaction(_) => "transaction",
-            Request::BestChainUtxo { .. } => "best_chain_utxo",
+            Request::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             Request::Block(_) => "block",
             Request::FindBlockHashes { .. } => "find_block_hashes",
             Request::FindBlockHeaders { .. } => "find_block_headers",
@@ -623,10 +620,7 @@ pub enum ReadRequest {
     /// returning `None` immediately if it is unknown.
     ///
     /// Checks verified blocks in the finalized chain and the _best_ non-finalized chain.
-    ///
-    /// This request is purely informational, there is no guarantee that
-    /// the UTXO remains unspent in the best chain.
-    BestChainUtxo(transparent::OutPoint),
+    UnspentBestChainUtxo(transparent::OutPoint),
 
     /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
     /// returning `None` immediately if it is unknown.
@@ -760,7 +754,7 @@ impl ReadRequest {
             ReadRequest::Block(_) => "block",
             ReadRequest::Transaction(_) => "transaction",
             ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
-            ReadRequest::BestChainUtxo { .. } => "best_chain_utxo",
+            ReadRequest::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             ReadRequest::AnyChainUtxo { .. } => "any_chain_utxo",
             ReadRequest::BlockLocator => "block_locator",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
@@ -799,7 +793,9 @@ impl TryFrom<Request> for ReadRequest {
 
             Request::Block(hash_or_height) => Ok(ReadRequest::Block(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
-            Request::BestChainUtxo(outpoint) => Ok(ReadRequest::BestChainUtxo(outpoint)),
+            Request::UnspentBestChainUtxo(outpoint) => {
+                Ok(ReadRequest::UnspentBestChainUtxo(outpoint))
+            }
 
             Request::BlockLocator => Ok(ReadRequest::BlockLocator),
             Request::FindBlockHashes { known_blocks, stop } => {

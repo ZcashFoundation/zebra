@@ -1021,7 +1021,7 @@ impl Service<Request> for StateService {
             | Request::Tip
             | Request::BlockLocator
             | Request::Transaction(_)
-            | Request::BestChainUtxo(_)
+            | Request::UnspentBestChainUtxo(_)
             | Request::Block(_)
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. } => {
@@ -1218,7 +1218,7 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // Currently unused.
-            ReadRequest::BestChainUtxo(outpoint) => {
+            ReadRequest::UnspentBestChainUtxo(outpoint) => {
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1228,17 +1228,21 @@ impl Service<ReadRequest> for ReadStateService {
                     span.in_scope(move || {
                         let utxo = state.non_finalized_state_receiver.with_watch_data(
                             |non_finalized_state| {
-                                read::utxo(non_finalized_state.best_chain(), &state.db, outpoint)
+                                read::unspent_utxo(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    outpoint,
+                                )
                             },
                         );
 
                         // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::BestChainUtxo");
+                        timer.finish(module_path!(), line!(), "ReadRequest::UnspentBestChainUtxo");
 
-                        Ok(ReadResponse::BestChainUtxo(utxo))
+                        Ok(ReadResponse::UnspentBestChainUtxo(utxo))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::BestChainUtxo"))
+                .map(|join_result| join_result.expect("panic in ReadRequest::UnspentBestChainUtxo"))
                 .boxed()
             }
 

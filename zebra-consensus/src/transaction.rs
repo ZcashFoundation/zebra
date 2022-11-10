@@ -486,11 +486,13 @@ where
                     tracing::trace!("UXTO in known_utxos, discarding query");
                     output.utxo.clone()
                 } else if is_mempool {
-                    let query = state.clone().oneshot(zs::Request::BestChainUtxo(*outpoint));
-                    if let zebra_state::Response::BestChainUtxo(utxo) = query.await? {
+                    let query = state
+                        .clone()
+                        .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
+                    if let zebra_state::Response::UnspentBestChainUtxo(utxo) = query.await? {
                         utxo.ok_or(TransactionError::TransparentInputNotFound)?
                     } else {
-                        unreachable!("BestChainUtxo always responds with Option<Utxo>")
+                        unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
                     }
                 } else {
                     let query = state
