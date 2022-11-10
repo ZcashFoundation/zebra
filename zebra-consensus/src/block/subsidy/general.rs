@@ -11,7 +11,7 @@ use zebra_chain::{
     transaction::Transaction,
 };
 
-use crate::parameters::subsidy::*;
+use crate::{funding_stream_values, parameters::subsidy::*};
 
 /// The divisor used for halvings.
 ///
@@ -66,6 +66,16 @@ pub fn block_subsidy(height: Height, network: Network) -> Result<Amount<NonNegat
         // which truncates (rounds down) the result, as specified
         Amount::try_from(scaled_max_block_subsidy / halving_div)
     }
+}
+
+/// `MinerSubsidy(height)` as described in [protocol specification §7.8][7.8]
+///
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+pub fn miner_subsidy(height: Height, network: Network) -> Result<Amount<NonNegative>, Error> {
+    let total_funding_stream_amount: Result<Amount<NonNegative>, _> =
+        funding_stream_values(height, network)?.values().sum();
+
+    block_subsidy(height, network)? - total_funding_stream_amount?
 }
 
 /// Returns all output amounts in `Transaction`.
