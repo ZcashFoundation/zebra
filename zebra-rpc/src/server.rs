@@ -120,6 +120,24 @@ impl RpcServer {
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             {
+                // Prevent loss of miner funds due to an unsupported or incorrect address type.
+                if let Some(miner_address) = mining_config.miner_address {
+                    assert_eq!(
+                        miner_address.network(),
+                        network,
+                        "incorrect miner address config: {} \
+                         network.network {network} and miner address network {} must match",
+                        miner_address,
+                        miner_address.network(),
+                    );
+                    assert!(
+                        miner_address.is_script_hash(),
+                        "incorrect miner address config: {} \
+                         Zebra only supports transparent 'pay to script hash' (P2SH) addresses",
+                        miner_address,
+                    );
+                }
+
                 // Initialize the getblocktemplate rpc method handler
                 let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
                     network,

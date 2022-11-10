@@ -1,9 +1,11 @@
-use super::*;
-use color_eyre::Report;
-use std::convert::TryFrom;
+//! Tests for funding streams.
 
+use color_eyre::Report;
+
+use super::*;
+
+/// Check mainnet funding stream values are correct for the entire period.
 #[test]
-// Check funding streams are correct in the entire period.
 fn test_funding_stream_values() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
     let network = Network::Mainnet;
@@ -51,6 +53,32 @@ fn test_funding_stream_values() -> Result<(), Report> {
         hash_map
     );
     assert!(funding_stream_values(end, network)?.is_empty());
+
+    Ok(())
+}
+
+/// Check mainnet and testnet funding stream addresses are valid transparent P2SH addresses.
+#[test]
+fn test_funding_stream_addresses() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    for (network, receivers) in FUNDING_STREAM_ADDRESSES.iter() {
+        for (receiver, addresses) in receivers {
+            for address in addresses {
+                let address = Address::from_str(address).expect("address should deserialize");
+                assert_eq!(
+                    &address.network(),
+                    network,
+                    "incorrect network for {:?} funding stream address constant: {}",
+                    receiver,
+                    address,
+                );
+
+                // Asserts if address is not a P2SH address.
+                let _script = new_coinbase_script(address);
+            }
+        }
+    }
 
     Ok(())
 }
