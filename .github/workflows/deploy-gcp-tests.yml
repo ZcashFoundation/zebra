@@ -164,6 +164,7 @@ jobs:
           gcloud auth list
 
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -213,6 +214,7 @@ jobs:
       - name: Launch ${{ inputs.test_id }} test
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -386,6 +388,7 @@ jobs:
           gcloud auth list
 
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -453,6 +456,7 @@ jobs:
         if: ${{ (inputs.needs_zebra_state && !inputs.needs_lwd_state) && inputs.test_id != 'lwd-full-sync' }}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -501,6 +505,7 @@ jobs:
         if: ${{ (inputs.needs_zebra_state && inputs.needs_lwd_state) || inputs.test_id == 'lwd-full-sync' }}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -565,6 +570,7 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (sprout)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -622,6 +628,7 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (heartwood)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -676,6 +683,7 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (canopy)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -732,6 +740,7 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (1740k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -790,6 +799,7 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (1760k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -848,6 +858,7 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (1780k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -907,6 +918,7 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (1800k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -965,6 +977,7 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (1820k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -1022,6 +1035,7 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (checkpoint)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -1090,6 +1104,7 @@ jobs:
       - name: Result of ${{ inputs.test_id }} test
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -1214,6 +1229,7 @@ jobs:
 
           DOCKER_LOGS=$( \
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
