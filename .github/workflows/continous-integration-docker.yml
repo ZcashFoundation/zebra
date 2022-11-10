@@ -111,7 +111,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Disk images in GCP are required to be in lowercase, but the blockchain network
       # uses sentence case, so we need to downcase ${{ env.NETWORK or github.event.inputs.network }}
