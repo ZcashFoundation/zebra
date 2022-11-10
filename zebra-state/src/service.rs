@@ -1021,6 +1021,7 @@ impl Service<Request> for StateService {
             | Request::Tip
             | Request::BlockLocator
             | Request::Transaction(_)
+            | Request::BestChainUtxo(_)
             | Request::Block(_)
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. } => {

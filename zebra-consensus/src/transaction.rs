@@ -356,8 +356,9 @@ where
             // https://zips.z.cash/zip-0213#specification
 
             // Load spent UTXOs from state.
+            // TODO: Make this a method of `Request` and replace `tx.clone()` with `self.transaction()`?
             let (spent_utxos, spent_outputs) =
-                Self::spent_utxos(tx.clone(), req.known_utxos(), state).await?;
+                Self::spent_utxos(tx.clone(), req.known_utxos(), req.is_mempool(), state).await?;
 
             let cached_ffi_transaction =
                 Arc::new(CachedFfiTransaction::new(tx.clone(), spent_outputs));
@@ -464,6 +465,7 @@ where
     async fn spent_utxos(
         tx: Arc<Transaction>,
         known_utxos: Arc<HashMap<transparent::OutPoint, OrderedUtxo>>,
+        is_mempool: bool,
         state: Timeout<ZS>,
     ) -> Result<
         (
@@ -481,6 +483,13 @@ where
                 let utxo = if let Some(output) = known_utxos.get(outpoint) {
                     tracing::trace!("UXTO in known_utxos, discarding query");
                     output.utxo.clone()
+                } else if is_mempool {
+                    let query = state.clone().oneshot(zs::Request::BestChainUtxo(*outpoint));
+                    if let zebra_state::Response::BestChainUtxo(utxo) = query.await? {
+                        utxo.ok_or(TransactionError::InputNotFound)?
+                    } else {
+                        unreachable!("BestChainUtxo always responds with Option<Utxo>")
+                    }
                 } else {
                     let query = state
                         .clone()

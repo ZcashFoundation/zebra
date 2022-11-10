@@ -36,6 +36,9 @@ pub enum Response {
     /// Response to [`Request::Transaction`] with the specified transaction.
     Transaction(Option<Arc<Transaction>>),
 
+    /// Response to [`Request::BestChainUtxo`] with the UTXO
+    BestChainUtxo(Option<transparent::Utxo>),
+
     /// Response to [`Request::Block`] with the specified block.
     Block(Option<Arc<Block>>),
 
@@ -132,6 +135,8 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::Transaction(tx_and_height) => {
                 Ok(Response::Transaction(tx_and_height.map(|(tx, _height)| tx)))
             }
+            ReadResponse::BestChainUtxo(utxo) => Ok(Response::BestChainUtxo(utxo)),
+
 
             ReadResponse::AnyChainUtxo(_) => Err("ReadService does not track pending UTXOs. \
                                                   Manually unwrap the response, and handle pending UTXOs."),
@@ -141,7 +146,6 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockHeaders(headers) => Ok(Response::BlockHeaders(headers)),
 
             ReadResponse::TransactionIdsForBlock(_)
-            | ReadResponse::BestChainUtxo(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
             | ReadResponse::AddressBalance(_)
