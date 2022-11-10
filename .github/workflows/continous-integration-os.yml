@@ -28,7 +28,7 @@ on:
       - '.cargo/config.toml'
       - '**/clippy.toml'
       # workflow definitions
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/continous-integration-os.yml'
   pull_request:
     paths:
       # code and tests
@@ -98,6 +98,10 @@ jobs:
         #       or remove this workaround once the build is more efficient (#3005).
         #with:
         #  workspaces: ". -> C:\\zebra-target"
+        with:
+          # Split the getblocktemplate-rpcs cache from the regular cache, to avoid linker errors.
+          # (These might be "disk full" errors, or they might be dependency resolution issues.)
+          key: ${{ matrix.features }}
 
       - name: Change target output directory on Windows
         # Windows doesn't have enough space on the D: drive, so we redirect the build output to the
@@ -150,7 +154,7 @@ jobs:
       - name: Fetch path to Zcash parameters
         working-directory: ./zebra-consensus
         shell: bash
-        run: echo "ZCASH_PARAMS=$(cargo run --example get-params-path)" >> $GITHUB_ENV
+        run: echo "ZCASH_PARAMS=$(cargo run --release --example get-params-path)" >> $GITHUB_ENV
       - name: Cache Zcash parameters
         id: cache-params
         uses: actions/cache@v3
@@ -160,7 +164,7 @@ jobs:
       - name: Fetch Zcash parameters
         if: steps.cache-params.outputs.cache-hit != 'true'
         working-directory: ./zebra-consensus
-        run: cargo run --example download-params
+        run: cargo run --release --example download-params
 
       # Run unit and basic acceptance tests, only showing command output if the test fails.
       #
@@ -169,7 +173,7 @@ jobs:
         uses: actions-rs/cargo@v1.0.3
         with:
           command: test
-          args: ${{ matrix.features }} --verbose --workspace
+          args: ${{ matrix.features }} --release --verbose --workspace
 
       # Explicitly run any tests that are usually #[ignored]
 
@@ -182,7 +186,7 @@ jobs:
         with:
           command: test
           # Note: this only runs the zebrad acceptance tests, because re-running all the test binaries is slow on Windows
-          args: ${{ matrix.features }} --verbose --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
+          args: ${{ matrix.features }} --release --verbose --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_
 
   # Install Zebra with lockfile dependencies, with no caching and default features
   install-from-lockfile-no-cache:

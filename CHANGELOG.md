@@ -4,6 +4,24 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-rc.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.2) - 2022-11-TODO
+
+Zebra's latest release continues work on mining pool RPCs, and fixes a rare RPC crash that could lead to memory corruption.
+
+Zebra's consensus rules, node sync, and `lightwalletd` RPCs are ready for user testing and experimental use. Zebra has not been audited yet.
+
+### Breaking Changes
+
+This release has the following breaking changes:
+- TODO: search the changelog for breaking changes
+
+### Security
+
+- Fix a rare crash and memory errors when Zebra's RPC server shuts down ([#5591](https://github.com/ZcashFoundation/zebra/pull/5591))
+
+TODO: the rest of the changelog
+
+
 ## [Zebra 1.0.0-rc.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.1) - 2022-11-02
 
 This is the second Zebra release candidate. Zebra's consensus rules, node sync, and `lightwalletd` RPCs are ready for user testing and experimental use. Zebra has not been audited yet.

@@ -178,10 +178,13 @@ defaults write com.apple.CrashReporter DialogType none
 
 ### Network Ports and Data Usage
 
-By default, Zebra uses the following inbound TCP listener ports:
+Zebra uses the following inbound and outbound TCP ports:
 
 - 8233 on Mainnet
 - 18233 on Testnet
+
+Outbound connections are required to sync, inbound connections are optional.
+Zebra also needs access to the Zcash DNS seeders, via the OS DNS resolver (usually port 53).
 
 Zebra needs some peers which have a round-trip latency of 2 seconds or less.
 If this is a problem for you, please

@@ -650,6 +650,8 @@ async fn rpc_getblockcount() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -693,6 +695,8 @@ async fn rpc_getblockcount_empty_state() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -742,6 +746,8 @@ async fn rpc_getblockhash() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
@@ -777,6 +783,18 @@ async fn rpc_getblockhash() {
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblocktemplate() {
+    use std::panic;
+
+    use crate::methods::get_block_template_rpcs::constants::{
+        GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+    };
+    use zebra_chain::{
+        amount::{Amount, NonNegative},
+        block::{MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
+        chain_tip::mock::MockChainTip,
+    };
+    use zebra_consensus::MAX_BLOCK_SIGOPS;
+
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -787,7 +805,7 @@ async fn rpc_getblocktemplate() {
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
-    let (state, read_state, latest_chain_tip, _chain_tip_change) =
+    let (state, read_state, _latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
     let (
@@ -803,11 +821,20 @@ async fn rpc_getblocktemplate() {
     )
     .await;
 
+    let mining_config = get_block_template_rpcs::config::Config {
+        miner_address: Some(transparent::Address::from_script_hash(Mainnet, [0x7e; 20])),
+    };
+
+    let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
+    mock_chain_tip_sender.send_best_tip_height(NetworkUpgrade::Nu5.activation_height(Mainnet));
+
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        mining_config,
         Buffer::new(mempool.clone(), 1),
         read_state,
-        latest_chain_tip.clone(),
+        mock_chain_tip,
         tower::ServiceBuilder::new().service(chain_verifier),
     );
 
@@ -820,21 +847,44 @@ async fn rpc_getblocktemplate() {
 
     let get_block_template = get_block_template
         .await
-        .expect("unexpected panic in getblocktemplate RPC task")
+        .unwrap_or_else(|error| match error.try_into_panic() {
+            Ok(panic_object) => panic::resume_unwind(panic_object),
+            Err(cancelled_error) => {
+                panic!("getblocktemplate task was unexpectedly cancelled: {cancelled_error:?}")
+            }
+        })
         .expect("unexpected error in getblocktemplate RPC call");
 
     assert!(get_block_template.capabilities.is_empty());
-    assert_eq!(get_block_template.version, 0);
+    assert_eq!(get_block_template.version, ZCASH_BLOCK_VERSION);
     assert!(get_block_template.transactions.is_empty());
     assert!(get_block_template.target.is_empty());
     assert_eq!(get_block_template.min_time, 0);
-    assert!(get_block_template.mutable.is_empty());
-    assert!(get_block_template.nonce_range.is_empty());
-    assert_eq!(get_block_template.sigop_limit, 0);
-    assert_eq!(get_block_template.size_limit, 0);
+    assert_eq!(
+        get_block_template.mutable,
+        GET_BLOCK_TEMPLATE_MUTABLE_FIELD.to_vec()
+    );
+    assert_eq!(
+        get_block_template.nonce_range,
+        GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD
+    );
+    assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
+    assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
     assert_eq!(get_block_template.cur_time, 0);
     assert!(get_block_template.bits.is_empty());
     assert_eq!(get_block_template.height, 0);
+
+    // Coinbase transaction checks.
+    assert!(get_block_template.coinbase_txn.required);
+    assert!(!get_block_template.coinbase_txn.data.as_ref().is_empty());
+    assert_eq!(get_block_template.coinbase_txn.depends.len(), 0);
+    // TODO: should a coinbase transaction have sigops?
+    assert_eq!(get_block_template.coinbase_txn.sigops, 0);
+    // Coinbase transaction checks for empty blocks.
+    assert_eq!(
+        get_block_template.coinbase_txn.fee,
+        Amount::<NonNegative>::zero()
+    );
 
     mempool.expect_no_requests().await;
 }
@@ -856,15 +906,6 @@ async fn rpc_submitblock_errors() {
         zebra_state::populated_state(blocks, Mainnet).await;
 
     // Init RPCs
-    let _rpc = RpcImpl::new(
-        "RPC test",
-        Mainnet,
-        false,
-        Buffer::new(mempool.clone(), 1),
-        Buffer::new(read_state.clone(), 1),
-        latest_chain_tip.clone(),
-    );
-
     let (
         chain_verifier,
         _transaction_verifier,
@@ -880,6 +921,8 @@ async fn rpc_submitblock_errors() {
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        Default::default(),
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),

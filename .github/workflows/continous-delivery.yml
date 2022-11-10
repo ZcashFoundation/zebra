@@ -65,6 +65,7 @@ jobs:
   #
   # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
   build:
+    name: Build CD Docker
     uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
@@ -106,12 +107,14 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       - name: Create instance template
         run: |
@@ -178,12 +181,14 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Create instance template from container image
       - name: Manual deploy of a single instance running zebrad

@@ -1,6 +1,6 @@
 //! RPC methods related to mining only available with `getblocktemplate-rpcs` rust feature.
 
-use std::sync::Arc;
+use std::{iter, sync::Arc};
 
 use futures::{FutureExt, TryFutureExt};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
@@ -8,16 +8,27 @@ use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
-    amount::Amount,
+    amount::{self, Amount, NonNegative},
     block::Height,
-    block::{self, Block},
+    block::{
+        self,
+        merkle::{self, AuthDataRoot},
+        Block, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
+    },
     chain_tip::ChainTip,
+    parameters::Network,
     serialization::ZcashDeserializeInto,
+    transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
+    transparent,
 };
-use zebra_consensus::{BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError};
+use zebra_consensus::{
+    funding_stream_address, funding_stream_values, miner_subsidy, new_coinbase_script, BlockError,
+    VerifyBlockError, VerifyChainError, VerifyCheckpointError, MAX_BLOCK_SIGOPS,
+};
 use zebra_node_services::mempool;
 
 use crate::methods::{
+    best_chain_tip_height,
     get_block_template_rpcs::types::{
         default_roots::DefaultRoots, get_block_template::GetBlockTemplate, hex_data::HexData,
         submit_block, transaction::TransactionTemplate,
@@ -26,6 +37,7 @@ use crate::methods::{
 };
 
 pub mod config;
+pub mod constants;
 pub(crate) mod types;
 
 /// getblocktemplate RPC method signatures.
@@ -124,7 +136,13 @@ where
 
     // Configuration
     //
-    // TODO: add mining config for getblocktemplate RPC miner address
+    /// The configured network for this RPC service.
+    network: Network,
+
+    /// The configured miner address for this RPC service.
+    ///
+    /// Zebra currently only supports single-signature P2SH transparent addresses.
+    miner_address: Option<transparent::Address>,
 
     // Services
     //
@@ -165,12 +183,16 @@ where
 {
     /// Create a new instance of the handler for getblocktemplate RPCs.
     pub fn new(
+        network: Network,
+        mining_config: config::Config,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
         chain_verifier: ChainVerifier,
     ) -> Self {
         Self {
+            network,
+            miner_address: mining_config.miner_address,
             mempool,
             state,
             latest_chain_tip,
@@ -197,7 +219,7 @@ where
         + Sync
         + 'static,
     <State as Service<zebra_state::ReadRequest>>::Future: Send,
-    Tip: ChainTip + Send + Sync + 'static,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
     ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
@@ -206,27 +228,15 @@ where
     <ChainVerifier as Service<Arc<Block>>>::Future: Send,
 {
     fn get_block_count(&self) -> Result<u32> {
-        self.latest_chain_tip
-            .best_tip_height()
-            .map(|height| height.0)
-            .ok_or(Error {
-                code: ErrorCode::ServerError(0),
-                message: "No blocks in state".to_string(),
-                data: None,
-            })
+        best_chain_tip_height(&self.latest_chain_tip).map(|height| height.0)
     }
 
     fn get_block_hash(&self, index: i32) -> BoxFuture<Result<GetBlockHash>> {
         let mut state = self.state.clone();
-
-        let maybe_tip_height = self.latest_chain_tip.best_tip_height();
+        let latest_chain_tip = self.latest_chain_tip.clone();
 
         async move {
-            let tip_height = maybe_tip_height.ok_or(Error {
-                code: ErrorCode::ServerError(0),
-                message: "No blocks in state".to_string(),
-                data: None,
-            })?;
+            let tip_height = best_chain_tip_height(&latest_chain_tip)?;
 
             let height = get_height_from_int(index, tip_height)?;
 
@@ -255,44 +265,43 @@ where
     }
 
     fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>> {
+        let network = self.network;
+        let miner_address = self.miner_address;
+
         let mempool = self.mempool.clone();
+        let latest_chain_tip = self.latest_chain_tip.clone();
 
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
-            // TODO: put this in a separate get_mempool_transactions() function
-            let request = mempool::Request::FullTransactions;
-            let response = mempool.oneshot(request).await.map_err(|error| Error {
+            let miner_address = miner_address.ok_or_else(|| Error {
                 code: ErrorCode::ServerError(0),
-                message: error.to_string(),
+                message: "configure mining.miner_address in zebrad.toml \
+                          with a transparent P2SH single signature address"
+                    .to_string(),
                 data: None,
             })?;
 
-            let transactions = if let mempool::Response::FullTransactions(transactions) = response {
-                // TODO: select transactions according to ZIP-317 (#5473)
-                transactions
-            } else {
-                unreachable!("unmatched response to a mempool::FullTransactions request");
-            };
+            let tip_height = best_chain_tip_height(&latest_chain_tip)?;
+            let mempool_txs = select_mempool_transactions(mempool).await?;
 
-            let merkle_root;
-            let auth_data_root;
+            let miner_fee = miner_fee(&mempool_txs);
 
-            // TODO: add the coinbase transaction to these lists, and delete the is_empty() check
-            if !transactions.is_empty() {
-                merkle_root = transactions.iter().cloned().collect();
-                auth_data_root = transactions.iter().cloned().collect();
-            } else {
-                merkle_root = [0; 32].into();
-                auth_data_root = [0; 32].into();
-            }
+            let block_height = (tip_height + 1).expect("tip is far below Height::MAX");
+            let outputs =
+                standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
+            let coinbase_tx = Transaction::new_v5_coinbase(network, block_height, outputs).into();
 
-            let transactions = transactions.iter().map(Into::into).collect();
+            let (merkle_root, auth_data_root) =
+                calculate_transaction_roots(&coinbase_tx, &mempool_txs);
+
+            // Convert into TransactionTemplates
+            let mempool_txs = mempool_txs.iter().map(Into::into).collect();
 
             let empty_string = String::from("");
             Ok(GetBlockTemplate {
                 capabilities: vec![],
 
-                version: 0,
+                version: ZCASH_BLOCK_VERSION,
 
                 previous_block_hash: GetBlockHash([0; 32].into()),
                 block_commitments_hash: [0; 32].into(),
@@ -305,39 +314,24 @@ where
                     block_commitments_hash: [0; 32].into(),
                 },
 
-                transactions,
+                transactions: mempool_txs,
 
-                // TODO: move to a separate function in the transactions module
-                coinbase_txn: TransactionTemplate {
-                    // TODO: generate coinbase transaction data
-                    data: vec![].into(),
-
-                    // TODO: calculate from transaction data
-                    hash: [0; 32].into(),
-                    auth_digest: [0; 32].into(),
-
-                    // Always empty for coinbase transactions.
-                    depends: Vec::new(),
-
-                    // TODO: negative sum of transactions.*.fee
-                    fee: Amount::zero(),
-
-                    // TODO: sigops used by the generated transaction data
-                    sigops: 0,
-
-                    required: true,
-                },
+                coinbase_txn: TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee),
 
                 target: empty_string.clone(),
 
                 min_time: 0,
 
-                mutable: vec![],
+                mutable: constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
 
-                nonce_range: empty_string.clone(),
+                nonce_range: constants::GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
 
-                sigop_limit: 0,
-                size_limit: 0,
+                sigop_limit: MAX_BLOCK_SIGOPS,
+
+                size_limit: MAX_BLOCK_BYTES,
 
                 cur_time: 0,
 
@@ -423,6 +417,106 @@ where
         .boxed()
     }
 }
+
+// get_block_template support methods
+
+/// Returns selected transactions in the `mempool`, or an error if the mempool has failed.
+///
+/// TODO: select transactions according to ZIP-317 (#5473)
+pub async fn select_mempool_transactions<Mempool>(
+    mempool: Mempool,
+) -> Result<Vec<VerifiedUnminedTx>>
+where
+    Mempool: Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
+    Mempool::Future: Send,
+{
+    let response = mempool
+        .oneshot(mempool::Request::FullTransactions)
+        .await
+        .map_err(|error| Error {
+            code: ErrorCode::ServerError(0),
+            message: error.to_string(),
+            data: None,
+        })?;
+
+    if let mempool::Response::FullTransactions(transactions) = response {
+        // TODO: select transactions according to ZIP-317 (#5473)
+        Ok(transactions)
+    } else {
+        unreachable!("unmatched response to a mempool::FullTransactions request");
+    }
+}
+
+/// Returns the total miner fee for `mempool_txs`.
+pub fn miner_fee(mempool_txs: &[VerifiedUnminedTx]) -> Amount<NonNegative> {
+    let miner_fee: amount::Result<Amount<NonNegative>> =
+        mempool_txs.iter().map(|tx| tx.miner_fee).sum();
+
+    miner_fee.expect(
+        "invalid selected transactions: \
+         fees in a valid block can not be more than MAX_MONEY",
+    )
+}
+
+/// Returns the standard funding stream and miner reward transparent output scripts
+/// for `network`, `height` and `miner_fee`.
+///
+/// Only works for post-Canopy heights.
+pub fn standard_coinbase_outputs(
+    network: Network,
+    height: Height,
+    miner_address: transparent::Address,
+    miner_fee: Amount<NonNegative>,
+) -> Vec<(Amount<NonNegative>, transparent::Script)> {
+    let funding_streams = funding_stream_values(height, network)
+        .expect("funding stream value calculations are valid for reasonable chain heights");
+
+    let mut funding_streams: Vec<(Amount<NonNegative>, transparent::Address)> = funding_streams
+        .iter()
+        .map(|(receiver, amount)| (*amount, funding_stream_address(height, network, *receiver)))
+        .collect();
+    // The HashMap returns funding streams in an arbitrary order,
+    // but Zebra's snapshot tests expect the same order every time.
+    funding_streams.sort_by_key(|(amount, _address)| *amount);
+
+    let miner_reward = miner_subsidy(height, network)
+        .expect("reward calculations are valid for reasonable chain heights")
+        + miner_fee;
+    let miner_reward =
+        miner_reward.expect("reward calculations are valid for reasonable chain heights");
+
+    let mut coinbase_outputs = funding_streams;
+    coinbase_outputs.push((miner_reward, miner_address));
+
+    coinbase_outputs
+        .iter()
+        .map(|(amount, address)| (*amount, new_coinbase_script(*address)))
+        .collect()
+}
+
+/// Returns the transaction effecting and authorizing roots
+/// for `coinbase_tx` and `mempool_txs`.
+//
+// TODO: should this be spawned into a cryptographic operations pool?
+//       (it would only matter if there were a lot of small transactions in a block)
+pub fn calculate_transaction_roots(
+    coinbase_tx: &UnminedTx,
+    mempool_txs: &[VerifiedUnminedTx],
+) -> (merkle::Root, AuthDataRoot) {
+    let block_transactions =
+        || iter::once(coinbase_tx).chain(mempool_txs.iter().map(|tx| &tx.transaction));
+
+    let merkle_root = block_transactions().cloned().collect();
+    let auth_data_root = block_transactions().cloned().collect();
+
+    (merkle_root, auth_data_root)
+}
+
+// get_block_hash support methods
 
 /// Given a potentially negative index, find the corresponding `Height`.
 ///

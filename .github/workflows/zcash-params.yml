@@ -24,6 +24,7 @@ on:
 
 jobs:
   build:
+    name: Build Zcash Params Docker
     uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/zcash-params/Dockerfile

@@ -31,7 +31,7 @@ jobs:
       - run: 'echo "No build required"'
 
   build:
-    name: Build / Build images
+    name: Build CI Docker / Build images
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'

@@ -12,6 +12,11 @@ on:
         required: true
         type: string
         description: 'Explains what the test does'
+      height_grep_text:
+        required: false
+        type: string
+        description: 'Regular expression to find the tip height in test logs, and add it to newly created cached state image metadata'
+
       # Test selection and parameters
       test_variables:
         required: true
@@ -22,6 +27,12 @@ on:
         type: string
         default: Mainnet
         description: 'Zcash network to test against'
+      is_long_test:
+        required: false
+        type: boolean
+        default: false
+        description: 'Does this test need multiple run jobs? (Does it run longer than 6 hours?)'
+
       # Cached state
       #
       # TODO: find a better name
@@ -69,11 +80,6 @@ on:
         required: true
         type: boolean
         description: 'Does the test create a new cached state disk?'
-      # Metadata
-      height_grep_text:
-        required: false
-        type: string
-        description: 'Regular expression to find the tip height in test logs, and add it to newly created cached state image metadata'
       app_name:
         required: false
         type: string
@@ -119,20 +125,17 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Create a Compute Engine virtual machine
       - name: Create ${{ inputs.test_id }} GCP compute instance
@@ -193,20 +196,17 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Launch the test without any cached state
       - name: Launch ${{ inputs.test_id }} test
@@ -260,12 +260,14 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Find a cached state disk for this job, matching all of:
       # - disk cached state (lwd_state_dir/zebra_state_dir or disk_prefix) - zebrad-cache or lwd-cache
@@ -415,20 +417,17 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Launch the test with the previously created Zebra-only cached state.
       # Each test runs one of the "Launch test" steps, and skips the other.
@@ -524,12 +523,14 @@ jobs:
 
 
   # follow the logs of the test we just launched, up to Sapling activation (or the test finishing)
+  #
+  # If `inputs.is_long_test` is `false`, this job is skipped.
   logs-sprout:
     name: Log ${{ inputs.test_id }} test (sprout)
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     needs: [ launch-with-cached-state, launch-without-cached-state ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -545,20 +546,17 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Show all the logs since the container launched,
       # following until Sapling activation (or the test finishes).
@@ -598,7 +596,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (heartwood)
     needs: [ logs-sprout ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -614,20 +612,17 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Show recent logs, following until Canopy activation (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (heartwood)
@@ -657,7 +652,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (canopy)
     needs: [ logs-heartwood ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -673,20 +668,17 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Show recent logs, following until NU5 activation (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (canopy)
@@ -718,7 +710,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (1740k)
     needs: [ logs-canopy ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -734,20 +726,17 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Show recent logs, following until block 1,740,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1740k)
@@ -781,7 +770,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (1760k)
     needs: [ logs-1740k ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -797,20 +786,17 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Show recent logs, following until block 1,760,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1760k)
@@ -844,7 +830,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (1780k)
     needs: [ logs-1760k ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -860,20 +846,17 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Show recent logs, following until block 1,780,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1780k)
@@ -908,7 +891,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (1800k)
     needs: [ logs-1780k ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -924,20 +907,17 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Show recent logs, following until block 1,800,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1800k)
@@ -971,7 +951,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (1820k)
     needs: [ logs-1800k ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -987,20 +967,17 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.1
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Show recent logs, following until block 1,820,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1820k)
@@ -1031,7 +1008,7 @@ jobs:
     name: Log ${{ inputs.test_id }} test (checkpoint)
     needs: [ logs-1820k ]
     # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -1047,20 +1024,17 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Show recent logs, following until the last checkpoint (or the test finishes)
       #
@@ -1086,69 +1060,15 @@ jobs:
           -e 'test result:.*finished in' \
           "
 
-  # follow the logs of the test we just launched, until it finishes
-  logs-end:
-    name: Log ${{ inputs.test_id }} test (end)
-    needs: [ logs-checkpoint ]
-    # If the previous job fails, we still want to show the logs.
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-    steps:
-      - uses: actions/checkout@v3.1.0
-        with:
-          persist-credentials: false
-          fetch-depth: '2'
 
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
-        with:
-          short-length: 7
-
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
-      # Setup gcloud CLI
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: google-github-actions/auth@v0.8.3
-        with:
-          retries: '3'
-          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
-          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
-
-      # Show recent logs, following until the test finishes
-      - name: Show logs for ${{ inputs.test_id }} test (end)
-        run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --quiet \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail ${{ env.EXTRA_LOG_LINES }} \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          'test result:.*finished in' \
-          "
-
-
-  # check the results of the test, and show all of the test logs
+  # Show all the test logs, then follow the logs of the test we just launched, until it finishes.
+  # Then check the result of the test.
+  #
+  # If `inputs.is_long_test` is `false`, the Rust test harness mostly runs in this job.
+  # Otherwise, it mostly runs in the "logs" jobs.
   test-result:
-    # TODO: update the job name here, and in the branch protection rules
     name: Run ${{ inputs.test_id }} test
-    needs: [ logs-end ]
+    needs: [ logs-checkpoint ]
     # If the previous job fails, we also want to run and fail this job,
     # so that the branch protection rule fails in Mergify and GitHub.
     if: ${{ !cancelled() }}
@@ -1167,20 +1087,17 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
-        run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
       # Then wait for the container to finish, and exit with the test's exit status.
@@ -1205,6 +1122,7 @@ jobs:
           set -e;
           sudo docker logs \
           --tail all \
+          --follow \
           ${{ inputs.test_id }} | \
           tee --output-error=exit /dev/stderr | \
           grep --max-count=1 --extended-regexp --color=always \
@@ -1262,11 +1180,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Get the state version from the local constants.rs file to be used in the image creation,
       # as the state version is part of the disk image name.
@@ -1437,11 +1357,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0.8.3
+        uses: google-github-actions/auth@v1.0.0
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
 
       # Deletes the instances that has been recently deployed in the actual commit after all
       # previous jobs have run, no matter the outcome of the job.

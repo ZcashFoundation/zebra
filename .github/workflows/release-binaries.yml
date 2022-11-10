@@ -20,6 +20,7 @@ jobs:
   #
   # The image will be named `zebrad:<semver>`
   build:
+    name: Build Release Docker
     uses: ./.github/workflows/build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
