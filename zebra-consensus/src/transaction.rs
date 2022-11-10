@@ -480,6 +480,8 @@ where
         for input in inputs {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
                 tracing::trace!("awaiting outpoint lookup");
+                // Currently, Zebra only supports known UTXOs in block transactions.
+                // But it might support them in the mempool in future.
                 let utxo = if let Some(output) = known_utxos.get(outpoint) {
                     tracing::trace!("UXTO in known_utxos, discarding query");
                     output.utxo.clone()

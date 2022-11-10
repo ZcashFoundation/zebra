@@ -178,8 +178,8 @@ pub enum TransactionError {
     #[error("must have at least one active orchard flag")]
     NotEnoughFlags,
 
-    #[error("could not find an input UTXO in best chain")]
-    InputNotFound,
+    #[error("could not find a mempool transaction input UTXO in the best chain")]
+    TransparentInputNotFound,
 }
 
 impl From<BoxError> for TransactionError {
