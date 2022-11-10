@@ -7,6 +7,7 @@
 
 use std::{
     env,
+    net::SocketAddr,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -14,6 +15,7 @@ use std::{
 use color_eyre::eyre::Result;
 use tempfile::TempDir;
 
+use zebra_test::net::random_known_port;
 use zebrad::{
     components::{mempool, sync, tracing},
     config::ZebradConfig,
@@ -94,4 +96,28 @@ pub fn configs_dir() -> PathBuf {
 pub fn config_file_full_path(config_file: PathBuf) -> PathBuf {
     let path = configs_dir().join(config_file);
     Path::new(&path).into()
+}
+
+/// Returns a `zebrad` config with a random known RPC port.
+///
+/// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
+pub fn random_known_rpc_port_config(parallel_cpu_threads: bool) -> Result<ZebradConfig> {
+    // [Note on port conflict](#Note on port conflict)
+    let listen_port = random_known_port();
+    let listen_ip = "127.0.0.1".parse().expect("hard-coded IP is valid");
+    let zebra_rpc_listener = SocketAddr::new(listen_ip, listen_port);
+
+    // Write a configuration that has the rpc listen_addr option set
+    // TODO: split this config into another function?
+    let mut config = default_test_config()?;
+    config.rpc.listen_addr = Some(zebra_rpc_listener);
+    if parallel_cpu_threads {
+        // Auto-configure to the number of CPU cores: most users configre this
+        config.rpc.parallel_cpu_threads = 0;
+    } else {
+        // Default config, users who want to detect port conflicts configure this
+        config.rpc.parallel_cpu_threads = 1;
+    }
+
+    Ok(config)
 }

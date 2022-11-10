@@ -18,3 +18,4 @@ pub mod get_block_template_rpcs;
 pub mod launch;
 pub mod lightwalletd;
 pub mod sync;
+pub mod test_type;
