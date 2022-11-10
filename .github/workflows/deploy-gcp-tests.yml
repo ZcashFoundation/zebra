@@ -1229,7 +1229,7 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=" \
-          docker logs ${{ inputs.test_id }} --tail 200 \
+          sudo docker logs ${{ inputs.test_id }} --tail 200 \
           ")
 
           SYNC_HEIGHT=$( \
@@ -1360,3 +1360,15 @@ jobs:
           else
             gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
           fi
+
+      # Deletes SSH keys generated during this workflow run, as GCP has a limit of SSH keys
+      # that can exist at the same time in the OS Login metadata. Not deleting this keys
+      # could cause the following error:
+      # `Login profile size exceeds 32 KiB. Delete profile values to make additional space`
+      - name: Delete temporal SSH keys
+        continue-on-error: true
+        run: |
+          for i in $(gcloud compute os-login ssh-keys list --format="table[no-heading](value.fingerprint)"); do 
+            echo "$i";
+            gcloud compute os-login ssh-keys remove --key "$i" || true;
+          done
