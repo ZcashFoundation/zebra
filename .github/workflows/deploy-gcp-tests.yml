@@ -160,11 +160,12 @@ jobs:
       # SSH into the just created VM, and create a docker volume with the newly created disk.
       - name: Create ${{ inputs.test_id }} Docker volume
         run: |
+          gcloud info
           gcloud auth list
 
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --zone ${{ env.ZONE }} \
+          --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -206,14 +207,13 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Launch the test without any cached state
       - name: Launch ${{ inputs.test_id }} test
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -383,9 +383,11 @@ jobs:
       # but the cached state can be smaller if we just increased the disk size.)
       - name: Create ${{ inputs.test_id }} Docker volume
         run: |
+          gcloud info
           gcloud auth list
 
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -425,9 +427,7 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Launch the test with the previously created Zebra-only cached state.
       # Each test runs one of the "Launch test" steps, and skips the other.
@@ -453,6 +453,7 @@ jobs:
         if: ${{ (inputs.needs_zebra_state && !inputs.needs_lwd_state) && inputs.test_id != 'lwd-full-sync' }}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -501,6 +502,7 @@ jobs:
         if: ${{ (inputs.needs_zebra_state && inputs.needs_lwd_state) || inputs.test_id == 'lwd-full-sync' }}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -550,9 +552,7 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Show all the logs since the container launched,
       # following until Sapling activation (or the test finishes).
@@ -565,6 +565,7 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (sprout)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -614,14 +615,13 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Show recent logs, following until Canopy activation (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (heartwood)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -668,14 +668,13 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Show recent logs, following until NU5 activation (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (canopy)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -724,14 +723,13 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Show recent logs, following until block 1,740,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1740k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -782,14 +780,13 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Show recent logs, following until block 1,760,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1760k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -840,14 +837,13 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Show recent logs, following until block 1,780,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1780k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -899,14 +895,13 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Show recent logs, following until block 1,800,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1800k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -952,19 +947,18 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1.0.0
+        uses: google-github-actions/auth@v0.8.1
         with:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Show recent logs, following until block 1,820,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1820k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -1012,9 +1006,7 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Show recent logs, following until the last checkpoint (or the test finishes)
       #
@@ -1022,6 +1014,7 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (checkpoint)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -1073,9 +1066,7 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
       # Then wait for the container to finish, and exit with the test's exit status.
@@ -1090,6 +1081,7 @@ jobs:
       - name: Result of ${{ inputs.test_id }} test
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -1160,9 +1152,7 @@ jobs:
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Get the state version from the local constants.rs file to be used in the image creation,
       # as the state version is part of the disk image name.
@@ -1214,6 +1204,7 @@ jobs:
 
           DOCKER_LOGS=$( \
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
           --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -1335,9 +1326,7 @@ jobs:
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.0
+          token_format: 'access_token'
 
       # Deletes the instances that has been recently deployed in the actual commit after all
       # previous jobs have run, no matter the outcome of the job.
