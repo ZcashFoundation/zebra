@@ -51,7 +51,7 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
 
         info!("spawning RPC server...");
 
-        let (rpc_server_task_handle, rpc_tx_queue_task_handle) = RpcServer::spawn(
+        let (rpc_server_task_handle, rpc_tx_queue_task_handle, _rpc_server) = RpcServer::spawn(
             config,
             Default::default(),
             "RPC server test",
@@ -74,9 +74,6 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
 
         let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
         assert!(matches!(rpc_tx_queue_task_result, None));
-
-        // TODO: when we return server.close_handle(), use it to shut down the server here,
-        //       and remove the shutdown timeout
     });
 
     info!("waiting for RPC server to shut down...");
@@ -87,21 +84,36 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
 /// on an OS-assigned unallocated port.
 #[test]
 fn rpc_server_spawn_unallocated_port_single_thread() {
-    rpc_server_spawn_unallocated_port(false)
+    rpc_server_spawn_unallocated_port(false, false)
 }
 
-/// Test that the JSON-RPC server spawn when configured with multiple threads,
+/// Test that the JSON-RPC server spawns and shuts down when configured with a single thread,
+/// on an OS-assigned unallocated port.
+#[test]
+fn rpc_server_spawn_unallocated_port_single_thread_shutdown() {
+    rpc_server_spawn_unallocated_port(false, true)
+}
+
+/// Test that the JSON-RPC server spawns when configured with multiple threads,
 /// on an OS-assigned unallocated port.
 #[test]
 fn rpc_sever_spawn_unallocated_port_parallel_threads() {
-    rpc_server_spawn_unallocated_port(true)
+    rpc_server_spawn_unallocated_port(true, false)
+}
+
+/// Test that the JSON-RPC server spawns and shuts down when configured with multiple threads,
+/// on an OS-assigned unallocated port.
+#[test]
+fn rpc_sever_spawn_unallocated_port_parallel_threads_shutdown() {
+    rpc_server_spawn_unallocated_port(true, true)
 }
 
 /// Test if the RPC server will spawn on an OS-assigned unallocated port.
 ///
-/// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
+/// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores,
+/// and `do_shutdown` to true to close the server using the close handle.
 #[tracing::instrument]
-fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool) {
+fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool, do_shutdown: bool) {
     let _init_guard = zebra_test::init();
 
     let port = zebra_test::net::random_unallocated_port();
@@ -123,7 +135,7 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool) {
 
         info!("spawning RPC server...");
 
-        let (rpc_server_task_handle, rpc_tx_queue_task_handle) = RpcServer::spawn(
+        let (rpc_server_task_handle, rpc_tx_queue_task_handle, rpc_server) = RpcServer::spawn(
             config,
             Default::default(),
             "RPC server test",
@@ -140,15 +152,33 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool) {
         state.expect_no_requests().await;
         chain_verifier.expect_no_requests().await;
 
-        // The server and queue tasks should continue without errors or panics
-        let rpc_server_task_result = rpc_server_task_handle.now_or_never();
-        assert!(matches!(rpc_server_task_result, None));
+        if do_shutdown {
+            rpc_server
+                .expect("unexpected missing RpcServer for configured RPC port")
+                .shutdown()
+                .await
+                .expect("unexpected panic during RpcServer shutdown");
 
-        let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-        assert!(matches!(rpc_tx_queue_task_result, None));
+            // The server and queue tasks should shut down without errors or panics
+            let rpc_server_task_result = rpc_server_task_handle.await;
+            assert!(
+                matches!(rpc_server_task_result, Ok(())),
+                "unexpected server task panic during shutdown: {rpc_server_task_result:?}"
+            );
 
-        // TODO: when we return server.close_handle(), use it to shut down the server here
-        //       and remove the shutdown timeout
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.await;
+            assert!(
+                matches!(rpc_tx_queue_task_result, Ok(())),
+                "unexpected queue task panic during shutdown: {rpc_tx_queue_task_result:?}"
+            );
+        } else {
+            // The server and queue tasks should continue without errors or panics
+            let rpc_server_task_result = rpc_server_task_handle.now_or_never();
+            assert!(matches!(rpc_server_task_result, None));
+
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            assert!(matches!(rpc_tx_queue_task_result, None));
+        }
     });
 
     info!("waiting for RPC server to shut down...");
@@ -182,22 +212,23 @@ fn rpc_server_spawn_port_conflict() {
 
         info!("spawning RPC server 1...");
 
-        let (_rpc_server_1_task_handle, _rpc_tx_queue_1_task_handle) = RpcServer::spawn(
-            config.clone(),
-            Default::default(),
-            "RPC server 1 test",
-            Buffer::new(mempool.clone(), 1),
-            Buffer::new(state.clone(), 1),
-            Buffer::new(chain_verifier.clone(), 1),
-            NoChainTip,
-            Mainnet,
-        );
+        let (_rpc_server_1_task_handle, _rpc_tx_queue_1_task_handle, _rpc_server) =
+            RpcServer::spawn(
+                config.clone(),
+                Default::default(),
+                "RPC server 1 test",
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+                Buffer::new(chain_verifier.clone(), 1),
+                NoChainTip,
+                Mainnet,
+            );
 
         tokio::time::sleep(Duration::from_secs(3)).await;
 
         info!("spawning conflicted RPC server 2...");
 
-        let (rpc_server_2_task_handle, _rpc_tx_queue_2_task_handle) = RpcServer::spawn(
+        let (rpc_server_2_task_handle, _rpc_tx_queue_2_task_handle, _rpc_server) = RpcServer::spawn(
             config,
             Default::default(),
             "RPC server 2 conflict test",
@@ -285,22 +316,23 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
 
         info!("spawning parallel RPC server 1...");
 
-        let (_rpc_server_1_task_handle, _rpc_tx_queue_1_task_handle) = RpcServer::spawn(
-            config.clone(),
-            Default::default(),
-            "RPC server 1 test",
-            Buffer::new(mempool.clone(), 1),
-            Buffer::new(state.clone(), 1),
-            Buffer::new(chain_verifier.clone(), 1),
-            NoChainTip,
-            Mainnet,
-        );
+        let (_rpc_server_1_task_handle, _rpc_tx_queue_1_task_handle, _rpc_server) =
+            RpcServer::spawn(
+                config.clone(),
+                Default::default(),
+                "RPC server 1 test",
+                Buffer::new(mempool.clone(), 1),
+                Buffer::new(state.clone(), 1),
+                Buffer::new(chain_verifier.clone(), 1),
+                NoChainTip,
+                Mainnet,
+            );
 
         tokio::time::sleep(Duration::from_secs(3)).await;
 
         info!("spawning parallel conflicted RPC server 2...");
 
-        let (rpc_server_2_task_handle, _rpc_tx_queue_2_task_handle) = RpcServer::spawn(
+        let (rpc_server_2_task_handle, _rpc_tx_queue_2_task_handle, _rpc_server) = RpcServer::spawn(
             config,
             Default::default(),
             "RPC server 2 conflict test",
