@@ -69,9 +69,7 @@ fn test_funding_stream_addresses() -> Result<(), Report> {
                 assert_eq!(
                     &address.network(),
                     network,
-                    "incorrect network for {:?} funding stream address constant: {}",
-                    receiver,
-                    address,
+                    "incorrect network for {receiver:?} funding stream address constant: {address}",
                 );
 
                 // Asserts if address is not a P2SH address.

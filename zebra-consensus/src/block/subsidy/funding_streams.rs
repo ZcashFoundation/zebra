@@ -126,9 +126,8 @@ pub fn funding_stream_address(
 pub fn check_script_form(lock_script: &Script, address: Address) -> bool {
     assert!(
         address.is_script_hash(),
-        "incorrect funding stream address constant: {} \
+        "incorrect funding stream address constant: {address} \
          Zcash only supports transparent 'pay to script hash' (P2SH) addresses",
-        address,
     );
 
     // Verify a Bitcoin P2SH single or multisig address.
@@ -141,9 +140,8 @@ pub fn check_script_form(lock_script: &Script, address: Address) -> bool {
 pub fn new_coinbase_script(address: Address) -> Script {
     assert!(
         address.is_script_hash(),
-        "incorrect coinbase script address: {} \
+        "incorrect coinbase script address: {address} \
          Zebra only supports transparent 'pay to script hash' (P2SH) addresses",
-        address,
     );
 
     let address_hash = address
