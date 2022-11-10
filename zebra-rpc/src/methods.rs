@@ -14,7 +14,7 @@ use hex::{FromHex, ToHex};
 use indexmap::IndexMap;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
-use tokio::{sync::broadcast::Sender, task::JoinHandle};
+use tokio::{sync::broadcast, task::JoinHandle};
 use tower::{buffer::Buffer, Service, ServiceExt};
 use tracing::Instrument;
 
@@ -278,8 +278,8 @@ where
 
     // Tasks
     //
-    /// A sender component of a channel used to send transactions to the queue.
-    queue_sender: Sender<Option<UnminedTx>>,
+    /// A sender component of a channel used to send transactions to the mempool queue.
+    queue_sender: broadcast::Sender<UnminedTx>,
 }
 
 impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
@@ -313,7 +313,7 @@ where
         <Mempool as Service<mempool::Request>>::Future: Send,
         <State as Service<zebra_state::ReadRequest>>::Future: Send,
     {
-        let runner = Queue::start();
+        let (runner, queue_sender) = Queue::start();
 
         let mut app_version = app_version.to_string();
 
@@ -329,7 +329,7 @@ where
             mempool: mempool.clone(),
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
-            queue_sender: runner.sender(),
+            queue_sender,
         };
 
         // run the process queue
@@ -517,7 +517,7 @@ where
 
             // send transaction to the rpc queue, ignore any error.
             let unmined_transaction = UnminedTx::from(raw_transaction.clone());
-            let _ = queue_sender.send(Some(unmined_transaction));
+            let _ = queue_sender.send(unmined_transaction);
 
             let transaction_parameter = mempool::Gossip::Tx(raw_transaction.into());
             let request = mempool::Request::Queue(vec![transaction_parameter]);
