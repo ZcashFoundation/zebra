@@ -133,7 +133,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Create a Compute Engine virtual machine
       - name: Create ${{ inputs.test_id }} GCP compute instance
@@ -202,7 +204,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Launch the test without any cached state
       - name: Launch ${{ inputs.test_id }} test
@@ -261,7 +265,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Find a cached state disk for this job, matching all of:
       # - disk cached state (lwd_state_dir/zebra_state_dir or disk_prefix) - zebrad-cache or lwd-cache
@@ -419,7 +425,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Launch the test with the previously created Zebra-only cached state.
       # Each test runs one of the "Launch test" steps, and skips the other.
@@ -546,7 +554,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Show all the logs since the container launched,
       # following until Sapling activation (or the test finishes).
@@ -610,7 +620,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Show recent logs, following until Canopy activation (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (heartwood)
@@ -664,7 +676,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Show recent logs, following until NU5 activation (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (canopy)
@@ -720,7 +734,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Show recent logs, following until block 1,740,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1740k)
@@ -778,7 +794,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Show recent logs, following until block 1,760,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1760k)
@@ -836,7 +854,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Show recent logs, following until block 1,780,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1780k)
@@ -895,7 +915,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Show recent logs, following until block 1,800,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1800k)
@@ -953,7 +975,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Show recent logs, following until block 1,820,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1820k)
@@ -1008,7 +1032,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Show recent logs, following until the last checkpoint (or the test finishes)
       #
@@ -1069,7 +1095,9 @@ jobs:
           retries: '3'
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
       # Then wait for the container to finish, and exit with the test's exit status.
@@ -1156,7 +1184,9 @@ jobs:
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Get the state version from the local constants.rs file to be used in the image creation,
       # as the state version is part of the disk image name.
@@ -1331,7 +1361,9 @@ jobs:
         with:
           workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
-          token_format: 'access_token'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.0
 
       # Deletes the instances that has been recently deployed in the actual commit after all
       # previous jobs have run, no matter the outcome of the job.
