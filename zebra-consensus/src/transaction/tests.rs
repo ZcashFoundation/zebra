@@ -19,11 +19,14 @@ use zebra_chain::{
     transaction::{
         arbitrary::{
             fake_v5_transactions_for_network, insert_fake_orchard_shielded_data, test_transactions,
+            transactions_from_blocks,
         },
         Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
     transparent::{self, CoinbaseData},
 };
+
+use zebra_test::mock_service::MockService;
 
 use crate::error::TransactionError;
 
@@ -175,6 +178,38 @@ fn v5_transaction_with_no_inputs_fails_validation() {
         check::has_inputs_and_outputs(&transaction),
         Err(TransactionError::NoInputs)
     );
+}
+
+#[tokio::test]
+async fn mempool_request_with_missing_input_is_rejected() {
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let verifier = Verifier::new(Network::Mainnet, state.clone());
+
+    let (height, tx) = transactions_from_blocks(zebra_test::vectors::MAINNET_BLOCKS.iter())
+        .find(|(_, tx)| !(tx.is_coinbase() || tx.inputs().is_empty()))
+        .expect("At least one non-coinbase transaction with transparent inputs in test vectors");
+
+    let expected_state_request = zebra_state::Request::BestChainUtxo(match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    });
+
+    tokio::spawn(async move {
+        state
+            .expect_request(expected_state_request)
+            .await
+            .expect("verifier should call mock state service")
+            .respond(zebra_state::Response::BestChainUtxo(None));
+    });
+
+    let verifier_response = verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await;
+
+    assert_eq!(verifier_response, Err(TransactionError::InputNotFound));
 }
 
 #[test]
