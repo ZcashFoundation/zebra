@@ -120,6 +120,8 @@ jobs:
         run: |
           gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --boot-disk-type=pd-ssd \
+          --image-project=debian-cloud \
+          --image-family=debian-11 \
           --container-image ${{ env.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
           --create-disk name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=300GB,type=pd-ssd \
           --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
@@ -196,6 +198,8 @@ jobs:
           gcloud compute instances create-with-container "zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size 300GB \
           --boot-disk-type=pd-ssd \
+          --image-project=debian-cloud \
+          --image-family=debian-11 \
           --container-stdin \
           --container-tty \
           --container-image ${{ env.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
