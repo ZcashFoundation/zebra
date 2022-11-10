@@ -34,7 +34,7 @@ proptest! {
     #[test]
     fn insert_remove_to_from_queue(transaction in any::<UnminedTx>()) {
         // create a queue
-        let mut runner = Queue::start();
+        let (mut runner, _sender) = Queue::start();
 
         // insert transaction
         runner.queue.insert(transaction.clone());
@@ -54,7 +54,7 @@ proptest! {
     #[test]
     fn queue_size_limit(transactions in any::<[UnminedTx; CHANNEL_AND_QUEUE_CAPACITY + 1]>()) {
         // create a queue
-        let mut runner = Queue::start();
+        let (mut runner, _sender) = Queue::start();
 
         // insert all transactions we have
         transactions.iter().for_each(|t| runner.queue.insert(t.clone()));
@@ -68,7 +68,7 @@ proptest! {
     #[test]
     fn queue_order(transactions in any::<[UnminedTx; 32]>()) {
         // create a queue
-        let mut runner = Queue::start();
+        let (mut runner, _sender) = Queue::start();
         // fill the queue and check insertion order
         for i in 0..CHANNEL_AND_QUEUE_CAPACITY {
             let transaction = transactions[i].clone();
@@ -108,7 +108,7 @@ proptest! {
             time::pause();
 
             // create a queue
-            let mut runner = Queue::start();
+            let (mut runner, _sender) = Queue::start();
 
             // insert a transaction to the queue
             runner.queue.insert(transaction);
@@ -165,7 +165,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
 
             // create a queue
-            let mut runner = Queue::start();
+            let (mut runner, _sender) = Queue::start();
 
             // insert a transaction to the queue
             let unmined_transaction = UnminedTx::from(transaction);
@@ -246,7 +246,7 @@ proptest! {
             let mut write_state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
             // create a queue
-            let mut runner = Queue::start();
+            let (mut runner, _sender) = Queue::start();
 
             // insert a transaction to the queue
             let unmined_transaction = UnminedTx::from(&transaction);
@@ -320,7 +320,7 @@ proptest! {
             let mut mempool = MockService::build().for_prop_tests();
 
             // create a queue
-            let mut runner = Queue::start();
+            let (mut runner, _sender) = Queue::start();
 
             // insert a transaction to the queue
             let unmined_transaction = UnminedTx::from(transaction.clone());
