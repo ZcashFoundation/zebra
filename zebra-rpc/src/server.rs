@@ -30,7 +30,7 @@ use crate::{
 };
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-use crate::methods::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
+use crate::methods::{get_block_template_rpcs, GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
 pub mod compatibility;
 mod tracing_middleware;
@@ -68,8 +68,16 @@ impl RpcServer {
     ///
     /// Returns [`JoinHandle`]s for the RPC server and `sendrawtransaction` queue tasks,
     /// and a [`RpcServer`] handle, which can be used to shut down the RPC server task.
+    //
+    // TODO: put some of the configs or services in their own struct?
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn<Version, Mempool, State, Tip, ChainVerifier>(
         config: Config,
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        mining_config: get_block_template_rpcs::config::Config,
+        #[cfg(not(feature = "getblocktemplate-rpcs"))]
+        #[allow(unused_variables)]
+        mining_config: (),
         app_version: Version,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
@@ -115,6 +123,7 @@ impl RpcServer {
                 // Initialize the getblocktemplate rpc method handler
                 let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
                     network,
+                    mining_config,
                     mempool.clone(),
                     state.clone(),
                     latest_chain_tip.clone(),

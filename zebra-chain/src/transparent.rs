@@ -180,6 +180,25 @@ impl fmt::Display for Input {
 }
 
 impl Input {
+    /// Returns a new coinbase input for `height` with optional `data` and `sequence`.
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    pub fn new_coinbase(
+        height: block::Height,
+        data: Option<Vec<u8>>,
+        sequence: Option<u32>,
+    ) -> Input {
+        Input::Coinbase {
+            height,
+
+            // "No extra coinbase data" is the default.
+            data: CoinbaseData(data.unwrap_or_default()),
+
+            // If the caller does not specify the sequence number,
+            // use a sequence number that activates the LockTime.
+            sequence: sequence.unwrap_or(0),
+        }
+    }
+
     /// Returns the input's sequence number.
     pub fn sequence(&self) -> u32 {
         match self {
@@ -333,6 +352,15 @@ pub struct Output {
 }
 
 impl Output {
+    /// Returns a new coinbase output that pays `amount` using `lock_script`.
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    pub fn new_coinbase(amount: Amount<NonNegative>, lock_script: Script) -> Output {
+        Output {
+            value: amount,
+            lock_script,
+        }
+    }
+
     /// Get the value contained in this output.
     /// This amount is subtracted from the transaction value pool by this output.
     pub fn value(&self) -> Amount<NonNegative> {
