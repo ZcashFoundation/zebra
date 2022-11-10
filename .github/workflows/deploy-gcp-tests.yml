@@ -145,7 +145,7 @@ jobs:
           --boot-disk-size 300GB \
           --boot-disk-type pd-ssd \
           --create-disk name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
-          --container-image debian-11 \
+          --container-image debian-11-bullseye-v20221102 \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
@@ -365,7 +365,7 @@ jobs:
           --boot-disk-size 300GB \
           --boot-disk-type pd-ssd \
           --create-disk image=${{ env.CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
-          --container-image debian-11 \
+          --container-image debian-11-bullseye-v20221102 \
           --container-restart-policy=never \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
