@@ -13,14 +13,18 @@ use zebra_chain::{
     block::{
         self,
         merkle::{self, AuthDataRoot},
-        Block,
+        Block, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
     },
     chain_tip::ChainTip,
     parameters::Network,
     serialization::ZcashDeserializeInto,
-    transaction::{UnminedTx, VerifiedUnminedTx},
+    transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
+    transparent,
 };
-use zebra_consensus::{BlockError, VerifyBlockError, VerifyChainError, VerifyCheckpointError};
+use zebra_consensus::{
+    funding_stream_address, funding_stream_values, miner_subsidy, new_coinbase_script, BlockError,
+    VerifyBlockError, VerifyChainError, VerifyCheckpointError, MAX_BLOCK_SIGOPS,
+};
 use zebra_node_services::mempool;
 
 use crate::methods::{
@@ -33,6 +37,7 @@ use crate::methods::{
 };
 
 pub mod config;
+pub mod constants;
 pub(crate) mod types;
 
 /// getblocktemplate RPC method signatures.
@@ -131,10 +136,13 @@ where
 
     // Configuration
     //
-    // TODO: add mining config for getblocktemplate RPC miner address
-    //
     /// The configured network for this RPC service.
-    _network: Network,
+    network: Network,
+
+    /// The configured miner address for this RPC service.
+    ///
+    /// Zebra currently only supports single-signature P2SH transparent addresses.
+    miner_address: Option<transparent::Address>,
 
     // Services
     //
@@ -176,13 +184,15 @@ where
     /// Create a new instance of the handler for getblocktemplate RPCs.
     pub fn new(
         network: Network,
+        mining_config: config::Config,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
         chain_verifier: ChainVerifier,
     ) -> Self {
         Self {
-            _network: network,
+            network,
+            miner_address: mining_config.miner_address,
             mempool,
             state,
             latest_chain_tip,
@@ -255,63 +265,31 @@ where
     }
 
     fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>> {
+        let network = self.network;
+        let miner_address = self.miner_address;
+
         let mempool = self.mempool.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
-            let _tip_height = best_chain_tip_height(&latest_chain_tip)?;
+            let miner_address = miner_address.ok_or_else(|| Error {
+                code: ErrorCode::ServerError(0),
+                message: "configure mining.miner_address in zebrad.toml \
+                          with a transparent P2SH single signature address"
+                    .to_string(),
+                data: None,
+            })?;
+
+            let tip_height = best_chain_tip_height(&latest_chain_tip)?;
             let mempool_txs = select_mempool_transactions(mempool).await?;
 
             let miner_fee = miner_fee(&mempool_txs);
 
-            /*
-            Fake a "coinbase" transaction by duplicating a mempool transaction,
-            or fake a response.
-
-            This is temporarily required for the tests to pass.
-
-            TODO: create a method Transaction::new_v5_coinbase(network, tip_height, miner_fee),
-                  and call it here.
-             */
-            let coinbase_tx = if mempool_txs.is_empty() {
-                let empty_string = String::from("");
-                return Ok(GetBlockTemplate {
-                    capabilities: vec![],
-                    version: 0,
-                    previous_block_hash: GetBlockHash([0; 32].into()),
-                    block_commitments_hash: [0; 32].into(),
-                    light_client_root_hash: [0; 32].into(),
-                    final_sapling_root_hash: [0; 32].into(),
-                    default_roots: DefaultRoots {
-                        merkle_root: [0; 32].into(),
-                        chain_history_root: [0; 32].into(),
-                        auth_data_root: [0; 32].into(),
-                        block_commitments_hash: [0; 32].into(),
-                    },
-                    transactions: Vec::new(),
-                    coinbase_txn: TransactionTemplate {
-                        data: Vec::new().into(),
-                        hash: [0; 32].into(),
-                        auth_digest: [0; 32].into(),
-                        depends: Vec::new(),
-                        fee: Amount::zero(),
-                        sigops: 0,
-                        required: true,
-                    },
-                    target: empty_string.clone(),
-                    min_time: 0,
-                    mutable: vec![],
-                    nonce_range: empty_string.clone(),
-                    sigop_limit: 0,
-                    size_limit: 0,
-                    cur_time: 0,
-                    bits: empty_string,
-                    height: 0,
-                });
-            } else {
-                mempool_txs[0].transaction.clone()
-            };
+            let block_height = (tip_height + 1).expect("tip is far below Height::MAX");
+            let outputs =
+                standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
+            let coinbase_tx = Transaction::new_v5_coinbase(network, block_height, outputs).into();
 
             let (merkle_root, auth_data_root) =
                 calculate_transaction_roots(&coinbase_tx, &mempool_txs);
@@ -323,7 +301,7 @@ where
             Ok(GetBlockTemplate {
                 capabilities: vec![],
 
-                version: 0,
+                version: ZCASH_BLOCK_VERSION,
 
                 previous_block_hash: GetBlockHash([0; 32].into()),
                 block_commitments_hash: [0; 32].into(),
@@ -344,12 +322,16 @@ where
 
                 min_time: 0,
 
-                mutable: vec![],
+                mutable: constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
 
-                nonce_range: empty_string.clone(),
+                nonce_range: constants::GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
 
-                sigop_limit: 0,
-                size_limit: 0,
+                sigop_limit: MAX_BLOCK_SIGOPS,
+
+                size_limit: MAX_BLOCK_BYTES,
 
                 cur_time: 0,
 
@@ -478,6 +460,42 @@ pub fn miner_fee(mempool_txs: &[VerifiedUnminedTx]) -> Amount<NonNegative> {
         "invalid selected transactions: \
          fees in a valid block can not be more than MAX_MONEY",
     )
+}
+
+/// Returns the standard funding stream and miner reward transparent output scripts
+/// for `network`, `height` and `miner_fee`.
+///
+/// Only works for post-Canopy heights.
+pub fn standard_coinbase_outputs(
+    network: Network,
+    height: Height,
+    miner_address: transparent::Address,
+    miner_fee: Amount<NonNegative>,
+) -> Vec<(Amount<NonNegative>, transparent::Script)> {
+    let funding_streams = funding_stream_values(height, network)
+        .expect("funding stream value calculations are valid for reasonable chain heights");
+
+    let mut funding_streams: Vec<(Amount<NonNegative>, transparent::Address)> = funding_streams
+        .iter()
+        .map(|(receiver, amount)| (*amount, funding_stream_address(height, network, *receiver)))
+        .collect();
+    // The HashMap returns funding streams in an arbitrary order,
+    // but Zebra's snapshot tests expect the same order every time.
+    funding_streams.sort_by_key(|(amount, _address)| *amount);
+
+    let miner_reward = miner_subsidy(height, network)
+        .expect("reward calculations are valid for reasonable chain heights")
+        + miner_fee;
+    let miner_reward =
+        miner_reward.expect("reward calculations are valid for reasonable chain heights");
+
+    let mut coinbase_outputs = funding_streams;
+    coinbase_outputs.push((miner_reward, miner_address));
+
+    coinbase_outputs
+        .iter()
+        .map(|(amount, address)| (*amount, new_coinbase_script(*address)))
+        .collect()
 }
 
 /// Returns the transaction effecting and authorizing roots

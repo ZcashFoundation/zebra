@@ -225,29 +225,21 @@ pub fn sync_until(
         testdir()?.with_config(&mut config)?
     };
 
-    let mut child = tempdir.spawn_child(args!["start"])?.with_timeout(timeout);
+    let child = tempdir.spawn_child(args!["start"])?.with_timeout(timeout);
 
-    let network = format!("network: {network},");
+    let network_log = format!("network: {network},");
 
     if mempool_behavior.require_activation() {
         // require that the mempool activated,
         // checking logs as they arrive
 
-        child.expect_stdout_line_matches(&network)?;
-
-        if check_legacy_chain {
-            child.expect_stdout_line_matches("starting legacy chain check")?;
-            child.expect_stdout_line_matches("no legacy chain found")?;
-        }
-
-        // before the stop regex, expect mempool activation
-        if mempool_behavior.require_forced_activation() {
-            child.expect_stdout_line_matches("enabling mempool for debugging")?;
-        }
-        child.expect_stdout_line_matches("activating mempool")?;
-
-        // then wait for the stop log, which must happen after the mempool becomes active
-        child.expect_stdout_line_matches(stop_regex)?;
+        let mut child = check_sync_logs_until(
+            child,
+            network,
+            stop_regex,
+            mempool_behavior,
+            check_legacy_chain,
+        )?;
 
         // make sure the child process is dead
         // if it has already exited, ignore that error
@@ -271,7 +263,7 @@ pub fn sync_until(
         );
         let output = child.wait_with_output()?;
 
-        output.stdout_line_contains(&network)?;
+        output.stdout_line_contains(&network_log)?;
 
         if check_legacy_chain {
             output.stdout_line_contains("starting legacy chain check")?;
@@ -293,6 +285,47 @@ pub fn sync_until(
 
         Ok(output.dir.expect("wait_with_output sets dir"))
     }
+}
+
+/// Check sync logs on `network` until `zebrad` logs `stop_regex`.
+///
+/// ## Test Settings
+///
+/// Checks the logs for the expected `mempool_behavior`.
+///
+/// If `check_legacy_chain` is true, make sure the logs contain the legacy chain check.
+///
+/// ## Test Status
+///
+/// Returns the provided `zebrad` [`TestChild`] when `stop_regex` is encountered.
+///
+/// Returns an error if the child exits or `timeout` elapses before `stop_regex` is found.
+#[tracing::instrument(skip(zebrad))]
+pub fn check_sync_logs_until(
+    mut zebrad: TestChild<TempDir>,
+    network: Network,
+    stop_regex: &str,
+    // Test Settings
+    mempool_behavior: MempoolBehavior,
+    check_legacy_chain: bool,
+) -> Result<TestChild<TempDir>> {
+    zebrad.expect_stdout_line_matches(&format!("network: {network},"))?;
+
+    if check_legacy_chain {
+        zebrad.expect_stdout_line_matches("starting legacy chain check")?;
+        zebrad.expect_stdout_line_matches("no legacy chain found")?;
+    }
+
+    // before the stop regex, expect mempool activation
+    if mempool_behavior.require_forced_activation() {
+        zebrad.expect_stdout_line_matches("enabling mempool for debugging")?;
+    }
+    zebrad.expect_stdout_line_matches("activating mempool")?;
+
+    // then wait for the stop log, which must happen after the mempool becomes active
+    zebrad.expect_stdout_line_matches(stop_regex)?;
+
+    Ok(zebrad)
 }
 
 /// Runs a zebrad instance to synchronize the chain to the network tip.

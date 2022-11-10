@@ -13,7 +13,7 @@ use std::{collections::HashSet, sync::Arc};
 use chrono::Duration;
 use indexmap::IndexMap;
 use tokio::{
-    sync::broadcast::{channel, Receiver, Sender},
+    sync::broadcast::{self, error::TryRecvError},
     time::Instant,
 };
 
@@ -55,24 +55,26 @@ pub struct Queue {
 /// The runner will make the processing of the transactions in the queue.
 pub struct Runner {
     queue: Queue,
-    sender: Sender<Option<UnminedTx>>,
+    receiver: broadcast::Receiver<UnminedTx>,
     tip_height: Height,
 }
 
 impl Queue {
     /// Start a new queue
-    pub fn start() -> Runner {
-        let (sender, _receiver) = channel(CHANNEL_AND_QUEUE_CAPACITY);
+    pub fn start() -> (Runner, broadcast::Sender<UnminedTx>) {
+        let (sender, receiver) = broadcast::channel(CHANNEL_AND_QUEUE_CAPACITY);
 
         let queue = Queue {
             transactions: IndexMap::new(),
         };
 
-        Runner {
+        let runner = Runner {
             queue,
-            sender,
+            receiver,
             tip_height: Height(0),
-        }
+        };
+
+        (runner, sender)
     }
 
     /// Get the transactions in the queue.
@@ -103,16 +105,6 @@ impl Queue {
 }
 
 impl Runner {
-    /// Create a new sender for this runner.
-    pub fn sender(&self) -> Sender<Option<UnminedTx>> {
-        self.sender.clone()
-    }
-
-    /// Create a new receiver.
-    pub fn receiver(&self) -> Receiver<Option<UnminedTx>> {
-        self.sender.subscribe()
-    }
-
     /// Get the queue transactions as a `HashSet` of unmined ids.
     fn transactions_as_hash_set(&self) -> HashSet<UnminedTxId> {
         let transactions = self.queue.transactions();
@@ -157,8 +149,6 @@ impl Runner {
             + 'static,
         Tip: ChainTip + Clone + Send + Sync + 'static,
     {
-        let mut receiver = self.sender.subscribe();
-
         loop {
             // if we don't have a chain use `NO_CHAIN_TIP_HEIGHT` to get block spacing
             let tip_height = match tip.best_tip_height() {
@@ -173,8 +163,23 @@ impl Runner {
             tokio::time::sleep(spacing.to_std().expect("should never be less than zero")).await;
 
             // get transactions from the channel
-            while let Ok(Some(tx)) = receiver.try_recv() {
-                let _ = &self.queue.insert(tx.clone());
+            loop {
+                let tx = match self.receiver.try_recv() {
+                    Ok(tx) => tx,
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Lagged(skipped_count)) => {
+                        tracing::info!("sendrawtransaction queue was full: skipped {skipped_count} transactions");
+                        continue;
+                    }
+                    Err(TryRecvError::Closed) => {
+                        tracing::info!(
+                            "sendrawtransaction queue was closed: is Zebra shutting down?"
+                        );
+                        return;
+                    }
+                };
+
+                self.queue.insert(tx.clone());
             }
 
             // skip some work if stored tip height is the same as the one arriving

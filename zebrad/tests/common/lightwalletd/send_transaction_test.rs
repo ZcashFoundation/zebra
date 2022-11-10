@@ -1,49 +1,42 @@
 //! Test sending transactions using a lightwalletd instance connected to a zebrad instance.
 //!
-//! This test requires a cached chain state that is partially synchronized, i.e., it should be a
-//! few blocks below the network chain tip height. We open this state during the test, but we don't
-//! add any blocks to it.
+//! This test requires a cached chain state that is partially synchronized close to the
+//! network chain tip height. It will finish the sync and update the cached chain state.
 //!
-//! The transactions to use to send are obtained from the blocks synchronized by a temporary zebrad
-//! instance that are higher than the chain tip of the cached state. This instance uses a copy of
-//! the state.
+//! After finishing the sync, it will get the first 20 blocks in the non-finalized state
+//! (past the MAX_BLOCK_REORG_HEIGHT) via getblock rpc calls, shuts down the zebrad instance
+//! so that the retrieved blocks aren't finalized into the cached state, and get the finalized
+//! tip height of the updated cached state.
+//!
+//! The transactions to use to send are obtained from those blocks that are above the finalized
+//! tip height of the updated cached state.
 //!
 //! The zebrad instance connected to lightwalletd uses the cached state and does not connect to any
 //! external peers, which prevents it from downloading the blocks from where the test transactions
 //! were obtained. This is to ensure that zebra does not reject the transactions because they have
 //! already been seen in a block.
 
-use std::{
-    cmp::min,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{cmp::min, sync::Arc};
 
-use color_eyre::eyre::{eyre, Result};
-use futures::TryFutureExt;
-use tower::{Service, ServiceExt};
+use color_eyre::eyre::Result;
 
 use zebra_chain::{
-    block,
-    chain_tip::ChainTip,
     parameters::Network::{self, *},
     serialization::ZcashSerialize,
     transaction::{self, Transaction},
 };
 use zebra_rpc::queue::CHANNEL_AND_QUEUE_CAPACITY;
-use zebra_state::HashOrHeight;
 use zebrad::components::mempool::downloads::MAX_INBOUND_CONCURRENCY;
 
 use crate::common::{
-    cached_state::{load_tip_height_from_state_directory, start_state_service_with_cache_dir},
+    cached_state::get_future_blocks,
     launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
     lightwalletd::{
         can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
         sync::wait_for_zebrad_and_lightwalletd_sync,
         wallet_grpc::{self, connect_to_lightwalletd, Empty, Exclude},
-        LightwalletdTestType::*,
     },
-    sync::copy_state_and_perform_full_sync,
+    test_type::TestType::{self, *},
 };
 
 /// The maximum number of transactions we want to send in the test.
@@ -54,6 +47,9 @@ use crate::common::{
 fn max_sent_transactions() -> usize {
     min(CHANNEL_AND_QUEUE_CAPACITY, MAX_INBOUND_CONCURRENCY) - 1
 }
+
+/// Number of blocks past the finalized to load transactions from.
+const MAX_NUM_FUTURE_BLOCKS: u32 = 50;
 
 /// The test entry point.
 //
@@ -94,7 +90,7 @@ pub async fn run() -> Result<()> {
     );
 
     let mut transactions =
-        load_transactions_from_future_blocks(network, zebrad_state_path.clone()).await?;
+        load_transactions_from_future_blocks(network, test_type, test_name).await?;
 
     tracing::info!(
         transaction_count = ?transactions.len(),
@@ -252,134 +248,29 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
-/// Loads transactions from a block that's after the chain tip of the cached state.
+/// Loads transactions from a few block(s) after the chain tip of the cached state.
 ///
-/// We copy the cached state to avoid modifying `zebrad_state_path`.
-/// This copy is used to launch a `zebrad` instance connected to the network,
-/// which finishes synchronizing the chain.
-/// Then we load transactions from this updated state.
+/// Returns a list of non-coinbase transactions from blocks that have not been finalized to disk
+/// in the `ZEBRA_CACHED_STATE_DIR`.
 ///
-/// Returns a list of valid transactions that are not in any of the blocks present in the
-/// original `zebrad_state_path`.
+/// ## Panics
+///
+/// If the provided `test_type` doesn't need an rpc server and cached state
 #[tracing::instrument]
 async fn load_transactions_from_future_blocks(
     network: Network,
-    zebrad_state_path: PathBuf,
+    test_type: TestType,
+    test_name: &str,
 ) -> Result<Vec<Arc<Transaction>>> {
-    let partial_sync_height =
-        load_tip_height_from_state_directory(network, zebrad_state_path.as_ref()).await?;
-
-    tracing::info!(
-        ?partial_sync_height,
-        partial_sync_path = ?zebrad_state_path,
-        "performing full sync...",
-    );
-
-    let full_sync_path =
-        copy_state_and_perform_full_sync(network, zebrad_state_path.as_ref()).await?;
-
-    tracing::info!(?full_sync_path, "loading transactions...");
-
-    let transactions =
-        load_transactions_from_block_after(partial_sync_height, network, full_sync_path.as_ref())
-            .await?;
+    let transactions = get_future_blocks(network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS)
+        .await?
+        .into_iter()
+        .flat_map(|block| block.transactions)
+        .filter(|transaction| !transaction.is_coinbase())
+        .take(max_sent_transactions())
+        .collect();
 
     Ok(transactions)
-}
-
-/// Loads transactions from a block that's after the specified `height`.
-///
-/// Starts at the block after the block at the specified `height`, and stops when it finds a block
-/// from where it can load at least one non-coinbase transaction.
-///
-/// # Panics
-///
-/// If the specified `zebrad_state_path` contains a chain state that's not synchronized to a tip that's
-/// after `height`.
-#[tracing::instrument]
-async fn load_transactions_from_block_after(
-    height: block::Height,
-    network: Network,
-    zebrad_state_path: &Path,
-) -> Result<Vec<Arc<Transaction>>> {
-    let (_read_write_state_service, mut state, latest_chain_tip, _chain_tip_change) =
-        start_state_service_with_cache_dir(network, zebrad_state_path).await?;
-
-    let tip_height = latest_chain_tip
-        .best_tip_height()
-        .ok_or_else(|| eyre!("State directory doesn't have a chain tip block"))?;
-
-    assert!(
-        tip_height > height,
-        "Chain not synchronized to a block after the specified height",
-    );
-
-    let mut target_height = height.0;
-    let mut transactions = Vec::new();
-
-    while transactions.len() < max_sent_transactions() {
-        let new_transactions =
-            load_transactions_from_block(block::Height(target_height), &mut state).await?;
-
-        if let Some(mut new_transactions) = new_transactions {
-            new_transactions.retain(|transaction| !transaction.is_coinbase());
-            transactions.append(&mut new_transactions);
-        } else {
-            tracing::info!(
-                "Reached the end of the finalized chain\n\
-                 collected {} transactions from {} blocks before {target_height:?}",
-                transactions.len(),
-                target_height - height.0 - 1,
-            );
-            break;
-        }
-
-        target_height += 1;
-    }
-
-    tracing::info!(
-        "Collected {} transactions from {} blocks before {target_height:?}",
-        transactions.len(),
-        target_height - height.0 - 1,
-    );
-
-    Ok(transactions)
-}
-
-/// Performs a request to the provided read-only `state` service to fetch all transactions from a
-/// block at the specified `height`.
-#[tracing::instrument(skip(state))]
-async fn load_transactions_from_block<ReadStateService>(
-    height: block::Height,
-    state: &mut ReadStateService,
-) -> Result<Option<Vec<Arc<Transaction>>>>
-where
-    ReadStateService: Service<
-        zebra_state::ReadRequest,
-        Response = zebra_state::ReadResponse,
-        Error = zebra_state::BoxError,
-    >,
-{
-    let request = zebra_state::ReadRequest::Block(HashOrHeight::Height(height));
-
-    let response = state
-        .ready()
-        .and_then(|ready_service| ready_service.call(request))
-        .map_err(|error| eyre!(error))
-        .await?;
-
-    let block = match response {
-        zebra_state::ReadResponse::Block(Some(block)) => block,
-        zebra_state::ReadResponse::Block(None) => {
-            tracing::info!(
-                "Reached the end of the finalized chain, state is missing block at {height:?}",
-            );
-            return Ok(None);
-        }
-        _ => unreachable!("Incorrect response from state service: {response:?}"),
-    };
-
-    Ok(Some(block.transactions.to_vec()))
 }
 
 /// Prepare a request to send to lightwalletd that contains a transaction to be sent.

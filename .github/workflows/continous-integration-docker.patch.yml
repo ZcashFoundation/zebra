@@ -90,6 +90,12 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
+  submit-block-test:
+    name: submit block / Run submit-block test
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
   lightwalletd-full-sync:
     name: lightwalletd tip / Run lwd-full-sync test
     runs-on: ubuntu-latest

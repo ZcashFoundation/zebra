@@ -8,14 +8,23 @@
 use insta::Settings;
 use tower::{buffer::Buffer, Service};
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{
+    chain_tip::mock::MockChainTip,
+    parameters::{Network, NetworkUpgrade},
+    serialization::ZcashDeserializeInto,
+    transaction::Transaction,
+    transparent,
+};
 use zebra_node_services::mempool;
 use zebra_state::LatestChainTip;
 
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::methods::{
-    get_block_template_rpcs::types::{hex_data::HexData, submit_block},
+    get_block_template_rpcs::{
+        self,
+        types::{get_block_template::GetBlockTemplate, hex_data::HexData, submit_block},
+    },
     GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
 };
 
@@ -29,7 +38,7 @@ pub async fn test_responses<State, ReadState>(
     >,
     state: State,
     read_state: ReadState,
-    latest_chain_tip: LatestChainTip,
+    _latest_chain_tip: LatestChainTip,
     settings: Settings,
 ) where
     State: Service<
@@ -64,11 +73,19 @@ pub async fn test_responses<State, ReadState>(
     )
     .await;
 
+    let mining_config = get_block_template_rpcs::config::Config {
+        miner_address: Some(transparent::Address::from_script_hash(network, [0xad; 20])),
+    };
+
+    let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
+    mock_chain_tip_sender.send_best_tip_height(NetworkUpgrade::Nu5.activation_height(network));
+
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         network,
+        mining_config,
         Buffer::new(mempool.clone(), 1),
         read_state,
-        latest_chain_tip,
+        mock_chain_tip,
         chain_verifier,
     );
 
@@ -100,7 +117,14 @@ pub async fn test_responses<State, ReadState>(
         .expect("unexpected panic in getblocktemplate RPC task")
         .expect("unexpected error in getblocktemplate RPC call");
 
-    snapshot_rpc_getblocktemplate(get_block_template, &settings);
+    let coinbase_tx: Transaction = get_block_template
+        .coinbase_txn
+        .data
+        .as_ref()
+        .zcash_deserialize_into()
+        .expect("coinbase bytes are valid");
+
+    snapshot_rpc_getblocktemplate(get_block_template, coinbase_tx, &settings);
 
     // `submitblock`
     let submit_block = get_block_template_rpc
@@ -123,10 +147,12 @@ fn snapshot_rpc_getblockhash(block_hash: GetBlockHash, settings: &insta::Setting
 
 /// Snapshot `getblocktemplate` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblocktemplate(
-    block_template: crate::methods::get_block_template_rpcs::types::get_block_template::GetBlockTemplate,
+    block_template: GetBlockTemplate,
+    coinbase_tx: Transaction,
     settings: &insta::Settings,
 ) {
     settings.bind(|| insta::assert_json_snapshot!("get_block_template", block_template));
+    settings.bind(|| insta::assert_json_snapshot!("get_block_template.coinbase_tx", coinbase_tx));
 }
 
 /// Snapshot `submitblock` response, using `cargo insta` and JSON serialization.

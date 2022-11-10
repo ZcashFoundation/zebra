@@ -176,8 +176,12 @@ impl StartCmd {
             .service(mempool);
 
         // Launch RPC server
-        let (rpc_task_handle, rpc_tx_queue_task_handle) = RpcServer::spawn(
+        let (rpc_task_handle, rpc_tx_queue_task_handle, rpc_server) = RpcServer::spawn(
             config.rpc,
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            config.mining,
+            #[cfg(not(feature = "getblocktemplate-rpcs"))]
+            (),
             app_version(),
             mempool.clone(),
             read_only_state_service,
@@ -351,6 +355,14 @@ impl StartCmd {
         // startup tasks
         groth16_download_handle.abort();
         old_databases_task_handle.abort();
+
+        // Wait until the RPC server shuts down.
+        // This can take around 150 seconds.
+        //
+        // Without this shutdown, Zebra's RPC unit tests sometimes crashed with memory errors.
+        if let Some(rpc_server) = rpc_server {
+            rpc_server.shutdown_blocking();
+        }
 
         exit_status
     }
