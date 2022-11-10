@@ -209,7 +209,10 @@ async fn mempool_request_with_missing_input_is_rejected() {
         })
         .await;
 
-    assert_eq!(verifier_response, Err(TransactionError::InputNotFound));
+    assert_eq!(
+        verifier_response,
+        Err(TransactionError::TransparentInputNotFound)
+    );
 }
 
 #[test]

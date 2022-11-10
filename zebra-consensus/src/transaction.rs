@@ -488,7 +488,7 @@ where
                 } else if is_mempool {
                     let query = state.clone().oneshot(zs::Request::BestChainUtxo(*outpoint));
                     if let zebra_state::Response::BestChainUtxo(utxo) = query.await? {
-                        utxo.ok_or(TransactionError::InputNotFound)?
+                        utxo.ok_or(TransactionError::TransparentInputNotFound)?
                     } else {
                         unreachable!("BestChainUtxo always responds with Option<Utxo>")
                     }
