@@ -115,6 +115,10 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::BestChainBlockHash`](crate::ReadRequest::BestChainBlockHash) with the
     /// specified block hash.
     BlockHash(Option<block::Hash>),
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Response to [`ReadRequest::CheckContextualValidity`]
+    Validated,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.
@@ -152,7 +156,7 @@ impl TryFrom<ReadResponse> for Response {
             }
 
             #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadResponse::BlockHash(_) => {
+            ReadResponse::BlockHash(_) | ReadResponse::Validated => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
         }

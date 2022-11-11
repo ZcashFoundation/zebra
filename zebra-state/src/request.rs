@@ -744,6 +744,12 @@ pub enum ReadRequest {
     /// * [`ReadResponse::BlockHash(Some(hash))`](ReadResponse::BlockHash) if the block is in the best chain;
     /// * [`ReadResponse::BlockHash(None)`](ReadResponse::BlockHash) otherwise.
     BestChainBlockHash(block::Height),
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Performs contextual validation of the given block
+    ///
+    /// Returns [`ReadResponse::Validated`] when successful or a validation error
+    CheckContextualValidity(PreparedBlock),
 }
 
 impl ReadRequest {
@@ -766,6 +772,8 @@ impl ReadRequest {
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadRequest::CheckContextualValidity(_) => "check_contextual_validity",
         }
     }
 

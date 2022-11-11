@@ -1522,13 +1522,6 @@ impl Service<ReadRequest> for ReadStateService {
             // Used by get_block_hash RPC.
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::BestChainBlockHash(height) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "best_chain_block_hash",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1552,6 +1545,36 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::BestChainBlockHash"))
+                .boxed()
+            }
+
+            // Used by get_block_template RPC.
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadRequest::CheckContextualValidity(_block) => {
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let _best_chain = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| non_finalized_state.best_chain().map(Arc::clone),
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(
+                            module_path!(),
+                            line!(),
+                            "ReadRequest::CheckContextualValidity",
+                        );
+
+                        Ok(ReadResponse::Validated)
+                    })
+                })
+                .map(|join_result| {
+                    join_result.expect("panic in ReadRequest::CheckContextualValidity")
+                })
                 .boxed()
             }
         }
