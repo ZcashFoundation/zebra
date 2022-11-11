@@ -36,6 +36,9 @@ pub enum Response {
     /// Response to [`Request::Transaction`] with the specified transaction.
     Transaction(Option<Arc<Transaction>>),
 
+    /// Response to [`Request::UnspentBestChainUtxo`] with the UTXO
+    UnspentBestChainUtxo(Option<transparent::Utxo>),
+
     /// Response to [`Request::Block`] with the specified block.
     Block(Option<Arc<Block>>),
 
@@ -81,12 +84,9 @@ pub enum ReadResponse {
     /// The response to a `FindBlockHeaders` request.
     BlockHeaders(Vec<block::CountedHeader>),
 
-    /// The response to a `BestChainUtxo` request, from verified blocks in the
+    /// The response to a `UnspentBestChainUtxo` request, from verified blocks in the
     /// _best_ non-finalized chain, or the finalized chain.
-    ///
-    /// This response is purely informational, there is no guarantee that
-    /// the UTXO remains unspent in the best chain.
-    BestChainUtxo(Option<transparent::Utxo>),
+    UnspentBestChainUtxo(Option<transparent::Utxo>),
 
     /// The response to an `AnyChainUtxo` request, from verified blocks in
     /// _any_ non-finalized chain, or the finalized chain.
@@ -132,6 +132,8 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::Transaction(tx_and_height) => {
                 Ok(Response::Transaction(tx_and_height.map(|(tx, _height)| tx)))
             }
+            ReadResponse::UnspentBestChainUtxo(utxo) => Ok(Response::UnspentBestChainUtxo(utxo)),
+
 
             ReadResponse::AnyChainUtxo(_) => Err("ReadService does not track pending UTXOs. \
                                                   Manually unwrap the response, and handle pending UTXOs."),
@@ -141,7 +143,6 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockHeaders(headers) => Ok(Response::BlockHeaders(headers)),
 
             ReadResponse::TransactionIdsForBlock(_)
-            | ReadResponse::BestChainUtxo(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
             | ReadResponse::AddressBalance(_)
