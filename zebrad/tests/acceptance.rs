@@ -2028,13 +2028,11 @@ async fn fully_synced_rpc_test() -> Result<()> {
         return Ok(());
     };
 
-    zebrad.expect_stdout_line_matches(&format!(
-        "Opened RPC endpoint at {}",
-        zebra_rpc_address.expect("lightwalletd test must have RPC port"),
-    ))?;
+    let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
 
-    let client =
-        RPCRequestClient::new(zebra_rpc_address.expect("lightwalletd test must have RPC port"));
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
+
+    let client = RPCRequestClient::new(zebra_rpc_address);
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
