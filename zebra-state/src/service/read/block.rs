@@ -141,6 +141,22 @@ where
         .or_else(|| db.utxo(&outpoint).map(|utxo| utxo.utxo))
 }
 
+/// Returns the [`Utxo`] for [`transparent::OutPoint`], if it exists and is unspent in the
+/// non-finalized `chain` or finalized `db`.
+pub fn unspent_utxo<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    outpoint: transparent::OutPoint,
+) -> Option<Utxo>
+where
+    C: AsRef<Chain>,
+{
+    match chain {
+        Some(chain) if chain.as_ref().spent_utxos.contains(&outpoint) => None,
+        chain => utxo(chain, db, outpoint),
+    }
+}
+
 /// Returns the [`Utxo`] for [`transparent::OutPoint`], if it exists in any chain
 /// in the `non_finalized_state`, or in the finalized `db`.
 ///
