@@ -1345,7 +1345,7 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     let client = RPCRequestClient::new(config.rpc.listen_addr.unwrap());
 
     // Make the call to the `getinfo` RPC method
-    let res = client.call("get_info", "[]".to_string()).await?;
+    let res = client.call("getinfo", "[]".to_string()).await?;
 
     // Test rpc endpoint response
     assert!(res.status().is_success());
