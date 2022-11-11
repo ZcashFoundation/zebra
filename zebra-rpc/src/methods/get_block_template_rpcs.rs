@@ -41,7 +41,8 @@ pub mod constants;
 pub(crate) mod types;
 
 /// The max estimated distance to the chain tip for the getblocktemplate method
-const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: i32 = 0;
+// TODO: Add this to the config so it can be set to 0?
+const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: i32 = 1;
 
 /// getblocktemplate RPC method signatures.
 #[rpc(server)]
