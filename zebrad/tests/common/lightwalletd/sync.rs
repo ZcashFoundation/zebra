@@ -13,6 +13,7 @@ use zebra_test::prelude::*;
 use crate::common::{
     launch::ZebradTestDirExt,
     lightwalletd::wallet_grpc::{connect_to_lightwalletd, ChainSpec},
+    rpc_client::RPCRequestClient,
     test_type::TestType,
 };
 
@@ -182,14 +183,9 @@ pub fn are_zebrad_and_lightwalletd_tips_synced(
         let lightwalletd_tip_height = lightwalletd_tip_block.height;
 
         // Get the block tip from zebrad
-        let zebrad_json_rpc_client = reqwest::Client::new();
-        let zebrad_blockchain_info = zebrad_json_rpc_client
-            .post(format!("http://{}", &zebra_rpc_address.to_string()))
-            .body(r#"{"jsonrpc": "2.0", "method": "getblockchaininfo", "params": [], "id":123 }"#)
-            .header("Content-Type", "application/json")
-            .send()
-            .await?
-            .text()
+        let client = RPCRequestClient::new(zebra_rpc_address);
+        let zebrad_blockchain_info = client
+            .text_from_call("getblockchaininfo", "[]".to_string())
             .await?;
         let zebrad_blockchain_info: serde_json::Value =
             serde_json::from_str(&zebrad_blockchain_info)?;
