@@ -40,6 +40,9 @@ pub mod config;
 pub mod constants;
 pub(crate) mod types;
 
+/// The max estimated distance to the chain tip for the getblocktemplate method
+const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: i32 = 0;
+
 /// getblocktemplate RPC method signatures.
 #[rpc(server)]
 pub trait GetBlockTemplateRpc {
@@ -273,6 +276,24 @@ where
 
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
+            let estimated_distance_to_chain_tip = latest_chain_tip
+                .estimate_distance_to_network_chain_tip(network)
+                .ok_or_else(|| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "No Chain tip available yet".to_string(),
+                    data: None,
+                })?;
+
+            if estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
+                return Err(Error {
+                    // Return error code -10 (https://github.com/s-nomp/node-stratum-pool/blob/d86ae73f8ff968d9355bb61aac05e0ebef36ccb5/lib/pool.js#L140)
+                    // TODO: Confirm that this is the expected error code for !synced
+                    code: ErrorCode::ServerError(-10),
+                    message: "Zebra has not synced to the chain tip".to_string(),
+                    data: None,
+                });
+            }
+
             let miner_address = miner_address.ok_or_else(|| Error {
                 code: ErrorCode::ServerError(0),
                 message: "configure mining.miner_address in zebrad.toml \
