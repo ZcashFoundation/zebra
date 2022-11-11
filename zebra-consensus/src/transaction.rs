@@ -356,8 +356,9 @@ where
             // https://zips.z.cash/zip-0213#specification
 
             // Load spent UTXOs from state.
+            // TODO: Make this a method of `Request` and replace `tx.clone()` with `self.transaction()`?
             let (spent_utxos, spent_outputs) =
-                Self::spent_utxos(tx.clone(), req.known_utxos(), state).await?;
+                Self::spent_utxos(tx.clone(), req.known_utxos(), req.is_mempool(), state).await?;
 
             let cached_ffi_transaction =
                 Arc::new(CachedFfiTransaction::new(tx.clone(), spent_outputs));
@@ -464,6 +465,7 @@ where
     async fn spent_utxos(
         tx: Arc<Transaction>,
         known_utxos: Arc<HashMap<transparent::OutPoint, OrderedUtxo>>,
+        is_mempool: bool,
         state: Timeout<ZS>,
     ) -> Result<
         (
@@ -478,9 +480,20 @@ where
         for input in inputs {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
                 tracing::trace!("awaiting outpoint lookup");
+                // Currently, Zebra only supports known UTXOs in block transactions.
+                // But it might support them in the mempool in future.
                 let utxo = if let Some(output) = known_utxos.get(outpoint) {
                     tracing::trace!("UXTO in known_utxos, discarding query");
                     output.utxo.clone()
+                } else if is_mempool {
+                    let query = state
+                        .clone()
+                        .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
+                    if let zebra_state::Response::UnspentBestChainUtxo(utxo) = query.await? {
+                        utxo.ok_or(TransactionError::TransparentInputNotFound)?
+                    } else {
+                        unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
+                    }
                 } else {
                     let query = state
                         .clone()
