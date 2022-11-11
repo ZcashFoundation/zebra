@@ -223,6 +223,11 @@ impl Address {
         }
     }
 
+    /// Returns `true` if the address is `PayToScriptHash`, and `false` if it is `PayToPublicKeyHash`.
+    pub fn is_script_hash(&self) -> bool {
+        matches!(self, Address::PayToScriptHash { .. })
+    }
+
     /// Returns the hash bytes for this address, regardless of the address type.
     ///
     /// # Correctness
