@@ -32,6 +32,13 @@ pub(crate) const SOLUTION_SIZE: usize = 1344;
 #[derive(Deserialize, Serialize)]
 pub struct Solution(#[serde(with = "BigArray")] pub [u8; SOLUTION_SIZE]);
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+impl Default for Solution {
+    fn default() -> Self {
+        Self([0; SOLUTION_SIZE])
+    }
+}
+
 impl Solution {
     /// The length of the portion of the header used as input when verifying
     /// equihash solutions, in bytes.

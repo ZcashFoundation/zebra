@@ -1,6 +1,12 @@
 //! The `GetBlockTempate` type is the output of the `getblocktemplate` RPC method.
 
-use zebra_chain::{amount, block::ChainHistoryBlockTxAuthCommitmentHash};
+use chrono::Utc;
+use zebra_chain::{
+    amount,
+    block::{ChainHistoryBlockTxAuthCommitmentHash, Header},
+    parameters::Network,
+    work::{difficulty::ExpandedDifficulty, equihash::Solution},
+};
 
 use crate::methods::{
     get_block_template_rpcs::types::{
@@ -101,4 +107,33 @@ pub struct GetBlockTemplate {
     /// Add documentation.
     // TODO: use Height type?
     pub height: u32,
+}
+
+impl From<&GetBlockTemplate> for Header {
+    fn from(get_block_template: &GetBlockTemplate) -> Self {
+        let &GetBlockTemplate {
+            version,
+            previous_block_hash: GetBlockHash(previous_block_hash),
+            default_roots:
+                DefaultRoots {
+                    merkle_root,
+                    block_commitments_hash,
+                    ..
+                },
+            ..
+        } = get_block_template;
+
+        Self {
+            version,
+            previous_block_hash,
+            merkle_root,
+            commitment_bytes: block_commitments_hash.into(),
+            time: Utc::now(),
+            // TODO: get difficulty from target once it uses ExpandedDifficulty type
+            difficulty_threshold: ExpandedDifficulty::target_difficulty_limit(Network::Mainnet)
+                .to_compact(),
+            nonce: [0; 32],
+            solution: Solution::default(),
+        }
+    }
 }

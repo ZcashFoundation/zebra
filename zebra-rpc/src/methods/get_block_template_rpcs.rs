@@ -268,6 +268,7 @@ where
         let network = self.network;
         let miner_address = self.miner_address;
 
+        let mut state = self.state.clone();
         let mempool = self.mempool.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
@@ -294,11 +295,18 @@ where
             let (merkle_root, auth_data_root) =
                 calculate_transaction_roots(&coinbase_tx, &mempool_txs);
 
+            let prepared_block_txs: Vec<_> = mempool_txs
+                .iter()
+                .map(|tx| tx.transaction.transaction.clone())
+                .chain(iter::once(coinbase_tx.transaction.clone()))
+                .collect();
+
             // Convert into TransactionTemplates
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
 
             let empty_string = String::from("");
-            Ok(GetBlockTemplate {
+
+            let get_block_template = GetBlockTemplate {
                 capabilities: vec![],
 
                 version: ZCASH_BLOCK_VERSION,
@@ -338,7 +346,28 @@ where
                 bits: empty_string,
 
                 height: 0,
-            })
+            };
+
+            let request = zebra_state::ReadRequest::CheckContextualValidity(
+                make_test_prepared_block(&get_block_template, prepared_block_txs),
+            );
+
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            match response {
+                zebra_state::ReadResponse::Validated => Ok(()),
+                _ => unreachable!("unmatched response to a CheckContextualValidity request"),
+            }?;
+
+            Ok(get_block_template)
         }
         .boxed()
     }
@@ -556,5 +585,29 @@ fn get_height_from_int(index: i32, tip_height: Height) -> Result<Height> {
         };
 
         Ok(Height(sanitized_height))
+    }
+}
+
+/// Make a test PreparedBlock the getblocktemplate data to contextually validate
+fn make_test_prepared_block(
+    get_block_template: &GetBlockTemplate,
+    transactions: Vec<Arc<Transaction>>,
+) -> zebra_state::PreparedBlock {
+    let block = Arc::new(Block {
+        header: Arc::new(get_block_template.into()),
+        transactions,
+    });
+
+    let hash = block.hash();
+    let height = Height(get_block_template.height);
+    let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|t| t.hash()).collect();
+    let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
+
+    zebra_state::PreparedBlock {
+        block,
+        hash,
+        height,
+        new_outputs,
+        transaction_hashes,
     }
 }
