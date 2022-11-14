@@ -534,8 +534,13 @@ impl Arbitrary for LockTime {
         prop_oneof![
             (block::Height::MIN.0..=LockTime::MAX_HEIGHT.0)
                 .prop_map(|n| LockTime::Height(block::Height(n))),
-            (LockTime::MIN_TIMESTAMP..=LockTime::MAX_TIMESTAMP)
-                .prop_map(|n| { LockTime::Time(Utc.timestamp(n, 0)) })
+            (LockTime::MIN_TIMESTAMP..=LockTime::MAX_TIMESTAMP).prop_map(|n| {
+                LockTime::Time(
+                    Utc.timestamp_opt(n, 0)
+                        .single()
+                        .expect("in-range number of seconds and valid nanosecond"),
+                )
+            })
         ]
         .boxed()
     }
