@@ -1568,6 +1568,36 @@ impl Service<ReadRequest> for ReadStateService {
                                 &latest_non_finalized_state,
                                 &block,
                             )?;
+
+                            // Reads from disk
+                            let sprout_final_treestates =
+                                check::anchors::fetch_sprout_final_treestates(
+                                    &state.db,
+                                    &best_chain,
+                                    &block,
+                                );
+
+                            let contextual =
+                                best_chain.new_contextually_valid_block(block, &state.db)?;
+
+                            check::anchors::sprout_anchors_refer_to_treestates(
+                                sprout_final_treestates,
+                                Arc::clone(&contextual.block),
+                                contextual.height,
+                                contextual.transaction_hashes,
+                            )?;
+
+                            check::block_commitment_is_valid_for_chain_history(
+                                contextual.block,
+                                state.network,
+                                &best_chain.history_tree,
+                            )?;
+                        } else {
+                            check::block_commitment_is_valid_for_chain_history(
+                                block.block,
+                                state.network,
+                                &state.db.history_tree(),
+                            )?;
                         };
 
                         // The work is done in the future.

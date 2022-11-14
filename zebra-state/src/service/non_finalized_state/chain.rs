@@ -30,8 +30,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::Treestate, service::check, ContextuallyValidBlock, HashOrHeight, OutputLocation,
-    TransactionLocation, ValidateContextError,
+    request::Treestate,
+    service::{check, finalized_state::ZebraDb},
+    ContextuallyValidBlock, HashOrHeight, OutputLocation, PreparedBlock, TransactionLocation,
+    ValidateContextError,
 };
 
 use self::index::TransparentTransfers;
@@ -433,6 +435,45 @@ impl Chain {
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
         self.blocks.get(&height)
+    }
+
+    /// Contextually validate `prepared` using `finalized_state`.
+    ///
+    /// Returns new contextually valid block
+    #[tracing::instrument(level = "debug", skip(self, finalized_state))]
+    pub fn new_contextually_valid_block(
+        &self,
+        prepared: PreparedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<ContextuallyValidBlock, ValidateContextError> {
+        // Reads from disk
+        //
+        // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
+        let spent_utxos = check::utxo::transparent_spend(
+            &prepared,
+            &self.unspent_utxos(),
+            &self.spent_utxos,
+            finalized_state,
+        )?;
+
+        // Reads from disk
+        check::anchors::sapling_orchard_anchors_refer_to_final_treestates(
+            finalized_state,
+            self,
+            &prepared,
+        )?;
+
+        // Quick check that doesn't read from disk
+        ContextuallyValidBlock::with_block_and_spent_utxos(prepared.clone(), spent_utxos.clone())
+            .map_err(
+                |value_balance_error| ValidateContextError::CalculateBlockChainValueChange {
+                    value_balance_error,
+                    height: prepared.height,
+                    block_hash: prepared.hash,
+                    transaction_count: prepared.block.transactions.len(),
+                    spent_utxo_count: spent_utxos.len(),
+                },
+            )
     }
 
     /// Returns the [`Transaction`] with [`transaction::Hash`], if it exists in this chain.

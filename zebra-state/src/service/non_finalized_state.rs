@@ -216,40 +216,11 @@ impl NonFinalizedState {
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         // Reads from disk
-        //
-        // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
-        let spent_utxos = check::utxo::transparent_spend(
-            &prepared,
-            &new_chain.unspent_utxos(),
-            &new_chain.spent_utxos,
-            finalized_state,
-        )?;
-
-        // Reads from disk
-        check::anchors::sapling_orchard_anchors_refer_to_final_treestates(
-            finalized_state,
-            &new_chain,
-            &prepared,
-        )?;
-
-        // Reads from disk
         let sprout_final_treestates =
             check::anchors::fetch_sprout_final_treestates(finalized_state, &new_chain, &prepared);
 
         // Quick check that doesn't read from disk
-        let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(
-            prepared.clone(),
-            spent_utxos.clone(),
-        )
-        .map_err(|value_balance_error| {
-            ValidateContextError::CalculateBlockChainValueChange {
-                value_balance_error,
-                height: prepared.height,
-                block_hash: prepared.hash,
-                transaction_count: prepared.block.transactions.len(),
-                spent_utxo_count: spent_utxos.len(),
-            }
-        })?;
+        let contextual = new_chain.new_contextually_valid_block(prepared, finalized_state)?;
 
         Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
     }
