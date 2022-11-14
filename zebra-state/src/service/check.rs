@@ -13,15 +13,12 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::{
-        block_iter::any_ancestor_blocks, finalized_state::FinalizedState,
-        non_finalized_state::NonFinalizedState,
-    },
+    service::{block_iter::any_ancestor_blocks, non_finalized_state::NonFinalizedState},
     BoxError, PreparedBlock, ValidateContextError,
 };
 
 // use self as check
-use super::check;
+use super::{check, finalized_state::ZebraDb};
 
 // These types are used in doc links
 #[allow(unused_imports)]
@@ -369,25 +366,26 @@ where
 ///
 /// Additional contextual validity checks are performed by the non-finalized [`Chain`].
 pub(crate) fn initial_contextual_validity(
-    finalized_state: &FinalizedState,
+    network: Network,
+    db: &ZebraDb,
     non_finalized_state: &NonFinalizedState,
     prepared: &PreparedBlock,
 ) -> Result<(), ValidateContextError> {
     let relevant_chain = any_ancestor_blocks(
         non_finalized_state,
-        &finalized_state.db,
+        db,
         prepared.block.header.previous_block_hash,
     );
 
     // Security: check proof of work before any other checks
     check::block_is_valid_for_recent_chain(
         prepared,
-        finalized_state.network(),
-        finalized_state.db.finalized_tip_height(),
+        network,
+        db.finalized_tip_height(),
         relevant_chain,
     )?;
 
-    check::nullifier::no_duplicates_in_finalized_chain(prepared, &finalized_state.db)?;
+    check::nullifier::no_duplicates_in_finalized_chain(prepared, db)?;
 
     Ok(())
 }

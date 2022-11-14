@@ -1550,7 +1550,7 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by get_block_template RPC.
             #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadRequest::CheckContextualValidity(_block) => {
+            ReadRequest::CheckContextualValidity(block) => {
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1558,9 +1558,17 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let _best_chain = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| non_finalized_state.best_chain().map(Arc::clone),
-                        );
+                        let latest_non_finalized_state = state.latest_non_finalized_state();
+                        if let Some(best_chain) =
+                            latest_non_finalized_state.best_chain().map(Arc::clone)
+                        {
+                            check::initial_contextual_validity(
+                                state.network,
+                                &state.db,
+                                &latest_non_finalized_state,
+                                &block,
+                            )?;
+                        };
 
                         // The work is done in the future.
                         timer.finish(
