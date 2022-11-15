@@ -1368,7 +1368,7 @@ jobs:
       - name: Delete temporal SSH keys
         continue-on-error: true
         run: |
-          for i in $(gcloud compute os-login ssh-keys list --format="table[no-heading](value.fingerprint)"); do 
+          for i in $(gcloud compute os-login ssh-keys list --format="table[no-heading](value.fingerprint)") --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com; do 
             echo "$i";
-            gcloud compute os-login ssh-keys remove --key "$i" || true;
+            gcloud compute os-login ssh-keys remove --key "$i" --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com || true;
           done
