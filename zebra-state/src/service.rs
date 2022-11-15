@@ -797,6 +797,50 @@ impl ReadStateService {
     fn latest_non_finalized_state(&self) -> NonFinalizedState {
         self.non_finalized_state_receiver.cloned_watch_data()
     }
+
+    /// Check the contextual validity of a block in the best chain
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    fn check_best_chain_contextual_validity(
+        &self,
+        block: PreparedBlock,
+    ) -> Result<(), crate::ValidateContextError> {
+        let latest_non_finalized_state = self.latest_non_finalized_state();
+        if let Some(best_chain) = latest_non_finalized_state.best_chain() {
+            check::initial_contextual_validity(
+                self.network,
+                &self.db,
+                &latest_non_finalized_state,
+                &block,
+            )?;
+
+            // Reads from disk
+            let sprout_final_treestates =
+                check::anchors::fetch_sprout_final_treestates(&self.db, best_chain, &block);
+
+            let contextual = best_chain.new_contextually_valid_block(block, &self.db)?;
+
+            check::anchors::sprout_anchors_refer_to_treestates(
+                sprout_final_treestates,
+                Arc::clone(&contextual.block),
+                contextual.height,
+                contextual.transaction_hashes,
+            )?;
+
+            check::block_commitment_is_valid_for_chain_history(
+                contextual.block,
+                self.network,
+                &best_chain.history_tree,
+            )?;
+        } else {
+            check::block_commitment_is_valid_for_chain_history(
+                block.block,
+                self.network,
+                &self.db.history_tree(),
+            )?;
+        };
+
+        Ok(())
+    }
 }
 
 impl Service<Request> for StateService {
@@ -1558,48 +1602,7 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let latest_non_finalized_state = state.latest_non_finalized_state();
-                        if let Some(best_chain) =
-                            latest_non_finalized_state.best_chain().map(Arc::clone)
-                        {
-                            check::initial_contextual_validity(
-                                state.network,
-                                &state.db,
-                                &latest_non_finalized_state,
-                                &block,
-                            )?;
-
-                            // Reads from disk
-                            let sprout_final_treestates =
-                                check::anchors::fetch_sprout_final_treestates(
-                                    &state.db,
-                                    &best_chain,
-                                    &block,
-                                );
-
-                            let contextual =
-                                best_chain.new_contextually_valid_block(block, &state.db)?;
-
-                            check::anchors::sprout_anchors_refer_to_treestates(
-                                sprout_final_treestates,
-                                Arc::clone(&contextual.block),
-                                contextual.height,
-                                contextual.transaction_hashes,
-                            )?;
-
-                            check::block_commitment_is_valid_for_chain_history(
-                                contextual.block,
-                                state.network,
-                                &best_chain.history_tree,
-                            )?;
-                        } else {
-                            check::block_commitment_is_valid_for_chain_history(
-                                block.block,
-                                state.network,
-                                &state.db.history_tree(),
-                            )?;
-                        };
-
+                        state.check_best_chain_contextual_validity(block)?;
                         // The work is done in the future.
                         timer.finish(
                             module_path!(),
