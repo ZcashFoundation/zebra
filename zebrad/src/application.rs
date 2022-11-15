@@ -376,7 +376,7 @@ impl Application for ZebradApp {
         let default_filter = command
             .command
             .as_ref()
-            .map(|zcmd| zcmd.default_tracing_filter(command.verbose))
+            .map(|zcmd| zcmd.default_tracing_filter(command.verbose, command.help))
             .unwrap_or("warn");
         let is_server = command
             .command
