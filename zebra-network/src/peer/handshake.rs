@@ -608,7 +608,10 @@ where
     // To try to stay within the range where zcashd will ignore our clock skew,
     // truncate the timestamp to the nearest 5 minutes.
     let now = Utc::now().timestamp();
-    let timestamp = Utc.timestamp(now - now.rem_euclid(5 * 60), 0);
+    let timestamp = Utc
+        .timestamp_opt(now - now.rem_euclid(5 * 60), 0)
+        .single()
+        .expect("in-range number of seconds and valid nanosecond");
 
     let (their_addr, our_services, our_listen_addr) = match connected_addr {
         // Version messages require an address, so we use
