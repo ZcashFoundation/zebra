@@ -800,6 +800,8 @@ impl ReadStateService {
 
     /// Check the contextual validity of a block in the best chain
     #[cfg(feature = "getblocktemplate-rpcs")]
+    #[allow(clippy::unwrap_in_result)]
+    #[tracing::instrument(level = "debug", skip_all)]
     fn check_best_chain_contextual_validity(
         &self,
         block: PreparedBlock,
@@ -821,19 +823,35 @@ impl ReadStateService {
                 check::anchors::fetch_sprout_final_treestates(&self.db, best_chain, &block);
 
             let contextual = best_chain.new_contextually_valid_block(block, &self.db)?;
+            let mut block_commitment_result = None;
+            let mut sprout_anchor_result = None;
 
-            check::anchors::sprout_anchors_refer_to_treestates(
-                sprout_final_treestates,
-                Arc::clone(&contextual.block),
-                contextual.height,
-                contextual.transaction_hashes,
-            )?;
+            rayon::in_place_scope_fifo(|scope| {
+                // Clone function arguments for different threads
+                let block = Arc::clone(&contextual.block);
 
-            check::block_commitment_is_valid_for_chain_history(
-                contextual.block,
-                self.network,
-                &best_chain.history_tree,
-            )?;
+                scope.spawn_fifo(|_scope| {
+                    block_commitment_result =
+                        Some(check::anchors::sprout_anchors_refer_to_treestates(
+                            sprout_final_treestates,
+                            block,
+                            contextual.height,
+                            contextual.transaction_hashes,
+                        ));
+                });
+
+                scope.spawn_fifo(|_scope| {
+                    sprout_anchor_result =
+                        Some(check::block_commitment_is_valid_for_chain_history(
+                            contextual.block,
+                            self.network,
+                            &best_chain.history_tree,
+                        ));
+                });
+            });
+
+            block_commitment_result.expect("scope has finished")?;
+            sprout_anchor_result.expect("scope has finished")?;
         } else {
             let next_valid_height = self
                 .db
