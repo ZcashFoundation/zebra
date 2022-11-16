@@ -49,10 +49,49 @@ pub struct NonFinalizedState {
     pub network: Network,
 }
 
+/// Builder for NonFinalizedState
+#[derive(Clone, Debug)]
+#[cfg(feature = "getblocktemplate-rpcs")]
+pub struct NonFinalizedStateBuilder {
+    /// Verified, non-finalized chains, in ascending order
+    pub chain_set: BTreeSet<Arc<Chain>>,
+
+    /// The configured Zcash network.
+    pub network: Network,
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+impl NonFinalizedStateBuilder {
+    /// Add a chain to be included in the built NonFinalizedState
+    /// Returns the builder
+    pub fn insert_chain(mut self, chain: Arc<Chain>) -> Self {
+        self.chain_set.insert(chain);
+        self
+    }
+
+    /// Consumes the builder and returns the NonFinalizedState
+    pub fn finish(self) -> NonFinalizedState {
+        NonFinalizedState {
+            chain_set: self.chain_set,
+            network: self.network,
+        }
+    }
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
 impl NonFinalizedState {
     /// Returns a new non-finalized state for `network`.
     pub fn new(network: Network) -> NonFinalizedState {
         NonFinalizedState {
+            chain_set: Default::default(),
+            network,
+        }
+    }
+
+    /// Returns a new NonFinalizedStateBuilder for creating a non-finalized state for `network`.
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    pub fn build(network: Network) -> NonFinalizedStateBuilder {
+        NonFinalizedStateBuilder {
             chain_set: Default::default(),
             network,
         }

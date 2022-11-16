@@ -804,12 +804,15 @@ impl ReadStateService {
         &self,
         block: PreparedBlock,
     ) -> Result<(), crate::ValidateContextError> {
-        let latest_non_finalized_state = self.latest_non_finalized_state();
-        if let Some(best_chain) = latest_non_finalized_state.best_chain() {
+        if let Some(best_chain) = self.latest_non_finalized_state().best_chain() {
+            let best_chain_latest_non_finalized_state = NonFinalizedState::build(self.network)
+                .insert_chain(Arc::clone(best_chain))
+                .finish();
+
             check::initial_contextual_validity(
                 self.network,
                 &self.db,
-                &latest_non_finalized_state,
+                &best_chain_latest_non_finalized_state,
                 &block,
             )?;
 
@@ -832,6 +835,16 @@ impl ReadStateService {
                 &best_chain.history_tree,
             )?;
         } else {
+            let next_valid_height = self
+                .db
+                .finalized_tip_height()
+                .map(|height| (height + 1).expect("committed heights are valid"))
+                .unwrap_or(block::Height(0));
+
+            if block.height != next_valid_height {
+                return Err(crate::ValidateContextError::NotReadyToBeCommitted);
+            }
+
             check::block_commitment_is_valid_for_chain_history(
                 block.block,
                 self.network,
