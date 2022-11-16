@@ -101,8 +101,16 @@ impl ChainTip for MockChainTip {
         unreachable!("Method not used in tests");
     }
 
-    fn estimate_distance_to_network_chain_tip(&self, _network: Network) -> Option<i32> {
-        *self.estimated_distance_to_network_chain_tip.borrow()
+    fn estimate_distance_to_network_chain_tip(
+        &self,
+        _network: Network,
+    ) -> Option<(i32, block::Height)> {
+        self.estimated_distance_to_network_chain_tip
+            .borrow()
+            .and_then(|estimated_distance| {
+                self.best_tip_height()
+                    .map(|tip_height| (estimated_distance, tip_height))
+            })
     }
 }
 
