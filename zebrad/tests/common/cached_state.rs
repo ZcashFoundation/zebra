@@ -9,8 +9,6 @@ use std::path::{Path, PathBuf};
 
 use std::time::Duration;
 
-use reqwest::Client;
-
 use color_eyre::eyre::{eyre, Result};
 use tempfile::TempDir;
 use tokio::fs;
@@ -26,6 +24,7 @@ use zebra_chain::{
 use zebra_state::{ChainTipChange, LatestChainTip};
 
 use crate::common::config::testdir;
+use crate::common::rpc_client::RPCRequestClient;
 
 use zebra_state::MAX_BLOCK_REORG_HEIGHT;
 
@@ -231,22 +230,11 @@ pub async fn get_raw_future_blocks(
     )?;
 
     // Create an http client
-    let client = Client::new();
-
-    let send_rpc_request = |method, params| {
-        client
-            .post(format!("http://{}", &rpc_address))
-            .body(format!(
-                r#"{{"jsonrpc": "2.0", "method": "{method}", "params": {params}, "id":123 }}"#
-            ))
-            .header("Content-Type", "application/json")
-            .send()
-    };
+    let rpc_client = RPCRequestClient::new(rpc_address);
 
     let blockchain_info: serde_json::Value = serde_json::from_str(
-        &send_rpc_request("getblockchaininfo", "[]".to_string())
-            .await?
-            .text()
+        &rpc_client
+            .text_from_call("getblockchaininfo", "[]".to_string())
             .await?,
     )?;
 
@@ -266,9 +254,8 @@ pub async fn get_raw_future_blocks(
 
     for block_height in (0..max_num_blocks).map(|idx| idx + estimated_finalized_tip_height) {
         let raw_block: serde_json::Value = serde_json::from_str(
-            &send_rpc_request("getblock", format!(r#"["{block_height}", 0]"#))
-                .await?
-                .text()
+            &rpc_client
+                .text_from_call("getblock", format!(r#"["{block_height}", 0]"#))
                 .await?,
         )?;
 
