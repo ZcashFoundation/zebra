@@ -150,7 +150,7 @@ jobs:
           --container-image=gcr.io/google-containers/busybox \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
-          --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
+          --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE,enable-oslogin=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
@@ -161,10 +161,9 @@ jobs:
       # SSH into the just created VM, and create a docker volume with the newly created disk.
       - name: Create ${{ inputs.test_id }} Docker volume
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -212,10 +211,9 @@ jobs:
       # Launch the test without any cached state
       - name: Launch ${{ inputs.test_id }} test
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -372,7 +370,7 @@ jobs:
           --container-image=gcr.io/google-containers/busybox \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
-          --metadata=google-monitoring-enabled=true,google-logging-enabled=true \
+          --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE,enable-oslogin=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
@@ -385,10 +383,9 @@ jobs:
       # but the cached state can be smaller if we just increased the disk size.)
       - name: Create ${{ inputs.test_id }} Docker volume
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -454,10 +451,9 @@ jobs:
         # TODO: we should find a better logic for this use cases
         if: ${{ (inputs.needs_zebra_state && !inputs.needs_lwd_state) && inputs.test_id != 'lwd-full-sync' }}
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -504,10 +500,9 @@ jobs:
         # TODO: we should find a better logic for this use cases
         if: ${{ (inputs.needs_zebra_state && inputs.needs_lwd_state) || inputs.test_id == 'lwd-full-sync' }}
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -570,10 +565,9 @@ jobs:
       # Errors in the tests are caught by the final test status job.
       - name: Show logs for ${{ inputs.test_id }} test (sprout)
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -629,10 +623,9 @@ jobs:
       # Show recent logs, following until Canopy activation (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (heartwood)
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -685,10 +678,9 @@ jobs:
       # Show recent logs, following until NU5 activation (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (canopy)
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -743,10 +735,9 @@ jobs:
       # Show recent logs, following until block 1,740,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1740k)
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -803,10 +794,9 @@ jobs:
       # Show recent logs, following until block 1,760,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1760k)
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -863,10 +853,9 @@ jobs:
       # Show recent logs, following until block 1,780,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1780k)
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -924,10 +913,9 @@ jobs:
       # Show recent logs, following until block 1,800,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1800k)
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -984,10 +972,9 @@ jobs:
       # Show recent logs, following until block 1,820,000 (or the test finishes)
       - name: Show logs for ${{ inputs.test_id }} test (1820k)
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -1043,10 +1030,9 @@ jobs:
       # TODO: when doing obtain/extend tips, log the verifier in use, and check for full verification here
       - name: Show logs for ${{ inputs.test_id }} test (checkpoint)
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -1113,10 +1099,9 @@ jobs:
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
         run: |
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -1239,10 +1224,9 @@ jobs:
           SYNC_HEIGHT=""
 
           DOCKER_LOGS=$( \
-          gcloud compute ssh \
-          github-service-account@${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
-          --quiet \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
@@ -1378,3 +1362,15 @@ jobs:
           else
             gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
           fi
+
+      # Deletes SSH keys generated during this workflow run, as GCP has a limit of SSH keys
+      # that can exist at the same time in the OS Login metadata. Not deleting this keys
+      # could cause the following error:
+      # `Login profile size exceeds 32 KiB. Delete profile values to make additional space`
+      - name: Delete temporal SSH keys
+        continue-on-error: true
+        run: |
+          for i in $(gcloud compute os-login ssh-keys list --format="table[no-heading](value.fingerprint)") --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com; do 
+            echo "$i";
+            gcloud compute os-login ssh-keys remove --key "$i" --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com || true;
+          done
