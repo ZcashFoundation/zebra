@@ -45,7 +45,8 @@ pub fn transaction() -> (Transaction, Vec<u8>) {
 /// Returns a generated transparent lock time, and its canonical serialized bytes.
 pub fn lock_time() -> (LockTime, Vec<u8>) {
     let lock_time = LockTime::Time(DateTime::<Utc>::from_utc(
-        NaiveDateTime::from_timestamp(61, 0),
+        NaiveDateTime::from_timestamp_opt(61, 0)
+            .expect("in-range number of seconds and valid nanosecond"),
         Utc,
     ));
     let lock_time_bytes = lock_time.zcash_serialize_to_vec().unwrap();
