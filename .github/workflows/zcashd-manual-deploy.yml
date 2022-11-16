@@ -55,8 +55,8 @@ jobs:
           gcloud compute instance-templates create-with-container zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --boot-disk-size 10GB \
           --boot-disk-type=pd-ssd \
-          --image-project=debian-cloud \
-          --image-family=debian-11 \
+          --image-project=cos-cloud \
+          --image-family=cos-stable \
           --container-stdin \
           --container-tty \
           --container-image electriccoinco/zcashd \
