@@ -78,7 +78,6 @@ impl NonFinalizedStateBuilder {
     }
 }
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 impl NonFinalizedState {
     /// Returns a new non-finalized state for `network`.
     pub fn new(network: Network) -> NonFinalizedState {
