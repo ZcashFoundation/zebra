@@ -337,7 +337,7 @@ where
 
                 bits: empty_string,
 
-                height: 0,
+                height: block_height.0,
             })
         }
         .boxed()
