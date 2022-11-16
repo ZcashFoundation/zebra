@@ -116,35 +116,34 @@ pub fn funding_stream_address(
         .expect("there is always another hash map as value for a given valid network")
         .get(&receiver)
         .expect("in the inner hash map there is always a vector of strings with addresses")[index];
-    Address::from_str(address).expect("Address should deserialize")
+    Address::from_str(address).expect("address should deserialize")
 }
 
-/// Given a funding stream address, create a script and check if it is the same
+/// Given a funding stream P2SH address, create a script and check if it is the same
 /// as the given lock_script as described in [protocol specification §7.10][7.10]
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 pub fn check_script_form(lock_script: &Script, address: Address) -> bool {
-    // TODO: Verify P2SH multisig funding stream addresses (#5577).
-    //       As of NU5, the funding streams do not use multisig addresses,
-    //       so this is optional.
-    //
-    // # Consensus
-    //
-    // > The standard redeem script hash is specified in [Bitcoin-Multisig] for P2SH multisig
-    // > addresses...
-    // [protocol specification §7.10][7.10]
-    //
-    // [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-    // [Bitcoin-Multisig]: https://developer.bitcoin.org/ devguide/transactions.html#multisig
+    assert!(
+        address.is_script_hash(),
+        "incorrect funding stream address constant: {address} \
+         Zcash only supports transparent 'pay to script hash' (P2SH) addresses",
+    );
 
-    // Verify a Bitcoin P2SH single address.
+    // Verify a Bitcoin P2SH single or multisig address.
     let standard_script_hash = new_coinbase_script(address);
 
     lock_script == &standard_script_hash
 }
 
-/// Returns a new funding stream coinbase output lock script, which pays to `address`.
+/// Returns a new funding stream coinbase output lock script, which pays to the P2SH `address`.
 pub fn new_coinbase_script(address: Address) -> Script {
+    assert!(
+        address.is_script_hash(),
+        "incorrect coinbase script address: {address} \
+         Zebra only supports transparent 'pay to script hash' (P2SH) addresses",
+    );
+
     let address_hash = address
         .zcash_serialize_to_vec()
         .expect("we should get address bytes here");

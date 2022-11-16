@@ -28,7 +28,9 @@ pub use address::{
     utxo::{address_utxos, AddressUtxos, ADDRESS_HEIGHTS_FULL_RANGE},
 };
 
-pub use block::{any_utxo, block, block_header, transaction, transaction_hashes_for_block, utxo};
+pub use block::{
+    any_utxo, block, block_header, transaction, transaction_hashes_for_block, unspent_utxo, utxo,
+};
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use block::hash;
