@@ -56,6 +56,13 @@ use crate::{
     Request, Response,
 };
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use {
+    crate::response::GetBlockTemplateChainInfo,
+    chrono::{DateTime, Utc},
+    zebra_chain::work::difficulty::CompactDifficulty,
+};
+
 pub mod block_iter;
 pub mod chain_tip;
 pub mod watch_receiver;
@@ -1549,6 +1556,57 @@ impl Service<ReadRequest> for ReadStateService {
                         timer.finish(module_path!(), line!(), "ReadRequest::BestChainBlockHash");
 
                         Ok(ReadResponse::BlockHash(hash))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::BestChainBlockHash"))
+                .boxed()
+            }
+
+            // Used by get_block_template RPC.
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadRequest::ChainInfo() => {
+                metrics::counter!(
+                    "state.requests",
+                    1,
+                    "service" => "read_state",
+                    "type" => "chain_info",
+                );
+
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                // # Performance
+                //
+                // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        // Relevant block data
+                        let relevant_data_res = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::last_block_headers(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    read::best_tip(&non_finalized_state, &state.db)
+                                        .expect("We should have a block tip")
+                                        .0,
+                                )
+                            },
+                        );
+                        let relevant_data: Option<Vec<(CompactDifficulty, DateTime<Utc>)>> =
+                            relevant_data_res.map(|data| {
+                                data.iter()
+                                    .map(|h| (h.difficulty_threshold, h.time))
+                                    .collect()
+                            });
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::BestChainInfo");
+
+                        Ok(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                            relevant_data,
+                        }))
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::BestChainBlockHash"))

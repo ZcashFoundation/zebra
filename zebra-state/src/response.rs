@@ -10,6 +10,12 @@ use zebra_chain::{
     transparent,
 };
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use {
+    chrono::{DateTime, Utc},
+    zebra_chain::work::difficulty::CompactDifficulty,
+};
+
 // Allow *only* these unused imports, so that rustdoc link resolution
 // will work with inline links.
 #[allow(unused_imports)]
@@ -115,6 +121,20 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::BestChainBlockHash`](crate::ReadRequest::BestChainBlockHash) with the
     /// specified block hash.
     BlockHash(Option<block::Hash>),
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Response to [`ReadRequest::ChainInfo`](crate::ReadRequest::ChainInfo) with the state
+    /// information needed by the `getblocktemplate` RPC method.
+    ChainInfo(GetBlockTemplateChainInfo),
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+/// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GetBlockTemplateChainInfo {
+    /// A list of relevant block data needed to calculate difficulty fields.
+    // TODO : Can this field be an iterator ?
+    pub relevant_data: Option<Vec<(CompactDifficulty, DateTime<Utc>)>>,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.
@@ -153,6 +173,10 @@ impl TryFrom<ReadResponse> for Response {
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::BlockHash(_) => {
+                Err("there is no corresponding Response for this ReadResponse")
+            }
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadResponse::ChainInfo(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
         }
