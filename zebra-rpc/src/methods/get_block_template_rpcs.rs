@@ -29,7 +29,7 @@ use zebra_consensus::{
 use zebra_node_services::mempool;
 
 use crate::methods::{
-    best_chain_tip_height, best_chain_tip_time,
+    best_chain_tip_hash, best_chain_tip_height, best_chain_tip_time,
     get_block_template_rpcs::types::{
         default_roots::DefaultRoots, get_block_template::GetBlockTemplate, hex_data::HexData,
         submit_block, transaction::TransactionTemplate,
@@ -283,6 +283,7 @@ where
             })?;
 
             let tip_height = best_chain_tip_height(&latest_chain_tip)?;
+            let tip_hash = best_chain_tip_hash(&latest_chain_tip)?;
             let tip_time = best_chain_tip_time(&latest_chain_tip)?;
             let mempool_txs = select_mempool_transactions(mempool).await?;
 
@@ -309,7 +310,7 @@ where
 
                 version: ZCASH_BLOCK_VERSION,
 
-                previous_block_hash: GetBlockHash([0; 32].into()),
+                previous_block_hash: GetBlockHash(tip_hash),
                 block_commitments_hash: [0; 32].into(),
                 light_client_root_hash: [0; 32].into(),
                 final_sapling_root_hash: [0; 32].into(),
