@@ -89,16 +89,16 @@ pub struct GetBlockTemplate {
     #[serde(rename = "sizelimit")]
     pub size_limit: u64,
 
-    /// Add documentation.
+    /// The current system time as seconds since epoch.
     // TODO: use DateTime32 type?
     #[serde(rename = "curtime")]
-    pub cur_time: u32,
+    pub cur_time: i64,
 
     /// Add documentation.
     // TODO: use CompactDifficulty type.
     pub bits: String,
 
-    /// Add documentation.
+    /// The height of the next block in the best chain.
     // TODO: use Height type?
     pub height: u32,
 }

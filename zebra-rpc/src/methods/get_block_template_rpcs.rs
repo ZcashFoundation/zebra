@@ -333,7 +333,7 @@ where
 
                 size_limit: MAX_BLOCK_BYTES,
 
-                cur_time: 0,
+                cur_time: chrono::Utc::now().timestamp(),
 
                 bits: empty_string,
 
