@@ -228,7 +228,9 @@ impl From<&u32> for DateTime32 {
 impl From<DateTime32> for chrono::DateTime<Utc> {
     fn from(value: DateTime32) -> Self {
         // chrono::DateTime is guaranteed to hold 32-bit values
-        Utc.timestamp(value.timestamp.into(), 0)
+        Utc.timestamp_opt(value.timestamp.into(), 0)
+            .single()
+            .expect("in-range number of seconds and valid nanosecond")
     }
 }
 

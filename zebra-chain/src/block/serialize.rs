@@ -87,7 +87,12 @@ impl ZcashDeserialize for Header {
             merkle_root: merkle::Root(reader.read_32_bytes()?),
             commitment_bytes: reader.read_32_bytes()?,
             // This can't panic, because all u32 values are valid `Utc.timestamp`s
-            time: Utc.timestamp(reader.read_u32::<LittleEndian>()?.into(), 0),
+            time: Utc
+                .timestamp_opt(reader.read_u32::<LittleEndian>()?.into(), 0)
+                .single()
+                .ok_or(SerializationError::Parse(
+                    "out-of-range number of seconds and/or invalid nanosecond",
+                ))?,
             difficulty_threshold: CompactDifficulty(reader.read_u32::<LittleEndian>()?),
             nonce: reader.read_32_bytes()?,
             solution: equihash::Solution::zcash_deserialize(reader)?,
