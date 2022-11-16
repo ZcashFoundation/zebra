@@ -223,7 +223,8 @@ fn deserialize_large_transaction() {
 
     // Create a lock time.
     let lock_time = LockTime::Time(DateTime::<Utc>::from_utc(
-        NaiveDateTime::from_timestamp(61, 0),
+        NaiveDateTime::from_timestamp_opt(61, 0)
+            .expect("in-range number of seconds and valid nanosecond"),
         Utc,
     ));
 
