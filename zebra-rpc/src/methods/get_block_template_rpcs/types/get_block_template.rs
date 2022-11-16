@@ -18,6 +18,8 @@ pub struct GetBlockTemplate {
     /// - `proposal`: <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
     /// - `longpoll`: <https://en.bitcoin.it/wiki/BIP_0022#Optional:_Long_Polling>
     /// - `serverlist`: <https://en.bitcoin.it/wiki/BIP_0023#Logical_Services>
+    ///
+    /// In zcashd, this field is hardcoded to ["proposal"]. We do the same in zebra.
     pub capabilities: Vec<String>,
 
     /// The version of the block format.

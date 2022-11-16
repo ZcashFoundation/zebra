@@ -305,7 +305,7 @@ where
 
             let empty_string = String::from("");
             Ok(GetBlockTemplate {
-                capabilities: vec![],
+                capabilities: vec!["proposal".to_string()],
 
                 version: ZCASH_BLOCK_VERSION,
 
