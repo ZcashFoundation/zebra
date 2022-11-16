@@ -161,6 +161,8 @@ use common::{
     test_type::TestType::{self, *},
 };
 
+use crate::common::rpc_client::RPCRequestClient;
+
 /// The maximum amount of time that we allow the creation of a future to block the `tokio` executor.
 ///
 /// This should be larger than the amount of time between thread time slices on a busy test VM.
@@ -1320,7 +1322,6 @@ async fn rpc_endpoint_parallel_threads() -> Result<()> {
 /// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
 #[tracing::instrument]
 async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
-    use hyper::{body::to_bytes, Body, Client, Method, Request};
     use serde_json::Value;
 
     let _init_guard = zebra_test::init();
@@ -1331,7 +1332,6 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
     let mut config = random_known_rpc_port_config(parallel_cpu_threads)?;
-    let url = format!("http://{}", config.rpc.listen_addr.unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
     let mut child = dir.spawn_child(args!["start"])?;
@@ -1342,24 +1342,15 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     )?;
 
     // Create an http client
-    let client = Client::new();
+    let client = RPCRequestClient::new(config.rpc.listen_addr.unwrap());
 
-    // Create a request to call `getinfo` RPC method
-    let req = Request::builder()
-        .method(Method::POST)
-        .uri(url)
-        .header("content-type", "application/json")
-        .body(Body::from(
-            r#"{"jsonrpc":"1.0","method":"getinfo","params":[],"id":123}"#,
-        ))?;
-
-    // Make the call to the RPC endpoint
-    let res = client.request(req).await?;
+    // Make the call to the `getinfo` RPC method
+    let res = client.call("getinfo", "[]".to_string()).await?;
 
     // Test rpc endpoint response
     assert!(res.status().is_success());
 
-    let body = to_bytes(res).await;
+    let body = res.bytes().await;
     let (body, mut child) = child.kill_on_error(body)?;
 
     let parsed: Value = serde_json::from_slice(&body)?;
@@ -1419,17 +1410,12 @@ fn non_blocking_logger() -> Result<()> {
         )?;
 
         // Create an http client
-        let client = reqwest::Client::new();
+        let client = RPCRequestClient::new(zebra_rpc_address);
 
         // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
         // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
         for _ in 0..500 {
-            let res = client
-                .post(format!("http://{}", &zebra_rpc_address))
-                .body(r#"{"jsonrpc":"1.0","method":"getinfo","params":[],"id":123}"#)
-                .header("Content-Type", "application/json")
-                .send()
-                .await?;
+            let res = client.call("getinfo", "[]".to_string()).await?;
 
             // Test that zebrad rpc endpoint is still responding to requests
             assert!(res.status().is_success());
@@ -2042,28 +2028,17 @@ async fn fully_synced_rpc_test() -> Result<()> {
         return Ok(());
     };
 
-    zebrad.expect_stdout_line_matches(&format!(
-        "Opened RPC endpoint at {}",
-        zebra_rpc_address.expect("lightwalletd test must have RPC port"),
-    ))?;
+    let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
+
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
+
+    let client = RPCRequestClient::new(zebra_rpc_address);
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
     // if desired.
-    let client = reqwest::Client::new();
     let res = client
-        .post(format!(
-            "http://{}",
-            &zebra_rpc_address
-                .expect("lightwalletd test must have RPC port")
-                .to_string()
-        ))
-        // Manually constructed request to avoid encoding it, for simplicity
-        .body(r#"{"jsonrpc": "2.0", "method": "getblock", "params": ["1180900", 0], "id":123 }"#)
-        .header("Content-Type", "application/json")
-        .send()
-        .await?
-        .text()
+        .text_from_call("getblock", r#"["1180900", 0]"#.to_string())
         .await?;
 
     // Simple textual check to avoid fully parsing the response, for simplicity

@@ -10,12 +10,12 @@
 
 use color_eyre::eyre::{Context, Result};
 
-use reqwest::Client;
 use zebra_chain::parameters::Network;
 
 use crate::common::{
     cached_state::get_raw_future_blocks,
     launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
+    rpc_client::RPCRequestClient,
     test_type::TestType,
 };
 
@@ -65,16 +65,11 @@ pub(crate) async fn run() -> Result<()> {
     tracing::info!(?rpc_address, "zebrad opened its RPC port",);
 
     // Create an http client
-    let client = Client::new();
+    let client = RPCRequestClient::new(rpc_address);
 
     for raw_block in raw_blocks {
         let res = client
-            .post(format!("http://{}", &rpc_address))
-            .body(format!(
-                r#"{{"jsonrpc": "2.0", "method": "submitblock", "params": ["{raw_block}"], "id":123 }}"#
-            ))
-            .header("Content-Type", "application/json")
-            .send()
+            .call("submitblock", format!(r#"["{raw_block}"]"#))
             .await?;
 
         assert!(res.status().is_success());
