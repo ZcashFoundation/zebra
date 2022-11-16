@@ -738,7 +738,10 @@ mod tests {
     lazy_static! {
         static ref VERSION_TEST_VECTOR: Message = {
             let services = PeerServices::NODE_NETWORK;
-            let timestamp = Utc.timestamp(1_568_000_000, 0);
+            let timestamp = Utc
+                .timestamp_opt(1_568_000_000, 0)
+                .single()
+                .expect("in-range number of seconds and valid nanosecond");
 
             VersionMessage {
                 version: crate::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
