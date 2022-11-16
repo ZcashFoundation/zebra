@@ -2,6 +2,7 @@
 
 use std::{iter, sync::Arc};
 
+use chrono::Duration;
 use futures::{FutureExt, TryFutureExt};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
@@ -16,7 +17,7 @@ use zebra_chain::{
         Block, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
     },
     chain_tip::ChainTip,
-    parameters::Network,
+    parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING},
     serialization::ZcashDeserializeInto,
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
@@ -28,7 +29,7 @@ use zebra_consensus::{
 use zebra_node_services::mempool;
 
 use crate::methods::{
-    best_chain_tip_height,
+    best_chain_tip_height, best_chain_tip_time,
     get_block_template_rpcs::types::{
         default_roots::DefaultRoots, get_block_template::GetBlockTemplate, hex_data::HexData,
         submit_block, transaction::TransactionTemplate,
@@ -282,11 +283,16 @@ where
             })?;
 
             let tip_height = best_chain_tip_height(&latest_chain_tip)?;
+            let tip_time = best_chain_tip_time(&latest_chain_tip)?;
             let mempool_txs = select_mempool_transactions(mempool).await?;
 
             let miner_fee = miner_fee(&mempool_txs);
 
             let block_height = (tip_height + 1).expect("tip is far below Height::MAX");
+            let block_time = tip_time
+                .checked_add_signed(Duration::seconds(POST_BLOSSOM_POW_TARGET_SPACING))
+                .expect("tip plus a small constant is far below i64::MAX")
+                .timestamp();
             let outputs =
                 standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
             let coinbase_tx = Transaction::new_v5_coinbase(network, block_height, outputs).into();
@@ -320,7 +326,7 @@ where
 
                 target: empty_string.clone(),
 
-                min_time: 0,
+                min_time: block_time,
 
                 mutable: constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD
                     .iter()
