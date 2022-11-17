@@ -2154,9 +2154,19 @@ async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
     common::lightwalletd::wallet_grpc_test::run().await
 }
 
+/// Test successful getblocktemplate rpc call
+///
+/// See [`common::get_block_template_rpcs::get_block_template`] for more information.
+#[tokio::test]
+#[ignore]
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn get_block_template() -> Result<()> {
+    common::get_block_template_rpcs::get_block_template::run().await
+}
+
 /// Test successful submitblock rpc call
 ///
-/// See [`common::getblocktemplate`] for more information.
+/// See [`common::get_block_template_rpcs::submit_block`] for more information.
 #[tokio::test]
 #[ignore]
 #[cfg(feature = "getblocktemplate-rpcs")]
