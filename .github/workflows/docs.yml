@@ -54,7 +54,7 @@ jobs:
           components: rust-docs
           override: true
 
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2
 
       - name: Setup mdBook
         uses: peaceiris/actions-mdbook@v1.2.0

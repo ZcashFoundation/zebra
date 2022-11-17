@@ -80,7 +80,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2
         with:
           # TODO: change to shared-key when we switch to Swatinem/rust-cache@v2
           sharedKey: "clippy-cargo-lock"
@@ -130,7 +130,7 @@ jobs:
 
       # We don't cache `fmt` outputs because the job is quick,
       # and we want to use the limited GitHub actions cache space for slower jobs.
-      #- uses: Swatinem/rust-cache@v1
+      #- uses: Swatinem/rust-cache@v2
 
       - uses: actions-rs/cargo@v1.0.3
         with:

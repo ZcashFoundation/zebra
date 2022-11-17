@@ -93,7 +93,7 @@ jobs:
           profile: minimal
           override: true
 
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2
         # TODO: change Rust cache target directory on Windows,
         #       or remove this workaround once the build is more efficient (#3005).
         #with:
@@ -235,7 +235,7 @@ jobs:
           profile: minimal
           override: true
 
-      - uses: Swatinem/rust-cache@v1
+      - uses: Swatinem/rust-cache@v2
         with:
           # TODO: change to shared-key when we switch to Swatinem/rust-cache@v2
           sharedKey: "clippy-cargo-lock"
