@@ -853,6 +853,9 @@ impl ReadStateService {
             block_commitment_result.expect("scope has finished")?;
             sprout_anchor_result.expect("scope has finished")?;
         } else {
+            // Not currently used by the getblocktemplate rpc method because it requires
+            // a low estimated distance to the network chain tip that means it would return
+            // an error before reaching this when the non-finalized state is empty anyways
             let next_valid_height = self
                 .db
                 .finalized_tip_height()
