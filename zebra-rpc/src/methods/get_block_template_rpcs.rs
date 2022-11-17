@@ -21,12 +21,15 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
+    work::difficulty::{ExpandedDifficulty, U256},
 };
 use zebra_consensus::{
     funding_stream_address, funding_stream_values, miner_subsidy, new_coinbase_script, BlockError,
     VerifyBlockError, VerifyChainError, VerifyCheckpointError, MAX_BLOCK_SIGOPS,
 };
 use zebra_node_services::mempool;
+
+use zebra_state::{ReadRequest, ReadResponse};
 
 use crate::methods::{
     best_chain_tip_hash, best_chain_tip_height, best_chain_tip_time,
@@ -271,6 +274,7 @@ where
 
         let mempool = self.mempool.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
+        let mut state = self.state.clone();
 
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
@@ -304,7 +308,32 @@ where
             // Convert into TransactionTemplates
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
 
-            let empty_string = String::from("");
+            // Calling state chainfo to additional data
+            let request = ReadRequest::ChainInfo();
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            let chain_info = match response {
+                ReadResponse::ChainInfo(chain_info) => chain_info,
+                _ => unreachable!("chaininfo always respond even if all data inside is `None`"),
+            };
+
+            let expected_difficulty = match chain_info.expected_difficulty {
+                Some(difficulty) => difficulty,
+                _ => Err(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "Not enough state in the chain".to_string(),
+                    data: None,
+                })?,
+            };
+
             Ok(GetBlockTemplate {
                 capabilities: vec!["proposal".to_string()],
 
@@ -325,7 +354,12 @@ where
 
                 coinbase_txn: TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee),
 
-                target: empty_string.clone(),
+                target: format!(
+                    "{}",
+                    expected_difficulty
+                        .to_expanded()
+                        .unwrap_or_else(|| ExpandedDifficulty::from(U256::zero()))
+                ),
 
                 min_time: block_time,
 
@@ -342,7 +376,9 @@ where
 
                 cur_time: chrono::Utc::now().timestamp(),
 
-                bits: empty_string,
+                bits: format!("{:#010x}", expected_difficulty.to_value())
+                    .drain(2..)
+                    .collect(),
 
                 height: block_height.0,
             })
