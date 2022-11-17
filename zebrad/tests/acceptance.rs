@@ -103,6 +103,12 @@
 //!
 //! ## Getblocktemplate tests
 //!
+//! Example of how to run the get_block_template test:
+//!
+//! ```console
+//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/chain cargo test get_block_template --features getblocktemplate-rpcs --release  -- --ignored --nocapture
+//! ```
+//!
 //! Example of how to run the submit_block test:
 //!
 //! ```console
