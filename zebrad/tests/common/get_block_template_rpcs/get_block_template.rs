@@ -50,13 +50,17 @@ pub(crate) async fn run() -> Result<()> {
         true,
     )?;
 
-    let rpc_client = RPCRequestClient::new(rpc_address);
-
-    let getblocktemplate_response = &rpc_client
+    tracing::info!("calling getblocktemplate RPC method at {rpc_address}...",);
+    let getblocktemplate_response = RPCRequestClient::new(rpc_address)
         .call("getblocktemplate", "[]".to_string())
         .await?;
 
-    assert!(getblocktemplate_response.status().is_success());
+    let is_response_success = getblocktemplate_response.status().is_success();
+    let response_text = getblocktemplate_response.text().await?;
+
+    tracing::info!(response_text, "got getblocktemplate response",);
+
+    assert!(is_response_success);
 
     zebrad.kill(false)?;
 
