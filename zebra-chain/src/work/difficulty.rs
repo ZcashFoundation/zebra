@@ -257,6 +257,11 @@ impl CompactDifficulty {
         let expanded = self.to_expanded()?;
         Work::try_from(expanded).ok()
     }
+
+    /// Returns the raw inner value.
+    pub fn to_value(self) -> u32 {
+        self.0
+    }
 }
 
 impl TryFrom<ExpandedDifficulty> for Work {

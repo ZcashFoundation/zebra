@@ -11,10 +11,7 @@ use zebra_chain::{
 };
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-use {
-    chrono::{DateTime, Utc},
-    zebra_chain::work::difficulty::CompactDifficulty,
-};
+use zebra_chain::work::difficulty::CompactDifficulty;
 
 // Allow *only* these unused imports, so that rustdoc link resolution
 // will work with inline links.
@@ -132,9 +129,8 @@ pub enum ReadResponse {
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GetBlockTemplateChainInfo {
-    /// A list of relevant block data needed to calculate difficulty fields.
-    // TODO : Can this field be an iterator ?
-    pub relevant_data: Option<Vec<(CompactDifficulty, DateTime<Utc>)>>,
+    /// Expected difficulty data for the candidate block.
+    pub expected_difficulty: Option<CompactDifficulty>,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.

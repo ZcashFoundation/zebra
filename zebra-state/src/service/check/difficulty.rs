@@ -46,7 +46,7 @@ pub const POW_MAX_ADJUST_DOWN_PERCENT: i32 = 32;
 pub const BLOCK_MAX_TIME_SINCE_MEDIAN: i64 = 90 * 60;
 
 /// Contains the context needed to calculate the adjusted difficulty for a block.
-pub(super) struct AdjustedDifficulty {
+pub(crate) struct AdjustedDifficulty {
     /// The `header.time` field from the candidate block
     candidate_time: DateTime<Utc>,
     /// The coinbase height from the candidate block
@@ -99,8 +99,8 @@ impl AdjustedDifficulty {
         let previous_block_height = (candidate_block_height - 1)
             .expect("contextual validation is never run on the genesis block");
 
-        AdjustedDifficulty::new_from_header(
-            &candidate_block.header,
+        AdjustedDifficulty::new_from_header_time(
+            candidate_block.header.time,
             previous_block_height,
             network,
             context,
@@ -108,7 +108,7 @@ impl AdjustedDifficulty {
     }
 
     /// Initialise and return a new [`AdjustedDifficulty`] using a
-    /// `candidate_header`, `previous_block_height`, `network`, and a `context`.
+    /// `candidate_header_time`, `previous_block_height`, `network`, and a `context`.
     ///
     /// Designed for use when validating block headers, where the full block has not
     /// been downloaded yet.
@@ -118,8 +118,8 @@ impl AdjustedDifficulty {
     /// # Panics
     ///
     /// If the context contains fewer than 28 items.
-    pub fn new_from_header<C>(
-        candidate_header: &block::Header,
+    pub fn new_from_header_time<C>(
+        candidate_header_time: DateTime<Utc>,
         previous_block_height: block::Height,
         network: Network,
         context: C,
@@ -142,7 +142,7 @@ impl AdjustedDifficulty {
             .expect("not enough context: difficulty adjustment needs at least 28 (PoWAveragingWindow + PoWMedianBlockSpan) headers");
 
         AdjustedDifficulty {
-            candidate_time: candidate_header.time,
+            candidate_time: candidate_header_time,
             candidate_height,
             network,
             relevant_difficulty_thresholds,

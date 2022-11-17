@@ -57,11 +57,7 @@ use crate::{
 };
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-use {
-    crate::response::GetBlockTemplateChainInfo,
-    chrono::{DateTime, Utc},
-    zebra_chain::work::difficulty::CompactDifficulty,
-};
+use crate::response::GetBlockTemplateChainInfo;
 
 pub mod block_iter;
 pub mod chain_tip;
@@ -1575,6 +1571,7 @@ impl Service<ReadRequest> for ReadStateService {
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
+                let network = self.network;
 
                 // # Performance
                 //
@@ -1582,30 +1579,31 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        // Relevant block data
-                        let relevant_data_res = state.non_finalized_state_receiver.with_watch_data(
+                        // Tip
+                        let tip = state.non_finalized_state_receiver.with_watch_data(
                             |non_finalized_state| {
-                                read::last_block_headers(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    read::best_tip(&non_finalized_state, &state.db)
-                                        .expect("We should have a block tip")
-                                        .0,
-                                )
+                                read::tip(non_finalized_state.best_chain(), &state.db)
                             },
                         );
-                        let relevant_data: Option<Vec<(CompactDifficulty, DateTime<Utc>)>> =
-                            relevant_data_res.map(|data| {
-                                data.iter()
-                                    .map(|h| (h.difficulty_threshold, h.time))
-                                    .collect()
-                            });
+
+                        let expected_difficulty = tip.map(|tip| {
+                            state.non_finalized_state_receiver.with_watch_data(
+                                |non_finalized_state| {
+                                    read::difficulty::relevant_chain_difficulty(
+                                        non_finalized_state,
+                                        &state.db,
+                                        tip,
+                                        network,
+                                    )
+                                },
+                            )
+                        });
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::BestChainInfo");
 
                         Ok(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                            relevant_data,
+                            expected_difficulty,
                         }))
                     })
                 })

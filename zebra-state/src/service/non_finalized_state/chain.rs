@@ -603,17 +603,6 @@ impl Chain {
         self.blocks.values().nth(n).map(|block| block.hash)
     }
 
-    /// Returns the block header of the `n`th block from the non-finalized root.
-    ///
-    /// This is the block at `non_finalized_root_height() + n`.
-    #[cfg(feature = "getblocktemplate-rpcs")]
-    pub fn non_finalized_nth_header(&self, n: usize) -> Option<Arc<block::Header>> {
-        self.blocks
-            .values()
-            .nth(n)
-            .map(|block| block.block.header.clone())
-    }
-
     /// Remove the highest height block of the non-finalized portion of a chain.
     fn pop_tip(&mut self) {
         let block_height = self.non_finalized_tip_height();

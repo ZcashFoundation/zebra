@@ -35,7 +35,7 @@ pub(crate) mod utxo;
 #[cfg(test)]
 mod tests;
 
-use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
+pub(crate) use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
 
 /// Check that the `prepared` block is contextually valid for `network`, based
 /// on the `finalized_tip_height` and `relevant_chain`.
