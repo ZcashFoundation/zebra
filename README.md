@@ -242,7 +242,7 @@ There are a few bugs in Zebra that we're still working on fixing:
 - Experimental Tor support is disabled until [`arti-client` upgrades to `x25519-dalek` 2.0.0 or later](https://github.com/ZcashFoundation/zebra/issues/5492)
   - This happens due to a Rust dependency conflict, which can only be resolved by changing the dependencies of `x25519-dalek`
 
-- Output of `help`, `--help` flag, and usage of invalid commands or options are inconsistent. Reports of this issues can be found [here](https://github.com/ZcashFoundation/zebra/issues/5502) and are planned to be fixed in the context of [upgrading Abscissa](https://github.com/ZcashFoundation/zebra/issues/5502).
+- Output of `help`, `--help` flag, and usage of invalid commands or options are inconsistent. Reports of these issues can be found [here](https://github.com/ZcashFoundation/zebra/issues/5502) and are planned to be fixed in the context of [upgrading Abscissa](https://github.com/ZcashFoundation/zebra/issues/5502).
 
 ## Future Work
 
