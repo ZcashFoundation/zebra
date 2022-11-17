@@ -82,11 +82,11 @@ pub async fn test_responses<State, ReadState>(
 
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         network,
-        mining_config,
+        mining_config.clone(),
         Buffer::new(mempool.clone(), 1),
         read_state,
-        mock_chain_tip,
-        chain_verifier,
+        mock_chain_tip.clone(),
+        chain_verifier.clone(),
     );
 
     // `getblockcount`
@@ -103,6 +103,34 @@ pub async fn test_responses<State, ReadState>(
         .expect("We should have a GetBlockHash struct");
 
     snapshot_rpc_getblockhash(get_block_hash, &settings);
+
+    // `submitblock`
+    let submit_block = get_block_template_rpc
+        .submit_block(HexData("".into()), None)
+        .await
+        .expect("unexpected error in submitblock RPC call");
+
+    snapshot_rpc_submit_block_invalid(submit_block, &settings);
+
+    // Init RPC for getblocktemplate rpc method with the mock read_state service.
+    let mut read_state = MockService::build().for_unit_tests();
+    let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
+        network,
+        mining_config,
+        Buffer::new(mempool.clone(), 1),
+        read_state.clone(),
+        mock_chain_tip,
+        chain_verifier,
+    );
+
+    tokio::spawn(async move {
+        read_state
+            .expect_request_that(|req| {
+                matches!(req, zebra_state::ReadRequest::CheckContextualValidity(_))
+            })
+            .await
+            .respond(zebra_state::ReadResponse::Validated);
+    });
 
     // `getblocktemplate`
     let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
@@ -125,14 +153,6 @@ pub async fn test_responses<State, ReadState>(
         .expect("coinbase bytes are valid");
 
     snapshot_rpc_getblocktemplate(get_block_template, coinbase_tx, &settings);
-
-    // `submitblock`
-    let submit_block = get_block_template_rpc
-        .submit_block(HexData("".into()), None)
-        .await
-        .expect("unexpected error in submitblock RPC call");
-
-    snapshot_rpc_submit_block_invalid(submit_block, &settings);
 }
 
 /// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
