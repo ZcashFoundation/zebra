@@ -1020,7 +1020,7 @@ where
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-/// Returns the best chain tip time of `latest_chain_tip`,
+/// Returns the best chain tip hash of `latest_chain_tip`,
 /// or an RPC error if there are no blocks in the state.
 pub fn best_chain_tip_hash<Tip>(latest_chain_tip: &Tip) -> Result<block::Hash>
 where
