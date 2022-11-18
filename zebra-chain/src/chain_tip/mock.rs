@@ -5,7 +5,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use tokio::sync::watch;
 
-use crate::{block, chain_tip::ChainTip, transaction};
+use crate::{block, chain_tip::ChainTip, parameters::Network, transaction};
 
 /// A sender to sets the values read by a [`MockChainTip`].
 pub struct MockChainTipSender {
@@ -17,6 +17,9 @@ pub struct MockChainTipSender {
 
     /// A sender that sets the `best_tip_block_time` of a [`MockChainTip`].
     best_tip_block_time: watch::Sender<Option<DateTime<Utc>>>,
+
+    /// A sender that sets the `estimate_distance_to_network_chain_tip` of a [`MockChainTip`].
+    estimated_distance_to_network_chain_tip: watch::Sender<Option<i32>>,
 }
 
 /// A mock [`ChainTip`] implementation that allows setting the `best_tip_height` externally.
@@ -30,6 +33,9 @@ pub struct MockChainTip {
 
     /// A mocked `best_tip_height` value set by the [`MockChainTipSender`].
     best_tip_block_time: watch::Receiver<Option<DateTime<Utc>>>,
+
+    /// A mocked `estimate_distance_to_network_chain_tip` value set by the [`MockChainTipSender`].
+    estimated_distance_to_network_chain_tip: watch::Receiver<Option<i32>>,
 }
 
 impl MockChainTip {
@@ -43,17 +49,21 @@ impl MockChainTip {
         let (height_sender, height_receiver) = watch::channel(None);
         let (hash_sender, hash_receiver) = watch::channel(None);
         let (time_sender, time_receiver) = watch::channel(None);
+        let (estimated_distance_to_tip_sender, estimated_distance_to_tip_receiver) =
+            watch::channel(None);
 
         let mock_chain_tip = MockChainTip {
             best_tip_height: height_receiver,
             best_tip_hash: hash_receiver,
             best_tip_block_time: time_receiver,
+            estimated_distance_to_network_chain_tip: estimated_distance_to_tip_receiver,
         };
 
         let mock_chain_tip_sender = MockChainTipSender {
             best_tip_height: height_sender,
             best_tip_hash: hash_sender,
             best_tip_block_time: time_sender,
+            estimated_distance_to_network_chain_tip: estimated_distance_to_tip_sender,
         };
 
         (mock_chain_tip, mock_chain_tip_sender)
@@ -90,6 +100,18 @@ impl ChainTip for MockChainTip {
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         unreachable!("Method not used in tests");
     }
+
+    fn estimate_distance_to_network_chain_tip(
+        &self,
+        _network: Network,
+    ) -> Option<(i32, block::Height)> {
+        self.estimated_distance_to_network_chain_tip
+            .borrow()
+            .and_then(|estimated_distance| {
+                self.best_tip_height()
+                    .map(|tip_height| (estimated_distance, tip_height))
+            })
+    }
 }
 
 impl MockChainTipSender {
@@ -112,5 +134,12 @@ impl MockChainTipSender {
         self.best_tip_block_time
             .send(block_time.into())
             .expect("attempt to send a best tip block time to a dropped `MockChainTip`");
+    }
+
+    /// Send a new estimated distance to network chain tip to the [`MockChainTip`].
+    pub fn send_estimated_distance_to_network_chain_tip(&self, distance: impl Into<Option<i32>>) {
+        self.estimated_distance_to_network_chain_tip
+            .send(distance.into())
+            .expect("attempt to send a best tip height to a dropped `MockChainTip`");
     }
 }
