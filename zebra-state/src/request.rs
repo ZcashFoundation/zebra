@@ -748,8 +748,9 @@ pub enum ReadRequest {
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Get state information from the best block chain.
     ///
-    /// Returns [`ReadResponse::ChainInfo()`](ReadResponse::ChainInfo) structure with information needed
-    /// by the `getblocktemplate` RPC method.
+    /// Returns [`ReadResponse::ChainInfo(info)`](ReadResponse::ChainInfo) where `info` is a
+    /// [`ReadResponse::GetBlockTemplateChainInfo`](ReadResponse::GetBlockTemplateChainInfo)` structure containing
+    /// best chain state information.
     ChainInfo(),
 }
 

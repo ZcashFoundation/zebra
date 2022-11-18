@@ -829,12 +829,14 @@ async fn rpc_getblocktemplate() {
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(NetworkUpgrade::Nu5.activation_height(Mainnet));
+    // nu5 block hash
     mock_chain_tip_sender.send_best_tip_hash(
         zebra_chain::block::Hash::from_hex(
             "0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8",
         )
         .unwrap(),
     );
+    // nu5 block time
     mock_chain_tip_sender.send_best_tip_block_time(Utc.timestamp_opt(1654008605, 0).unwrap());
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
@@ -875,6 +877,7 @@ async fn rpc_getblocktemplate() {
         get_block_template.target,
         "0000000000000000000000000000000000000000000000000000000000000001"
     );
+    // nu5 + next block = 1654008605 + 75
     assert_eq!(get_block_template.min_time, 1654008680);
     assert_eq!(
         get_block_template.mutable,
@@ -886,9 +889,9 @@ async fn rpc_getblocktemplate() {
     );
     assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
     assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
-    assert!(get_block_template.cur_time > 0);
+    assert!(get_block_template.cur_time > 1654008605); // greater than nu5 time
     assert_eq!(get_block_template.bits, "01010000");
-    assert_eq!(get_block_template.height, 1687105);
+    assert_eq!(get_block_template.height, 1687105); // nu5 height
 
     // Coinbase transaction checks.
     assert!(get_block_template.coinbase_txn.required);
