@@ -1525,13 +1525,6 @@ impl Service<ReadRequest> for ReadStateService {
             // Used by get_block_hash RPC.
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::BestChainBlockHash(height) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "best_chain_block_hash",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1561,17 +1554,9 @@ impl Service<ReadRequest> for ReadStateService {
             // Used by get_block_template RPC.
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::ChainInfo() => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "chain_info",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
-                let network = self.network;
 
                 // # Performance
                 //
@@ -1594,7 +1579,7 @@ impl Service<ReadRequest> for ReadStateService {
                                         non_finalized_state,
                                         &state.db,
                                         tip,
-                                        network,
+                                        state.network,
                                     )
                                 },
                             )
