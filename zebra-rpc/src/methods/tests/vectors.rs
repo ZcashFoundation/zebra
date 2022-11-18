@@ -785,6 +785,8 @@ async fn rpc_getblockhash() {
 async fn rpc_getblocktemplate() {
     use std::panic;
 
+    use chrono::{TimeZone, Utc};
+
     use crate::methods::get_block_template_rpcs::constants::{
         GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
     };
@@ -827,6 +829,13 @@ async fn rpc_getblocktemplate() {
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(NetworkUpgrade::Nu5.activation_height(Mainnet));
+    mock_chain_tip_sender.send_best_tip_hash(
+        zebra_chain::block::Hash::from_hex(
+            "0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8",
+        )
+        .unwrap(),
+    );
+    mock_chain_tip_sender.send_best_tip_block_time(Utc.timestamp_opt(1654008605, 0).unwrap());
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
@@ -855,11 +864,17 @@ async fn rpc_getblocktemplate() {
         })
         .expect("unexpected error in getblocktemplate RPC call");
 
-    assert!(get_block_template.capabilities.is_empty());
+    assert_eq!(
+        get_block_template.capabilities,
+        vec!["proposal".to_string()]
+    );
     assert_eq!(get_block_template.version, ZCASH_BLOCK_VERSION);
     assert!(get_block_template.transactions.is_empty());
-    assert!(get_block_template.target.is_empty());
-    assert_eq!(get_block_template.min_time, 0);
+    assert_eq!(
+        get_block_template.target,
+        "0000000000000000000000000000000000000000000000000000000000000001"
+    );
+    assert_eq!(get_block_template.min_time, 1654008680);
     assert_eq!(
         get_block_template.mutable,
         GET_BLOCK_TEMPLATE_MUTABLE_FIELD.to_vec()
@@ -870,9 +885,9 @@ async fn rpc_getblocktemplate() {
     );
     assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
     assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
-    assert_eq!(get_block_template.cur_time, 0);
-    assert!(get_block_template.bits.is_empty());
-    assert_eq!(get_block_template.height, 0);
+    assert!(get_block_template.cur_time > 0);
+    assert_eq!(get_block_template.bits, "01010000");
+    assert_eq!(get_block_template.height, 1687105);
 
     // Coinbase transaction checks.
     assert!(get_block_template.coinbase_txn.required);

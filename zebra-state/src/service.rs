@@ -1586,6 +1586,7 @@ impl Service<ReadRequest> for ReadStateService {
                             },
                         );
 
+                        // Difficulty
                         let expected_difficulty = tip.map(|tip| {
                             state.non_finalized_state_receiver.with_watch_data(
                                 |non_finalized_state| {
@@ -1600,14 +1601,14 @@ impl Service<ReadRequest> for ReadStateService {
                         });
 
                         // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::BestChainInfo");
+                        timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");
 
                         Ok(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
                             expected_difficulty,
                         }))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::BestChainBlockHash"))
+                .map(|join_result| join_result.expect("panic in ReadRequest::ChainInfo"))
                 .boxed()
             }
         }

@@ -1,11 +1,14 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+assertion_line: 159
 expression: block_template
 ---
 {
-  "capabilities": [],
+  "capabilities": [
+    "proposal"
+  ],
   "version": 4,
-  "previousblockhash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "previousblockhash": "0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8",
   "blockcommitmentshash": "0000000000000000000000000000000000000000000000000000000000000000",
   "lightclientroothash": "0000000000000000000000000000000000000000000000000000000000000000",
   "finalsaplingroothash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -25,8 +28,8 @@ expression: block_template
     "sigops": 0,
     "required": true
   },
-  "target": "",
-  "mintime": 0,
+  "target": "0000000000000000000000000000000000000000000000000000000000000001",
+  "mintime": 1654008680,
   "mutable": [
     "time",
     "transactions",
@@ -35,7 +38,7 @@ expression: block_template
   "noncerange": "00000000ffffffff",
   "sigoplimit": 20000,
   "sizelimit": 2000000,
-  "curtime": 0,
-  "bits": "",
-  "height": 0
+  "curtime": "[Time]",
+  "bits": "01010000",
+  "height": 1842421
 }

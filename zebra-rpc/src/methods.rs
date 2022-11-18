@@ -19,7 +19,7 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
-    block::{self, Hash, Height, SerializedBlock},
+    block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
     orchard,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
@@ -1022,7 +1022,7 @@ where
 #[cfg(feature = "getblocktemplate-rpcs")]
 /// Returns the best chain tip time of `latest_chain_tip`,
 /// or an RPC error if there are no blocks in the state.
-pub fn best_chain_tip_hash<Tip>(latest_chain_tip: &Tip) -> Result<Hash>
+pub fn best_chain_tip_hash<Tip>(latest_chain_tip: &Tip) -> Result<block::Hash>
 where
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
