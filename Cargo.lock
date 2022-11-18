@@ -5217,15 +5217,50 @@ dependencies = [
 ]
 
 [[package]]
-name = "zcash_proofs"
-version = "0.8.0"
+name = "zcash_primitives"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b5cdd6f43c8b56449e52f760d71241b8490530dc10a88d990e8dcf0c435a957"
+checksum = "f7e33ec9068388e8de106a78268f90487d6975b171ee197aef16cc64c093486d"
+dependencies = [
+ "aes",
+ "bip0039",
+ "bitvec",
+ "blake2b_simd",
+ "blake2s_simd",
+ "bls12_381",
+ "byteorder",
+ "equihash",
+ "ff",
+ "fpe",
+ "group",
+ "hdwallet",
+ "hex",
+ "incrementalmerkletree",
+ "jubjub",
+ "lazy_static",
+ "memuse",
+ "nonempty",
+ "orchard",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "ripemd",
+ "secp256k1",
+ "sha2",
+ "subtle",
+ "zcash_address",
+ "zcash_encoding",
+ "zcash_note_encryption",
+]
+
+[[package]]
+name = "zcash_proofs"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77381adc72286874e563ee36ba99953946abcbd195ada45440a2754ca823d407"
 dependencies = [
  "bellman",
  "blake2b_simd",
  "bls12_381",
- "byteorder",
  "directories",
  "group",
  "jubjub",
@@ -5234,7 +5269,7 @@ dependencies = [
  "rand_core 0.6.4",
  "redjubjub",
  "tracing",
- "zcash_primitives",
+ "zcash_primitives 0.9.0",
 ]
 
 [[package]]
@@ -5256,7 +5291,7 @@ dependencies = [
  "tracing",
  "zcash_encoding",
  "zcash_note_encryption",
- "zcash_primitives",
+ "zcash_primitives 0.8.1",
 ]
 
 [[package]]
@@ -5314,7 +5349,7 @@ dependencies = [
  "zcash_encoding",
  "zcash_history",
  "zcash_note_encryption",
- "zcash_primitives",
+ "zcash_primitives 0.9.0",
  "zebra-test",
 ]
 
