@@ -112,6 +112,7 @@ impl fmt::Debug for ExpandedDifficulty {
     }
 }
 
+#[cfg(feature = "getblocktemplate-rpcs")]
 impl fmt::Display for ExpandedDifficulty {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut buf = [0; 32];
@@ -268,8 +269,9 @@ impl CompactDifficulty {
         Work::try_from(expanded).ok()
     }
 
+    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Returns the raw inner value.
-    pub fn to_value(self) -> u32 {
+    pub fn to_value(&self) -> u32 {
         self.0
     }
 }
