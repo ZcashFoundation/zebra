@@ -10,7 +10,7 @@ use tracing::instrument;
 
 use zebra_chain::{block, transparent};
 
-use crate::{BoxError, FinalizedBlock, PreparedBlock};
+use crate::{error::DuplicateError, BoxError, FinalizedBlock, PreparedBlock};
 
 #[cfg(test)]
 mod tests;
@@ -139,9 +139,10 @@ impl QueuedBlocks {
             let parent_hash = &expired_block.block.header.previous_block_hash;
 
             // we don't care if the receiver was dropped
-            let _ = expired_sender.send(Err(
-                "pruned block at or below the finalized tip height".into()
-            ));
+            let _ = expired_sender.send(Err(DuplicateError::BestChain(Some(
+                "pruned block at or below the finalized tip height".to_string(),
+            ))
+            .into()));
 
             // TODO: only remove UTXOs if there are no queued blocks with that UTXO
             //       (known_utxos is best-effort, so this is ok for now)

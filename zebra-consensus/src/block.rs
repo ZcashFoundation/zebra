@@ -29,6 +29,7 @@ use zebra_chain::{
     work::equihash,
 };
 use zebra_state as zs;
+use zs::CommitBlockError;
 
 use crate::{error::*, transaction as tx, BoxError};
 
@@ -71,7 +72,7 @@ pub enum VerifyBlockError {
     Time(zebra_chain::block::BlockTimeError),
 
     #[error("unable to commit block after semantic verification")]
-    Commit(#[source] BoxError),
+    Commit(#[source] CommitBlockError),
 
     #[error("invalid transaction")]
     Transaction(#[from] TransactionError),
@@ -271,10 +272,10 @@ where
             match state_service
                 .ready()
                 .await
-                .map_err(VerifyBlockError::Commit)?
+                .expect("poll_ready method of state service and Ready::<StateService>::poll will never return Err")
                 .call(zs::Request::CommitBlock(prepared_block))
                 .await
-                .map_err(VerifyBlockError::Commit)?
+                .map_err(|e| VerifyBlockError::Commit(e.downcast::<CommitBlockError>().map(|e| *e).unwrap()))?
             {
                 zs::Response::Committed(committed_hash) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");

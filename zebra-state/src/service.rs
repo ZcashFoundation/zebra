@@ -43,6 +43,7 @@ use crate::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA,
         MAX_LEGACY_CHAIN_BLOCKS,
     },
+    error::{DuplicateError, TaskExitError},
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
@@ -244,9 +245,7 @@ impl Drop for StateService {
         self.clear_finalized_block_queue(
             "dropping the state: dropped unused queued finalized block",
         );
-        self.clear_non_finalized_block_queue(
-            "dropping the state: dropped unused queued non-finalized block",
-        );
+        self.clear_non_finalized_block_queue(TaskExitError::StateService);
 
         // Then drop self.read_service, which checks the block write task for panics,
         // and tries to shut down the database.
@@ -573,7 +572,7 @@ impl StateService {
     }
 
     /// Drops all queued non-finalized blocks, and sends an error on their result channels.
-    fn clear_non_finalized_block_queue(&mut self, error: impl Into<BoxError> + Clone) {
+    fn clear_non_finalized_block_queue(&mut self, error: TaskExitError) {
         for (_hash, queued) in self.queued_non_finalized_blocks.drain() {
             Self::send_non_finalized_block_error(queued, error.clone());
         }
@@ -609,18 +608,13 @@ impl StateService {
             .contains(&prepared.hash)
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            let _ = rsp_tx.send(Err(
-                "block has already been sent to be committed to the state".into(),
-            ));
+            let _ = rsp_tx.send(Err(DuplicateError::Pending.into()));
             return rsp_rx;
         }
 
         if self.read_service.db.contains_height(prepared.height) {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            let _ = rsp_tx.send(Err(
-                "block height is in the finalized state: block is already committed to the state"
-                    .into(),
-            ));
+            let _ = rsp_tx.send(Err(DuplicateError::BestChain(None).into()));
             return rsp_rx;
         }
 
@@ -633,7 +627,7 @@ impl StateService {
             tracing::debug!("replacing older queued request with new request");
             let (mut rsp_tx, rsp_rx) = oneshot::channel();
             std::mem::swap(old_rsp_tx, &mut rsp_tx);
-            let _ = rsp_tx.send(Err("replaced by newer request".into()));
+            let _ = rsp_tx.send(Err(DuplicateError::Pending.into()));
             rsp_rx
         } else {
             let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -730,14 +724,9 @@ impl StateService {
 
                     if let Err(SendError(queued)) = send_result {
                         // If Zebra is shutting down, drop blocks and return an error.
-                        Self::send_non_finalized_block_error(
-                            queued,
-                            "block commit task exited. Is Zebra shutting down?",
-                        );
+                        Self::send_non_finalized_block_error(queued, TaskExitError::BlockWriteTask);
 
-                        self.clear_non_finalized_block_queue(
-                            "block commit task exited. Is Zebra shutting down?",
-                        );
+                        self.clear_non_finalized_block_queue(TaskExitError::BlockWriteTask);
 
                         return;
                     };

@@ -41,10 +41,44 @@ impl From<BoxError> for CloneError {
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+/// An error specifying where a duplicate block was found.
+#[derive(Debug, Error, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub enum DuplicateError {
+    #[error("block is on the best chain")]
+    BestChain(Option<String>),
+
+    #[error("block is on a side chain")]
+    SideChain,
+
+    #[error("block is queued to be validated and committed")]
+    Pending,
+}
+
+/// An error specifying the kind of task exit.
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub enum TaskExitError {
+    #[error("dropping the state: dropped unused queued non-finalized block")]
+    StateService,
+
+    #[error("block commit task exited. Is Zebra shutting down?")]
+    BlockWriteTask,
+}
+
 /// An error describing the reason a block could not be committed to the state.
 #[derive(Debug, Error, PartialEq, Eq)]
-#[error("block is not contextually valid")]
-pub struct CommitBlockError(#[from] ValidateContextError);
+#[allow(missing_docs)]
+pub enum CommitBlockError {
+    #[error("block is not contextually valid")]
+    Invalid(#[from] ValidateContextError),
+
+    #[error("block is already committed or pending a commit")]
+    Duplicate(#[from] DuplicateError),
+
+    #[error("block commit task exited. Is Zebra shutting down?")]
+    TaskExited(#[from] TaskExitError),
+}
 
 /// An error describing why a block failed contextual validation.
 #[derive(Debug, Error, PartialEq, Eq)]
