@@ -807,6 +807,7 @@ async fn rpc_getblocktemplate() {
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(NetworkUpgrade::Nu5.activation_height(Mainnet));
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
@@ -876,6 +877,17 @@ async fn rpc_getblocktemplate() {
     );
 
     mempool.expect_no_requests().await;
+
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(100));
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template()
+        .await
+        .expect_err("needs an error when estimated distance to network chain tip is far");
+
+    assert_eq!(
+        get_block_template_sync_error.code,
+        ErrorCode::ServerError(-10)
+    );
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]

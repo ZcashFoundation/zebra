@@ -61,7 +61,6 @@ async fn test_rpc_response_data_for_network(network: Network) {
         mempool.clone(),
         state,
         read_state.clone(),
-        latest_chain_tip.clone(),
         settings.clone(),
     )
     .await;

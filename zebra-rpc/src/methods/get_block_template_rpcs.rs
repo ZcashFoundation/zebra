@@ -40,6 +40,11 @@ pub mod config;
 pub mod constants;
 pub(crate) mod types;
 
+/// The max estimated distance to the chain tip for the getblocktemplate method
+// Set to 30 in case the local time is a little ahead.
+// TODO: Replace this with SyncStatus
+const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: i32 = 30;
+
 /// getblocktemplate RPC method signatures.
 #[rpc(server)]
 pub trait GetBlockTemplateRpc {
@@ -282,7 +287,30 @@ where
                 data: None,
             })?;
 
-            let tip_height = best_chain_tip_height(&latest_chain_tip)?;
+            let (estimated_distance_to_chain_tip, tip_height) = latest_chain_tip
+                .estimate_distance_to_network_chain_tip(network)
+                .ok_or_else(|| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "No Chain tip available yet".to_string(),
+                    data: None,
+                })?;
+
+            if estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
+                tracing::info!(
+                    estimated_distance_to_chain_tip,
+                    ?tip_height,
+                    "Zebra has not synced to the chain tip"
+                );
+
+                return Err(Error {
+                    // Return error code -10 (https://github.com/s-nomp/node-stratum-pool/blob/d86ae73f8ff968d9355bb61aac05e0ebef36ccb5/lib/pool.js#L140)
+                    // TODO: Confirm that this is the expected error code for !synced
+                    code: ErrorCode::ServerError(-10),
+                    message: format!("Zebra has not synced to the chain tip, estimated distance: {estimated_distance_to_chain_tip}"),
+                    data: None,
+                });
+            }
+
             let mempool_txs = select_mempool_transactions(mempool).await?;
 
             let miner_fee = miner_fee(&mempool_txs);
