@@ -67,7 +67,7 @@ pub struct GetBlockTemplate {
     #[serde(rename = "coinbasetxn")]
     pub coinbase_txn: TransactionTemplate<amount::NegativeOrZero>,
 
-    /// Add documentation.
+    /// The expected difficulty for the new block displayed in expanded form.
     // TODO: use ExpandedDifficulty type.
     pub target: String,
 
@@ -96,7 +96,7 @@ pub struct GetBlockTemplate {
     #[serde(rename = "curtime")]
     pub cur_time: i64,
 
-    /// Add documentation.
+    /// The expected difficulty for the new block displayed in compact form.
     // TODO: use CompactDifficulty type.
     pub bits: String,
 
