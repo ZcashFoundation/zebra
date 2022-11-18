@@ -751,7 +751,7 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::ChainInfo(info)`](ReadResponse::ChainInfo) where `info` is a
     /// [`ReadResponse::GetBlockTemplateChainInfo`](ReadResponse::GetBlockTemplateChainInfo)` structure containing
     /// best chain state information.
-    ChainInfo(),
+    ChainInfo,
 }
 
 impl ReadRequest {
@@ -775,7 +775,7 @@ impl ReadRequest {
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
             #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadRequest::ChainInfo() => "chain_info",
+            ReadRequest::ChainInfo => "chain_info",
         }
     }
 

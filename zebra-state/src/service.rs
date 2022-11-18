@@ -1553,7 +1553,7 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by get_block_template RPC.
             #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadRequest::ChainInfo() => {
+            ReadRequest::ChainInfo => {
                 let timer = CodeTimer::start();
 
                 let state = self.clone();

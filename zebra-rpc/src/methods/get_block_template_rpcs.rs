@@ -337,8 +337,8 @@ where
             // Convert into TransactionTemplates
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
 
-            // Calling state chainfo to additional data
-            let request = ReadRequest::ChainInfo();
+            // Calling state with `ChainInfo` request for relevant chain data
+            let request = ReadRequest::ChainInfo;
             let response = state
                 .ready()
                 .and_then(|service| service.call(request))
@@ -354,14 +354,11 @@ where
                 _ => unreachable!("chaininfo always respond even if all data inside is `None`"),
             };
 
-            let expected_difficulty = match chain_info.expected_difficulty {
-                Some(difficulty) => difficulty,
-                _ => Err(Error {
-                    code: ErrorCode::ServerError(0),
-                    message: "Not enough state in the chain".to_string(),
-                    data: None,
-                })?,
-            };
+            let expected_difficulty = chain_info.expected_difficulty.ok_or(Error {
+                code: ErrorCode::ServerError(0),
+                message: "Not enough blocks in the chain".to_string(),
+                data: None,
+            })?;
 
             Ok(GetBlockTemplate {
                 capabilities: vec!["proposal".to_string()],
@@ -387,7 +384,7 @@ where
                     "{}",
                     expected_difficulty
                         .to_expanded()
-                        .unwrap_or_else(|| ExpandedDifficulty::from(U256::zero()))
+                        .unwrap_or_else(|| ExpandedDifficulty::from(U256::one()))
                 ),
 
                 min_time: block_time,
