@@ -1557,6 +1557,7 @@ impl Service<ReadRequest> for ReadStateService {
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
+                let latest_non_finalized_state = self.latest_non_finalized_state();
 
                 // # Performance
                 //
@@ -1564,26 +1565,17 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        // Tip
-                        let tip = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::tip(non_finalized_state.best_chain(), &state.db)
-                            },
-                        );
-
-                        // Difficulty
-                        let expected_difficulty = tip.map(|tip| {
-                            state.non_finalized_state_receiver.with_watch_data(
-                                |non_finalized_state| {
+                        let expected_difficulty =
+                            read::tip(latest_non_finalized_state.best_chain(), &state.db).map(
+                                |tip| {
                                     read::difficulty::relevant_chain_difficulty(
-                                        non_finalized_state,
+                                        &latest_non_finalized_state,
                                         &state.db,
                                         tip,
                                         state.network,
                                     )
                                 },
-                            )
-                        });
+                            );
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");

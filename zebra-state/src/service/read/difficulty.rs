@@ -20,12 +20,12 @@ use crate::service::{
 /// Note: Return `1` as the difficulty if we don't have enough blocks in the state. Should not happen in a
 /// running blockchain but only in some test cases where not enough state is loaded.
 pub fn relevant_chain_difficulty(
-    non_finalized_state: NonFinalizedState,
+    non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
     tip: (Height, Hash),
     network: Network,
 ) -> CompactDifficulty {
-    let relevant_chain = any_ancestor_blocks(&non_finalized_state, db, tip.1);
+    let relevant_chain = any_ancestor_blocks(non_finalized_state, db, tip.1);
     difficulty(relevant_chain, tip.0, network)
 }
 
