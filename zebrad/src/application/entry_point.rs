@@ -42,6 +42,13 @@ pub struct EntryPoint {
 impl EntryPoint {
     /// Borrow the underlying command type
     fn command(&self) -> &ZebradCmd {
+        if self.help {
+            let _ = Usage::for_command::<EntryPoint>().print_info();
+            let _ = Usage::for_command::<EntryPoint>().print_usage();
+            let _ = Usage::for_command::<ZebradCmd>().print_usage();
+            std::process::exit(0);
+        }
+
         self.command
             .as_ref()
             .expect("Some(ZebradCmd::Start(StartCmd::default()) as default value")
