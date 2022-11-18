@@ -16,7 +16,6 @@ use zebra_chain::{
     transparent,
 };
 use zebra_node_services::mempool;
-use zebra_state::LatestChainTip;
 
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -38,7 +37,6 @@ pub async fn test_responses<State, ReadState>(
     >,
     state: State,
     read_state: ReadState,
-    _latest_chain_tip: LatestChainTip,
     settings: Settings,
 ) where
     State: Service<
@@ -79,6 +77,7 @@ pub async fn test_responses<State, ReadState>(
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(NetworkUpgrade::Nu5.activation_height(network));
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         network,
