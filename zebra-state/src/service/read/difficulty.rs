@@ -1,11 +1,11 @@
-//! Context of the current best block chain.
-
+//! Get context and calculate difficulty for the next block.
+//!
 use std::borrow::Borrow;
 
 use zebra_chain::{
     block::{Block, Hash, Height},
     parameters::{Network, POW_AVERAGING_WINDOW},
-    work::difficulty::{CompactDifficulty, U256},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
 };
 
 use crate::service::{
@@ -17,7 +17,7 @@ use crate::service::{
 
 /// Return the CompactDifficulty for the current best chain.
 ///
-/// Return one as the difficulty if we don't have enough block in the state. Should not happen in a
+/// Note: Return `1` as the difficulty if we don't have enough blocks in the state. Should not happen in a
 /// running blockchain but only in some test cases where not enough state is loaded.
 pub fn relevant_chain_difficulty(
     non_finalized_state: NonFinalizedState,
@@ -51,9 +51,7 @@ where
 
     // If we don't have enough context we just return 1.
     if relevant_data.len() < MAX_CONTEXT_BLOCKS {
-        return CompactDifficulty::from(zebra_chain::work::difficulty::ExpandedDifficulty::from(
-            U256::one(),
-        ));
+        return CompactDifficulty::from(ExpandedDifficulty::from(U256::one()));
     }
 
     let time = chrono::Utc::now();
