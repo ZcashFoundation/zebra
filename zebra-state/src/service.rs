@@ -1566,16 +1566,16 @@ impl Service<ReadRequest> for ReadStateService {
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
                         let expected_difficulty =
-                            read::tip(latest_non_finalized_state.best_chain(), &state.db).map(
-                                |tip| {
+                            read::tip(latest_non_finalized_state.best_chain(), &state.db)
+                                .map(|tip| {
                                     read::difficulty::relevant_chain_difficulty(
                                         &latest_non_finalized_state,
                                         &state.db,
                                         tip,
                                         state.network,
                                     )
-                                },
-                            );
+                                })
+                                .unwrap_or(None);
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");

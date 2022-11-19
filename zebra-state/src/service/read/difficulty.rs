@@ -5,7 +5,7 @@ use std::borrow::Borrow;
 use zebra_chain::{
     block::{Block, Hash, Height},
     parameters::{Network, POW_AVERAGING_WINDOW},
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
+    work::difficulty::CompactDifficulty,
 };
 
 use crate::service::{
@@ -24,12 +24,16 @@ pub fn relevant_chain_difficulty(
     db: &ZebraDb,
     tip: (Height, Hash),
     network: Network,
-) -> CompactDifficulty {
+) -> Option<CompactDifficulty> {
     let relevant_chain = any_ancestor_blocks(non_finalized_state, db, tip.1);
     difficulty(relevant_chain, tip.0, network)
 }
 
-fn difficulty<C>(relevant_chain: C, tip_height: Height, network: Network) -> CompactDifficulty
+fn difficulty<C>(
+    relevant_chain: C,
+    tip_height: Height,
+    network: Network,
+) -> Option<CompactDifficulty>
 where
     C: IntoIterator,
     C::Item: Borrow<Block>,
@@ -51,12 +55,12 @@ where
 
     // If we don't have enough context we just return 1.
     if relevant_data.len() < MAX_CONTEXT_BLOCKS {
-        return CompactDifficulty::from(ExpandedDifficulty::from(U256::one()));
+        return None;
     }
 
     let time = chrono::Utc::now();
     let difficulty_adjustment =
         AdjustedDifficulty::new_from_header_time(time, tip_height, network, relevant_data);
 
-    difficulty_adjustment.expected_difficulty_threshold()
+    Some(difficulty_adjustment.expected_difficulty_threshold())
 }

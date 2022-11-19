@@ -56,14 +56,8 @@ async fn test_rpc_response_data_for_network(network: Network) {
 
     // Test getblocktemplate-rpcs snapshots
     #[cfg(feature = "getblocktemplate-rpcs")]
-    get_block_template_rpcs::test_responses(
-        network,
-        mempool.clone(),
-        state,
-        read_state.clone(),
-        settings.clone(),
-    )
-    .await;
+    get_block_template_rpcs::test_responses(network, mempool.clone(), state, settings.clone())
+        .await;
 
     // Init RPC
     let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(

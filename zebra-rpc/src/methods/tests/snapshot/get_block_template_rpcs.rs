@@ -17,8 +17,11 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
     transaction::Transaction,
     transparent,
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
 };
 use zebra_node_services::mempool;
+
+use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
 
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -30,7 +33,7 @@ use crate::methods::{
     GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
 };
 
-pub async fn test_responses<State, ReadState>(
+pub async fn test_responses<State>(
     network: Network,
     mut mempool: MockService<
         mempool::Request,
@@ -39,7 +42,6 @@ pub async fn test_responses<State, ReadState>(
         zebra_node_services::BoxError,
     >,
     state: State,
-    read_state: ReadState,
     settings: Settings,
 ) where
     State: Service<
@@ -51,15 +53,6 @@ pub async fn test_responses<State, ReadState>(
         + Sync
         + 'static,
     <State as Service<zebra_state::Request>>::Future: Send,
-    ReadState: Service<
-            zebra_state::ReadRequest,
-            Response = zebra_state::ReadResponse,
-            Error = zebra_state::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
 {
     let (
         chain_verifier,
@@ -88,11 +81,12 @@ pub async fn test_responses<State, ReadState>(
     mock_chain_tip_sender.send_best_tip_block_time(Utc.timestamp_opt(1654008605, 0).unwrap());
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
+    let read_state = MockService::build().for_unit_tests();
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         network,
         mining_config,
         Buffer::new(mempool.clone(), 1),
-        read_state,
+        read_state.clone(),
         mock_chain_tip,
         chain_verifier,
     );
@@ -113,6 +107,20 @@ pub async fn test_responses<State, ReadState>(
     snapshot_rpc_getblockhash(get_block_hash, &settings);
 
     // `getblocktemplate`
+
+    // fake difficulty
+    tokio::spawn(async move {
+        read_state
+            .clone()
+            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .await
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_difficulty: Some(CompactDifficulty::from(ExpandedDifficulty::from(
+                    U256::one(),
+                ))),
+            }));
+    });
+
     let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
 
     mempool

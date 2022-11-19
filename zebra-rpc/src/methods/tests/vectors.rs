@@ -794,34 +794,18 @@ async fn rpc_getblocktemplate() {
         amount::{Amount, NonNegative},
         block::{MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
         chain_tip::mock::MockChainTip,
+        work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
     };
     use zebra_consensus::MAX_BLOCK_SIGOPS;
 
+    use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
+
     let _init_guard = zebra_test::init();
 
-    // Create a continuous chain of mainnet blocks from genesis
-    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
-        .collect();
-
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    // Create a populated state service
-    let (state, read_state, _latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), Mainnet).await;
 
-    let (
-        chain_verifier,
-        _transaction_verifier,
-        _parameter_download_task_handle,
-        _max_checkpoint_height,
-    ) = zebra_consensus::chain::init(
-        zebra_consensus::Config::default(),
-        Mainnet,
-        state.clone(),
-        true,
-    )
-    .await;
+    let read_state = MockService::build().for_unit_tests();
+    let chain_verifier = MockService::build().for_unit_tests();
 
     let mining_config = get_block_template_rpcs::config::Config {
         miner_address: Some(transparent::Address::from_script_hash(Mainnet, [0x7e; 20])),
@@ -845,10 +829,22 @@ async fn rpc_getblocktemplate() {
         Mainnet,
         mining_config,
         Buffer::new(mempool.clone(), 1),
-        read_state,
+        read_state.clone(),
         mock_chain_tip,
         tower::ServiceBuilder::new().service(chain_verifier),
     );
+
+    tokio::spawn(async move {
+        read_state
+            .clone()
+            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .await
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_difficulty: Some(CompactDifficulty::from(ExpandedDifficulty::from(
+                    U256::one(),
+                ))),
+            }));
+    });
 
     let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
 

@@ -21,7 +21,6 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
-    work::difficulty::{ExpandedDifficulty, U256},
 };
 use zebra_consensus::{
     funding_stream_address, funding_stream_values, miner_subsidy, new_coinbase_script, BlockError,
@@ -384,7 +383,11 @@ where
                     "{}",
                     expected_difficulty
                         .to_expanded()
-                        .unwrap_or_else(|| ExpandedDifficulty::from(U256::one()))
+                        .ok_or(Error {
+                            code: ErrorCode::ServerError(0),
+                            message: "Not enough blocks in the chain".to_string(),
+                            data: None,
+                        })?
                 ),
 
                 min_time: block_time,
