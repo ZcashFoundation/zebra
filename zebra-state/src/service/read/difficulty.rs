@@ -1,5 +1,5 @@
 //! Get context and calculate difficulty for the next block.
-//!
+
 use std::borrow::Borrow;
 
 use zebra_chain::{
@@ -17,8 +17,7 @@ use crate::service::{
 
 /// Return the CompactDifficulty for the current best chain.
 ///
-/// Note: Return `1` as the difficulty if we don't have enough blocks in the state. Should not happen in a
-/// running blockchain but only in some test cases where not enough state is loaded.
+/// Return `None` if we don't have enough blocks in the state.
 pub fn relevant_chain_difficulty(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
