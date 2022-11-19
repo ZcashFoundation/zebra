@@ -53,7 +53,6 @@ where
         )
     });
 
-    // If we don't have enough context we just return 1.
     if relevant_data.len() < MAX_CONTEXT_BLOCKS {
         return None;
     }
