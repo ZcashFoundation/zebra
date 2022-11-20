@@ -22,6 +22,7 @@ use crate::common::{
 /// Number of blocks past the finalized to retrieve and submit.
 const MAX_NUM_FUTURE_BLOCKS: u32 = 3;
 
+#[allow(clippy::print_stderr)]
 pub(crate) async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
 
