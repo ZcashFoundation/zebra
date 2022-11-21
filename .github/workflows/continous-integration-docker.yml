@@ -329,6 +329,7 @@ jobs:
       saves_to_disk: true
       disk_suffix: checkpoint
       height_grep_text: 'flushing database to disk .*height.*=.*Height.*\('
+    secrets: inherit
     # We want to prevent multiple checkpoint syncs running at the same time,
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
     # because we might never get a finished sync.
@@ -355,6 +356,7 @@ jobs:
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: checkpoint
+    secrets: inherit
 
   # zebrad cached tip state tests
 
@@ -387,6 +389,7 @@ jobs:
       saves_to_disk: true
       disk_suffix: tip
       height_grep_text: 'current_height.*=.*Height.*\('
+    secrets: inherit
     # We want to prevent multiple full zebrad syncs running at the same time,
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
     # because we might never get a finished sync.
@@ -428,6 +431,7 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
       height_grep_text: 'current_height.*=.*Height.*\('
+    secrets: inherit
 
   # lightwalletd cached tip state tests
 
@@ -460,6 +464,7 @@ jobs:
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
       height_grep_text: '(current_height.*=.*Height.*\()|(Adding block to cache )'
+    secrets: inherit
     # We want to prevent multiple lightwalletd full syncs running at the same time,
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
     # because we might never get a finished sync.
@@ -496,6 +501,7 @@ jobs:
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
       height_grep_text: '(current_height.*=.*Height.*\()|(Adding block to cache )'
+    secrets: inherit
 
   # Test that Zebra can answer a synthetic RPC call, using a cached Zebra tip state
   #
@@ -520,6 +526,7 @@ jobs:
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
+    secrets: inherit
 
   # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
   #
@@ -546,6 +553,7 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
+    secrets: inherit
     # We want to prevent multiple lightwalletd send transaction tests running at the same time,
     # but we don't want to cancel running tests on `main` if a new PR gets merged,
     # because we might never get a finished test.
@@ -580,6 +588,7 @@ jobs:
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
       lwd_state_dir: 'lwd-cache'
+    secrets: inherit
 
   # Test that Zebra can handle a submit block RPC call, using a cached Zebra tip state
   #
@@ -605,3 +614,4 @@ jobs:
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
+    secrets: inherit
