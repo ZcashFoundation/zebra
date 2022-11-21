@@ -125,6 +125,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -146,11 +157,11 @@ jobs:
           --boot-disk-type pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
-          --create-disk name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
+          --create-disk=name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
           --container-image=gcr.io/google-containers/busybox \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
-          --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE,enable-oslogin=TRUE \
+          --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
@@ -162,7 +173,6 @@ jobs:
       - name: Create ${{ inputs.test_id }} Docker volume
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -196,6 +206,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -212,7 +233,6 @@ jobs:
       - name: Launch ${{ inputs.test_id }} test
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -255,6 +275,17 @@ jobs:
         run: |
           NETWORK_CAPS=${{ inputs.network }}
           echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -366,11 +397,11 @@ jobs:
           --boot-disk-type pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
-          --create-disk image=${{ env.CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
+          --create-disk=image=${{ env.CACHED_DISK_NAME }},name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",device-name="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}",size=300GB,type=pd-ssd \
           --container-image=gcr.io/google-containers/busybox \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
-          --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE,enable-oslogin=TRUE \
+          --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
@@ -384,7 +415,6 @@ jobs:
       - name: Create ${{ inputs.test_id }} Docker volume
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -415,6 +445,17 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
+
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -452,7 +493,6 @@ jobs:
         if: ${{ (inputs.needs_zebra_state && !inputs.needs_lwd_state) && inputs.test_id != 'lwd-full-sync' }}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -501,7 +541,6 @@ jobs:
         if: ${{ (inputs.needs_zebra_state && inputs.needs_lwd_state) || inputs.test_id == 'lwd-full-sync' }}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -543,6 +582,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -566,7 +616,6 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (sprout)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -608,6 +657,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -624,7 +684,6 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (heartwood)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -663,6 +722,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -679,7 +749,6 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (canopy)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -720,6 +789,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -736,7 +816,6 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (1740k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -779,6 +858,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -795,7 +885,6 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (1760k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -838,6 +927,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -854,7 +954,6 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (1780k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -898,6 +997,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -914,7 +1024,6 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (1800k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -957,6 +1066,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -973,7 +1093,6 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (1820k)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -1013,6 +1132,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -1031,7 +1161,6 @@ jobs:
       - name: Show logs for ${{ inputs.test_id }} test (checkpoint)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -1075,6 +1204,17 @@ jobs:
         with:
           short-length: 7
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -1100,7 +1240,6 @@ jobs:
       - name: Result of ${{ inputs.test_id }} test
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -1164,6 +1303,17 @@ jobs:
           LONG_GITHUB_REF=${{ env.GITHUB_REF_SLUG_URL }}
           echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> $GITHUB_ENV
 
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -1225,7 +1375,6 @@ jobs:
 
           DOCKER_LOGS=$( \
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --ssh-key-expire-after=30s \
           --zone ${{ env.ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
@@ -1362,15 +1511,3 @@ jobs:
           else
             gcloud compute instances delete "${INSTANCE}" --zone "${{ env.ZONE }}" --delete-disks all --quiet
           fi
-
-      # Deletes SSH keys generated during this workflow run, as GCP has a limit of SSH keys
-      # that can exist at the same time in the OS Login metadata. Not deleting this keys
-      # could cause the following error:
-      # `Login profile size exceeds 32 KiB. Delete profile values to make additional space`
-      - name: Delete temporal SSH keys
-        continue-on-error: true
-        run: |
-          for i in $(gcloud compute os-login ssh-keys list --format="table[no-heading](value.fingerprint)") --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com; do 
-            echo "$i";
-            gcloud compute os-login ssh-keys remove --key "$i" --impersonate-service-account=github-service-account@zealous-zebra.iam.gserviceaccount.com || true;
-          done
