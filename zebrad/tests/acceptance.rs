@@ -103,12 +103,6 @@
 //!
 //! ## Getblocktemplate tests
 //!
-//! Example of how to run the get_block_template test:
-//!
-//! ```console
-//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/chain cargo test get_block_template --features getblocktemplate-rpcs --release  -- --ignored --nocapture
-//! ```
-//!
 //! Example of how to run the submit_block test:
 //!
 //! ```console
@@ -2160,19 +2154,9 @@ async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
     common::lightwalletd::wallet_grpc_test::run().await
 }
 
-/// Test successful getblocktemplate rpc call
-///
-/// See [`common::get_block_template_rpcs::get_block_template`] for more information.
-#[tokio::test]
-#[ignore]
-#[cfg(feature = "getblocktemplate-rpcs")]
-async fn get_block_template() -> Result<()> {
-    common::get_block_template_rpcs::get_block_template::run().await
-}
-
 /// Test successful submitblock rpc call
 ///
-/// See [`common::get_block_template_rpcs::submit_block`] for more information.
+/// See [`common::getblocktemplate`] for more information.
 #[tokio::test]
 #[ignore]
 #[cfg(feature = "getblocktemplate-rpcs")]
