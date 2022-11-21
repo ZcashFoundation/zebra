@@ -24,7 +24,7 @@ proptest-impl = [
 
 [dependencies]
 bincode = "1.3.3"
-chrono = { version = "0.4.22", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.23", default-features = false, features = ["clock", "std"] }
 dirs = "4.0.0"
 displaydoc = "0.2.3"
 futures = "0.3.25"
@@ -62,7 +62,7 @@ once_cell = "1.16.0"
 spandoc = "0.2.2"
 
 hex = { version = "0.4.3", features = ["serde"] }
-insta = { version = "1.21.0", features = ["ron"] }
+insta = { version = "1.21.1", features = ["ron"] }
 
 proptest = "0.10.1"
 proptest-derive = "0.3.0"

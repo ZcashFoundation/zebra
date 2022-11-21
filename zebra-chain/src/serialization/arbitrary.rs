@@ -44,7 +44,11 @@ pub fn datetime_full() -> impl Strategy<Value = chrono::DateTime<Utc>> {
         DateTime::<Utc>::MIN_UTC.timestamp()..=DateTime::<Utc>::MAX_UTC.timestamp(),
         0..2_000_000_000_u32,
     )
-        .prop_map(|(secs, nsecs)| Utc.timestamp(secs, nsecs))
+        .prop_map(|(secs, nsecs)| {
+            Utc.timestamp_opt(secs, nsecs)
+                .single()
+                .expect("in-range number of seconds and valid nanosecond")
+        })
 }
 
 /// Returns a strategy that produces an arbitrary time from a [`u32`] number

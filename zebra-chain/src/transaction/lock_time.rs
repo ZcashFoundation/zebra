@@ -71,7 +71,11 @@ impl LockTime {
     //
     // TODO: replace Utc.timestamp with DateTime32 (#2211)
     pub fn min_lock_time_timestamp() -> LockTime {
-        LockTime::Time(Utc.timestamp(Self::MIN_TIMESTAMP, 0))
+        LockTime::Time(
+            Utc.timestamp_opt(Self::MIN_TIMESTAMP, 0)
+                .single()
+                .expect("in-range number of seconds and valid nanosecond"),
+        )
     }
 
     /// Returns the maximum [`LockTime::Time`], as a [`LockTime`].
@@ -81,7 +85,11 @@ impl LockTime {
     //
     // TODO: replace Utc.timestamp with DateTime32 (#2211)
     pub fn max_lock_time_timestamp() -> LockTime {
-        LockTime::Time(Utc.timestamp(Self::MAX_TIMESTAMP, 0))
+        LockTime::Time(
+            Utc.timestamp_opt(Self::MAX_TIMESTAMP, 0)
+                .single()
+                .expect("in-range number of seconds and valid nanosecond"),
+        )
     }
 }
 
@@ -108,7 +116,11 @@ impl ZcashDeserialize for LockTime {
             Ok(LockTime::Height(block::Height(n)))
         } else {
             // This can't panic, because all u32 values are valid `Utc.timestamp`s.
-            Ok(LockTime::Time(Utc.timestamp(n.into(), 0)))
+            Ok(LockTime::Time(
+                Utc.timestamp_opt(n.into(), 0)
+                    .single()
+                    .expect("in-range number of seconds and valid nanosecond"),
+            ))
         }
     }
 }

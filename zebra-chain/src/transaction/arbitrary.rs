@@ -534,8 +534,13 @@ impl Arbitrary for LockTime {
         prop_oneof![
             (block::Height::MIN.0..=LockTime::MAX_HEIGHT.0)
                 .prop_map(|n| LockTime::Height(block::Height(n))),
-            (LockTime::MIN_TIMESTAMP..=LockTime::MAX_TIMESTAMP)
-                .prop_map(|n| { LockTime::Time(Utc.timestamp(n, 0)) })
+            (LockTime::MIN_TIMESTAMP..=LockTime::MAX_TIMESTAMP).prop_map(|n| {
+                LockTime::Time(
+                    Utc.timestamp_opt(n, 0)
+                        .single()
+                        .expect("in-range number of seconds and valid nanosecond"),
+                )
+            })
         ]
         .boxed()
     }
@@ -930,16 +935,7 @@ pub fn test_transactions(
         Network::Testnet => zebra_test::vectors::TESTNET_BLOCKS.iter(),
     };
 
-    blocks.flat_map(|(&block_height, &block_bytes)| {
-        let block = block_bytes
-            .zcash_deserialize_into::<block::Block>()
-            .expect("block is structurally valid");
-
-        block
-            .transactions
-            .into_iter()
-            .map(move |transaction| (block::Height(block_height), transaction))
-    })
+    transactions_from_blocks(blocks)
 }
 
 /// Generate an iterator over fake V5 transactions.
@@ -950,18 +946,23 @@ pub fn fake_v5_transactions_for_network<'b>(
     network: Network,
     blocks: impl DoubleEndedIterator<Item = (&'b u32, &'b &'static [u8])> + 'b,
 ) -> impl DoubleEndedIterator<Item = Transaction> + 'b {
-    blocks.flat_map(move |(height, original_bytes)| {
-        let original_block = original_bytes
+    transactions_from_blocks(blocks)
+        .map(move |(height, transaction)| transaction_to_fake_v5(&transaction, network, height))
+}
+
+/// Generate an iterator over ([`block::Height`], [`Arc<Transaction>`]).
+pub fn transactions_from_blocks<'a>(
+    blocks: impl DoubleEndedIterator<Item = (&'a u32, &'a &'static [u8])> + 'a,
+) -> impl DoubleEndedIterator<Item = (block::Height, Arc<Transaction>)> + 'a {
+    blocks.flat_map(|(&block_height, &block_bytes)| {
+        let block = block_bytes
             .zcash_deserialize_into::<block::Block>()
             .expect("block is structurally valid");
 
-        original_block
+        block
             .transactions
             .into_iter()
-            .map(move |transaction| {
-                transaction_to_fake_v5(&transaction, network, block::Height(*height))
-            })
-            .map(Transaction::from)
+            .map(move |transaction| (block::Height(block_height), transaction))
     })
 }
 

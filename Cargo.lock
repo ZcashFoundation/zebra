@@ -525,9 +525,9 @@ checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
 
 [[package]]
 name = "bytes"
-version = "1.2.1"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec8a7b6a70fde80372154c65702f00a0f56f3e1c36abbc6c440484be248856db"
+checksum = "dfb24e866b15a1af2a1b663f10c6b6b8f397a84aadb828f12e5b289ec23a3a3c"
 
 [[package]]
 name = "bzip2-sys"
@@ -608,9 +608,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.22"
+version = "0.4.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfd4d1b31faaa3a89d7934dbded3111da0d2ef28e3ebccdb4f0179f5929d1ef1"
+checksum = "16b0a3d9ed01224b22057780a37bb8c5dbfe1be8ba48678e7bf57ec4b385411f"
 dependencies = [
  "iana-time-zone",
  "js-sys",
@@ -1977,9 +1977,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.21.0"
+version = "1.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "581d4e3314cae4536e5d22ffd23189d4a374696c5ef733eadafae0ed273fd303"
+checksum = "ba1e75aa1530e7385af7b2685478dece08dafb9db3b4225c753286decea83bef"
 dependencies = [
  "console",
  "lazy_static",
@@ -3699,9 +3699,9 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "sentry"
-version = "0.28.0"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a120fb5e8b7975736bf1fc57de380531e617a6a8f5a55d037bcea25a7f5e8371"
+checksum = "c6425e2a14006415449fb0a3e9a119df5032f59e7a2d9350cf8738eca290dfc5"
 dependencies = [
  "httpdate",
  "reqwest",
@@ -3716,9 +3716,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-backtrace"
-version = "0.28.0"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ac56ff9aae25b024a5aad4f0242808dfde29161c82d183adce778338c6822ef"
+checksum = "04d79c194e5c20fe602e81faf39f3cff0f275ec61283f437a892cfd6544da592"
 dependencies = [
  "backtrace",
  "once_cell",
@@ -3728,9 +3728,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-contexts"
-version = "0.28.0"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "188506b08b5e64004c71b7a5edb34959083e6e1288fada3b8d18d0bc7449ce1e"
+checksum = "e1c2a57601eeb870521cc241caee27e57a012f297ece3c1b7eee87f2a531edb5"
 dependencies = [
  "hostname",
  "libc",
@@ -3742,9 +3742,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-core"
-version = "0.28.0"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff58433a7ad557b586a09c42c4298d5f3ddb0c777e1a79d950e510d7b93fce0e"
+checksum = "8be90ea119c6d0664c8ab534013bc9e90355e7004d782d5d1492ca513393b929"
 dependencies = [
  "once_cell",
  "rand 0.8.5",
@@ -3755,9 +3755,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-tracing"
-version = "0.28.0"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc8d5bae1e1c06d96a966efc425bf1479a90464de99757d40601ce449f91fbed"
+checksum = "073a872ab639da1bee23354025ddc9c1b9e5d70eabfe8cd6f10a81914cf6563d"
 dependencies = [
  "sentry-core",
  "tracing-core",
@@ -3766,11 +3766,10 @@ dependencies = [
 
 [[package]]
 name = "sentry-types"
-version = "0.28.0"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb30d75498a041005a774ec1b6b7d9589c5906d17ebaca338cb685dc92170f9b"
+checksum = "67ad85f0addf16310a1fbcf3facc7acb17ef5dbf6ae059d2f3c38442a471404d"
 dependencies = [
- "chrono",
  "debugid",
  "getrandom 0.2.5",
  "hex",
@@ -3837,9 +3836,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "2.0.1"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "368f2d60d049ea019a84dcd6687b0d1e0030fe663ae105039bdf967ed5e6a9a7"
+checksum = "25bf4a5a814902cd1014dbccfa4d4560fb8432c779471e96e035602519f82eef"
 dependencies = [
  "base64",
  "chrono",
@@ -3853,9 +3852,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "2.0.1"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ccadfacf6cf10faad22bbadf55986bdd0856edfb5d9210aa1dcf1f516e84e93"
+checksum = "e3452b4c0f6c1e357f73fdb87cd1efabaa12acf328c7a528e252893baeb3f4aa"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2 1.0.42",
@@ -5218,15 +5217,50 @@ dependencies = [
 ]
 
 [[package]]
-name = "zcash_proofs"
-version = "0.8.0"
+name = "zcash_primitives"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b5cdd6f43c8b56449e52f760d71241b8490530dc10a88d990e8dcf0c435a957"
+checksum = "f7e33ec9068388e8de106a78268f90487d6975b171ee197aef16cc64c093486d"
+dependencies = [
+ "aes",
+ "bip0039",
+ "bitvec",
+ "blake2b_simd",
+ "blake2s_simd",
+ "bls12_381",
+ "byteorder",
+ "equihash",
+ "ff",
+ "fpe",
+ "group",
+ "hdwallet",
+ "hex",
+ "incrementalmerkletree",
+ "jubjub",
+ "lazy_static",
+ "memuse",
+ "nonempty",
+ "orchard",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "ripemd",
+ "secp256k1",
+ "sha2",
+ "subtle",
+ "zcash_address",
+ "zcash_encoding",
+ "zcash_note_encryption",
+]
+
+[[package]]
+name = "zcash_proofs"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77381adc72286874e563ee36ba99953946abcbd195ada45440a2754ca823d407"
 dependencies = [
  "bellman",
  "blake2b_simd",
  "bls12_381",
- "byteorder",
  "directories",
  "group",
  "jubjub",
@@ -5235,7 +5269,7 @@ dependencies = [
  "rand_core 0.6.4",
  "redjubjub",
  "tracing",
- "zcash_primitives",
+ "zcash_primitives 0.9.0",
 ]
 
 [[package]]
@@ -5257,7 +5291,7 @@ dependencies = [
  "tracing",
  "zcash_encoding",
  "zcash_note_encryption",
- "zcash_primitives",
+ "zcash_primitives 0.8.1",
 ]
 
 [[package]]
@@ -5315,7 +5349,7 @@ dependencies = [
  "zcash_encoding",
  "zcash_history",
  "zcash_note_encryption",
- "zcash_primitives",
+ "zcash_primitives 0.9.0",
  "zebra-test",
 ]
 
