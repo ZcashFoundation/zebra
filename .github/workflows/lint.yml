@@ -144,9 +144,10 @@ jobs:
     needs: changed-files
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
     # cargo doc doesn't support '--  -D warnings', so we have to add it here
+    # https://github.com/rust-lang/cargo/issues/8424#issuecomment-774662296
     env:
       RUSTDOCFLAGS: -D warnings
-      
+
     steps:
       - uses: actions/checkout@v3.1.0
         with:
