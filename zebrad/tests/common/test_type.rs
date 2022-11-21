@@ -176,11 +176,6 @@ impl TestType {
             return Some(Ok(config));
         }
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        let _ = config.mining.miner_address.insert(
-            zebra_chain::transparent::Address::from_script_hash(config.network.network, [0x7e; 20]),
-        );
-
         let zebra_state_path = self.zebrad_state_path(test_name)?;
 
         config.sync.checkpoint_verify_concurrency_limit =

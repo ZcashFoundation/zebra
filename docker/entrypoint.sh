@@ -78,10 +78,6 @@ case "$1" in
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
             ls -lhR "$LIGHTWALLETD_DATA_DIR/db" || (echo "No $LIGHTWALLETD_DATA_DIR/db"; ls -lhR "$LIGHTWALLETD_DATA_DIR" | head -50 || echo "No $LIGHTWALLETD_DATA_DIR directory")
             cargo test --locked --release --features lightwalletd-grpc-tests --package zebrad --test acceptance -- --nocapture --include-ignored sending_transactions_using_lightwalletd
-        elif [[ "$TEST_GET_BLOCK_TEMPLATE" -eq "1" ]]; then
-            # Starting with a cached Zebra tip, test getting a block template from Zebra's RPC server.
-            ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
-            cargo test --locked --release --features getblocktemplate-rpcs --package zebrad --test acceptance -- --nocapture --include-ignored get_block_template
         elif [[ "$TEST_SUBMIT_BLOCK" -eq "1" ]]; then
             # Starting with a cached Zebra tip, test sending a block to Zebra's RPC port.
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
