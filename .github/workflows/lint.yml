@@ -164,7 +164,7 @@ jobs:
       - uses: actions-rs/cargo@v1.0.3
         with:
           command: doc
-          args: --no-deps --document-private-items --all-features -- -D warnings
+          args: --no-deps --document-private-items --all-features -D warnings
 
   actionlint:
     runs-on: ubuntu-latest
