@@ -116,6 +116,8 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.0.1
 
+      # TODO we should implement the fixes from https://github.com/ZcashFoundation/zebra/pull/5670 here
+      # but the implementation is failing as it's requiring the disk names, contrary to what is stated in the official documentation
       - name: Create instance template
         run: |
           gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -123,8 +125,8 @@ jobs:
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --container-image ${{ env.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --create-disk=auto-delete=yes,size=300GB,type=pd-ssd \
-          --container-mount-disk=mount-path="/zebrad-cache" \
+          --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=300GB,type=pd-ssd \
+          --container-mount-disk=mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --tags zebrad
@@ -146,7 +148,7 @@ jobs:
           --health-check zebrad-tracing-filter \
           --initial-delay 30 \
           --region "${{ env.REGION }}" \
-          --size 2
+          --size 1
 
       # Rolls out update to existing group using the new instance template
       - name: Update managed instance group
