@@ -271,10 +271,10 @@ where
         let mut state = self.state.clone();
 
         let fut = async move {
-            // Don't download/verify if the transaction is already in the state.
+            // Don't download/verify if the transaction is already in the best chain.
             Self::transaction_in_state(&mut state, txid).await?;
 
-            trace!(?txid, "transaction is not in state");
+            trace!(?txid, "transaction is not in best chain");
 
             let next_height = match state.oneshot(zs::Request::Tip).await {
                 Ok(zs::Response::Tip(None)) => Ok(Height(0)),
@@ -442,12 +442,11 @@ where
         self.pending.len()
     }
 
-    /// Check if transaction is already in the state.
+    /// Check if transaction is already in the best chain.
     async fn transaction_in_state(
         state: &mut ZS,
         txid: UnminedTxId,
     ) -> Result<(), TransactionDownloadVerifyError> {
-        // Check if the transaction is already in the state.
         match state
             .ready()
             .await
