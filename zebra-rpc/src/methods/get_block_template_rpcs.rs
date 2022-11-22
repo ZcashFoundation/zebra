@@ -31,7 +31,7 @@ use zebra_node_services::mempool;
 use zebra_state::{ReadRequest, ReadResponse};
 
 use crate::methods::{
-    best_chain_tip_hash, best_chain_tip_height, best_chain_tip_time,
+    best_chain_tip_height,
     get_block_template_rpcs::types::{
         default_roots::DefaultRoots, get_block_template::GetBlockTemplate, hex_data::HexData,
         submit_block, transaction::TransactionTemplate,
@@ -290,9 +290,8 @@ where
                 data: None,
             })?;
 
-            let tip_hash = best_chain_tip_hash(&latest_chain_tip)?;
-            let tip_time = best_chain_tip_time(&latest_chain_tip)?;
-
+            // The tip estimate must not be the same as the one coming from the state
+            // but this is ok for an estimate
             let (estimated_distance_to_chain_tip, tip_height) = latest_chain_tip
                 .estimate_distance_to_network_chain_tip(network)
                 .ok_or_else(|| Error {
@@ -321,6 +320,28 @@ where
 
             let miner_fee = miner_fee(&mempool_txs);
 
+            // Calling state with `ChainInfo` request for relevant chain data
+            let request = ReadRequest::ChainInfo;
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                                data: None,
+                            })?;
+
+            let chain_info = match response {
+                ReadResponse::ChainInfo(Some(chain_info)) => chain_info,
+                _ => unreachable!("lets hope for always some until later"),
+            };
+
+            // Get all the tip data from the state call
+            let tip_height = chain_info.tip.0;
+            let tip_hash = chain_info.tip.1;
+            let tip_time = chain_info.tip.2;
+
             let block_height = (tip_height + 1).expect("tip is far below Height::MAX");
             let block_time = tip_time
                 .checked_add_signed(Duration::seconds(POST_BLOSSOM_POW_TARGET_SPACING))
@@ -335,29 +356,6 @@ where
 
             // Convert into TransactionTemplates
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
-
-            // Calling state with `ChainInfo` request for relevant chain data
-            let request = ReadRequest::ChainInfo;
-            let response = state
-                .ready()
-                .and_then(|service| service.call(request))
-                .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
-
-            let chain_info = match response {
-                ReadResponse::ChainInfo(chain_info) => chain_info,
-                _ => unreachable!("chaininfo always respond even if all data inside is `None`"),
-            };
-
-            let expected_difficulty = chain_info.expected_difficulty.ok_or(Error {
-                code: ErrorCode::ServerError(0),
-                message: "Not enough blocks in the chain".to_string(),
-                data: None,
-            })?;
 
             Ok(GetBlockTemplate {
                 capabilities: vec!["proposal".to_string()],
@@ -381,7 +379,7 @@ where
 
                 target: format!(
                     "{}",
-                    expected_difficulty
+                    chain_info.expected_difficulty
                         .to_expanded()
                         .ok_or(Error {
                             code: ErrorCode::ServerError(0),
@@ -405,7 +403,7 @@ where
 
                 cur_time: chrono::Utc::now().timestamp(),
 
-                bits: format!("{:#010x}", expected_difficulty.to_value())
+                bits: format!("{:#010x}", chain_info.expected_difficulty.to_value())
                     .drain(2..)
                     .collect(),
 

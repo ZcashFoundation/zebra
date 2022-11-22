@@ -33,7 +33,7 @@ use crate::methods::{
     GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
 };
 
-pub async fn test_responses<State>(
+pub async fn test_responses<State, ReadState>(
     network: Network,
     mut mempool: MockService<
         mempool::Request,
@@ -42,6 +42,7 @@ pub async fn test_responses<State>(
         zebra_node_services::BoxError,
     >,
     state: State,
+    read_state: ReadState,
     settings: Settings,
 ) where
     State: Service<
@@ -53,6 +54,15 @@ pub async fn test_responses<State>(
         + Sync
         + 'static,
     <State as Service<zebra_state::Request>>::Future: Send,
+    ReadState: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
 {
     let (
         chain_verifier,
@@ -71,24 +81,26 @@ pub async fn test_responses<State>(
         miner_address: Some(transparent::Address::from_script_hash(network, [0xad; 20])),
     };
 
-    let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
-    mock_chain_tip_sender.send_best_tip_height(NetworkUpgrade::Nu5.activation_height(network));
+    // nu5 block height
+    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(network).unwrap();
     // nu5 block hash
-    mock_chain_tip_sender.send_best_tip_hash(
-        Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap(),
-    );
+    let fake_tip_hash =
+        Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
     // nu5 block time
-    mock_chain_tip_sender.send_best_tip_block_time(Utc.timestamp_opt(1654008605, 0).unwrap());
+    let fake_tip_time = Utc.timestamp_opt(1654008605, 0).unwrap();
+
+    let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
+    mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
-    let read_state = MockService::build().for_unit_tests();
+    // get an rpc instance with continious blockchain state
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         network,
-        mining_config,
+        mining_config.clone(),
         Buffer::new(mempool.clone(), 1),
-        read_state.clone(),
-        mock_chain_tip,
-        chain_verifier,
+        read_state,
+        mock_chain_tip.clone(),
+        chain_verifier.clone(),
     );
 
     // `getblockcount`
@@ -106,20 +118,36 @@ pub async fn test_responses<State>(
 
     snapshot_rpc_getblockhash(get_block_hash, &settings);
 
-    // `getblocktemplate`
+    // get a new empty state
+    let new_read_state = MockService::build().for_unit_tests();
 
-    // fake difficulty
+    // send tip hash and time needed for getblocktemplate rpc
+    mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
+    mock_chain_tip_sender.send_best_tip_block_time(fake_tip_time);
+
+    // create a new rpc instance with new state and mock
+    let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
+        network,
+        mining_config,
+        Buffer::new(mempool.clone(), 1),
+        new_read_state.clone(),
+        mock_chain_tip,
+        chain_verifier,
+    );
+
+    // fake tip and difficulty for `getblocktemplate`
     tokio::spawn(async move {
-        read_state
+        new_read_state
             .clone()
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
-            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                expected_difficulty: Some(CompactDifficulty::from(ExpandedDifficulty::from(
-                    U256::one(),
-                ))),
-            }));
+            .respond(ReadResponse::ChainInfo(Some(GetBlockTemplateChainInfo {
+                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                tip: (fake_tip_height, fake_tip_hash, fake_tip_time),
+            })));
     });
+
+    // `getblocktemplate`
 
     let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
 

@@ -792,7 +792,7 @@ async fn rpc_getblocktemplate() {
     };
     use zebra_chain::{
         amount::{Amount, NonNegative},
-        block::{MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
+        block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
         chain_tip::mock::MockChainTip,
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
     };
@@ -811,17 +811,18 @@ async fn rpc_getblocktemplate() {
         miner_address: Some(transparent::Address::from_script_hash(Mainnet, [0x7e; 20])),
     };
 
-    let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
-    mock_chain_tip_sender.send_best_tip_height(NetworkUpgrade::Nu5.activation_height(Mainnet));
+    // nu5 block height
+    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(Mainnet).unwrap();
     // nu5 block hash
-    mock_chain_tip_sender.send_best_tip_hash(
-        zebra_chain::block::Hash::from_hex(
-            "0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8",
-        )
-        .unwrap(),
-    );
+    let fake_tip_hash =
+        Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
     // nu5 block time
-    mock_chain_tip_sender.send_best_tip_block_time(Utc.timestamp_opt(1654008605, 0).unwrap());
+    let fake_tip_time = Utc.timestamp_opt(1654008605, 0).unwrap();
+
+    let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
+    mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
+    mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
+    mock_chain_tip_sender.send_best_tip_block_time(fake_tip_time);
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
     // Init RPC
@@ -839,11 +840,10 @@ async fn rpc_getblocktemplate() {
             .clone()
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
-            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                expected_difficulty: Some(CompactDifficulty::from(ExpandedDifficulty::from(
-                    U256::one(),
-                ))),
-            }));
+            .respond(ReadResponse::ChainInfo(Some(GetBlockTemplateChainInfo {
+                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                tip: (fake_tip_height, fake_tip_hash, fake_tip_time),
+            })));
     });
 
     let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());

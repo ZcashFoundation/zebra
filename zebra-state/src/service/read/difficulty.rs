@@ -21,7 +21,7 @@ use crate::service::{
 pub fn relevant_chain_difficulty(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
-    tip: (Height, Hash),
+    tip: (Height, Hash, chrono::DateTime<chrono::Utc>),
     network: Network,
 ) -> CompactDifficulty {
     let relevant_chain = any_ancestor_blocks(non_finalized_state, db, tip.1);

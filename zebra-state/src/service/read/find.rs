@@ -36,12 +36,15 @@ pub fn best_tip(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
 ) -> Option<(block::Height, block::Hash)> {
-    tip(non_finalized_state.best_chain(), db)
+    tip(non_finalized_state.best_chain(), db).map(|t| (t.0, t.1))
 }
 
 /// Returns the tip of `chain`.
 /// If there is no chain, returns the tip of `db`.
-pub fn tip<C>(chain: Option<C>, db: &ZebraDb) -> Option<(Height, block::Hash)>
+pub fn tip<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+) -> Option<(Height, block::Hash, chrono::DateTime<chrono::Utc>)>
 where
     C: AsRef<Chain>,
 {
@@ -62,7 +65,7 @@ pub fn tip_height<C>(chain: Option<C>, db: &ZebraDb) -> Option<Height>
 where
     C: AsRef<Chain>,
 {
-    tip(chain, db).map(|(height, _hash)| height)
+    tip(chain, db).map(|(height, _hash, _)| height)
 }
 
 /// Returns the tip [`block::Hash`] of `chain`.
@@ -72,7 +75,7 @@ pub fn tip_hash<C>(chain: Option<C>, db: &ZebraDb) -> Option<block::Hash>
 where
     C: AsRef<Chain>,
 {
-    tip(chain, db).map(|(_height, hash)| hash)
+    tip(chain, db).map(|(_height, hash, _time)| hash)
 }
 
 /// Return the depth of block `hash` from the chain tip.

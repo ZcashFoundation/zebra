@@ -1092,11 +1092,12 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let tip = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
+                        let tip = state
+                            .non_finalized_state_receiver
+                            .with_watch_data(|non_finalized_state| {
                                 read::tip(non_finalized_state.best_chain(), &state.db)
-                            },
-                        );
+                            })
+                            .map(|t| (t.0, t.1));
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Tip");
@@ -1565,24 +1566,24 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let expected_difficulty =
-                            read::tip(latest_non_finalized_state.best_chain(), &state.db).map(
-                                |tip| {
-                                    read::difficulty::relevant_chain_difficulty(
-                                        &latest_non_finalized_state,
-                                        &state.db,
-                                        tip,
-                                        state.network,
-                                    )
-                                },
-                            );
+                        let get_block_template_info = read::tip(
+                            latest_non_finalized_state.best_chain(),
+                            &state.db,
+                        )
+                        .map(|tip| GetBlockTemplateChainInfo {
+                            tip,
+                            expected_difficulty: read::difficulty::relevant_chain_difficulty(
+                                &latest_non_finalized_state,
+                                &state.db,
+                                tip,
+                                state.network,
+                            ),
+                        });
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");
 
-                        Ok(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                            expected_difficulty,
-                        }))
+                        Ok(ReadResponse::ChainInfo(get_block_template_info))
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::ChainInfo"))

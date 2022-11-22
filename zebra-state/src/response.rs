@@ -122,15 +122,17 @@ pub enum ReadResponse {
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::ChainInfo`](crate::ReadRequest::ChainInfo) with the state
     /// information needed by the `getblocktemplate` RPC method.
-    ChainInfo(GetBlockTemplateChainInfo),
+    ChainInfo(Option<GetBlockTemplateChainInfo>),
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GetBlockTemplateChainInfo {
+    /// Tip data.
+    pub tip: (block::Height, block::Hash, chrono::DateTime<chrono::Utc>),
     /// Expected difficulty data for the candidate block.
-    pub expected_difficulty: Option<CompactDifficulty>,
+    pub expected_difficulty: CompactDifficulty,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.

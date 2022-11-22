@@ -81,7 +81,7 @@ impl ZebraDb {
     ///
     /// If Zebra is storing block heights that are close to [`MAX_ON_DISK_HEIGHT`].
     fn check_max_on_disk_tip_height(&self) {
-        if let Some((tip_height, tip_hash)) = self.tip() {
+        if let Some((tip_height, tip_hash, _time)) = self.tip() {
             if tip_height.0 > MAX_ON_DISK_HEIGHT.0 / 2 {
                 error!(
                     ?tip_height,
