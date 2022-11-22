@@ -126,7 +126,7 @@ jobs:
           --image-family=cos-stable \
           --container-image ${{ env.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
           --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }},auto-delete=yes,size=300GB,type=pd-ssd \
-          --container-mount-disk mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
+          --container-mount-disk=mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
           --tags zebrad
