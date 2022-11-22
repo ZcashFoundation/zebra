@@ -17,22 +17,18 @@ use crate::service::{
 
 /// Return the CompactDifficulty for the current best chain.
 ///
-/// Return `None` if we don't have enough blocks in the state.
+/// Panic if we don't have enough blocks in the state.
 pub fn relevant_chain_difficulty(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
     tip: (Height, Hash),
     network: Network,
-) -> Option<CompactDifficulty> {
+) -> CompactDifficulty {
     let relevant_chain = any_ancestor_blocks(non_finalized_state, db, tip.1);
     difficulty(relevant_chain, tip.0, network)
 }
 
-fn difficulty<C>(
-    relevant_chain: C,
-    tip_height: Height,
-    network: Network,
-) -> Option<CompactDifficulty>
+fn difficulty<C>(relevant_chain: C, tip_height: Height, network: Network) -> CompactDifficulty
 where
     C: IntoIterator,
     C::Item: Borrow<Block>,
@@ -52,13 +48,13 @@ where
         )
     });
 
-    if relevant_data.len() < MAX_CONTEXT_BLOCKS {
-        return None;
-    }
+    // The getblocktemplate RPC returns an error if Zebra is not synced to the tip.
+    // So this will never happen in production code.
+    assert!(relevant_data.len() < MAX_CONTEXT_BLOCKS);
 
     let time = chrono::Utc::now();
     let difficulty_adjustment =
         AdjustedDifficulty::new_from_header_time(time, tip_height, network, relevant_data);
 
-    Some(difficulty_adjustment.expected_difficulty_threshold())
+    difficulty_adjustment.expected_difficulty_threshold()
 }
