@@ -143,6 +143,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed-files
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
+    # cargo doc doesn't support '--  -D warnings', so we have to add it here
+    # https://github.com/rust-lang/cargo/issues/8424#issuecomment-774662296
+    #
+    # These -A and -W settings must be the same as the rustdoc settings in:
+    # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L53
+    env:
+      RUSTDOCFLAGS: -D warnings -A rustdoc::private_intra_doc_links
 
     steps:
       - uses: actions/checkout@v3.1.0
