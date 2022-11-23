@@ -6,6 +6,7 @@ use jsonrpc_core::ErrorCode;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
+    amount::Amount,
     block::Block,
     chain_tip::NoChainTip,
     parameters::Network::*,
@@ -288,6 +289,7 @@ async fn rpc_getrawtransaction() {
                         id: UnminedTxId::Legacy(tx.hash()),
                         transaction: tx.clone(),
                         size: 0,
+                        conventional_fee: Amount::zero(),
                     }]));
                 });
             let get_tx_req = rpc.get_raw_transaction(tx.hash().encode_hex(), 0u8);
