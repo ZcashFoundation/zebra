@@ -61,10 +61,14 @@ Every few weeks, we release a [new Zebra version](https://github.com/ZcashFounda
 
 Zebra's network stack is interoperable with `zcashd`,
 and Zebra implements all the features required to reach Zcash network consensus.
-
-Zebra also supports the [`lightwalletd` backend JSON-RPCs](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd).
-
 Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
+
+Zebra validates blocks and transactions, but needs extra software to generate them:
+- to generate transactions, [configure `zebrad`'s JSON-RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd),
+  and use a light wallet with `lightwalletd` and Zebra.
+- to generate blocks, [compile `zebrad` with the `getblocktemplate-rpcs` feature](https://doc.zebra.zfnd.org/zebrad/#json-rpc), configure the JSON-RPC port,
+  and use a mining pool or miner with Zebra's mining JSON-RPCs.
+  Mining support is currently incomplete, experimental, and off by default.
 
 ## Getting Started
 
@@ -77,7 +81,10 @@ docker run zfnd/zebra:1.0.0-rc.1
 
 For more information, read our [Docker documentation](book/src/user/docker.md).
 
-> You can also [enable Zebra's RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd) and [configure other features](https://zebra.zfnd.org/user/run.html).
+You can also:
+- [compile Zebra with metrics or tracing](https://doc.zebra.zfnd.org/zebrad/#metrics),
+- [enable Zebra's RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd), and
+- [configure other features](https://zebra.zfnd.org/user/run.html).
 
 ### Build Instructions
 
