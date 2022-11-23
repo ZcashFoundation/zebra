@@ -207,7 +207,7 @@ fn test_block_and_transaction_data_with_network(network: Network) {
 fn snapshot_block_and_transaction_data(state: &FinalizedState) {
     let tip = state.tip();
 
-    insta::assert_ron_snapshot!("tip", tip.map(|t| (t.0, t.1)).map(Tip::from));
+    insta::assert_ron_snapshot!("tip", tip.map(Tip::from));
 
     if let Some((max_height, tip_block_hash)) = tip {
         // Check that the database returns empty note commitment trees for the

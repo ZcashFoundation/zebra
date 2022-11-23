@@ -498,7 +498,7 @@ impl Chain {
         self.height_by_hash.get(&hash).cloned()
     }
 
-    /// Returns the non-finalized tip block height, hash and time.
+    /// Returns the non-finalized tip block height and hash.
     pub fn non_finalized_tip(&self) -> (Height, block::Hash) {
         (
             self.non_finalized_tip_height(),
