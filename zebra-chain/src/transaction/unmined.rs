@@ -231,10 +231,7 @@ impl fmt::Display for UnminedTx {
 
 impl From<Transaction> for UnminedTx {
     fn from(transaction: Transaction) -> Self {
-        let size = transaction.zcash_serialized_size().expect(
-            "unexpected serialization failure: all structurally valid transactions have a size",
-        );
-
+        let size = transaction.zcash_serialized_size();
         let conventional_fee = zip317::conventional_fee(&transaction);
 
         // The borrow is actually needed to avoid taking ownership
@@ -250,10 +247,7 @@ impl From<Transaction> for UnminedTx {
 
 impl From<&Transaction> for UnminedTx {
     fn from(transaction: &Transaction) -> Self {
-        let size = transaction.zcash_serialized_size().expect(
-            "unexpected serialization failure: all structurally valid transactions have a size",
-        );
-
+        let size = transaction.zcash_serialized_size();
         let conventional_fee = zip317::conventional_fee(transaction);
 
         Self {
@@ -267,10 +261,7 @@ impl From<&Transaction> for UnminedTx {
 
 impl From<Arc<Transaction>> for UnminedTx {
     fn from(transaction: Arc<Transaction>) -> Self {
-        let size = transaction.zcash_serialized_size().expect(
-            "unexpected serialization failure: all structurally valid transactions have a size",
-        );
-
+        let size = transaction.zcash_serialized_size();
         let conventional_fee = zip317::conventional_fee(&transaction);
 
         Self {
@@ -284,10 +275,7 @@ impl From<Arc<Transaction>> for UnminedTx {
 
 impl From<&Arc<Transaction>> for UnminedTx {
     fn from(transaction: &Arc<Transaction>) -> Self {
-        let size = transaction.zcash_serialized_size().expect(
-            "unexpected serialization failure: all structurally valid transactions have a size",
-        );
-
+        let size = transaction.zcash_serialized_size();
         let conventional_fee = zip317::conventional_fee(transaction);
 
         Self {
