@@ -343,21 +343,21 @@ jobs:
           #
           # The probability of two matching short commit hashes within the same month is very low.
           COMMIT_DISK_PREFIX="${DISK_PREFIX}-.+-${{ env.GITHUB_SHA_SHORT }}-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}"
-          COMMIT_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${COMMIT_DISK_PREFIX}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          COMMIT_CACHED_DISK_NAME=$(gcloud compute images list --filter="status=READY AND name~${COMMIT_DISK_PREFIX}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "${GITHUB_REF_SLUG_URL}-${{ env.GITHUB_SHA_SHORT }} Disk: $COMMIT_CACHED_DISK_NAME"
           if [[ -n "$COMMIT_CACHED_DISK_NAME" ]]; then
               echo "Description: $(gcloud compute images describe $COMMIT_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
           fi
 
           # Try to find an image generated from the main branch
-          MAIN_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          MAIN_CACHED_DISK_NAME=$(gcloud compute images list --filter="status=READY AND name~${DISK_PREFIX}-main-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "main Disk: $MAIN_CACHED_DISK_NAME"
           if [[ -n "$MAIN_CACHED_DISK_NAME" ]]; then
               echo "Description: $(gcloud compute images describe $MAIN_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
           fi
 
           # Try to find an image generated from any other branch
-          ANY_CACHED_DISK_NAME=$(gcloud compute images list --filter="name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+          ANY_CACHED_DISK_NAME=$(gcloud compute images list --filter="status=READY AND name~${DISK_PREFIX}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${{ inputs.disk_suffix }}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           echo "any branch Disk: $ANY_CACHED_DISK_NAME"
           if [[ -n "$ANY_CACHED_DISK_NAME" ]]; then
               echo "Description: $(gcloud compute images describe $ANY_CACHED_DISK_NAME --format='value(DESCRIPTION)')"
@@ -1415,7 +1415,7 @@ jobs:
           ORIGINAL_HEIGHT="0"
 
           if [[ -n "${{ format('{0}', needs.setup-with-cached-state.outputs.cached_disk_name) }}" ]]; then
-              ORIGINAL_HEIGHT=$(gcloud compute images list --filter="name=${{ needs.setup-with-cached-state.outputs.cached_disk_name }}" --format="value(labels.height)")
+              ORIGINAL_HEIGHT=$(gcloud compute images list --filter="status=READY AND name=${{ needs.setup-with-cached-state.outputs.cached_disk_name }}" --format="value(labels.height)")
               ORIGINAL_HEIGHT=${ORIGINAL_HEIGHT:-0}
               echo "$CACHED_DISK_NAME height: $ORIGINAL_HEIGHT"
           fi
