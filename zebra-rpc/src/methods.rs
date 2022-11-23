@@ -1006,20 +1006,6 @@ where
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-/// Returns the best chain tip time of `latest_chain_tip`,
-/// or an RPC error if there are no blocks in the state.
-pub fn best_chain_tip_time<Tip>(latest_chain_tip: &Tip) -> Result<chrono::DateTime<Utc>>
-where
-    Tip: ChainTip + Clone + Send + Sync + 'static,
-{
-    latest_chain_tip.best_tip_block_time().ok_or(Error {
-        code: ErrorCode::ServerError(0),
-        message: "No blocks in state".to_string(),
-        data: None,
-    })
-}
-
-#[cfg(feature = "getblocktemplate-rpcs")]
 /// Returns the best chain tip hash of `latest_chain_tip`,
 /// or an RPC error if there are no blocks in the state.
 pub fn best_chain_tip_hash<Tip>(latest_chain_tip: &Tip) -> Result<block::Hash>
