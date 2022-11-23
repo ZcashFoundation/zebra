@@ -46,7 +46,7 @@ jobs:
       - name: Format network name for labels
         run: |
           NETWORK_CAPS="${{ inputs.network }}"
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
