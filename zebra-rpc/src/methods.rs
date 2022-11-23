@@ -1005,20 +1005,6 @@ where
     })
 }
 
-#[cfg(feature = "getblocktemplate-rpcs")]
-/// Returns the best chain tip hash of `latest_chain_tip`,
-/// or an RPC error if there are no blocks in the state.
-pub fn best_chain_tip_hash<Tip>(latest_chain_tip: &Tip) -> Result<block::Hash>
-where
-    Tip: ChainTip + Clone + Send + Sync + 'static,
-{
-    latest_chain_tip.best_tip_hash().ok_or(Error {
-        code: ErrorCode::ServerError(0),
-        message: "No blocks in state".to_string(),
-        data: None,
-    })
-}
-
 /// Response to a `getinfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_info` method].
