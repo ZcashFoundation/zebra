@@ -53,7 +53,7 @@ mod zip317;
 const MEMPOOL_TRANSACTION_COST_THRESHOLD: u64 = 4000;
 
 /// When a transaction pays a fee less than the conventional fee,
-/// this low fee penatly is added to its cost for mempool eviction.
+/// this low fee penalty is added to its cost for mempool eviction.
 ///
 /// See [VerifiedUnminedTx::eviction_weight()] for details.
 const MEMPOOL_TRANSACTION_LOW_FEE_PENALTY: u64 = 16_000;
