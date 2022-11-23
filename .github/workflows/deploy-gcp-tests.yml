@@ -163,7 +163,7 @@ jobs:
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
-          --labels=app=${{ inputs.app_name }},environment=test,network=${{ inputs.network }},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
+          --labels=app=${{ inputs.app_name }},environment=test,github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
           sleep 60
@@ -404,7 +404,7 @@ jobs:
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
-          --labels=app=${{ inputs.app_name }},environment=test,network=${{ inputs.network }},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
+          --labels=app=${{ inputs.app_name }},environment=test,github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
           sleep 60
