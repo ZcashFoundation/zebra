@@ -133,7 +133,7 @@ jobs:
       # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
       - name: Downcase network name for labels
         run: |
-          NETWORK_CAPS=${{ inputs.network }}
+          NETWORK_CAPS="${{ inputs.network }}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Install our SSH secret
@@ -285,7 +285,7 @@ jobs:
 
       - name: Downcase network name for disks and labels
         run: |
-          NETWORK_CAPS=${{ inputs.network }}
+          NETWORK_CAPS="${{ inputs.network }}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Install our SSH secret
@@ -1311,9 +1311,9 @@ jobs:
       # Passes ${{ env.GITHUB_REF_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
       - name: Format network name and branch name for disks
         run: |
-          NETWORK_CAPS=${{ inputs.network }}
+          NETWORK_CAPS="${{ inputs.network }}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-          LONG_GITHUB_REF=${{ env.GITHUB_REF_SLUG_URL }}
+          LONG_GITHUB_REF="${{ env.GITHUB_REF_SLUG_URL }}"
           echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> $GITHUB_ENV
 
       # Install our SSH secret

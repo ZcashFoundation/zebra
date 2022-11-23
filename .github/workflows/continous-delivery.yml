@@ -112,7 +112,7 @@ jobs:
       # Passes the lowercase network to subsequent steps using $NETWORK env variable.
       - name: Downcase network name for labels
         run: |
-          NETWORK_CAPS=${{ inputs.network || env.DEFAULT_NETWORK }}
+          NETWORK_CAPS="${{ inputs.network || env.DEFAULT_NETWORK }}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
