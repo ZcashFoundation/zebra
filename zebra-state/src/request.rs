@@ -749,7 +749,7 @@ pub enum ReadRequest {
     /// Get state information from the best block chain.
     ///
     /// Returns [`ReadResponse::ChainInfo(info)`](ReadResponse::ChainInfo) where `info` is a
-    /// [`ReadResponse::GetBlockTemplateChainInfo`](ReadResponse::GetBlockTemplateChainInfo)` structure containing
+    /// [`zebra-state::GetBlockTemplateChainInfo`](zebra-state::GetBlockTemplateChainInfo)` structure containing
     /// best chain state information.
     ChainInfo,
 }

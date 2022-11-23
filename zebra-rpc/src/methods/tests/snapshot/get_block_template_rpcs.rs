@@ -93,7 +93,7 @@ pub async fn test_responses<State, ReadState>(
     mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
-    // get an rpc instance with continious blockchain state
+    // get an rpc instance with continuous blockchain state
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         network,
         mining_config.clone(),

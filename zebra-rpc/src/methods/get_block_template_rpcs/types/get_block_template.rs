@@ -19,7 +19,7 @@ pub struct GetBlockTemplate {
     /// - `longpoll`: <https://en.bitcoin.it/wiki/BIP_0022#Optional:_Long_Polling>
     /// - `serverlist`: <https://en.bitcoin.it/wiki/BIP_0023#Logical_Services>
     ///
-    /// By the above, Zebra wil lalways return an empty vector here.
+    /// By the above, Zebra will always return an empty vector here.
     pub capabilities: Vec<String>,
 
     /// The version of the block format.
@@ -71,7 +71,10 @@ pub struct GetBlockTemplate {
     // TODO: use ExpandedDifficulty type.
     pub target: String,
 
-    /// Last block time plus block spacing.
+    /// > For each block other than the genesis block, nTime MUST be strictly greater than
+    /// > the median-time-past of that block.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#blockheader>
     #[serde(rename = "mintime")]
     // TODO: use DateTime32 type?
     pub min_time: i64,
@@ -91,7 +94,10 @@ pub struct GetBlockTemplate {
     #[serde(rename = "sizelimit")]
     pub size_limit: u64,
 
-    /// The current system time as seconds since epoch.
+    /// > the current time as seen by the server (recommended for block time).
+    /// > note this is not necessarily the system clock, and must fall within the mintime/maxtime rules
+    ///
+    /// <https://en.bitcoin.it/wiki/BIP_0022#Block_Template_Request>
     // TODO: use DateTime32 type?
     #[serde(rename = "curtime")]
     pub cur_time: i64,
