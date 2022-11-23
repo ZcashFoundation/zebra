@@ -17,9 +17,6 @@
 
 use std::{fmt, sync::Arc};
 
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
-
 use crate::{
     amount::{Amount, NonNegative},
     serialization::ZcashSerialize,
@@ -31,6 +28,11 @@ use crate::{
 };
 
 use UnminedTxId::*;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
+mod zip317;
 
 /// The minimum cost value for a transaction in the mempool.
 ///
