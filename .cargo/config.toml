@@ -36,10 +36,9 @@ rustflags = [
     "-Wclippy::unnecessary_cast",
 
     # Incomplete code
-    "-Wmissing_docs",
     "-Wclippy::dbg_macro",
     "-Wclippy::todo",
-
+    
     # Manual debugging output.
     # Use tracing::trace!() or tracing::debug!() instead.
     "-Wclippy::print_stdout",
@@ -49,12 +48,18 @@ rustflags = [
     # Code styles we want to accept
     "-Aclippy::try_err",
 
-    # Links in public docs can point to private items.
-    "-Arustdoc::private_intra_doc_links",
-
     # Panics
     "-Wclippy::fallible_impl_from",
     "-Wclippy::unwrap_in_result",
+    
+    # Documentation
+    "-Wmissing_docs",
+
+    # These rustdoc -A and -W settings must be the same as the RUSTDOCFLAGS in:
+    # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/lint.yml#L152
+    
+    # Links in public docs can point to private items.
+    "-Arustdoc::private_intra_doc_links",
 
     # TODOs:
     # `cargo fix` might help do these fixes,
