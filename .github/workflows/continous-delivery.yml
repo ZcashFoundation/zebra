@@ -40,7 +40,7 @@ jobs:
   # - If our semver is `v1.3.0` the resulting output from this job would be `v1`
   #
   # Note: We just use the first part of the version to replace old instances, and change
-  # it when a major version is released, to keep a segregation between new and old 
+  # it when a major version is released, to keep a segregation between new and old
   # versions.
   versioning:
     name: Versioning
@@ -104,6 +104,17 @@ jobs:
         with:
           short-length: 7
 
+      # Makes the Zcash network name lowercase.
+      #
+      # Labels in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase ${{ inputs.network || env.DEFAULT_NETWORK }}.
+      #
+      # Passes the lowercase network to subsequent steps using $NETWORK env variable.
+      - name: Downcase network name for labels
+        run: |
+          NETWORK_CAPS=${{ inputs.network || env.DEFAULT_NETWORK }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -129,7 +140,7 @@ jobs:
           --container-mount-disk=mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
-          --labels=app=zebrad,environment=prod,network=${{ inputs.network || env.DEFAULT_NETWORK }},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
+          --labels=app=zebrad,environment=prod,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zebrad
 
       # Check if our destination instance group exists already
@@ -210,5 +221,5 @@ jobs:
           --container-mount-disk=mount-path='/zebrad-cache' \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --zone ${{ env.ZONE }} \
-          --labels=app=zebrad,environment=qa,network=${{ inputs.network || env.DEFAULT_NETWORK }},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
+          --labels=app=zebrad,environment=qa,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zebrad

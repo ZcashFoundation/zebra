@@ -125,6 +125,17 @@ jobs:
         with:
           short-length: 7
 
+      # Makes the Zcash network name lowercase.
+      #
+      # Labels in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase ${{ inputs.network }}.
+      #
+      # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
+      - name: Downcase network name for labels
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
       # Install our SSH secret
       - name: Install private SSH key
         uses: shimataro/ssh-key-action@v2.4.0
@@ -163,7 +174,7 @@ jobs:
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
-          --labels=app=${{ inputs.app_name }},environment=test,network=${{ inputs.network }},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
+          --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
           sleep 60
@@ -272,7 +283,7 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
+      - name: Downcase network name for disks and labels
         run: |
           NETWORK_CAPS=${{ inputs.network }}
           echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
@@ -404,7 +415,7 @@ jobs:
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
-          --labels=app=${{ inputs.app_name }},environment=test,network=${{ inputs.network }},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
+          --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
           sleep 60

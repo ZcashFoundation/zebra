@@ -37,6 +37,17 @@ jobs:
         with:
           short-length: 7
 
+      # Performs formatting on the Zcash network name.
+      #
+      # Labels in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase ${{ inputs.network }}.
+      #
+      # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
+      - name: Format network name for labels
+        run: |
+          NETWORK_CAPS=${{ inputs.network }}
+          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -64,7 +75,7 @@ jobs:
           --machine-type ${{ env.MACHINE_TYPE }} \
           --service-account ${{ env.DEPLOY_SA }} \
           --scopes cloud-platform \
-          --labels=app=zcashd,environment=prod,network=${{ inputs.network }},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
+          --labels=app=zcashd,environment=prod,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zcashd
 
       # Check if our destination instance group exists already
