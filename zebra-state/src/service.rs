@@ -1092,12 +1092,11 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let tip = state
-                            .non_finalized_state_receiver
-                            .with_watch_data(|non_finalized_state| {
+                        let tip = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
                                 read::tip(non_finalized_state.best_chain(), &state.db)
-                            })
-                            .map(|t| (t.0, t.1));
+                            },
+                        );
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Tip");
