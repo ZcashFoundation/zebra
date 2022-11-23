@@ -1,12 +1,10 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
-assertion_line: 159
+assertion_line: 199
 expression: block_template
 ---
 {
-  "capabilities": [
-    "proposal"
-  ],
+  "capabilities": [],
   "version": 4,
   "previousblockhash": "0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8",
   "blockcommitmentshash": "0000000000000000000000000000000000000000000000000000000000000000",

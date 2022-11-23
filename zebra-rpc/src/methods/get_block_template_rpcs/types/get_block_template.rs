@@ -19,7 +19,7 @@ pub struct GetBlockTemplate {
     /// - `longpoll`: <https://en.bitcoin.it/wiki/BIP_0022#Optional:_Long_Polling>
     /// - `serverlist`: <https://en.bitcoin.it/wiki/BIP_0023#Logical_Services>
     ///
-    /// In zcashd, this field is hardcoded to ["proposal"]. We do the same in zebra.
+    /// By the above, Zebra wil lalways return an empty vector here.
     pub capabilities: Vec<String>,
 
     /// The version of the block format.

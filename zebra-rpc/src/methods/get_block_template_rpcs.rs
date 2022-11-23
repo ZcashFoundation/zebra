@@ -358,7 +358,7 @@ where
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
 
             Ok(GetBlockTemplate {
-                capabilities: vec!["proposal".to_string()],
+                capabilities: Vec::new(),
 
                 version: ZCASH_BLOCK_VERSION,
 
