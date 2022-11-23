@@ -74,7 +74,7 @@ pub const FINISH_PARTIAL_SYNC_TIMEOUT: Duration = Duration::from_secs(11 * 60 * 
 
 /// The maximum time to wait for Zebrad to synchronize up to the chain tip starting from the
 /// genesis block.
-pub const FINISH_FULL_SYNC_TIMEOUT: Duration = Duration::from_secs(36 * 60 * 60);
+pub const FINISH_FULL_SYNC_TIMEOUT: Duration = Duration::from_secs(42 * 60 * 60);
 
 /// The test sync height where we switch to using the default lookahead limit.
 ///
