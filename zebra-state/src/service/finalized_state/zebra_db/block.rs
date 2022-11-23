@@ -62,12 +62,9 @@ impl ZebraDb {
     // TODO: rename to finalized_tip()
     //       move this method to the tip section
     #[allow(clippy::unwrap_in_result)]
-    pub fn tip(&self) -> Option<(block::Height, block::Hash, chrono::DateTime<chrono::Utc>)> {
+    pub fn tip(&self) -> Option<(block::Height, block::Hash)> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
-        let (height, hash) = self.db.zs_last_key_value(&hash_by_height)?;
-        let time = self.block_header(HashOrHeight::Height(height))?.time;
-
-        Some((height, hash, time))
+        self.db.zs_last_key_value(&hash_by_height)
     }
 
     /// Returns `true` if `height` is present in the finalized state.
@@ -187,19 +184,19 @@ impl ZebraDb {
     /// Returns the hash of the current finalized tip block.
     pub fn finalized_tip_hash(&self) -> block::Hash {
         self.tip()
-            .map(|(_, hash, _)| hash)
+            .map(|(_, hash)| hash)
             // if the state is empty, return the genesis previous block hash
             .unwrap_or(GENESIS_PREVIOUS_BLOCK_HASH)
     }
 
     /// Returns the height of the current finalized tip block.
     pub fn finalized_tip_height(&self) -> Option<block::Height> {
-        self.tip().map(|(height, _, _)| height)
+        self.tip().map(|(height, _)| height)
     }
 
     /// Returns the tip block, if there is one.
     pub fn tip_block(&self) -> Option<Arc<Block>> {
-        let (height, _hash, _) = self.tip()?;
+        let (height, _hash) = self.tip()?;
         self.block(height.into())
     }
 

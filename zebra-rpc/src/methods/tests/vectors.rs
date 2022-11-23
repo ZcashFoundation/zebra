@@ -835,6 +835,7 @@ async fn rpc_getblocktemplate() {
         tower::ServiceBuilder::new().service(chain_verifier),
     );
 
+    // Fake the ChainInfo response
     tokio::spawn(async move {
         read_state
             .clone()
@@ -842,7 +843,9 @@ async fn rpc_getblocktemplate() {
             .await
             .respond(ReadResponse::ChainInfo(Some(GetBlockTemplateChainInfo {
                 expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
-                tip: (fake_tip_height, fake_tip_hash, fake_tip_time),
+                tip: (fake_tip_height, fake_tip_hash),
+                median_time_past: fake_tip_time,
+                current_system_time: fake_tip_time,
             })));
     });
 
@@ -863,18 +866,14 @@ async fn rpc_getblocktemplate() {
         })
         .expect("unexpected error in getblocktemplate RPC call");
 
-    assert_eq!(
-        get_block_template.capabilities,
-        vec!["proposal".to_string()]
-    );
+    assert_eq!(get_block_template.capabilities, Vec::<String>::new());
     assert_eq!(get_block_template.version, ZCASH_BLOCK_VERSION);
     assert!(get_block_template.transactions.is_empty());
     assert_eq!(
         get_block_template.target,
         "0000000000000000000000000000000000000000000000000000000000000001"
     );
-    // nu5 + next block = 1654008605 + 75
-    assert_eq!(get_block_template.min_time, 1654008680);
+    assert_eq!(get_block_template.min_time, fake_tip_time.timestamp() + 1);
     assert_eq!(
         get_block_template.mutable,
         GET_BLOCK_TEMPLATE_MUTABLE_FIELD.to_vec()
@@ -885,7 +884,7 @@ async fn rpc_getblocktemplate() {
     );
     assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
     assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
-    assert!(get_block_template.cur_time > 1654008605); // greater than nu5 time
+    assert_eq!(get_block_template.cur_time, fake_tip_time.timestamp());
     assert_eq!(get_block_template.bits, "01010000");
     assert_eq!(get_block_template.height, 1687105); // nu5 height
 

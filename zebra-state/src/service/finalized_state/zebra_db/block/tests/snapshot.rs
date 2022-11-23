@@ -209,7 +209,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
     insta::assert_ron_snapshot!("tip", tip.map(|t| (t.0, t.1)).map(Tip::from));
 
-    if let Some((max_height, tip_block_hash, _tip_time)) = tip {
+    if let Some((max_height, tip_block_hash)) = tip {
         // Check that the database returns empty note commitment trees for the
         // genesis block.
         let sapling_tree = state

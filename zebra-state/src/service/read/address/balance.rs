@@ -86,7 +86,7 @@ fn finalized_transparent_balance(
         return Err("unable to get balance: state was committing a block".into());
     }
 
-    let finalized_tip = finalized_tip.map(|(height, _hash, _time)| height);
+    let finalized_tip = finalized_tip.map(|(height, _hash)| height);
 
     Ok((finalized_balance, finalized_tip))
 }

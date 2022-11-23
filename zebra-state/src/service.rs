@@ -1566,19 +1566,26 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let get_block_template_info = read::tip(
-                            latest_non_finalized_state.best_chain(),
-                            &state.db,
-                        )
-                        .map(|tip| GetBlockTemplateChainInfo {
-                            tip,
-                            expected_difficulty: read::difficulty::relevant_chain_difficulty(
-                                &latest_non_finalized_state,
-                                &state.db,
-                                tip,
-                                state.network,
-                            ),
-                        });
+                        let get_block_template_info =
+                            read::tip(latest_non_finalized_state.best_chain(), &state.db).map(
+                                |tip| {
+                                    let current_system_time = chrono::Utc::now();
+                                    let adjusted_difficulty_data =
+                                        read::difficulty::adjusted_difficulty_data(
+                                            &latest_non_finalized_state,
+                                            &state.db,
+                                            tip,
+                                            state.network,
+                                            &current_system_time,
+                                        );
+                                    GetBlockTemplateChainInfo {
+                                        tip,
+                                        expected_difficulty: adjusted_difficulty_data.0,
+                                        median_time_past: adjusted_difficulty_data.1,
+                                        current_system_time,
+                                    }
+                                },
+                            );
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");

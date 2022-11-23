@@ -7,7 +7,7 @@
 
 use chrono::{TimeZone, Utc};
 use hex::FromHex;
-use insta::{dynamic_redaction, Settings};
+use insta::Settings;
 use tower::{buffer::Buffer, Service};
 
 use zebra_chain::{
@@ -135,7 +135,9 @@ pub async fn test_responses<State, ReadState>(
         chain_verifier,
     );
 
-    // fake tip and difficulty for `getblocktemplate`
+    // `getblocktemplate`
+
+    // Fake the ChainInfo response
     tokio::spawn(async move {
         new_read_state
             .clone()
@@ -143,11 +145,11 @@ pub async fn test_responses<State, ReadState>(
             .await
             .respond(ReadResponse::ChainInfo(Some(GetBlockTemplateChainInfo {
                 expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
-                tip: (fake_tip_height, fake_tip_hash, fake_tip_time),
+                tip: (fake_tip_height, fake_tip_hash),
+                median_time_past: fake_tip_time,
+                current_system_time: fake_tip_time,
             })));
     });
-
-    // `getblocktemplate`
 
     let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
 
@@ -195,16 +197,7 @@ fn snapshot_rpc_getblocktemplate(
     coinbase_tx: Transaction,
     settings: &insta::Settings,
 ) {
-    settings.bind(|| {
-        insta::assert_json_snapshot!("get_block_template", block_template, {
-            ".curtime" => dynamic_redaction(|_value, _path| {
-                // TODO: assert that the value looks like a valid time.
-
-                // replace with:
-                "[Time]"
-            }),
-        })
-    });
+    settings.bind(|| insta::assert_json_snapshot!("get_block_template", block_template));
     settings.bind(|| insta::assert_json_snapshot!("get_block_template.coinbase_tx", coinbase_tx));
 }
 

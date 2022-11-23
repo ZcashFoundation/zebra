@@ -1,5 +1,6 @@
 //! Get context and calculate difficulty for the next block.
 
+use chrono::{DateTime, Utc};
 use std::borrow::Borrow;
 
 use zebra_chain::{
@@ -15,20 +16,26 @@ use crate::service::{
     NonFinalizedState,
 };
 
-/// Return the CompactDifficulty for the current best chain.
+/// Return the `CompactDifficulty` and `median_past_time` for the current best chain.
 ///
 /// Panic if we don't have enough blocks in the state.
-pub fn relevant_chain_difficulty(
+pub fn adjusted_difficulty_data(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
-    tip: (Height, Hash, chrono::DateTime<chrono::Utc>),
+    tip: (Height, Hash),
     network: Network,
-) -> CompactDifficulty {
+    current_system_time: &DateTime<Utc>,
+) -> (CompactDifficulty, DateTime<Utc>) {
     let relevant_chain = any_ancestor_blocks(non_finalized_state, db, tip.1);
-    difficulty(relevant_chain, tip.0, network)
+    difficulty(relevant_chain, tip.0, network, current_system_time)
 }
 
-fn difficulty<C>(relevant_chain: C, tip_height: Height, network: Network) -> CompactDifficulty
+fn difficulty<C>(
+    relevant_chain: C,
+    tip_height: Height,
+    network: Network,
+    current_system_time: &DateTime<Utc>,
+) -> (CompactDifficulty, chrono::DateTime<chrono::Utc>)
 where
     C: IntoIterator,
     C::Item: Borrow<Block>,
@@ -52,9 +59,15 @@ where
     // So this will never happen in production code.
     assert!(relevant_data.len() < MAX_CONTEXT_BLOCKS);
 
-    let time = chrono::Utc::now();
-    let difficulty_adjustment =
-        AdjustedDifficulty::new_from_header_time(time, tip_height, network, relevant_data);
+    let difficulty_adjustment = AdjustedDifficulty::new_from_header_time(
+        *current_system_time,
+        tip_height,
+        network,
+        relevant_data,
+    );
 
-    difficulty_adjustment.expected_difficulty_threshold()
+    (
+        difficulty_adjustment.expected_difficulty_threshold(),
+        difficulty_adjustment.median_time_past(),
+    )
 }

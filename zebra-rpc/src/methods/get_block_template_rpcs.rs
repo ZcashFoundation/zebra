@@ -17,7 +17,7 @@ use zebra_chain::{
         Block, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
     },
     chain_tip::ChainTip,
-    parameters::{Network, POST_BLOSSOM_POW_TARGET_SPACING},
+    parameters::Network,
     serialization::ZcashDeserializeInto,
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
@@ -340,13 +340,12 @@ where
             // Get all the tip data from the state call
             let tip_height = chain_info.tip.0;
             let tip_hash = chain_info.tip.1;
-            let tip_time = chain_info.tip.2;
 
             let block_height = (tip_height + 1).expect("tip is far below Height::MAX");
-            let block_time = tip_time
-                .checked_add_signed(Duration::seconds(POST_BLOSSOM_POW_TARGET_SPACING))
+            let min_time = chain_info.median_time_past.checked_add_signed(Duration::seconds(1))
                 .expect("tip plus a small constant is far below i64::MAX")
                 .timestamp();
+
             let outputs =
                 standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
             let coinbase_tx = Transaction::new_v5_coinbase(network, block_height, outputs).into();
@@ -388,7 +387,7 @@ where
                         })?
                 ),
 
-                min_time: block_time,
+                min_time,
 
                 mutable: constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD
                     .iter()
@@ -401,7 +400,7 @@ where
 
                 size_limit: MAX_BLOCK_BYTES,
 
-                cur_time: chrono::Utc::now().timestamp(),
+                cur_time: chain_info.current_system_time.timestamp(),
 
                 bits: format!("{:#010x}", chain_info.expected_difficulty.to_value())
                     .drain(2..)

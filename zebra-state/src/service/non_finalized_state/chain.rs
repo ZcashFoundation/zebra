@@ -499,11 +499,10 @@ impl Chain {
     }
 
     /// Returns the non-finalized tip block height, hash and time.
-    pub fn non_finalized_tip(&self) -> (Height, block::Hash, chrono::DateTime<chrono::Utc>) {
+    pub fn non_finalized_tip(&self) -> (Height, block::Hash) {
         (
             self.non_finalized_tip_height(),
             self.non_finalized_tip_hash(),
-            self.non_finalized_tip_time(),
         )
     }
 
@@ -576,17 +575,6 @@ impl Chain {
             .next_back()
             .expect("only called while blocks is populated")
             .hash
-    }
-
-    /// Returns the block time of the tip block.
-    pub fn non_finalized_tip_time(&self) -> chrono::DateTime<chrono::Utc> {
-        self.blocks
-            .values()
-            .next_back()
-            .expect("only called while blocks is populated")
-            .block
-            .header
-            .time
     }
 
     /// Returns the non-finalized root block hash and height.
