@@ -52,6 +52,12 @@ mod zip317;
 /// [ZIP-401]: https://zips.z.cash/zip-0401
 const MEMPOOL_TRANSACTION_COST_THRESHOLD: u64 = 4000;
 
+/// When a transaction pays a fee less than the conventional fee,
+/// this low fee penatly is added to its cost for mempool eviction.
+///
+/// See [VerifiedUnminedTx::eviction_weight()] for details.
+const MEMPOOL_TRANSACTION_LOW_FEE_PENALTY: u64 = 16_000;
+
 /// A unique identifier for an unmined transaction, regardless of version.
 ///
 /// "The transaction ID of a version 4 or earlier transaction is the SHA-256d hash
@@ -203,6 +209,11 @@ pub struct UnminedTx {
 
     /// The size in bytes of the serialized transaction data
     pub size: usize,
+
+    /// The conventional fee for this transaction, as defined by [ZIP-317].
+    ///
+    /// [ZIP-317]: https://zips.z.cash/zip-0317#fee-calculation
+    pub conventional_fee: Amount<NonNegative>,
 }
 
 impl fmt::Display for UnminedTx {
@@ -210,6 +221,7 @@ impl fmt::Display for UnminedTx {
         f.debug_struct("UnminedTx")
             .field("transaction", &self.transaction)
             .field("serialized_size", &self.size)
+            .field("conventional_fee", &self.conventional_fee)
             .finish()
     }
 }
@@ -223,11 +235,14 @@ impl From<Transaction> for UnminedTx {
             "unexpected serialization failure: all structurally valid transactions have a size",
         );
 
+        let conventional_fee = zip317::conventional_fee(&transaction);
+
         // The borrow is actually needed to avoid taking ownership
         #[allow(clippy::needless_borrow)]
         Self {
             id: (&transaction).into(),
             size,
+            conventional_fee,
             transaction: Arc::new(transaction),
         }
     }
@@ -239,10 +254,13 @@ impl From<&Transaction> for UnminedTx {
             "unexpected serialization failure: all structurally valid transactions have a size",
         );
 
+        let conventional_fee = zip317::conventional_fee(transaction);
+
         Self {
             id: transaction.into(),
-            transaction: Arc::new(transaction.clone()),
             size,
+            conventional_fee,
+            transaction: Arc::new(transaction.clone()),
         }
     }
 }
@@ -253,10 +271,13 @@ impl From<Arc<Transaction>> for UnminedTx {
             "unexpected serialization failure: all structurally valid transactions have a size",
         );
 
+        let conventional_fee = zip317::conventional_fee(&transaction);
+
         Self {
             id: transaction.as_ref().into(),
-            transaction,
             size,
+            conventional_fee,
+            transaction,
         }
     }
 }
@@ -267,10 +288,13 @@ impl From<&Arc<Transaction>> for UnminedTx {
             "unexpected serialization failure: all structurally valid transactions have a size",
         );
 
+        let conventional_fee = zip317::conventional_fee(transaction);
+
         Self {
             id: transaction.as_ref().into(),
-            transaction: transaction.clone(),
             size,
+            conventional_fee,
+            transaction: transaction.clone(),
         }
     }
 }
@@ -329,31 +353,34 @@ impl VerifiedUnminedTx {
     /// [ZIP-401]: https://zips.z.cash/zip-0401
     pub fn cost(&self) -> u64 {
         std::cmp::max(
-            self.transaction.size as u64,
+            u64::try_from(self.transaction.size).expect("fits in u64"),
             MEMPOOL_TRANSACTION_COST_THRESHOLD,
         )
     }
 
     /// The computed _eviction weight_ of a verified unmined transaction as part
-    /// of the mempool set.
+    /// of the mempool set, as defined in [ZIP-317] and [ZIP-401].
     ///
-    /// Consensus rule:
+    /// Standard rule:
     ///
     /// > Each transaction also has an eviction weight, which is cost +
     /// > low_fee_penalty, where low_fee_penalty is 16000 if the transaction pays
-    /// > a fee less than the conventional fee, otherwise 0. The conventional fee
-    /// > is currently defined as 1000 zatoshis
+    /// > a fee less than the conventional fee, otherwise 0.
     ///
+    /// > zcashd and zebrad limit the size of the mempool as described in [ZIP-401].
+    /// > This specifies a that is added to the "eviction weight" if the transaction
+    /// > pays a fee less than the conventional transaction fee. This threshold is
+    /// > modified to use the new conventional fee formula.
+    ///
+    /// [ZIP-317]: https://zips.z.cash/zip-0317#mempool-size-limiting
     /// [ZIP-401]: https://zips.z.cash/zip-0401
-    pub fn eviction_weight(self) -> u64 {
-        let conventional_fee = 1000;
+    pub fn eviction_weight(&self) -> u64 {
+        let mut cost = self.cost();
 
-        let low_fee_penalty = if u64::from(self.miner_fee) < conventional_fee {
-            16_000
-        } else {
-            0
-        };
+        if self.miner_fee < self.transaction.conventional_fee {
+            cost += MEMPOOL_TRANSACTION_LOW_FEE_PENALTY
+        }
 
-        self.cost() + low_fee_penalty
+        cost
     }
 }
