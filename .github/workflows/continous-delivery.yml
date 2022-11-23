@@ -71,7 +71,7 @@ jobs:
       dockerfile_target: runtime
       image_name: zebrad
       # We need to hard-code Mainnet here, because env is not allowed in this context
-      network: ${{ inputs.network || Mainnet }}
+      network: ${{ inputs.network || 'Mainnet' }}
       checkpoint_sync: true
       rust_backtrace: '1'
       zebra_skip_ipv6_tests: '1'
@@ -89,7 +89,7 @@ jobs:
   # - on every push/merge to the `main` branch
   # - on every release, when it's published
   deploy-nodes:
-    name: Deploy ${{ inputs.network || Mainnet }} nodes
+    name: Deploy ${{ inputs.network || 'Mainnet' }} nodes
     needs: [ build, versioning ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -107,12 +107,12 @@ jobs:
       # Makes the Zcash network name lowercase.
       #
       # Labels in GCP are required to be in lowercase, but the blockchain network
-      # uses sentence case, so we need to downcase ${{ inputs.network || Mainnet }}.
+      # uses sentence case, so we need to downcase ${{ inputs.network || 'Mainnet' }}.
       #
       # Passes the lowercase network to subsequent steps using $NETWORK env variable.
       - name: Downcase network name for labels
         run: |
-          NETWORK_CAPS="${{ inputs.network || Mainnet }}"
+          NETWORK_CAPS="${{ inputs.network || 'Mainnet' }}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
 
       # Setup gcloud CLI
