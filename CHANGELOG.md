@@ -6,18 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Zebra 1.0.0-rc.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.2) - 2022-11-TODO
 
-Zebra's latest release continues work on mining pool RPCs, and fixes a rare RPC crash that could lead to memory corruption.
+Zebra's latest release continues work on mining pool RPCs, fixes a rare RPC crash that could lead to memory corruption, and uses the ZIP-317 conventional fee for mempool size limits.
 
 Zebra's consensus rules, node sync, and `lightwalletd` RPCs are ready for user testing and experimental use. Zebra has not been audited yet.
 
 ### Breaking Changes
 
 This release has the following breaking changes:
+- Evict transactions from the mempool using the ZIP-317 conventional fee ([#5703](https://github.com/ZcashFoundation/zebra/pull/5703))
+  - If there are a lot of unmined transactions on the Zcash network, and Zebra's mempool
+    becomes full, Zebra will penalise transactions that don't pay at least the ZIP-317
+    conventional fee. These transactions will be more likely to get evicted.
+  - The ZIP-317 convention fee increases based on the number of logical transparent or
+    shielded actions in a transaction.
+  - This change has no impact under normal network conditions.
 - TODO: search the changelog for breaking changes
 
 ### Security
 
 - Fix a rare crash and memory errors when Zebra's RPC server shuts down ([#5591](https://github.com/ZcashFoundation/zebra/pull/5591))
+- Evict transactions from the mempool using the ZIP-317 conventional fee ([#5703](https://github.com/ZcashFoundation/zebra/pull/5703))
 
 TODO: the rest of the changelog
 
