@@ -36,7 +36,7 @@ pub fn best_tip(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
 ) -> Option<(block::Height, block::Hash)> {
-    tip(non_finalized_state.best_chain(), db).map(|t| (t.0, t.1))
+    tip(non_finalized_state.best_chain(), db)
 }
 
 /// Returns the tip of `chain`.
