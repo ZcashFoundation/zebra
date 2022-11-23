@@ -356,7 +356,7 @@ impl VerifiedUnminedTx {
     /// > a fee less than the conventional fee, otherwise 0.
     ///
     /// > zcashd and zebrad limit the size of the mempool as described in [ZIP-401].
-    /// > This specifies a that is added to the "eviction weight" if the transaction
+    /// > This specifies a low fee penalty that is added to the "eviction weight" if the transaction
     /// > pays a fee less than the conventional transaction fee. This threshold is
     /// > modified to use the new conventional fee formula.
     ///
