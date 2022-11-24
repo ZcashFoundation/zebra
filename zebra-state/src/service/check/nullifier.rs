@@ -1,12 +1,14 @@
 //! Checks for nullifier uniqueness.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use tracing::trace;
+use zebra_chain::transaction::Transaction;
 
 use crate::{
-    error::DuplicateNullifierError, service::finalized_state::ZebraDb, PreparedBlock,
-    ValidateContextError,
+    error::DuplicateNullifierError,
+    service::{finalized_state::ZebraDb, non_finalized_state::Chain},
+    PreparedBlock, ValidateContextError,
 };
 
 // Tidy up some doc links
@@ -48,6 +50,91 @@ pub(crate) fn no_duplicates_in_finalized_chain(
     for nullifier in prepared.block.orchard_nullifiers() {
         if finalized_state.contains_orchard_nullifier(nullifier) {
             Err(nullifier.duplicate_nullifier_error(true))?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Reject double-spends of nullifiers:
+/// - one from this [`Transaction`], and the other already committed to the
+///   provided [`ZebraDb`].
+///
+/// # Consensus
+///
+/// > A nullifier MUST NOT repeat either within a transaction,
+/// > or across transactions in a valid blockchain.
+/// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
+/// > even if they have the same bit pattern.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
+#[tracing::instrument(skip_all)]
+fn tx_no_duplicates_in_finalized_chain(
+    finalized_chain: &ZebraDb,
+    transaction: Arc<Transaction>,
+) -> Result<(), ValidateContextError> {
+    for nullifier in transaction.sprout_nullifiers() {
+        if finalized_chain.contains_sprout_nullifier(nullifier) {
+            Err(nullifier.duplicate_nullifier_error(true))?;
+        }
+    }
+
+    for nullifier in transaction.sapling_nullifiers() {
+        if finalized_chain.contains_sapling_nullifier(nullifier) {
+            Err(nullifier.duplicate_nullifier_error(true))?;
+        }
+    }
+
+    for nullifier in transaction.orchard_nullifiers() {
+        if finalized_chain.contains_orchard_nullifier(nullifier) {
+            Err(nullifier.duplicate_nullifier_error(true))?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Reject double-spends of nullifiers:
+/// - one from this [`Transaction`], and the other already committed to the
+///   provided non-finalized [`Chain`] or [`ZebraDb`].
+///
+/// # Consensus
+///
+/// > A nullifier MUST NOT repeat either within a transaction,
+/// > or across transactions in a valid blockchain.
+/// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
+/// > even if they have the same bit pattern.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
+#[tracing::instrument(skip_all)]
+pub(crate) fn tx_no_duplicates_in_chain(
+    non_finalized_chain: Option<&Arc<Chain>>,
+    finalized_chain: &ZebraDb,
+    transaction: Arc<Transaction>,
+) -> Result<(), ValidateContextError> {
+    let non_finalized_chain = match non_finalized_chain {
+        None => return tx_no_duplicates_in_finalized_chain(finalized_chain, transaction),
+        Some(non_finalized_chain) => non_finalized_chain,
+    };
+
+    for nullifier in transaction.sprout_nullifiers() {
+        let is_in_non_finalized_state = non_finalized_chain.sprout_nullifiers.contains(nullifier);
+        if is_in_non_finalized_state || finalized_chain.contains_sprout_nullifier(nullifier) {
+            Err(nullifier.duplicate_nullifier_error(!is_in_non_finalized_state))?;
+        }
+    }
+
+    for nullifier in transaction.sapling_nullifiers() {
+        let is_in_non_finalized_state = non_finalized_chain.sapling_nullifiers.contains(nullifier);
+        if is_in_non_finalized_state || finalized_chain.contains_sapling_nullifier(nullifier) {
+            Err(nullifier.duplicate_nullifier_error(!is_in_non_finalized_state))?;
+        }
+    }
+
+    for nullifier in transaction.orchard_nullifiers() {
+        let is_in_non_finalized_state = non_finalized_chain.orchard_nullifiers.contains(nullifier);
+        if is_in_non_finalized_state || finalized_chain.contains_orchard_nullifier(nullifier) {
+            Err(nullifier.duplicate_nullifier_error(!is_in_non_finalized_state))?;
         }
     }
 

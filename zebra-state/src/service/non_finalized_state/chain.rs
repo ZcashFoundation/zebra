@@ -105,11 +105,11 @@ pub struct Chain {
     pub(crate) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
 
     /// The Sprout nullifiers revealed by `blocks`.
-    pub(super) sprout_nullifiers: HashSet<sprout::Nullifier>,
+    pub(crate) sprout_nullifiers: HashSet<sprout::Nullifier>,
     /// The Sapling nullifiers revealed by `blocks`.
-    pub(super) sapling_nullifiers: HashSet<sapling::Nullifier>,
+    pub(crate) sapling_nullifiers: HashSet<sapling::Nullifier>,
     /// The Orchard nullifiers revealed by `blocks`.
-    pub(super) orchard_nullifiers: HashSet<orchard::Nullifier>,
+    pub(crate) orchard_nullifiers: HashSet<orchard::Nullifier>,
 
     /// Partial transparent address index data from `blocks`.
     pub(super) partial_transparent_transfers: HashMap<transparent::Address, TransparentTransfers>,
