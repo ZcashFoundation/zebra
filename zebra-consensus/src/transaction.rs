@@ -343,17 +343,6 @@ where
 
             check::spend_conflicts(&tx)?;
 
-
-            if req.is_mempool() {
-                let check_anchors_and_revealed_nullifiers_query = state
-                    .clone()
-                    .oneshot(zs::Request::CheckBestChainTipShieldedSpends(
-                        req.transaction(),
-                    ));
-
-                assert!(check_anchors_and_revealed_nullifiers_query.await? == zs::Response::ValidBestChainTipShieldedSpends);
-            }
-
             tracing::trace!(?tx_id, "passed quick checks");
 
             // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
@@ -368,15 +357,16 @@ where
 
             // Load spent UTXOs from state.
             // TODO: Make this a method of `Request` and replace `tx.clone()` with `self.transaction()`?
-            let (spent_utxos, spent_outputs) =
-                Self::spent_utxos(tx.clone(), req.known_utxos(), req.is_mempool(), state).await?;
+            let check_spent_utxos =
+                Self::spent_utxos(tx.clone(), req.known_utxos(), req.is_mempool(), state.clone());
+            let (spent_utxos, spent_outputs) = check_spent_utxos.await?;
 
             let cached_ffi_transaction =
                 Arc::new(CachedFfiTransaction::new(tx.clone(), spent_outputs));
 
             tracing::trace!(?tx_id, "got state UTXOs");
 
-            let async_checks = match tx.as_ref() {
+            let mut async_checks = match tx.as_ref() {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");
                     return Err(TransactionError::WrongVersion);
@@ -406,6 +396,21 @@ where
                     orchard_shielded_data,
                 )?,
             };
+
+            if req.is_mempool() {
+                let check_anchors_and_revealed_nullifiers_query = state
+                    .clone()
+                    .oneshot(zs::Request::CheckBestChainTipShieldedSpends(
+                        req.transaction(),
+                    ))
+                    .map(|res| {
+                        assert!(res? == zs::Response::ValidBestChainTipShieldedSpends);
+                        Ok(())
+                    }
+                );
+
+                async_checks.push(check_anchors_and_revealed_nullifiers_query);
+            }
 
             tracing::trace!(?tx_id, "awaiting async checks...");
 
