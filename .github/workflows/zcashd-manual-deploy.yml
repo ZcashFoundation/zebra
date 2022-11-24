@@ -64,6 +64,7 @@ jobs:
           --machine-type ${{ env.MACHINE_TYPE }} \
           --service-account ${{ env.DEPLOY_SA }} \
           --scopes cloud-platform \
+          --labels=app=zcashd,environment=prod,github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zcashd
 
       # Check if our destination instance group exists already
