@@ -189,17 +189,57 @@ async fn mempool_request_with_missing_input_is_rejected() {
         .find(|(_, tx)| !(tx.is_coinbase() || tx.inputs().is_empty()))
         .expect("At least one non-coinbase transaction with transparent inputs in test vectors");
 
-    let expected_state_request = zebra_state::Request::UnspentBestChainUtxo(match tx.inputs()[0] {
+    let input_outpoint = match tx.inputs()[0] {
         transparent::Input::PrevOut { outpoint, .. } => outpoint,
         transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
-    });
+    };
 
     tokio::spawn(async move {
         state
-            .expect_request(expected_state_request)
+            .expect_request_that(|req| {
+                matches!(req, zebra_state::Request::TransactionContextualValidity(_))
+            })
+            .await
+            .expect("verifier should call mock state service")
+            .respond(zebra_state::Response::ContextuallyValid);
+
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
             .await
             .expect("verifier should call mock state service")
             .respond(zebra_state::Response::UnspentBestChainUtxo(None));
+    });
+
+    let verifier_response = verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await;
+
+    assert_eq!(
+        verifier_response,
+        Err(TransactionError::TransparentInputNotFound)
+    );
+}
+
+#[tokio::test]
+async fn mempool_request_with_invalid_input_is_rejected() {
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let verifier = Verifier::new(Network::Mainnet, state.clone());
+
+    let (height, tx) = transactions_from_blocks(zebra_test::vectors::MAINNET_BLOCKS.iter())
+        .find(|(_, tx)| !(tx.is_coinbase() || tx.inputs().is_empty()))
+        .expect("At least one non-coinbase transaction with transparent inputs in test vectors");
+
+    tokio::spawn(async move {
+        state
+            .expect_request_that(|req| {
+                matches!(req, zebra_state::Request::TransactionContextualValidity(_))
+            })
+            .await
+            .expect("verifier should call mock state service")
+            .respond(Err("duplicate nullifier or invalid anchor"));
     });
 
     let verifier_response = verifier
@@ -242,6 +282,14 @@ async fn mempool_request_with_present_input_is_accepted() {
     };
 
     tokio::spawn(async move {
+        state
+            .expect_request_that(|req| {
+                matches!(req, zebra_state::Request::TransactionContextualValidity(_))
+            })
+            .await
+            .expect("verifier should call mock state service")
+            .respond(zebra_state::Response::ContextuallyValid);
+
         state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
             .await
