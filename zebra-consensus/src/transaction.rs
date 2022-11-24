@@ -343,6 +343,15 @@ where
 
             check::spend_conflicts(&tx)?;
 
+
+            let check_anchors_and_revealed_nullifiers_query = state
+                .clone()
+                .oneshot(zs::Request::TransactionContextualValidity(
+                    req.transaction(),
+                ));
+
+            check_anchors_and_revealed_nullifiers_query.await?;
+
             tracing::trace!(?tx_id, "passed quick checks");
 
             // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig

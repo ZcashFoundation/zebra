@@ -68,10 +68,12 @@ pub(crate) fn no_duplicates_in_finalized_chain(
 /// > even if they have the same bit pattern.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
+// TODO: impl nullifier getters for a trait and use a generic type to unify
+//       this fn with the one for `PreparedBlock`
 #[tracing::instrument(skip_all)]
 fn tx_no_duplicates_in_finalized_chain(
     finalized_chain: &ZebraDb,
-    transaction: Arc<Transaction>,
+    transaction: &Arc<Transaction>,
 ) -> Result<(), ValidateContextError> {
     for nullifier in transaction.sprout_nullifiers() {
         if finalized_chain.contains_sprout_nullifier(nullifier) {
@@ -110,7 +112,7 @@ fn tx_no_duplicates_in_finalized_chain(
 pub(crate) fn tx_no_duplicates_in_chain(
     non_finalized_chain: Option<&Arc<Chain>>,
     finalized_chain: &ZebraDb,
-    transaction: Arc<Transaction>,
+    transaction: &Arc<Transaction>,
 ) -> Result<(), ValidateContextError> {
     let non_finalized_chain = match non_finalized_chain {
         None => return tx_no_duplicates_in_finalized_chain(finalized_chain, transaction),

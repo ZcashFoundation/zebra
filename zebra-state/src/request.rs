@@ -14,7 +14,8 @@ use zebra_chain::{
     parallel::tree::NoteCommitmentTrees,
     sapling,
     serialization::SerializationError,
-    sprout, transaction,
+    sprout,
+    transaction::{self, Transaction},
     transparent::{self, utxos_from_ordered_utxos},
     value_balance::{ValueBalance, ValueBalanceError},
 };
@@ -539,6 +540,11 @@ pub enum Request {
         /// Optionally, the hash of the last header to request.
         stop: Option<block::Hash>,
     },
+
+    /// Contextually validates anchors and nullifiers of a transaction on the best chain
+    ///
+    /// Returns [`Response::Valid`].
+    TransactionContextualValidity(Arc<Transaction>),
 }
 
 impl Request {
@@ -555,6 +561,7 @@ impl Request {
             Request::Block(_) => "block",
             Request::FindBlockHashes { .. } => "find_block_hashes",
             Request::FindBlockHeaders { .. } => "find_block_headers",
+            Request::TransactionContextualValidity(_) => "transaction_contextual_validity",
         }
     }
 
@@ -736,6 +743,11 @@ pub enum ReadRequest {
     /// Returns a type with found utxos and transaction information.
     UtxosByAddresses(HashSet<transparent::Address>),
 
+    /// Contextually validates anchors and nullifiers of a transaction on the best chain
+    ///
+    /// Returns [`ReadResponse::Valid`].
+    TransactionContextualValidity(Arc<Transaction>),
+
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Looks up a block hash by height in the current best chain.
     ///
@@ -764,6 +776,7 @@ impl ReadRequest {
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addesses",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
+            ReadRequest::TransactionContextualValidity(_) => "transaction_contextual_validity",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
         }
@@ -803,6 +816,10 @@ impl TryFrom<Request> for ReadRequest {
             }
             Request::FindBlockHeaders { known_blocks, stop } => {
                 Ok(ReadRequest::FindBlockHeaders { known_blocks, stop })
+            }
+
+            Request::TransactionContextualValidity(tx) => {
+                Ok(ReadRequest::TransactionContextualValidity(tx))
             }
 
             Request::CommitBlock(_) | Request::CommitFinalizedBlock(_) => {

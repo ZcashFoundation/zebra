@@ -236,8 +236,8 @@ pub enum ValidateContextError {
     #[non_exhaustive]
     UnknownSproutAnchor {
         anchor: sprout::tree::Root,
-        height: block::Height,
-        tx_index_in_block: usize,
+        height: Option<block::Height>,
+        tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
 
@@ -248,8 +248,8 @@ pub enum ValidateContextError {
     #[non_exhaustive]
     UnknownSaplingAnchor {
         anchor: sapling::tree::Root,
-        height: block::Height,
-        tx_index_in_block: usize,
+        height: Option<block::Height>,
+        tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
 
@@ -260,8 +260,8 @@ pub enum ValidateContextError {
     #[non_exhaustive]
     UnknownOrchardAnchor {
         anchor: orchard::tree::Root,
-        height: block::Height,
-        tx_index_in_block: usize,
+        height: Option<block::Height>,
+        tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
 }

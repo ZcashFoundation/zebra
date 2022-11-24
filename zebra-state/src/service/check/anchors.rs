@@ -5,13 +5,108 @@ use std::{collections::HashMap, sync::Arc};
 
 use zebra_chain::{
     block::{Block, Height},
-    sprout, transaction,
+    sprout,
+    transaction::{self, Transaction},
 };
 
 use crate::{
     service::{finalized_state::ZebraDb, non_finalized_state::Chain},
     PreparedBlock, ValidateContextError,
 };
+
+/// Checks the final Sapling and Orchard anchors specified by transactions in this
+/// `transactions` iter.
+///
+/// This method checks for anchors computed from the final treestate of each block in
+/// the `parent_chain` or `finalized_state`.
+// TODO: Accept an Option<PreparedBlock> and replace sapling_orchard_anchors_refer_to_final_treestates with this fn
+pub(crate) fn tx_sapling_orchard_anchors_refer_to_final_treestates<
+    'a,
+    TransactionsIter: Iterator<Item = &'a Arc<Transaction>>,
+>(
+    finalized_state: &ZebraDb,
+    parent_chain: Option<&Arc<Chain>>,
+    transactions: TransactionsIter,
+) -> Result<(), ValidateContextError> {
+    for transaction in transactions {
+        // Sapling Spends
+        //
+        // MUST refer to some earlier block’s final Sapling treestate.
+        //
+        // # Consensus
+        //
+        // > The anchor of each Spend description MUST refer to some earlier
+        // > block’s final Sapling treestate. The anchor is encoded separately
+        // > in each Spend description for v4 transactions, or encoded once and
+        // > shared between all Spend descriptions in a v5 transaction.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
+        //
+        // This rule is also implemented in
+        // [`zebra_chain::sapling::shielded_data`].
+        //
+        // The "earlier treestate" check is implemented here.
+        for (anchor_index_in_tx, anchor) in transaction.sapling_anchors().enumerate() {
+            tracing::debug!(?anchor, ?anchor_index_in_tx, "observed sapling anchor",);
+
+            if !parent_chain
+                .map(|c| c.sapling_anchors.contains(&anchor))
+                .unwrap_or(false)
+                && !finalized_state.contains_sapling_anchor(&anchor)
+            {
+                return Err(ValidateContextError::UnknownSaplingAnchor {
+                    anchor,
+                    height: None,
+                    tx_index_in_block: None,
+                    transaction_hash: transaction.hash(),
+                });
+            }
+
+            tracing::debug!(?anchor, ?anchor_index_in_tx, "validated sapling anchor",);
+        }
+
+        // Orchard Actions
+        //
+        // MUST refer to some earlier block’s final Orchard treestate.
+        //
+        // # Consensus
+        //
+        // > The anchorOrchard field of the transaction, whenever it exists
+        // > (i.e. when there are any Action descriptions), MUST refer to some
+        // > earlier block’s final Orchard treestate.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#actions>
+        if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
+            tracing::debug!(
+                ?orchard_shielded_data.shared_anchor,
+                "observed orchard anchor",
+            );
+
+            if !parent_chain
+                .map(|c| {
+                    c.orchard_anchors
+                        .contains(&orchard_shielded_data.shared_anchor)
+                })
+                .unwrap_or(false)
+                && !finalized_state.contains_orchard_anchor(&orchard_shielded_data.shared_anchor)
+            {
+                return Err(ValidateContextError::UnknownOrchardAnchor {
+                    anchor: orchard_shielded_data.shared_anchor,
+                    height: None,
+                    tx_index_in_block: None,
+                    transaction_hash: transaction.hash(),
+                });
+            }
+
+            tracing::debug!(
+                ?orchard_shielded_data.shared_anchor,
+                "validated orchard anchor",
+            );
+        }
+    }
+
+    Ok(())
+}
 
 /// Checks the final Sapling and Orchard anchors specified by transactions in this
 /// `prepared` block.
@@ -56,8 +151,8 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
             {
                 return Err(ValidateContextError::UnknownSaplingAnchor {
                     anchor,
-                    height: prepared.height,
-                    tx_index_in_block,
+                    height: Some(prepared.height),
+                    tx_index_in_block: Some(tx_index_in_block),
                     transaction_hash: prepared.transaction_hashes[tx_index_in_block],
                 });
             }
@@ -97,8 +192,8 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
             {
                 return Err(ValidateContextError::UnknownOrchardAnchor {
                     anchor: orchard_shielded_data.shared_anchor,
-                    height: prepared.height,
-                    tx_index_in_block,
+                    height: Some(prepared.height),
+                    tx_index_in_block: Some(tx_index_in_block),
                     transaction_hash: prepared.transaction_hashes[tx_index_in_block],
                 });
             }
@@ -286,8 +381,8 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
                     );
                     return Err(ValidateContextError::UnknownSproutAnchor {
                         anchor: joinsplit.anchor,
-                        height,
-                        tx_index_in_block,
+                        height: Some(height),
+                        tx_index_in_block: Some(tx_index_in_block),
                         transaction_hash: transaction_hashes[tx_index_in_block],
                     });
                 }
