@@ -1565,6 +1565,17 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
+                        // # Correctness
+                        //
+                        // It is ok to do these lookups using multiple database calls. Finalized state updates
+                        // can only add overlapping blocks, and block hashes are unique across all chain forks.
+                        // 
+                        // If there is a large overlap between the non-finalized and finalized states,
+                        // where the finalized tip is above the non-finalized tip,
+                        // Zebra is receiving a lot of blocks, or this request has been delayed for a long time.
+                        //
+                        // In that case, the `getblocktemplate` RPC will return an error because Zebra
+                        // is not synced to the tip. That check happens before the RPC makes this request.
                         let get_block_template_info =
                             read::tip(latest_non_finalized_state.best_chain(), &state.db).map(
                                 |tip| {
