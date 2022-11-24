@@ -56,40 +56,33 @@ pub(crate) fn no_duplicates_in_finalized_chain(
     Ok(())
 }
 
-/// Reject double-spends of nullifiers:
-/// - one from this [`Transaction`], and the other already committed to the
-///   provided [`ZebraDb`].
-///
-/// # Consensus
-///
-/// > A nullifier MUST NOT repeat either within a transaction,
-/// > or across transactions in a valid blockchain.
-/// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
-/// > even if they have the same bit pattern.
-///
-/// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
-// TODO: impl nullifier getters for a trait and use a generic type to unify
-//       this fn with the one for `PreparedBlock`
-#[tracing::instrument(skip_all)]
-fn tx_no_duplicates_in_finalized_chain(
-    finalized_chain: &ZebraDb,
-    transaction: &Arc<Transaction>,
-) -> Result<(), ValidateContextError> {
-    for nullifier in transaction.sprout_nullifiers() {
-        if finalized_chain.contains_sprout_nullifier(nullifier) {
-            Err(nullifier.duplicate_nullifier_error(true))?;
-        }
-    }
+/// Returns a Ok(()) if the predicate(s) return false for every revealed nullifier
+/// Returns Err(DuplicateNullifierError) for the first nullifier that matches the predicate(s)
+fn find_duplicate_nullifier<'a, NullifierT, FinalizedStateContainsFn, NonFinalizedStateContainsFn>(
+    revealed_nullifiers: impl IntoIterator<Item = &'a NullifierT>,
+    finalized_state_contains: FinalizedStateContainsFn,
+    non_finalized_state_contains: Option<NonFinalizedStateContainsFn>,
+) -> Result<(), ValidateContextError>
+where
+    NullifierT: DuplicateNullifierError + 'a,
+    FinalizedStateContainsFn: Fn(&'a NullifierT) -> bool,
+    NonFinalizedStateContainsFn: Fn(&'a NullifierT) -> bool,
+{
+    if let Some(non_finalized_state_contains) = non_finalized_state_contains {
+        for nullifier in revealed_nullifiers {
+            if non_finalized_state_contains(nullifier) {
+                Err(nullifier.duplicate_nullifier_error(false))?
+            }
 
-    for nullifier in transaction.sapling_nullifiers() {
-        if finalized_chain.contains_sapling_nullifier(nullifier) {
-            Err(nullifier.duplicate_nullifier_error(true))?;
+            if finalized_state_contains(nullifier) {
+                Err(nullifier.duplicate_nullifier_error(true))?
+            }
         }
-    }
-
-    for nullifier in transaction.orchard_nullifiers() {
-        if finalized_chain.contains_orchard_nullifier(nullifier) {
-            Err(nullifier.duplicate_nullifier_error(true))?;
+    } else {
+        for nullifier in revealed_nullifiers {
+            if finalized_state_contains(nullifier) {
+                Err(nullifier.duplicate_nullifier_error(true))?
+            }
         }
     }
 
@@ -114,31 +107,23 @@ pub(crate) fn tx_no_duplicates_in_chain(
     finalized_chain: &ZebraDb,
     transaction: &Arc<Transaction>,
 ) -> Result<(), ValidateContextError> {
-    let non_finalized_chain = match non_finalized_chain {
-        None => return tx_no_duplicates_in_finalized_chain(finalized_chain, transaction),
-        Some(non_finalized_chain) => non_finalized_chain,
-    };
+    find_duplicate_nullifier(
+        transaction.sprout_nullifiers(),
+        |nullifier| finalized_chain.contains_sprout_nullifier(nullifier),
+        non_finalized_chain.map(|chain| |nullifier| chain.sprout_nullifiers.contains(nullifier)),
+    )?;
 
-    for nullifier in transaction.sprout_nullifiers() {
-        let is_in_non_finalized_state = non_finalized_chain.sprout_nullifiers.contains(nullifier);
-        if is_in_non_finalized_state || finalized_chain.contains_sprout_nullifier(nullifier) {
-            Err(nullifier.duplicate_nullifier_error(!is_in_non_finalized_state))?;
-        }
-    }
+    find_duplicate_nullifier(
+        transaction.sapling_nullifiers(),
+        |nullifier| finalized_chain.contains_sapling_nullifier(nullifier),
+        non_finalized_chain.map(|chain| |nullifier| chain.sapling_nullifiers.contains(nullifier)),
+    )?;
 
-    for nullifier in transaction.sapling_nullifiers() {
-        let is_in_non_finalized_state = non_finalized_chain.sapling_nullifiers.contains(nullifier);
-        if is_in_non_finalized_state || finalized_chain.contains_sapling_nullifier(nullifier) {
-            Err(nullifier.duplicate_nullifier_error(!is_in_non_finalized_state))?;
-        }
-    }
-
-    for nullifier in transaction.orchard_nullifiers() {
-        let is_in_non_finalized_state = non_finalized_chain.orchard_nullifiers.contains(nullifier);
-        if is_in_non_finalized_state || finalized_chain.contains_orchard_nullifier(nullifier) {
-            Err(nullifier.duplicate_nullifier_error(!is_in_non_finalized_state))?;
-        }
-    }
+    find_duplicate_nullifier(
+        transaction.orchard_nullifiers(),
+        |nullifier| finalized_chain.contains_orchard_nullifier(nullifier),
+        non_finalized_chain.map(|chain| |nullifier| chain.orchard_nullifiers.contains(nullifier)),
+    )?;
 
     Ok(())
 }
