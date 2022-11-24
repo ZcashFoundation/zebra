@@ -353,9 +353,9 @@ where
             //
             // We ignore the height as we are checkpointing on Canopy or higher in Mainnet and Testnet.
             const MAX_BLOCK_TIME_GAP: i64 = 90 * 60;
-            let max_time = chain_info.median_time_past.checked_add_signed(Duration::seconds(MAX_BLOCK_TIME_GAP)).expect("median time plus a small constant is far below i64::MAX");
+            let max_time = chain_info.median_time_past.checked_add_signed(Duration::seconds(MAX_BLOCK_TIME_GAP))
+                .expect("median time plus a small constant is far below i64::MAX");
             let cur_time = chain_info.current_system_time.timestamp().clamp(min_time.timestamp(), max_time.timestamp());
-       }
 
             let outputs =
                 standard_coinbase_outputs(network, block_height, miner_address, miner_fee);

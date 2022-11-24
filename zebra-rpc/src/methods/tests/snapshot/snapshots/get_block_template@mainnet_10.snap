@@ -36,7 +36,7 @@ expression: block_template
   "noncerange": "00000000ffffffff",
   "sigoplimit": 20000,
   "sizelimit": 2000000,
-  "curtime": 1654008605,
+  "curtime": 1654008606,
   "bits": "01010000",
   "height": 1687105
 }
