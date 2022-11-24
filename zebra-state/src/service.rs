@@ -1569,7 +1569,7 @@ impl Service<ReadRequest> for ReadStateService {
                         //
                         // It is ok to do these lookups using multiple database calls. Finalized state updates
                         // can only add overlapping blocks, and block hashes are unique across all chain forks.
-                        // 
+                        //
                         // If there is a large overlap between the non-finalized and finalized states,
                         // where the finalized tip is above the non-finalized tip,
                         // Zebra is receiving a lot of blocks, or this request has been delayed for a long time.
