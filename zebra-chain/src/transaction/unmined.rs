@@ -328,6 +328,13 @@ impl VerifiedUnminedTx {
         }
     }
 
+    /// Returns `true` if the transaction pays at least the [ZIP-317] conventional fee.
+    ///
+    /// [ZIP-317]: https://zips.z.cash/zip-0317#mempool-size-limiting
+    pub fn pays_conventional_fee(&self) -> bool {
+        self.miner_fee >= self.transaction.conventional_fee
+    }
+
     /// The cost in bytes of the transaction, as defined in [ZIP-401].
     ///
     /// A reflection of the work done by the network in processing them (proof
@@ -365,7 +372,7 @@ impl VerifiedUnminedTx {
     pub fn eviction_weight(&self) -> u64 {
         let mut cost = self.cost();
 
-        if self.miner_fee < self.transaction.conventional_fee {
+        if !self.pays_conventional_fee() {
             cost += MEMPOOL_TRANSACTION_LOW_FEE_PENALTY
         }
 
