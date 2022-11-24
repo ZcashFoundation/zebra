@@ -3,15 +3,11 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use zebra_chain::{
-    block::{Block, Height},
-    sprout,
-    transaction::{self, Transaction},
-};
+use zebra_chain::{block::Height, sprout, transaction::Transaction};
 
 use crate::{
     service::{finalized_state::ZebraDb, non_finalized_state::Chain},
-    PreparedBlock, ValidateContextError,
+    ValidateContextError,
 };
 
 /// Checks the final Sapling and Orchard anchors specified by transactions in this
@@ -19,107 +15,17 @@ use crate::{
 ///
 /// This method checks for anchors computed from the final treestate of each block in
 /// the `parent_chain` or `finalized_state`.
-// TODO: Accept an Option<PreparedBlock> and replace sapling_orchard_anchors_refer_to_final_treestates with this fn
-pub(crate) fn tx_sapling_orchard_anchors_refer_to_final_treestates<
+pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates<
     'a,
     TransactionsIter: Iterator<Item = &'a Arc<Transaction>>,
 >(
     finalized_state: &ZebraDb,
     parent_chain: Option<&Arc<Chain>>,
     transactions: TransactionsIter,
+    height: Option<Height>,
 ) -> Result<(), ValidateContextError> {
-    for transaction in transactions {
-        // Sapling Spends
-        //
-        // MUST refer to some earlier block’s final Sapling treestate.
-        //
-        // # Consensus
-        //
-        // > The anchor of each Spend description MUST refer to some earlier
-        // > block’s final Sapling treestate. The anchor is encoded separately
-        // > in each Spend description for v4 transactions, or encoded once and
-        // > shared between all Spend descriptions in a v5 transaction.
-        //
-        // <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
-        //
-        // This rule is also implemented in
-        // [`zebra_chain::sapling::shielded_data`].
-        //
-        // The "earlier treestate" check is implemented here.
-        for (anchor_index_in_tx, anchor) in transaction.sapling_anchors().enumerate() {
-            tracing::debug!(?anchor, ?anchor_index_in_tx, "observed sapling anchor",);
-
-            if !parent_chain
-                .map(|c| c.sapling_anchors.contains(&anchor))
-                .unwrap_or(false)
-                && !finalized_state.contains_sapling_anchor(&anchor)
-            {
-                return Err(ValidateContextError::UnknownSaplingAnchor {
-                    anchor,
-                    height: None,
-                    tx_index_in_block: None,
-                    transaction_hash: transaction.hash(),
-                });
-            }
-
-            tracing::debug!(?anchor, ?anchor_index_in_tx, "validated sapling anchor",);
-        }
-
-        // Orchard Actions
-        //
-        // MUST refer to some earlier block’s final Orchard treestate.
-        //
-        // # Consensus
-        //
-        // > The anchorOrchard field of the transaction, whenever it exists
-        // > (i.e. when there are any Action descriptions), MUST refer to some
-        // > earlier block’s final Orchard treestate.
-        //
-        // <https://zips.z.cash/protocol/protocol.pdf#actions>
-        if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
-            tracing::debug!(
-                ?orchard_shielded_data.shared_anchor,
-                "observed orchard anchor",
-            );
-
-            if !parent_chain
-                .map(|c| {
-                    c.orchard_anchors
-                        .contains(&orchard_shielded_data.shared_anchor)
-                })
-                .unwrap_or(false)
-                && !finalized_state.contains_orchard_anchor(&orchard_shielded_data.shared_anchor)
-            {
-                return Err(ValidateContextError::UnknownOrchardAnchor {
-                    anchor: orchard_shielded_data.shared_anchor,
-                    height: None,
-                    tx_index_in_block: None,
-                    transaction_hash: transaction.hash(),
-                });
-            }
-
-            tracing::debug!(
-                ?orchard_shielded_data.shared_anchor,
-                "validated orchard anchor",
-            );
-        }
-    }
-
-    Ok(())
-}
-
-/// Checks the final Sapling and Orchard anchors specified by transactions in this
-/// `prepared` block.
-///
-/// This method checks for anchors computed from the final treestate of each block in
-/// the `parent_chain` or `finalized_state`.
-#[tracing::instrument(skip(finalized_state, parent_chain, prepared))]
-pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
-    finalized_state: &ZebraDb,
-    parent_chain: &Chain,
-    prepared: &PreparedBlock,
-) -> Result<(), ValidateContextError> {
-    for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
+    for (tx_index_in_block, transaction) in transactions.enumerate() {
+        let tx_index_in_block = height.map(|_| tx_index_in_block);
         // Sapling Spends
         //
         // MUST refer to some earlier block’s final Sapling treestate.
@@ -142,18 +48,20 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
                 ?anchor,
                 ?anchor_index_in_tx,
                 ?tx_index_in_block,
-                height = ?prepared.height,
+                ?height,
                 "observed sapling anchor",
             );
 
-            if !parent_chain.sapling_anchors.contains(&anchor)
+            if !parent_chain
+                .map(|chain| chain.sapling_anchors.contains(&anchor))
+                .unwrap_or(false)
                 && !finalized_state.contains_sapling_anchor(&anchor)
             {
                 return Err(ValidateContextError::UnknownSaplingAnchor {
                     anchor,
-                    height: Some(prepared.height),
-                    tx_index_in_block: Some(tx_index_in_block),
-                    transaction_hash: prepared.transaction_hashes[tx_index_in_block],
+                    height,
+                    tx_index_in_block,
+                    transaction_hash: transaction.hash(),
                 });
             }
 
@@ -161,7 +69,7 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
                 ?anchor,
                 ?anchor_index_in_tx,
                 ?tx_index_in_block,
-                height = ?prepared.height,
+                ?height,
                 "validated sapling anchor",
             );
         }
@@ -181,27 +89,31 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
             tracing::debug!(
                 ?orchard_shielded_data.shared_anchor,
                 ?tx_index_in_block,
-                height = ?prepared.height,
+                ?height,
                 "observed orchard anchor",
             );
 
             if !parent_chain
-                .orchard_anchors
-                .contains(&orchard_shielded_data.shared_anchor)
+                .map(|chain| {
+                    chain
+                        .orchard_anchors
+                        .contains(&orchard_shielded_data.shared_anchor)
+                })
+                .unwrap_or(false)
                 && !finalized_state.contains_orchard_anchor(&orchard_shielded_data.shared_anchor)
             {
                 return Err(ValidateContextError::UnknownOrchardAnchor {
                     anchor: orchard_shielded_data.shared_anchor,
-                    height: Some(prepared.height),
-                    tx_index_in_block: Some(tx_index_in_block),
-                    transaction_hash: prepared.transaction_hashes[tx_index_in_block],
+                    height: None,
+                    tx_index_in_block: None,
+                    transaction_hash: transaction.hash(),
                 });
             }
 
             tracing::debug!(
                 ?orchard_shielded_data.shared_anchor,
                 ?tx_index_in_block,
-                height = ?prepared.height,
+                ?height,
                 "validated orchard anchor",
             );
         }
@@ -217,15 +129,21 @@ pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates(
 /// Sprout anchors may also refer to the interstitial output treestate of any prior
 /// `JoinSplit` _within the same transaction_; these are created on the fly
 /// in [`sprout_anchors_refer_to_treestates()`].
-#[tracing::instrument(skip(finalized_state, parent_chain, prepared))]
-pub(crate) fn fetch_sprout_final_treestates(
+#[tracing::instrument(skip_all)]
+pub(crate) fn fetch_sprout_final_treestates<
+    'a,
+    TransactionsIter: Iterator<Item = &'a Arc<Transaction>>,
+>(
     finalized_state: &ZebraDb,
-    parent_chain: &Chain,
-    prepared: &PreparedBlock,
+    parent_chain: Option<&Arc<Chain>>,
+    transactions: TransactionsIter,
+    height: Option<Height>,
 ) -> HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>> {
     let mut sprout_final_treestates = HashMap::new();
 
-    for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
+    for (tx_index_in_block, transaction) in transactions.enumerate() {
+        let tx_index_in_block = height.map(|_| tx_index_in_block);
+
         // Fetch and return Sprout JoinSplit final treestates
         for (joinsplit_index_in_tx, joinsplit) in
             transaction.sprout_groth16_joinsplits().enumerate()
@@ -236,9 +154,7 @@ pub(crate) fn fetch_sprout_final_treestates(
             }
 
             let input_tree = parent_chain
-                .sprout_trees_by_anchor
-                .get(&joinsplit.anchor)
-                .cloned()
+                .and_then(|chain| chain.sprout_trees_by_anchor.get(&joinsplit.anchor).cloned())
                 .or_else(|| {
                     finalized_state.sprout_note_commitment_tree_by_anchor(&joinsplit.anchor)
                 });
@@ -267,7 +183,7 @@ pub(crate) fn fetch_sprout_final_treestates(
                     ?joinsplit.anchor,
                     ?joinsplit_index_in_tx,
                     ?tx_index_in_block,
-                    height = ?prepared.height,
+                    ?height,
                     "observed sprout final treestate anchor",
                 );
             }
@@ -277,7 +193,7 @@ pub(crate) fn fetch_sprout_final_treestates(
     tracing::trace!(
         sprout_final_treestate_count = ?sprout_final_treestates.len(),
         ?sprout_final_treestates,
-        height = ?prepared.height,
+        ?height,
         "returning sprout final treestate anchors",
     );
 
@@ -294,13 +210,15 @@ pub(crate) fn fetch_sprout_final_treestates(
 /// (which must be populated with all treestates pointed to in the `prepared` block;
 /// see [`fetch_sprout_final_treestates()`]); or in the interstitial
 /// treestates which are computed on the fly in this function.
-#[tracing::instrument(skip(sprout_final_treestates, block, transaction_hashes))]
-pub(crate) fn sprout_anchors_refer_to_treestates(
+#[tracing::instrument(skip(sprout_final_treestates, transactions))]
+pub(crate) fn sprout_anchors_refer_to_treestates<
+    'a,
+    TransactionsIter: Iterator<Item = &'a Arc<Transaction>>,
+>(
     sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
-    block: Arc<Block>,
+    transactions: TransactionsIter,
     // Only used for debugging
-    height: Height,
-    transaction_hashes: Arc<[transaction::Hash]>,
+    height: Option<Height>,
 ) -> Result<(), ValidateContextError> {
     tracing::trace!(
         sprout_final_treestate_count = ?sprout_final_treestates.len(),
@@ -309,7 +227,7 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
         "received sprout final treestate anchors",
     );
 
-    for (tx_index_in_block, transaction) in block.transactions.iter().enumerate() {
+    for (tx_index_in_block, transaction) in transactions.enumerate() {
         // Sprout JoinSplits, with interstitial treestates to check as well.
         let mut interstitial_trees: HashMap<
             sprout::tree::Root,
@@ -381,9 +299,9 @@ pub(crate) fn sprout_anchors_refer_to_treestates(
                     );
                     return Err(ValidateContextError::UnknownSproutAnchor {
                         anchor: joinsplit.anchor,
-                        height: Some(height),
+                        height,
                         tx_index_in_block: Some(tx_index_in_block),
-                        transaction_hash: transaction_hashes[tx_index_in_block],
+                        transaction_hash: transaction.hash(),
                     });
                 }
             };

@@ -1536,10 +1536,25 @@ impl Service<ReadRequest> for ReadStateService {
                             &transaction,
                         )?;
 
-                        check::anchors::tx_sapling_orchard_anchors_refer_to_final_treestates(
+                        check::anchors::sapling_orchard_anchors_refer_to_final_treestates(
                             &state.db,
                             latest_non_finalized_best_chain.as_ref(),
                             std::iter::once(&transaction),
+                            None,
+                        )?;
+
+                        // Reads from disk
+                        let sprout_final_treestates = check::anchors::fetch_sprout_final_treestates(
+                            &state.db,
+                            latest_non_finalized_best_chain.as_ref(),
+                            std::iter::once(&transaction),
+                            None,
+                        );
+
+                        check::anchors::sprout_anchors_refer_to_treestates(
+                            sprout_final_treestates,
+                            std::iter::once(&transaction),
+                            None,
                         )?;
 
                         // The work is done in the future.

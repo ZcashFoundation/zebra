@@ -228,13 +228,18 @@ impl NonFinalizedState {
         // Reads from disk
         check::anchors::sapling_orchard_anchors_refer_to_final_treestates(
             finalized_state,
-            &new_chain,
-            &prepared,
+            Some(&new_chain),
+            prepared.block.transactions.iter(),
+            Some(prepared.height),
         )?;
 
         // Reads from disk
-        let sprout_final_treestates =
-            check::anchors::fetch_sprout_final_treestates(finalized_state, &new_chain, &prepared);
+        let sprout_final_treestates = check::anchors::fetch_sprout_final_treestates(
+            finalized_state,
+            Some(&new_chain),
+            prepared.block.transactions.iter(),
+            Some(prepared.height),
+        );
 
         // Quick check that doesn't read from disk
         let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(
@@ -273,7 +278,6 @@ impl NonFinalizedState {
 
         let block2 = contextual.block.clone();
         let height = contextual.height;
-        let transaction_hashes = contextual.transaction_hashes.clone();
 
         rayon::in_place_scope_fifo(|scope| {
             scope.spawn_fifo(|_scope| {
@@ -287,9 +291,8 @@ impl NonFinalizedState {
             scope.spawn_fifo(|_scope| {
                 sprout_anchor_result = Some(check::anchors::sprout_anchors_refer_to_treestates(
                     sprout_final_treestates,
-                    block2,
-                    height,
-                    transaction_hashes,
+                    block2.transactions.iter(),
+                    Some(height),
                 ));
             });
 

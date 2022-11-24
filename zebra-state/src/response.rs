@@ -53,6 +53,8 @@ pub enum Response {
     BlockHeaders(Vec<block::CountedHeader>),
 
     /// Response to [`Request::TransactionContextualValidity`].
+    ///
+    /// Does not check transparent UTXO inputs
     ContextuallyValid,
 }
 
@@ -115,6 +117,8 @@ pub enum ReadResponse {
     AddressUtxos(AddressUtxos),
 
     /// Response to [`ReadRequest::TransactionContextualValidity`].
+    ///
+    /// Does not check transparent UTXO inputs
     ContextuallyValid,
 
     #[cfg(feature = "getblocktemplate-rpcs")]
