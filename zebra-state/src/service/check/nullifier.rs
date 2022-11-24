@@ -56,33 +56,28 @@ pub(crate) fn no_duplicates_in_finalized_chain(
     Ok(())
 }
 
-/// Returns `Err(DuplicateNullifierError)` if any of the `revealed_nullifiers` are found in the non-finalized or finalized chains.
+/// Accepts an iterator of revealed nullifiers, a predicate fn for checking if a nullifier is in
+/// in the finalized chain, and a predicate fn for checking if the nullifier is in the non-finalized chain
+///
+/// Returns `Err(DuplicateNullifierError)` if any of the `revealed_nullifiers` are found in the
+/// non-finalized or finalized chains.
+///
 /// Returns `Ok(())` if all the `revealed_nullifiers` have not been seen in either chain.
 fn find_duplicate_nullifier<'a, NullifierT, FinalizedStateContainsFn, NonFinalizedStateContainsFn>(
     revealed_nullifiers: impl IntoIterator<Item = &'a NullifierT>,
-    finalized_state_contains: FinalizedStateContainsFn,
-    non_finalized_state_contains: Option<NonFinalizedStateContainsFn>,
+    finalized_chain_contains: FinalizedStateContainsFn,
+    non_finalized_chain_contains: Option<NonFinalizedStateContainsFn>,
 ) -> Result<(), ValidateContextError>
 where
     NullifierT: DuplicateNullifierError + 'a,
     FinalizedStateContainsFn: Fn(&'a NullifierT) -> bool,
     NonFinalizedStateContainsFn: Fn(&'a NullifierT) -> bool,
 {
-    if let Some(non_finalized_state_contains) = non_finalized_state_contains {
-        for nullifier in revealed_nullifiers {
-            if non_finalized_state_contains(nullifier) {
-                Err(nullifier.duplicate_nullifier_error(false))?
-            }
-
-            if finalized_state_contains(nullifier) {
-                Err(nullifier.duplicate_nullifier_error(true))?
-            }
-        }
-    } else {
-        for nullifier in revealed_nullifiers {
-            if finalized_state_contains(nullifier) {
-                Err(nullifier.duplicate_nullifier_error(true))?
-            }
+    for nullifier in revealed_nullifiers {
+        if let Some(true) = non_finalized_chain_contains.as_ref().map(|f| f(nullifier)) {
+            Err(nullifier.duplicate_nullifier_error(false))?
+        } else if finalized_chain_contains(nullifier) {
+            Err(nullifier.duplicate_nullifier_error(true))?
         }
     }
 
