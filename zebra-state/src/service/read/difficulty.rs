@@ -1,12 +1,12 @@
 //! Get context and calculate difficulty for the next block.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use std::borrow::Borrow;
 
 use zebra_chain::{
     block::{Block, Hash, Height},
     parameters::{Network, POW_AVERAGING_WINDOW},
-    work::difficulty::CompactDifficulty,
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 
 use crate::service::{
@@ -48,12 +48,18 @@ where
         .take(MAX_CONTEXT_BLOCKS)
         .collect();
 
-    let relevant_data = relevant_chain.iter().map(|block| {
-        (
-            block.borrow().header.difficulty_threshold,
-            block.borrow().header.time,
-        )
-    });
+    let mut relevant_data = relevant_chain
+        .iter()
+        .map(|block| {
+            (
+                block.borrow().header.difficulty_threshold,
+                block.borrow().header.time,
+            )
+        })
+        .peekable();
+
+    // get the tip time from the relevant chain
+    let tip_time = relevant_data.peek().expect("tip should be here").1;
 
     // The getblocktemplate RPC returns an error if Zebra is not synced to the tip.
     // So this will never happen in production code.
@@ -66,8 +72,34 @@ where
         relevant_data,
     );
 
-    (
-        difficulty_adjustment.expected_difficulty_threshold(),
-        difficulty_adjustment.median_time_past(),
-    )
+    let compact_difficulty = match network {
+        Network::Testnet => {
+            // > if the block time of a block at height height ≥ 299188 is greater than 6 * PoWTargetSpacing(height) seconds after
+            // > that of the preceding block, then the block is a minimum-difficulty block.
+            // > In that case its nBits field MUST be set to ToCompact(PoWLimit)
+            //
+            // https://zips.z.cash/zip-0208#minimum-difficulty-blocks-on-testnet
+            //
+            // As we checkpoint on Canopy or higher in the testnet, we can:
+            // - Ignore the height and,
+            // - Use the constant` PostBlossomPoWTargetSpacing` spec value which is equal to 75 seconds.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#constants
+            let pow_target_spacing_mul = Duration::seconds(6 * 75);
+
+            if current_system_time
+                > &tip_time
+                    .checked_add_signed(pow_target_spacing_mul)
+                    .expect("tip time plus a small constant is far below i64::MAX")
+            {
+                // We are in a minimum-difficulty block.
+                ExpandedDifficulty::target_difficulty_limit(Network::Testnet).to_compact()
+            } else {
+                difficulty_adjustment.expected_difficulty_threshold()
+            }
+        }
+        Network::Mainnet => difficulty_adjustment.expected_difficulty_threshold(),
+    };
+
+    (compact_difficulty, difficulty_adjustment.median_time_past())
 }
