@@ -197,11 +197,14 @@ async fn mempool_request_with_missing_input_is_rejected() {
     tokio::spawn(async move {
         state
             .expect_request_that(|req| {
-                matches!(req, zebra_state::Request::TransactionContextualValidity(_))
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipShieldedSpends(_)
+                )
             })
             .await
             .expect("verifier should call mock state service")
-            .respond(zebra_state::Response::ContextuallyValid);
+            .respond(zebra_state::Response::ValidBestChainTipShieldedSpends);
 
         state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
@@ -235,7 +238,10 @@ async fn mempool_request_with_invalid_input_is_rejected() {
     tokio::spawn(async move {
         state
             .expect_request_that(|req| {
-                matches!(req, zebra_state::Request::TransactionContextualValidity(_))
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipShieldedSpends(_)
+                )
             })
             .await
             .expect("verifier should call mock state service")
@@ -284,11 +290,14 @@ async fn mempool_request_with_present_input_is_accepted() {
     tokio::spawn(async move {
         state
             .expect_request_that(|req| {
-                matches!(req, zebra_state::Request::TransactionContextualValidity(_))
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipShieldedSpends(_)
+                )
             })
             .await
             .expect("verifier should call mock state service")
-            .respond(zebra_state::Response::ContextuallyValid);
+            .respond(zebra_state::Response::ValidBestChainTipShieldedSpends);
 
         state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))

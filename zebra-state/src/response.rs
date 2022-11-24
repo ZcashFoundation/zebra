@@ -52,10 +52,10 @@ pub enum Response {
     /// The response to a `FindBlockHeaders` request.
     BlockHeaders(Vec<block::CountedHeader>),
 
-    /// Response to [`Request::TransactionContextualValidity`].
+    /// Response to [`Request::CheckBestChainTipShieldedSpends`].
     ///
     /// Does not check transparent UTXO inputs
-    ContextuallyValid,
+    ValidBestChainTipShieldedSpends,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -116,10 +116,10 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::UtxosByAddresses`] with found utxos and transaction data.
     AddressUtxos(AddressUtxos),
 
-    /// Response to [`ReadRequest::TransactionContextualValidity`].
+    /// Response to [`ReadRequest::CheckBestChainTipShieldedSpends`].
     ///
     /// Does not check transparent UTXO inputs
-    ContextuallyValid,
+    ValidBestChainTipShieldedSpends,
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::BestChainBlockHash`](crate::ReadRequest::BestChainBlockHash) with the
@@ -152,7 +152,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockHashes(hashes) => Ok(Response::BlockHashes(hashes)),
             ReadResponse::BlockHeaders(headers) => Ok(Response::BlockHeaders(headers)),
 
-            ReadResponse::ContextuallyValid => Ok(Response::ContextuallyValid),
+            ReadResponse::ValidBestChainTipShieldedSpends => Ok(Response::ValidBestChainTipShieldedSpends),
 
             ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)

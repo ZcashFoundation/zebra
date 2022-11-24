@@ -347,7 +347,7 @@ where
             if req.is_mempool() {
                 let check_anchors_and_revealed_nullifiers_query = state
                     .clone()
-                    .oneshot(zs::Request::TransactionContextualValidity(
+                    .oneshot(zs::Request::CheckBestChainTipShieldedSpends(
                         req.transaction(),
                     ));
 

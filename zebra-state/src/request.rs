@@ -543,8 +543,8 @@ pub enum Request {
 
     /// Contextually validates anchors and nullifiers of a transaction on the best chain
     ///
-    /// Returns [`Response::ContextuallyValid`].
-    TransactionContextualValidity(Arc<Transaction>),
+    /// Returns [`Response::ValidBestChainTipShieldedSpends`].
+    CheckBestChainTipShieldedSpends(Arc<Transaction>),
 }
 
 impl Request {
@@ -561,7 +561,7 @@ impl Request {
             Request::Block(_) => "block",
             Request::FindBlockHashes { .. } => "find_block_hashes",
             Request::FindBlockHeaders { .. } => "find_block_headers",
-            Request::TransactionContextualValidity(_) => "transaction_contextual_validity",
+            Request::CheckBestChainTipShieldedSpends(_) => "transaction_contextual_validity",
         }
     }
 
@@ -745,8 +745,8 @@ pub enum ReadRequest {
 
     /// Contextually validates anchors and nullifiers of a transaction on the best chain
     ///
-    /// Returns [`ReadResponse::ContextuallyValid`].
-    TransactionContextualValidity(Arc<Transaction>),
+    /// Returns [`ReadResponse::ValidBestChainTipShieldedSpends`].
+    CheckBestChainTipShieldedSpends(Arc<Transaction>),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Looks up a block hash by height in the current best chain.
@@ -776,7 +776,7 @@ impl ReadRequest {
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addesses",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
-            ReadRequest::TransactionContextualValidity(_) => "transaction_contextual_validity",
+            ReadRequest::CheckBestChainTipShieldedSpends(_) => "transaction_contextual_validity",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
         }
@@ -818,8 +818,8 @@ impl TryFrom<Request> for ReadRequest {
                 Ok(ReadRequest::FindBlockHeaders { known_blocks, stop })
             }
 
-            Request::TransactionContextualValidity(tx) => {
-                Ok(ReadRequest::TransactionContextualValidity(tx))
+            Request::CheckBestChainTipShieldedSpends(tx) => {
+                Ok(ReadRequest::CheckBestChainTipShieldedSpends(tx))
             }
 
             Request::CommitBlock(_) | Request::CommitFinalizedBlock(_) => {

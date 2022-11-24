@@ -1025,7 +1025,7 @@ impl Service<Request> for StateService {
             | Request::Block(_)
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. }
-            | Request::TransactionContextualValidity(_) => {
+            | Request::CheckBestChainTipShieldedSpends(_) => {
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
@@ -1519,7 +1519,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
-            ReadRequest::TransactionContextualValidity(transaction) => {
+            ReadRequest::CheckBestChainTipShieldedSpends(transaction) => {
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1560,7 +1560,7 @@ impl Service<ReadRequest> for ReadStateService {
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::UnspentBestChainUtxo");
 
-                        Ok(ReadResponse::ContextuallyValid)
+                        Ok(ReadResponse::ValidBestChainTipShieldedSpends)
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::UnspentBestChainUtxo"))
