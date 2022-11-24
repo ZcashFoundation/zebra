@@ -543,7 +543,7 @@ pub enum Request {
 
     /// Contextually validates anchors and nullifiers of a transaction on the best chain
     ///
-    /// Returns [`Response::Valid`].
+    /// Returns [`Response::ContextuallyValid`].
     TransactionContextualValidity(Arc<Transaction>),
 }
 
@@ -745,7 +745,7 @@ pub enum ReadRequest {
 
     /// Contextually validates anchors and nullifiers of a transaction on the best chain
     ///
-    /// Returns [`ReadResponse::Valid`].
+    /// Returns [`ReadResponse::ContextuallyValid`].
     TransactionContextualValidity(Arc<Transaction>),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
