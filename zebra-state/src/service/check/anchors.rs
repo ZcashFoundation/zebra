@@ -15,6 +15,7 @@ use crate::{
 ///
 /// This method checks for anchors computed from the final treestate of each block in
 /// the `parent_chain` or `finalized_state`.
+#[tracing::instrument(skip_all)]
 pub(crate) fn sapling_orchard_anchors_refer_to_final_treestates<
     'a,
     TransactionsIter: Iterator<Item = &'a Arc<Transaction>>,
