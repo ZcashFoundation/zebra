@@ -351,7 +351,7 @@ where
                         req.transaction(),
                     ));
 
-                check_anchors_and_revealed_nullifiers_query.await?;
+                assert!(check_anchors_and_revealed_nullifiers_query.await? == zs::Response::ValidBestChainTipShieldedSpends);
             }
 
             tracing::trace!(?tx_id, "passed quick checks");
