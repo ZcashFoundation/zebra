@@ -884,7 +884,7 @@ async fn rpc_getblocktemplate() {
     );
     assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
     assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
-    assert_eq!(get_block_template.cur_time, fake_tip_time.timestamp());
+    assert_eq!(get_block_template.cur_time, fake_tip_time.timestamp() + 1);
     assert_eq!(get_block_template.bits, "01010000");
     assert_eq!(get_block_template.height, 1687105); // nu5 height
 
