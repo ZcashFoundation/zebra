@@ -37,11 +37,11 @@ pub trait ZcashSerialize: Sized {
     }
 
     /// Get the size of `self` by using a fake writer.
-    fn zcash_serialized_size(&self) -> Result<usize, io::Error> {
+    fn zcash_serialized_size(&self) -> usize {
         let mut writer = FakeWriter(0);
         self.zcash_serialize(&mut writer)
             .expect("writer should never fail");
-        Ok(writer.0)
+        writer.0
     }
 }
 
