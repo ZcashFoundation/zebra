@@ -56,8 +56,8 @@ pub(crate) fn no_duplicates_in_finalized_chain(
     Ok(())
 }
 
-/// Returns a Ok(()) if the predicate(s) return false for every revealed nullifier
-/// Returns Err(DuplicateNullifierError) for the first nullifier that matches the predicate(s)
+/// Returns `Err(DuplicateNullifierError)` if any of the `revealed_nullifiers` are found in the non-finalized or finalized chains.
+/// Returns `Ok(())` if all the `revealed_nullifiers` have not been seen in either chain.
 fn find_duplicate_nullifier<'a, NullifierT, FinalizedStateContainsFn, NonFinalizedStateContainsFn>(
     revealed_nullifiers: impl IntoIterator<Item = &'a NullifierT>,
     finalized_state_contains: FinalizedStateContainsFn,
