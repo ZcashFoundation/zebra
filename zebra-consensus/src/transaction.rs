@@ -175,10 +175,10 @@ impl Request {
     }
 
     /// The unverified mempool transaction, if this is a mempool request.
-    pub fn into_mempool_transaction(self) -> Option<UnminedTx> {
+    pub fn mempool_transaction(&self) -> Option<UnminedTx> {
         match self {
             Request::Block { .. } => None,
-            Request::Mempool { transaction, .. } => Some(transaction),
+            Request::Mempool { transaction, .. } => Some(transaction.clone()),
         }
     }
 
@@ -397,11 +397,11 @@ where
                 )?,
             };
 
-            if req.is_mempool() {
+            if let Some(unmined_tx) = req.mempool_transaction() {
                 let check_anchors_and_revealed_nullifiers_query = state
                     .clone()
                     .oneshot(zs::Request::CheckBestChainTipShieldedSpends(
-                        req.transaction(),
+                        unmined_tx,
                     ))
                     .map(|res| {
                         assert!(res? == zs::Response::ValidBestChainTipShieldedSpends);

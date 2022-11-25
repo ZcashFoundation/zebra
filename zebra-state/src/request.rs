@@ -15,7 +15,7 @@ use zebra_chain::{
     sapling,
     serialization::SerializationError,
     sprout,
-    transaction::{self, Transaction},
+    transaction::{self, UnminedTx},
     transparent::{self, utxos_from_ordered_utxos},
     value_balance::{ValueBalance, ValueBalanceError},
 };
@@ -544,7 +544,7 @@ pub enum Request {
     /// Contextually validates anchors and nullifiers of a transaction on the best chain
     ///
     /// Returns [`Response::ValidBestChainTipShieldedSpends`].
-    CheckBestChainTipShieldedSpends(Arc<Transaction>),
+    CheckBestChainTipShieldedSpends(UnminedTx),
 }
 
 impl Request {
@@ -746,7 +746,7 @@ pub enum ReadRequest {
     /// Contextually validates anchors and nullifiers of a transaction on the best chain
     ///
     /// Returns [`ReadResponse::ValidBestChainTipShieldedSpends`].
-    CheckBestChainTipShieldedSpends(Arc<Transaction>),
+    CheckBestChainTipShieldedSpends(UnminedTx),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Looks up a block hash by height in the current best chain.

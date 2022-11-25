@@ -1519,7 +1519,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
-            ReadRequest::CheckBestChainTipShieldedSpends(transaction) => {
+            ReadRequest::CheckBestChainTipShieldedSpends(unmined_tx) => {
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1533,13 +1533,13 @@ impl Service<ReadRequest> for ReadStateService {
                         check::nullifier::tx_no_duplicates_in_chain(
                             &state.db,
                             latest_non_finalized_best_chain.as_ref(),
-                            &transaction,
+                            &unmined_tx.transaction,
                         )?;
 
                         check::anchors::tx_anchors_refer_to_final_treestates(
                             &state.db,
                             latest_non_finalized_best_chain.as_ref(),
-                            &transaction,
+                            &unmined_tx,
                         )?;
 
                         // The work is done in the future.

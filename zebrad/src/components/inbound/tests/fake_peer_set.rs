@@ -163,7 +163,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
         let transaction = responder
             .request()
             .clone()
-            .into_mempool_transaction()
+            .mempool_transaction()
             .expect("unexpected non-mempool request");
 
         // Set a dummy fee and sigops.
@@ -267,7 +267,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         let transaction = responder
             .request()
             .clone()
-            .into_mempool_transaction()
+            .mempool_transaction()
             .expect("unexpected non-mempool request");
 
         // Set a dummy fee and sigops.
@@ -368,7 +368,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         let transaction = responder
             .request()
             .clone()
-            .into_mempool_transaction()
+            .mempool_transaction()
             .expect("unexpected non-mempool request");
 
         // Set a dummy fee and sigops.
@@ -502,7 +502,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         let transaction = responder
             .request()
             .clone()
-            .into_mempool_transaction()
+            .mempool_transaction()
             .expect("unexpected non-mempool request");
 
         // Set a dummy fee and sigops.

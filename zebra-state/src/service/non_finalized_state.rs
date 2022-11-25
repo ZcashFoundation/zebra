@@ -276,6 +276,7 @@ impl NonFinalizedState {
 
         let block2 = contextual.block.clone();
         let height = contextual.height;
+        let transaction_hashes = contextual.transaction_hashes.clone();
 
         rayon::in_place_scope_fifo(|scope| {
             scope.spawn_fifo(|_scope| {
@@ -291,6 +292,7 @@ impl NonFinalizedState {
                     Some(check::anchors::block_sprout_anchors_refer_to_treestates(
                         sprout_final_treestates,
                         block2,
+                        transaction_hashes,
                         height,
                     ));
             });
