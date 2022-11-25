@@ -290,7 +290,7 @@ impl From<&Arc<Transaction>> for UnminedTx {
 /// A verified unmined transaction, and the corresponding transaction fee.
 ///
 /// This transaction has been fully verified, in the context of the mempool.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct VerifiedUnminedTx {
     /// The unmined transaction.
@@ -302,6 +302,14 @@ pub struct VerifiedUnminedTx {
     /// The number of legacy signature operations in this transaction's
     /// transparent inputs and outputs.
     pub legacy_sigop_count: u64,
+
+    /// The block production fee weight for `transaction`, as defined by [ZIP-317].
+    ///
+    /// This is not consensus-critical, so we use `f32` for efficient calculations
+    /// when the mempool holds a large number of transactions.
+    ///
+    /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
+    pub block_production_fee_weight: f32,
 }
 
 impl fmt::Display for VerifiedUnminedTx {
@@ -315,16 +323,21 @@ impl fmt::Display for VerifiedUnminedTx {
 }
 
 impl VerifiedUnminedTx {
-    /// Create a new verified unmined transaction from a transaction, its fee and the legacy sigop count.
+    /// Create a new verified unmined transaction from an unmined transaction,
+    /// its miner fee, and its legacy sigop count.
     pub fn new(
         transaction: UnminedTx,
         miner_fee: Amount<NonNegative>,
         legacy_sigop_count: u64,
     ) -> Self {
+        let block_production_fee_weight =
+            zip317::block_production_fee_weight(&transaction, miner_fee);
+
         Self {
             transaction,
             miner_fee,
             legacy_sigop_count,
+            block_production_fee_weight,
         }
     }
 

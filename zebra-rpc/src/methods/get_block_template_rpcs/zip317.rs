@@ -12,11 +12,6 @@ use tower::{Service, ServiceExt};
 use zebra_chain::transaction::VerifiedUnminedTx;
 use zebra_node_services::mempool;
 
-/// The weight cap for ZIP-317 block production.
-///
-/// We use `f32` for efficient calculations when the mempool holds a large number of transactions.
-const WEIGHT_CAP: f32 = 4.0;
-
 /// Selects mempool transactions for block production according to [ZIP-317].
 ///
 /// Returns selected transactions from the `mempool`, or an error if the mempool has failed.

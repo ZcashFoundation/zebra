@@ -1,17 +1,14 @@
-//! The [ZIP-317 conventional fee calculation](https://zips.z.cash/zip-0317#fee-calculation)
-//! for [UnminedTx]s.
+//! An implementation of the [ZIP-317] fee calculations for [UnminedTx]s:
+//! - [conventional fee](https://zips.z.cash/zip-0317#fee-calculation)
+//! - [block production transaction weight](https://zips.z.cash/zip-0317#block-production)
 
 use std::cmp::max;
 
 use crate::{
     amount::{Amount, NonNegative},
     serialization::ZcashSerialize,
-    transaction::Transaction,
+    transaction::{Transaction, UnminedTx},
 };
-
-// For doc links
-#[allow(unused_imports)]
-use crate::transaction::UnminedTx;
 
 /// The marginal fee for the ZIP-317 fee calculation, in zatoshis per logical action.
 //
@@ -26,6 +23,9 @@ const P2PKH_STANDARD_INPUT_SIZE: usize = 150;
 
 /// The standard size of p2pkh outputs for the ZIP-317 fee calculation, in bytes.
 const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
+
+/// The weight cap for ZIP-317 block production.
+const WEIGHT_CAP: f32 = 4.0;
 
 /// Returns the conventional fee for `transaction`, as defined by [ZIP-317].
 ///
@@ -70,6 +70,18 @@ pub fn conventional_fee(transaction: &Transaction) -> Amount<NonNegative> {
     let conventional_fee = marginal_fee * max(GRACE_ACTIONS, logical_actions);
 
     conventional_fee.expect("conventional fee is positive and limited by serialized size limit")
+}
+
+/// Returns the block production fee weight for `transaction`, as defined by [ZIP-317].
+///
+/// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
+pub fn block_production_fee_weight(transaction: &UnminedTx, miner_fee: Amount<NonNegative>) -> f32 {
+    let miner_fee = i64::from(miner_fee) as f32;
+    let conventional_fee = i64::from(transaction.conventional_fee) as f32;
+
+    let uncapped_weight = miner_fee / conventional_fee;
+
+    uncapped_weight.min(WEIGHT_CAP)
 }
 
 /// Divide `quotient` by `divisor`, rounding the result up to the nearest integer.
