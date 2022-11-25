@@ -26,7 +26,6 @@ on:
       - published
 
 env:
-  NETWORK: Mainnet
   GAR_BASE: us-docker.pkg.dev/zealous-zebra/zebra
   REGION: us-central1
   ZONE: us-central1-a
@@ -40,7 +39,7 @@ jobs:
   # - If our semver is `v1.3.0` the resulting output from this job would be `v1`
   #
   # Note: We just use the first part of the version to replace old instances, and change
-  # it when a major version is released, to keep a segregation between new and old 
+  # it when a major version is released, to keep a segregation between new and old
   # versions.
   versioning:
     name: Versioning
@@ -71,7 +70,8 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebrad
-      network: Mainnet
+      # We need to hard-code Mainnet here, because env is not allowed in this context
+      network: ${{ inputs.network || 'Mainnet' }}
       checkpoint_sync: true
       rust_backtrace: '1'
       zebra_skip_ipv6_tests: '1'
@@ -89,7 +89,7 @@ jobs:
   # - on every push/merge to the `main` branch
   # - on every release, when it's published
   deploy-nodes:
-    name: Deploy Mainnet nodes
+    name: Deploy ${{ inputs.network || 'Mainnet' }} nodes
     needs: [ build, versioning ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -103,6 +103,17 @@ jobs:
         uses: rlespinasse/github-slug-action@v4
         with:
           short-length: 7
+
+      # Makes the Zcash network name lowercase.
+      #
+      # Labels in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase ${{ inputs.network || 'Mainnet' }}.
+      #
+      # Passes the lowercase network to subsequent steps using $NETWORK env variable.
+      - name: Downcase network name for labels
+        run: |
+          NETWORK_CAPS="${{ inputs.network || 'Mainnet' }}"
+          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -129,7 +140,7 @@ jobs:
           --container-mount-disk=mount-path="/zebrad-cache",name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }} \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --scopes cloud-platform \
-          --labels=app=zebrad,environment=prod,github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
+          --labels=app=zebrad,environment=prod,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zebrad
 
       # Check if our destination instance group exists already
@@ -210,5 +221,5 @@ jobs:
           --container-mount-disk=mount-path='/zebrad-cache' \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --zone ${{ env.ZONE }} \
-          --labels=app=zebrad,environment=qa,github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
+          --labels=app=zebrad,environment=qa,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zebrad
