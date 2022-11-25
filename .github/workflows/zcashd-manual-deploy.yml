@@ -37,13 +37,13 @@ jobs:
         with:
           short-length: 7
 
-      # Performs formatting on the Zcash network name.
+      # Makes the Zcash network name lowercase.
       #
       # Labels in GCP are required to be in lowercase, but the blockchain network
       # uses sentence case, so we need to downcase ${{ inputs.network }}.
       #
       # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
-      - name: Format network name for labels
+      - name: Downcase network name for labels
         run: |
           NETWORK_CAPS="${{ inputs.network }}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
