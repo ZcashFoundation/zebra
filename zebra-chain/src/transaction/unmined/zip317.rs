@@ -24,8 +24,25 @@ const P2PKH_STANDARD_INPUT_SIZE: usize = 150;
 /// The standard size of p2pkh outputs for the ZIP-317 fee calculation, in bytes.
 const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
 
-/// The weight cap for ZIP-317 block production.
-const WEIGHT_CAP: f32 = 4.0;
+/// The recommended weight cap for ZIP-317 block production.
+const MAX_BLOCK_PRODUCTION_WEIGHT: f32 = 4.0;
+
+/// Zebra's custom minimum weight for ZIP-317 block production,
+/// based on half the [ZIP-203] recommended transaction expiry height of 40 blocks.
+///
+/// This ensures all transactions have a non-zero probability of being mined,
+/// which simplifies our implementation.
+///
+/// If blocks are full, this makes it likely that very low fee transactions
+/// will be mined:
+/// - after approximately 20 blocks delay,
+/// - but before they expire.
+///
+/// Note: Small transactions that pay the legacy ZIP-313 conventional fee have twice this weight.
+/// If blocks are full, they will be mined after approximately 10 blocks delay.
+///
+/// [ZIP-203]: https://zips.z.cash/zip-0203#changes-for-blossom>
+const MIN_BLOCK_PRODUCTION_WEIGHT: f32 = 1.0 / 20.0;
 
 /// Returns the conventional fee for `transaction`, as defined by [ZIP-317].
 ///
@@ -81,7 +98,7 @@ pub fn block_production_fee_weight(transaction: &UnminedTx, miner_fee: Amount<No
 
     let uncapped_weight = miner_fee / conventional_fee;
 
-    uncapped_weight.min(WEIGHT_CAP)
+    uncapped_weight.clamp(MIN_BLOCK_PRODUCTION_WEIGHT, MAX_BLOCK_PRODUCTION_WEIGHT)
 }
 
 /// Divide `quotient` by `divisor`, rounding the result up to the nearest integer.
