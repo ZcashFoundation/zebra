@@ -290,7 +290,7 @@ where
                 data: None,
             })?;
 
-            // The tip estimate must not be the same as the one coming from the state
+            // The tip estimate may not be the same as the one coming from the state
             // but this is ok for an estimate
             let (estimated_distance_to_chain_tip, tip_height) = latest_chain_tip
                 .estimate_distance_to_network_chain_tip(network)
@@ -334,7 +334,7 @@ where
 
             let chain_info = match response {
                 ReadResponse::ChainInfo(Some(chain_info)) => chain_info,
-                _ => unreachable!("lets hope for always some until later"),
+                _ => unreachable!("we should always have enough state data here to get a `GetBlockTemplateChainInfo`"),
             };
 
             // Get the tip data from the state call
@@ -386,11 +386,7 @@ where
                     "{}",
                     chain_info.expected_difficulty
                         .to_expanded()
-                        .ok_or(Error {
-                            code: ErrorCode::ServerError(0),
-                            message: "Not enough blocks in the chain".to_string(),
-                            data: None,
-                        })?
+                        .expect("state always returns a valid difficulty value")
                 ),
 
                 min_time: chain_info.min_time.timestamp(),

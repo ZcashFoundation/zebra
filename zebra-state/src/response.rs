@@ -135,7 +135,7 @@ pub struct GetBlockTemplateChainInfo {
     pub expected_difficulty: CompactDifficulty,
     /// The current system time to use only once all around the getblocktemplate code.
     pub current_system_time: chrono::DateTime<chrono::Utc>,
-    /// The min time
+    /// The mininimum time the miner can use in a block.
     pub min_time: chrono::DateTime<chrono::Utc>,
 }
 

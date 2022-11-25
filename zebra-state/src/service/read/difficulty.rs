@@ -19,20 +19,23 @@ use crate::service::{
     NonFinalizedState,
 };
 
-/// Return the `CompactDifficulty` and `median_past_time` for the current best chain.
+/// Returns :
+/// - The `CompactDifficulty`, for the current best chain.
+/// - The current system time.
+/// - The minimum time for a next block.
 ///
 /// Panic if we don't have enough blocks in the state.
-pub fn adjusted_difficulty_data(
+pub fn difficulty_and_time_info(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
     tip: (Height, Hash),
     network: Network,
 ) -> (CompactDifficulty, DateTime<Utc>, DateTime<Utc>) {
     let relevant_chain = any_ancestor_blocks(non_finalized_state, db, tip.1);
-    difficulty(relevant_chain, tip.0, network)
+    difficulty_and_time(relevant_chain, tip.0, network)
 }
 
-fn difficulty<C>(
+fn difficulty_and_time<C>(
     relevant_chain: C,
     tip_height: Height,
     network: Network,

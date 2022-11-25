@@ -1576,24 +1576,24 @@ impl Service<ReadRequest> for ReadStateService {
                         //
                         // In that case, the `getblocktemplate` RPC will return an error because Zebra
                         // is not synced to the tip. That check happens before the RPC makes this request.
-                        let get_block_template_info =
-                            read::tip(latest_non_finalized_state.best_chain(), &state.db).map(
-                                |tip| {
-                                    let adjusted_difficulty_data =
-                                        read::difficulty::adjusted_difficulty_data(
-                                            &latest_non_finalized_state,
-                                            &state.db,
-                                            tip,
-                                            state.network,
-                                        );
-                                    GetBlockTemplateChainInfo {
-                                        tip,
-                                        expected_difficulty: adjusted_difficulty_data.0,
-                                        current_system_time: adjusted_difficulty_data.1,
-                                        min_time: adjusted_difficulty_data.2,
-                                    }
-                                },
+                        let get_block_template_info = read::tip(
+                            latest_non_finalized_state.best_chain(),
+                            &state.db,
+                        )
+                        .map(|tip| {
+                            let difficulty_and_time = read::difficulty::difficulty_and_time_info(
+                                &latest_non_finalized_state,
+                                &state.db,
+                                tip,
+                                state.network,
                             );
+                            GetBlockTemplateChainInfo {
+                                tip,
+                                expected_difficulty: difficulty_and_time.0,
+                                current_system_time: difficulty_and_time.1,
+                                min_time: difficulty_and_time.2,
+                            }
+                        });
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");
