@@ -88,6 +88,8 @@ pub async fn test_responses<State, ReadState>(
         Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
     // nu5 block time
     let fake_tip_time = Utc.timestamp_opt(1654008605, 0).unwrap();
+    //  nu5 block time  + 1
+    let fake_min_time = Utc.timestamp_opt(1654008606, 0).unwrap();
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
@@ -146,8 +148,8 @@ pub async fn test_responses<State, ReadState>(
             .respond(ReadResponse::ChainInfo(Some(GetBlockTemplateChainInfo {
                 expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
                 tip: (fake_tip_height, fake_tip_hash),
-                median_time_past: fake_tip_time,
                 current_system_time: fake_tip_time,
+                min_time: fake_min_time,
             })));
     });
 

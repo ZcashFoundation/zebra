@@ -133,10 +133,10 @@ pub struct GetBlockTemplateChainInfo {
     pub tip: (block::Height, block::Hash),
     /// Expected difficulty data for the candidate block.
     pub expected_difficulty: CompactDifficulty,
-    /// The mediam past time calculated from the adjusted difficulty.
-    pub median_time_past: chrono::DateTime<chrono::Utc>,
     /// The current system time to use only once all around the getblocktemplate code.
     pub current_system_time: chrono::DateTime<chrono::Utc>,
+    /// The min time
+    pub min_time: chrono::DateTime<chrono::Utc>,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.

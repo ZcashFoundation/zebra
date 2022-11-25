@@ -1579,20 +1579,18 @@ impl Service<ReadRequest> for ReadStateService {
                         let get_block_template_info =
                             read::tip(latest_non_finalized_state.best_chain(), &state.db).map(
                                 |tip| {
-                                    let current_system_time = chrono::Utc::now();
                                     let adjusted_difficulty_data =
                                         read::difficulty::adjusted_difficulty_data(
                                             &latest_non_finalized_state,
                                             &state.db,
                                             tip,
                                             state.network,
-                                            &current_system_time,
                                         );
                                     GetBlockTemplateChainInfo {
                                         tip,
                                         expected_difficulty: adjusted_difficulty_data.0,
-                                        median_time_past: adjusted_difficulty_data.1,
-                                        current_system_time,
+                                        current_system_time: adjusted_difficulty_data.1,
+                                        min_time: adjusted_difficulty_data.2,
                                     }
                                 },
                             );

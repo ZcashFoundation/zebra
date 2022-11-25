@@ -2,7 +2,6 @@
 
 use std::{iter, sync::Arc};
 
-use chrono::Duration;
 use futures::{FutureExt, TryFutureExt};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
@@ -343,20 +342,6 @@ where
             let tip_hash = chain_info.tip.1;
 
             let block_height = (tip_height + 1).expect("tip is far below Height::MAX");
-            // > For each block other than the genesis block , nTime MUST be strictly greater than
-            // > the median-time-past of that block.
-            // https://zips.z.cash/protocol/protocol.pdf#blockheader
-            let min_time = chain_info.median_time_past.checked_add_signed(Duration::seconds(1))
-                .expect("median time plus a small constant is far below i64::MAX");
-
-            // > For each block at block height 2 or greater on Mainnet, or block height 653606 or greater on Testnet, nTime
-            // > MUST be less than or equal to the median-time-past of that block plus 90 * 60 seconds.
-            //
-            // We ignore the height as we are checkpointing on Canopy or higher in Mainnet and Testnet.
-            const MAX_BLOCK_TIME_GAP: i64 = 90 * 60;
-            let max_time = chain_info.median_time_past.checked_add_signed(Duration::seconds(MAX_BLOCK_TIME_GAP))
-                .expect("median time plus a small constant is far below i64::MAX");
-            let cur_time = chain_info.current_system_time.timestamp().clamp(min_time.timestamp(), max_time.timestamp());
 
             let outputs =
                 standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
@@ -408,7 +393,7 @@ where
                         })?
                 ),
 
-                min_time: min_time.timestamp(),
+                min_time: chain_info.min_time.timestamp(),
 
                 mutable,
 
@@ -418,7 +403,7 @@ where
 
                 size_limit: MAX_BLOCK_BYTES,
 
-                cur_time,
+                cur_time: chain_info.current_system_time.timestamp(),
 
                 bits: format!("{:#010x}", chain_info.expected_difficulty.to_value())
                     .drain(2..)
