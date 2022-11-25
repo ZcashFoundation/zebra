@@ -196,6 +196,12 @@ async fn mempool_request_with_missing_input_is_rejected() {
 
     tokio::spawn(async move {
         state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(None));
+
+        state
             .expect_request_that(|req| {
                 matches!(
                     req,
@@ -205,12 +211,6 @@ async fn mempool_request_with_missing_input_is_rejected() {
             .await
             .expect("verifier should call mock state service")
             .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
-
-        state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
-            .await
-            .expect("verifier should call mock state service")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(None));
     });
 
     let verifier_response = verifier
@@ -254,6 +254,16 @@ async fn mempool_request_with_present_input_is_accepted() {
 
     tokio::spawn(async move {
         state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(
+                known_utxos
+                    .get(&input_outpoint)
+                    .map(|utxo| utxo.utxo.clone()),
+            ));
+
+        state
             .expect_request_that(|req| {
                 matches!(
                     req,
@@ -263,16 +273,6 @@ async fn mempool_request_with_present_input_is_accepted() {
             .await
             .expect("verifier should call mock state service")
             .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
-
-        state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
-            .await
-            .expect("verifier should call mock state service")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(
-                known_utxos
-                    .get(&input_outpoint)
-                    .map(|utxo| utxo.utxo.clone()),
-            ));
     });
 
     let verifier_response = verifier

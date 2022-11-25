@@ -3,6 +3,8 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use rayon::prelude::*;
+
 use zebra_chain::{
     block::{Block, Height},
     sprout,
@@ -14,7 +16,7 @@ use crate::{
     PreparedBlock, ValidateContextError,
 };
 
-/// Checks the final Sapling and Orchard anchors specified by `transactions`
+/// Checks the final Sapling and Orchard anchors specified by `transaction`
 ///
 /// This method checks for anchors computed from the final treestate of each block in
 /// the `parent_chain` or `finalized_state`.
@@ -331,18 +333,23 @@ pub(crate) fn block_sapling_orchard_anchors_refer_to_final_treestates(
     parent_chain: &Arc<Chain>,
     prepared: &PreparedBlock,
 ) -> Result<(), ValidateContextError> {
-    for (tx_index_in_block, transaction) in prepared.block.transactions.iter().enumerate() {
-        sapling_orchard_anchors_refer_to_final_treestates(
-            finalized_state,
-            Some(parent_chain),
-            transaction,
-            prepared.transaction_hashes[tx_index_in_block],
-            Some(tx_index_in_block),
-            Some(prepared.height),
-        )?;
-    }
+    prepared
+        .block
+        .transactions
+        .par_iter()
+        .enumerate()
+        .try_for_each(|(tx_index_in_block, transaction)| {
+            sapling_orchard_anchors_refer_to_final_treestates(
+                finalized_state,
+                Some(parent_chain),
+                transaction,
+                prepared.transaction_hashes[tx_index_in_block],
+                Some(tx_index_in_block),
+                Some(prepared.height),
+            )?;
 
-    Ok(())
+            Ok(())
+        })
 }
 
 /// This function fetches and returns the Sprout final treestates from the state,
@@ -399,17 +406,21 @@ pub(crate) fn block_sprout_anchors_refer_to_treestates(
         "received sprout final treestate anchors",
     );
 
-    for (tx_index_in_block, transaction) in block.transactions.iter().enumerate() {
-        sprout_anchors_refer_to_treestates(
-            &sprout_final_treestates,
-            transaction,
-            transaction_hashes[tx_index_in_block],
-            Some(tx_index_in_block),
-            Some(height),
-        )?;
-    }
+    block
+        .transactions
+        .par_iter()
+        .enumerate()
+        .try_for_each(|(tx_index_in_block, transaction)| {
+            sprout_anchors_refer_to_treestates(
+                &sprout_final_treestates,
+                transaction,
+                transaction_hashes[tx_index_in_block],
+                Some(tx_index_in_block),
+                Some(height),
+            )?;
 
-    Ok(())
+            Ok(())
+        })
 }
 
 /// Checks the final Sprout, Sapling and Orchard anchors specified by `transaction`
