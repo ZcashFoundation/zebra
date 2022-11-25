@@ -52,10 +52,10 @@ pub enum Response {
     /// The response to a `FindBlockHeaders` request.
     BlockHeaders(Vec<block::CountedHeader>),
 
-    /// Response to [`Request::CheckBestChainTipShieldedSpends`].
+    /// Response to [`Request::CheckBestChainTipNullifiersAndAnchors`].
     ///
     /// Does not check transparent UTXO inputs
-    ValidBestChainTipShieldedSpends,
+    ValidBestChainTipNullifiersAndAnchors,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -116,10 +116,10 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::UtxosByAddresses`] with found utxos and transaction data.
     AddressUtxos(AddressUtxos),
 
-    /// Response to [`ReadRequest::CheckBestChainTipShieldedSpends`].
+    /// Response to [`ReadRequest::CheckBestChainTipNullifiersAndAnchors`].
     ///
     /// Does not check transparent UTXO inputs
-    ValidBestChainTipShieldedSpends,
+    ValidBestChainTipNullifiersAndAnchors,
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::BestChainBlockHash`](crate::ReadRequest::BestChainBlockHash) with the
@@ -152,7 +152,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockHashes(hashes) => Ok(Response::BlockHashes(hashes)),
             ReadResponse::BlockHeaders(headers) => Ok(Response::BlockHeaders(headers)),
 
-            ReadResponse::ValidBestChainTipShieldedSpends => Ok(Response::ValidBestChainTipShieldedSpends),
+            ReadResponse::ValidBestChainTipNullifiersAndAnchors => Ok(Response::ValidBestChainTipNullifiersAndAnchors),
 
             ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)

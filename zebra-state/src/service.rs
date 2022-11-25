@@ -1025,7 +1025,7 @@ impl Service<Request> for StateService {
             | Request::Block(_)
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. }
-            | Request::CheckBestChainTipShieldedSpends(_) => {
+            | Request::CheckBestChainTipNullifiersAndAnchors(_) => {
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
@@ -1519,7 +1519,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
-            ReadRequest::CheckBestChainTipShieldedSpends(unmined_tx) => {
+            ReadRequest::CheckBestChainTipNullifiersAndAnchors(unmined_tx) => {
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1545,7 +1545,7 @@ impl Service<ReadRequest> for ReadStateService {
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::UnspentBestChainUtxo");
 
-                        Ok(ReadResponse::ValidBestChainTipShieldedSpends)
+                        Ok(ReadResponse::ValidBestChainTipNullifiersAndAnchors)
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::UnspentBestChainUtxo"))

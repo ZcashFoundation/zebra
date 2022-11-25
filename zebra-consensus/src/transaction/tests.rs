@@ -199,12 +199,12 @@ async fn mempool_request_with_missing_input_is_rejected() {
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipShieldedSpends(_)
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
                 )
             })
             .await
             .expect("verifier should call mock state service")
-            .respond(zebra_state::Response::ValidBestChainTipShieldedSpends);
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
 
         state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
@@ -257,12 +257,12 @@ async fn mempool_request_with_present_input_is_accepted() {
             .expect_request_that(|req| {
                 matches!(
                     req,
-                    zebra_state::Request::CheckBestChainTipShieldedSpends(_)
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
                 )
             })
             .await
             .expect("verifier should call mock state service")
-            .respond(zebra_state::Response::ValidBestChainTipShieldedSpends);
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
 
         state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))

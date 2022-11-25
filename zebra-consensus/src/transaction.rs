@@ -400,11 +400,11 @@ where
             if let Some(unmined_tx) = req.mempool_transaction() {
                 let check_anchors_and_revealed_nullifiers_query = state
                     .clone()
-                    .oneshot(zs::Request::CheckBestChainTipShieldedSpends(
+                    .oneshot(zs::Request::CheckBestChainTipNullifiersAndAnchors(
                         unmined_tx,
                     ))
                     .map(|res| {
-                        assert!(res? == zs::Response::ValidBestChainTipShieldedSpends);
+                        assert!(res? == zs::Response::ValidBestChainTipNullifiersAndAnchors);
                         Ok(())
                     }
                 );
