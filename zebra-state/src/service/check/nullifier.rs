@@ -98,8 +98,8 @@ where
 /// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
 #[tracing::instrument(skip_all)]
 pub(crate) fn tx_no_duplicates_in_chain(
-    non_finalized_chain: Option<&Arc<Chain>>,
     finalized_chain: &ZebraDb,
+    non_finalized_chain: Option<&Arc<Chain>>,
     transaction: &Arc<Transaction>,
 ) -> Result<(), ValidateContextError> {
     find_duplicate_nullifier(
