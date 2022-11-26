@@ -350,7 +350,7 @@ pub(crate) fn block_sapling_orchard_anchors_refer_to_final_treestates(
         })
 }
 
-/// Accepts a [`ZebraDb`], [`Chain`], and [`PreparedBlock`].
+/// Accepts a [`ZebraDb`], [`Arc<Chain>`](Chain), and [`PreparedBlock`].
 ///
 /// Iterates over the transactions in the [`PreparedBlock`], and fetches the Sprout final treestates
 /// from the state.
@@ -383,8 +383,8 @@ pub(crate) fn block_fetch_sprout_final_treestates(
     sprout_final_treestates
 }
 
-/// Accepts a [`ZebraDb`], [`Chain`], [`Block`], and a slice of [`transaction::Hash`](`TransactionHash`)es
-/// corresponding to the transactions in [`Block`]
+/// Accepts a [`ZebraDb`], [`Arc<Chain>`](Chain), [`Arc<Block>`](Block), and an
+/// [`Arc<[transaction::Hash]>`](TransactionHash) of hashes corresponding to the transactions in [`Block`]
 ///
 /// Iterates over the transactions in the [`Block`] checking the final Sprout anchors.
 ///
@@ -428,7 +428,7 @@ pub(crate) fn block_sprout_anchors_refer_to_treestates(
         })
 }
 
-/// Accepts a [`ZebraDb`], an optional [`Chain`], and an [`UnminedTx`].
+/// Accepts a [`ZebraDb`], an optional [`Option<Arc<Chain>>`](Chain), and an [`UnminedTx`].
 ///
 /// Checks the final Sprout, Sapling and Orchard anchors specified in the [`UnminedTx`].
 ///

@@ -73,7 +73,7 @@ proptest! {
 
         block1.transactions.push(transaction.into());
 
-    let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
+        let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
         finalized_state.populate_with_anchors(&block1);
@@ -214,7 +214,9 @@ proptest! {
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state,
-            &mut non_finalized_state,  block1);
+            &mut non_finalized_state,
+            block1
+        );
 
         prop_assert_eq!(
             commit_result,

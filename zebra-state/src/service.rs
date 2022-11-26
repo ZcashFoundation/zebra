@@ -1519,6 +1519,8 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
+            // Transaction Verifier expects errors from this request to be the ValidateContextError type
+            // and will panic if returned a different type of error.
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(unmined_tx) => {
                 let timer = CodeTimer::start();
 

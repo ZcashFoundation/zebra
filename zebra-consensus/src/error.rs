@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use zebra_chain::{amount, block, orchard, sapling, sprout, transparent};
+use zebra_state::ValidateContextError;
 
 use crate::{block::MAX_BLOCK_SIGOPS, BoxError};
 
@@ -33,7 +34,7 @@ pub enum SubsidyError {
     SumOverflow,
 }
 
-#[derive(Error, Clone, Debug, PartialEq, Eq)]
+#[derive(Error, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum TransactionError {
     #[error("first transaction must be coinbase")]
@@ -180,6 +181,10 @@ pub enum TransactionError {
 
     #[error("could not find a mempool transaction input UTXO in the best chain")]
     TransparentInputNotFound,
+
+    #[error("could not validate nullifiers and anchors on best chain")]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    ValidateNullifiersAndAnchorsError(#[from] ValidateContextError),
 }
 
 impl From<BoxError> for TransactionError {
@@ -209,7 +214,7 @@ impl From<SubsidyError> for BlockError {
     }
 }
 
-#[derive(Error, Clone, Debug, PartialEq, Eq)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub enum BlockError {
     #[error("block contains invalid transactions")]
     Transaction(#[from] TransactionError),

@@ -31,6 +31,7 @@ use zebra_chain::{
 
 use zebra_script::CachedFfiTransaction;
 use zebra_state as zs;
+use zs::ValidateContextError;
 
 use crate::{error::TransactionError, groth16::DescriptionWrapper, primitives, script, BoxError};
 
@@ -404,6 +405,11 @@ where
                         unmined_tx,
                     ))
                     .map(|res| {
+                        let res: Result<zs::Response, TransactionError> = res.map_err(|err| {
+                            let err: ValidateContextError = *err.downcast()
+                                .expect("CheckBestChainTipNullifiersAndAnchors error must be a ValidateContextError");
+                            err.into()
+                        });
                         assert!(res? == zs::Response::ValidBestChainTipNullifiersAndAnchors);
                         Ok(())
                     }
