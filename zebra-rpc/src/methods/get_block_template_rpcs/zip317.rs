@@ -45,19 +45,9 @@ where
     let mut remaining_block_sigops = MAX_BLOCK_SIGOPS;
     let mut remaining_block_bytes: usize = MAX_BLOCK_BYTES.try_into().expect("fits in memory");
 
-    // TODO: split these into separate functions?
-
-    if !conventional_fee_txs.is_empty() {
-        // Setup the transaction weights.
-        let conventional_fee_tx_weights: Vec<f32> = conventional_fee_txs
-            .iter()
-            .map(|tx| tx.block_production_fee_weight)
-            .collect();
-        let mut conventional_fee_tx_weights = WeightedIndex::new(conventional_fee_tx_weights)
-            .expect(
-            "there is at least one weight, all weights are non-negative, and the total is positive",
-        );
-
+    if let Some((mut conventional_fee_tx_weights, _total_weight)) =
+        setup_fee_weighted_index(&conventional_fee_txs)
+    {
         // > Repeat while there is any mempool transaction that:
         // > - pays at least the conventional fee,
         // > - is within the block sigop limit, and
@@ -88,15 +78,11 @@ where
         }
     }
 
-    if !low_fee_txs.is_empty() {
-        // > Let `N` be the number of remaining transactions with `tx.weight < 1`.
-        // > Calculate their sum of weights.
-        let low_fee_tx_weights: Vec<f32> = low_fee_txs
-            .iter()
-            .map(|tx| tx.block_production_fee_weight)
-            .collect();
-        let low_fee_tx_count = low_fee_tx_weights.len() as f32;
-        let remaining_weight: f32 = low_fee_tx_weights.iter().sum();
+    // > Let `N` be the number of remaining transactions with `tx.weight < 1`.
+    // > Calculate their sum of weights.
+    if let Some((mut low_fee_tx_weights, remaining_weight)) = setup_fee_weighted_index(&low_fee_txs)
+    {
+        let low_fee_tx_count = low_fee_txs.len() as f32;
 
         // > Calculate `size_target = ...`
         //
@@ -107,11 +93,6 @@ where
         let remaining_block_bytes =
             remaining_block_bytes as f32 * average_remaining_weight.min(1.0);
         let mut remaining_block_bytes = remaining_block_bytes as usize;
-
-        // Setup the transaction weights.
-        let mut low_fee_tx_weights = WeightedIndex::new(low_fee_tx_weights).expect(
-            "there is at least one weight, all weights are non-negative, and the total is positive",
-        );
 
         loop {
             // > Pick a transaction with probability in direct proportion to its weight
@@ -146,6 +127,7 @@ where
     Ok(selected_txs)
 }
 
+/// Fetch the transactions that are currently in `mempool`.
 async fn fetch_mempool_transactions<Mempool>(mempool: Mempool) -> Result<Vec<VerifiedUnminedTx>>
 where
     Mempool: Service<
@@ -169,4 +151,26 @@ where
     } else {
         unreachable!("unmatched response to a mempool::FullTransactions request")
     }
+}
+
+/// Returns a fee-weighted index and the total weight of `transactions`.
+///
+/// Returns `None` if there are no transactions, or if the weights are invalid.
+fn setup_fee_weighted_index(
+    transactions: &[VerifiedUnminedTx],
+) -> Option<(WeightedIndex<f32>, f32)> {
+    if transactions.is_empty() {
+        return None;
+    }
+
+    let tx_weights: Vec<f32> = transactions
+        .iter()
+        .map(|tx| tx.block_production_fee_weight)
+        .collect();
+    let total_tx_weight: f32 = tx_weights.iter().sum();
+
+    // Setup the transaction weights.
+    let tx_weights = WeightedIndex::new(tx_weights).ok()?;
+
+    Some((tx_weights, total_tx_weight))
 }
