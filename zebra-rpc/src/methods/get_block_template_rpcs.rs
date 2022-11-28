@@ -20,7 +20,6 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
-    work::difficulty::ExpandedDifficulty,
 };
 use zebra_consensus::{
     funding_stream_address, funding_stream_values, miner_subsidy, new_coinbase_script, BlockError,
@@ -353,14 +352,7 @@ where
             // Convert into TransactionTemplates
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
 
-            let mut mutable: Vec<String> = constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD.iter().map(ToString::to_string).collect();
-
-            // If we are in the testnet and received expected difficulty equals to the target difficulty limit for the Testnet then we
-            // are mining a minimum difficulty block.
-            // Zebra does not allow miners to change time field if we are in this scenario.
-            if network == Network::Testnet && chain_info.expected_difficulty == ExpandedDifficulty::target_difficulty_limit(Network::Testnet).to_compact() {
-                mutable.remove(mutable.iter().position(|field| *field == "time").expect("time must be a field of GET_BLOCK_TEMPLATE_MUTABLE_FIELD constant"));
-            }
+            let mutable: Vec<String> = constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD.iter().map(ToString::to_string).collect();
 
             Ok(GetBlockTemplate {
                 capabilities: Vec::new(),
