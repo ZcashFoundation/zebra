@@ -216,10 +216,7 @@ impl Application for ZebradApp {
         // report an error to the terminal if it occurs.
         let config = match command.config_path() {
             Some(path) => match self.load_config(&path) {
-                Ok(config) => {
-                    info!(config_path = ?path, ?config, "loaded zebrad config");
-                    config
-                }
+                Ok(config) => config,
                 Err(e) => {
                     status_err!("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file. You can generate a valid config by running \"zebrad generate\", and diff it against yours to examine any format inconsistencies.");
                     return Err(e);
@@ -405,6 +402,7 @@ impl Application for ZebradApp {
         // Log git metadata and platform info when zebrad starts up
         if is_server {
             tracing::info!("Diagnostic {}", metadata_section);
+            info!(config_path = ?command.config_path(), ?config, "loaded zebrad config");
         }
 
         // Activate the global span, so it's visible when we load the other
