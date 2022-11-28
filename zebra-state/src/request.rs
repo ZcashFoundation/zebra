@@ -561,7 +561,9 @@ impl Request {
             Request::Block(_) => "block",
             Request::FindBlockHashes { .. } => "find_block_hashes",
             Request::FindBlockHeaders { .. } => "find_block_headers",
-            Request::CheckBestChainTipNullifiersAndAnchors(_) => "best_chain_tip_nullifiers_anchors",
+            Request::CheckBestChainTipNullifiersAndAnchors(_) => {
+                "best_chain_tip_nullifiers_anchors"
+            }
         }
     }
 

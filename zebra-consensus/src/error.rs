@@ -195,6 +195,11 @@ impl From<BoxError> for TransactionError {
             Err(e) => err = e,
         }
 
+        match err.downcast::<ValidateContextError>() {
+            Ok(e) => return (*e).into(),
+            Err(e) => err = e,
+        }
+
         // buffered transaction verifier service error
         match err.downcast::<TransactionError>() {
             Ok(e) => return *e,
