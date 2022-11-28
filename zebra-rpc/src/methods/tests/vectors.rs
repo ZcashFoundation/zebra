@@ -893,6 +893,7 @@ async fn rpc_getblocktemplate() {
     assert_eq!(get_block_template.cur_time, fake_cur_time.timestamp());
     assert_eq!(get_block_template.bits, "01010000");
     assert_eq!(get_block_template.height, 1687105); // nu5 height
+    assert_eq!(get_block_template.max_time, fake_max_time.timestamp());
 
     // Coinbase transaction checks.
     assert!(get_block_template.coinbase_txn.required);

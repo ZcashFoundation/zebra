@@ -37,5 +37,6 @@ expression: block_template
   "sizelimit": 2000000,
   "curtime": 1654008617,
   "bits": "01010000",
-  "height": 1687105
+  "height": 1687105,
+  "maxtime": 1654008728
 }

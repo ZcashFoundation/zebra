@@ -398,6 +398,8 @@ where
                     .collect(),
 
                 height: block_height.0,
+
+                max_time: chain_info.max_time.timestamp(),
             })
         }
         .boxed()

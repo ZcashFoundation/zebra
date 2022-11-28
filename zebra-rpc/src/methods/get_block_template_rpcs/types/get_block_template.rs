@@ -109,4 +109,14 @@ pub struct GetBlockTemplate {
     /// The height of the next block in the best chain.
     // TODO: use Height type?
     pub height: u32,
+
+    /// Zebra adjusts the minimum and current times for testnet minimum difficulty blocks,
+    /// so we need to tell miners what the maximum valid time is.
+    ///
+    /// This field is not in the Zcash RPC reference yet.
+    /// Currently, miners use `min_time` or `cur_time`, or calculate `max_time` from the
+    /// fixed 90 minute consensus rule. (Or they just don't check!)
+    #[serde(rename = "maxtime")]
+    // TODO: use DateTime32 type?
+    pub max_time: i64,
 }
