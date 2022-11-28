@@ -543,7 +543,7 @@ pub enum Request {
 
     /// Contextually validates anchors and nullifiers of a transaction on the best chain
     ///
-    /// Returns [`Response::ValidBestChainTipNullifiersAndAnchors`] or a [`ValidateContextError`](crate::ValidateContextError)
+    /// Returns [`Response::ValidBestChainTipNullifiersAndAnchors`]
     CheckBestChainTipNullifiersAndAnchors(UnminedTx),
 }
 

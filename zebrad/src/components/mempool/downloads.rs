@@ -272,7 +272,7 @@ where
 
         let fut = async move {
             // Don't download/verify if the transaction is already in the best chain.
-            Self::transaction_in_chain(&mut state, txid).await?;
+            Self::transaction_in_best_chain(&mut state, txid).await?;
 
             trace!(?txid, "transaction is not in best chain");
 

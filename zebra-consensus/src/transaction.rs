@@ -357,9 +357,9 @@ where
 
             // Load spent UTXOs from state.
             // TODO: Make this a method of `Request` and replace `tx.clone()` with `self.transaction()`?
-            let check_spent_utxos =
+            let load_spent_utxos_fut =
                 Self::spent_utxos(tx.clone(), req.known_utxos(), req.is_mempool(), state.clone());
-            let (spent_utxos, spent_outputs) = check_spent_utxos.await?;
+            let (spent_utxos, spent_outputs) = load_spent_utxos_fut.await?;
 
             let cached_ffi_transaction =
                 Arc::new(CachedFfiTransaction::new(tx.clone(), spent_outputs));

@@ -5,6 +5,8 @@
 //! implement, and ensures that we don't reject blocks or transactions
 //! for a non-enumerated reason.
 
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
@@ -34,7 +36,7 @@ pub enum SubsidyError {
     SumOverflow,
 }
 
-#[derive(Error, Debug, PartialEq, Eq)]
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum TransactionError {
     #[error("first transaction must be coinbase")]
@@ -184,7 +186,7 @@ pub enum TransactionError {
 
     #[error("could not validate nullifiers and anchors on best chain")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
-    ValidateNullifiersAndAnchorsError(#[from] ValidateContextError),
+    ValidateNullifiersAndAnchorsError(#[from] Arc<ValidateContextError>),
 }
 
 impl From<BoxError> for TransactionError {
@@ -196,7 +198,7 @@ impl From<BoxError> for TransactionError {
         }
 
         match err.downcast::<ValidateContextError>() {
-            Ok(e) => return (*e).into(),
+            Ok(e) => return Arc::new(*e).into(),
             Err(e) => err = e,
         }
 
