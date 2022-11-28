@@ -18,6 +18,8 @@ pub struct GetBlockTemplate {
     /// - `proposal`: <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
     /// - `longpoll`: <https://en.bitcoin.it/wiki/BIP_0022#Optional:_Long_Polling>
     /// - `serverlist`: <https://en.bitcoin.it/wiki/BIP_0023#Logical_Services>
+    ///
+    /// By the above, Zebra will always return an empty vector here.
     pub capabilities: Vec<String>,
 
     /// The version of the block format.
@@ -65,14 +67,17 @@ pub struct GetBlockTemplate {
     #[serde(rename = "coinbasetxn")]
     pub coinbase_txn: TransactionTemplate<amount::NegativeOrZero>,
 
-    /// Add documentation.
+    /// The expected difficulty for the new block displayed in expanded form.
     // TODO: use ExpandedDifficulty type.
     pub target: String,
 
-    /// Add documentation.
+    /// > For each block other than the genesis block, nTime MUST be strictly greater than
+    /// > the median-time-past of that block.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#blockheader>
     #[serde(rename = "mintime")]
     // TODO: use DateTime32 type?
-    pub min_time: u32,
+    pub min_time: i64,
 
     /// Hardcoded list of block fields the miner is allowed to change.
     pub mutable: Vec<String>,
@@ -89,16 +94,29 @@ pub struct GetBlockTemplate {
     #[serde(rename = "sizelimit")]
     pub size_limit: u64,
 
-    /// Add documentation.
+    /// > the current time as seen by the server (recommended for block time).
+    /// > note this is not necessarily the system clock, and must fall within the mintime/maxtime rules
+    ///
+    /// <https://en.bitcoin.it/wiki/BIP_0022#Block_Template_Request>
     // TODO: use DateTime32 type?
     #[serde(rename = "curtime")]
-    pub cur_time: u32,
+    pub cur_time: i64,
 
-    /// Add documentation.
+    /// The expected difficulty for the new block displayed in compact form.
     // TODO: use CompactDifficulty type.
     pub bits: String,
 
-    /// Add documentation.
+    /// The height of the next block in the best chain.
     // TODO: use Height type?
     pub height: u32,
+
+    /// Zebra adjusts the minimum and current times for testnet minimum difficulty blocks,
+    /// so we need to tell miners what the maximum valid time is.
+    ///
+    /// This field is not in the Zcash RPC reference yet.
+    /// Currently, miners use `min_time` or `cur_time`, or calculate `max_time` from the
+    /// fixed 90 minute consensus rule. (Or they just don't check!)
+    #[serde(rename = "maxtime")]
+    // TODO: use DateTime32 type?
+    pub max_time: i64,
 }

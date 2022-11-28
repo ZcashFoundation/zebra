@@ -32,6 +32,8 @@ pub use config::{check_and_delete_old_databases, Config};
 pub use constants::MAX_BLOCK_REORG_HEIGHT;
 pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
 pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, ReadRequest, Request};
+#[cfg(feature = "getblocktemplate-rpcs")]
+pub use response::GetBlockTemplateChainInfo;
 pub use response::{ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipChange, LatestChainTip, TipAction},

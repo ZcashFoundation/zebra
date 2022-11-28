@@ -10,6 +10,9 @@ use zebra_chain::{
     transparent,
 };
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use zebra_chain::work::difficulty::CompactDifficulty;
+
 // Allow *only* these unused imports, so that rustdoc link resolution
 // will work with inline links.
 #[allow(unused_imports)]
@@ -115,6 +118,32 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::BestChainBlockHash`](crate::ReadRequest::BestChainBlockHash) with the
     /// specified block hash.
     BlockHash(Option<block::Hash>),
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Response to [`ReadRequest::ChainInfo`](crate::ReadRequest::ChainInfo) with the state
+    /// information needed by the `getblocktemplate` RPC method.
+    ChainInfo(Option<GetBlockTemplateChainInfo>),
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+/// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GetBlockTemplateChainInfo {
+    /// The current state tip height and hash.
+    /// The block template for the candidate block is the next block after this block.
+    pub tip: (block::Height, block::Hash),
+
+    /// The expected difficulty of the candidate block.
+    pub expected_difficulty: CompactDifficulty,
+
+    /// The current system time, adjusted to fit within `min_time` and `max_time`.
+    pub current_system_time: chrono::DateTime<chrono::Utc>,
+
+    /// The mininimum time the miner can use in this block.
+    pub min_time: chrono::DateTime<chrono::Utc>,
+
+    /// The maximum time the miner can use in this block.
+    pub max_time: chrono::DateTime<chrono::Utc>,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.
@@ -153,6 +182,10 @@ impl TryFrom<ReadResponse> for Response {
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::BlockHash(_) => {
+                Err("there is no corresponding Response for this ReadResponse")
+            }
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadResponse::ChainInfo(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
         }

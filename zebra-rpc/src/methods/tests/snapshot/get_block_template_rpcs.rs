@@ -5,17 +5,23 @@
 //! cargo insta test --review --features getblocktemplate-rpcs --delete-unreferenced-snapshots
 //! ```
 
+use chrono::{TimeZone, Utc};
+use hex::FromHex;
 use insta::Settings;
 use tower::{buffer::Buffer, Service};
 
 use zebra_chain::{
+    block::Hash,
     chain_tip::mock::MockChainTip,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
     transaction::Transaction,
     transparent,
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
 };
 use zebra_node_services::mempool;
+
+use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
 
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -75,17 +81,32 @@ pub async fn test_responses<State, ReadState>(
         miner_address: Some(transparent::Address::from_script_hash(network, [0xad; 20])),
     };
 
+    // nu5 block height
+    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(network).unwrap();
+    // nu5 block hash
+    let fake_tip_hash =
+        Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
+
+    //  nu5 block time + 1
+    let fake_min_time = Utc.timestamp_opt(1654008606, 0).unwrap();
+    // nu5 block time + 12
+    let fake_cur_time = Utc.timestamp_opt(1654008617, 0).unwrap();
+    // nu5 block time + 123
+    let fake_max_time = Utc.timestamp_opt(1654008728, 0).unwrap();
+
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
-    mock_chain_tip_sender.send_best_tip_height(NetworkUpgrade::Nu5.activation_height(network));
+    mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
+    mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
+    // get an rpc instance with continuous blockchain state
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         network,
-        mining_config,
+        mining_config.clone(),
         Buffer::new(mempool.clone(), 1),
         read_state,
-        mock_chain_tip,
-        chain_verifier,
+        mock_chain_tip.clone(),
+        chain_verifier.clone(),
     );
 
     // `getblockcount`
@@ -103,7 +124,39 @@ pub async fn test_responses<State, ReadState>(
 
     snapshot_rpc_getblockhash(get_block_hash, &settings);
 
+    // get a new empty state
+    let new_read_state = MockService::build().for_unit_tests();
+
+    // send tip hash and time needed for getblocktemplate rpc
+    mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
+
+    // create a new rpc instance with new state and mock
+    let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
+        network,
+        mining_config,
+        Buffer::new(mempool.clone(), 1),
+        new_read_state.clone(),
+        mock_chain_tip,
+        chain_verifier,
+    );
+
     // `getblocktemplate`
+
+    // Fake the ChainInfo response
+    tokio::spawn(async move {
+        new_read_state
+            .clone()
+            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .await
+            .respond(ReadResponse::ChainInfo(Some(GetBlockTemplateChainInfo {
+                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                tip: (fake_tip_height, fake_tip_hash),
+                current_system_time: fake_cur_time,
+                min_time: fake_min_time,
+                max_time: fake_max_time,
+            })));
+    });
+
     let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
 
     mempool

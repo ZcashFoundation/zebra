@@ -27,6 +27,8 @@ use zebra_consensus::{
 };
 use zebra_node_services::mempool;
 
+use zebra_state::{ReadRequest, ReadResponse};
+
 use crate::methods::{
     best_chain_tip_height,
     get_block_template_rpcs::types::{
@@ -275,6 +277,7 @@ where
 
         let mempool = self.mempool.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
+        let mut state = self.state.clone();
 
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
@@ -286,6 +289,8 @@ where
                 data: None,
             })?;
 
+            // The tip estimate may not be the same as the one coming from the state
+            // but this is ok for an estimate
             let (estimated_distance_to_chain_tip, tip_height) = latest_chain_tip
                 .estimate_distance_to_network_chain_tip(network)
                 .ok_or_else(|| Error {
@@ -314,7 +319,29 @@ where
 
             let miner_fee = miner_fee(&mempool_txs);
 
+            // Calling state with `ChainInfo` request for relevant chain data
+            let request = ReadRequest::ChainInfo;
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                                data: None,
+                            })?;
+
+            let chain_info = match response {
+                ReadResponse::ChainInfo(Some(chain_info)) => chain_info,
+                _ => unreachable!("we should always have enough state data here to get a `GetBlockTemplateChainInfo`"),
+            };
+
+            // Get the tip data from the state call
+            let tip_height = chain_info.tip.0;
+            let tip_hash = chain_info.tip.1;
+
             let block_height = (tip_height + 1).expect("tip is far below Height::MAX");
+
             let outputs =
                 standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
             let coinbase_tx = Transaction::new_v5_coinbase(network, block_height, outputs).into();
@@ -325,13 +352,14 @@ where
             // Convert into TransactionTemplates
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
 
-            let empty_string = String::from("");
+            let mutable: Vec<String> = constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD.iter().map(ToString::to_string).collect();
+
             Ok(GetBlockTemplate {
-                capabilities: vec![],
+                capabilities: Vec::new(),
 
                 version: ZCASH_BLOCK_VERSION,
 
-                previous_block_hash: GetBlockHash([0; 32].into()),
+                previous_block_hash: GetBlockHash(tip_hash),
                 block_commitments_hash: [0; 32].into(),
                 light_client_root_hash: [0; 32].into(),
                 final_sapling_root_hash: [0; 32].into(),
@@ -346,14 +374,16 @@ where
 
                 coinbase_txn: TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee),
 
-                target: empty_string.clone(),
+                target: format!(
+                    "{}",
+                    chain_info.expected_difficulty
+                        .to_expanded()
+                        .expect("state always returns a valid difficulty value")
+                ),
 
-                min_time: 0,
+                min_time: chain_info.min_time.timestamp(),
 
-                mutable: constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
+                mutable,
 
                 nonce_range: constants::GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
 
@@ -361,11 +391,15 @@ where
 
                 size_limit: MAX_BLOCK_BYTES,
 
-                cur_time: 0,
+                cur_time: chain_info.current_system_time.timestamp(),
 
-                bits: empty_string,
+                bits: format!("{:#010x}", chain_info.expected_difficulty.to_value())
+                    .drain(2..)
+                    .collect(),
 
-                height: 0,
+                height: block_height.0,
+
+                max_time: chain_info.max_time.timestamp(),
             })
         }
         .boxed()

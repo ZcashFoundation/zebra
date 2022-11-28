@@ -112,6 +112,17 @@ impl fmt::Debug for ExpandedDifficulty {
     }
 }
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+impl fmt::Display for ExpandedDifficulty {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut buf = [0; 32];
+        // Use the same byte order as block::Hash
+        self.0.to_big_endian(&mut buf);
+
+        f.write_str(&hex::encode(buf))
+    }
+}
+
 /// A 128-bit unsigned "Work" value.
 ///
 /// Used to calculate the total work for each chain of blocks.
@@ -256,6 +267,12 @@ impl CompactDifficulty {
     pub fn to_work(self) -> Option<Work> {
         let expanded = self.to_expanded()?;
         Work::try_from(expanded).ok()
+    }
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Returns the raw inner value.
+    pub fn to_value(&self) -> u32 {
+        self.0
     }
 }
 

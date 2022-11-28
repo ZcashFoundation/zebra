@@ -1522,13 +1522,6 @@ impl Service<ReadRequest> for ReadStateService {
             // Used by get_block_hash RPC.
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::BestChainBlockHash(height) => {
-                metrics::counter!(
-                    "state.requests",
-                    1,
-                    "service" => "read_state",
-                    "type" => "best_chain_block_hash",
-                );
-
                 let timer = CodeTimer::start();
 
                 let state = self.clone();
@@ -1552,6 +1545,53 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::BestChainBlockHash"))
+                .boxed()
+            }
+
+            // Used by get_block_template RPC.
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadRequest::ChainInfo => {
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+                let latest_non_finalized_state = self.latest_non_finalized_state();
+
+                // # Performance
+                //
+                // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        // # Correctness
+                        //
+                        // It is ok to do these lookups using multiple database calls. Finalized state updates
+                        // can only add overlapping blocks, and block hashes are unique across all chain forks.
+                        //
+                        // If there is a large overlap between the non-finalized and finalized states,
+                        // where the finalized tip is above the non-finalized tip,
+                        // Zebra is receiving a lot of blocks, or this request has been delayed for a long time.
+                        //
+                        // In that case, the `getblocktemplate` RPC will return an error because Zebra
+                        // is not synced to the tip. That check happens before the RPC makes this request.
+                        let get_block_template_info =
+                            read::tip(latest_non_finalized_state.best_chain(), &state.db).map(
+                                |tip| {
+                                    read::difficulty::difficulty_and_time_info(
+                                        &latest_non_finalized_state,
+                                        &state.db,
+                                        tip,
+                                        state.network,
+                                    )
+                                },
+                            );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");
+
+                        Ok(ReadResponse::ChainInfo(get_block_template_info))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::ChainInfo"))
                 .boxed()
             }
         }
