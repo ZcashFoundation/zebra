@@ -216,7 +216,10 @@ impl Application for ZebradApp {
         // report an error to the terminal if it occurs.
         let config = match command.config_path() {
             Some(path) => match self.load_config(&path) {
-                Ok(config) => config,
+                Ok(config) => {
+                    info!(config_path = ?path, ?config, "loaded zebrad config");
+                    config
+                }
                 Err(e) => {
                     status_err!("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file. You can generate a valid config by running \"zebrad generate\", and diff it against yours to examine any format inconsistencies.");
                     return Err(e);
