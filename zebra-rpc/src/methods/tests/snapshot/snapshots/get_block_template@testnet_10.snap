@@ -1,6 +1,5 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
-assertion_line: 202
 expression: block_template
 ---
 {
@@ -36,7 +35,7 @@ expression: block_template
   "noncerange": "00000000ffffffff",
   "sigoplimit": 20000,
   "sizelimit": 2000000,
-  "curtime": 1654008605,
+  "curtime": 1654008617,
   "bits": "01010000",
   "height": 1842421
 }

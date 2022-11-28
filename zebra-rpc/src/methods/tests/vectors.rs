@@ -818,15 +818,16 @@ async fn rpc_getblocktemplate() {
     // nu5 block hash
     let fake_tip_hash =
         Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
-    // nu5 block time
-    let fake_tip_time = Utc.timestamp_opt(1654008605, 0).unwrap();
-    //  nu5 block time  + 1
+    //  nu5 block time + 1
     let fake_min_time = Utc.timestamp_opt(1654008606, 0).unwrap();
+    // nu5 block time + 12
+    let fake_cur_time = Utc.timestamp_opt(1654008617, 0).unwrap();
+    // nu5 block time + 123
+    let fake_max_time = Utc.timestamp_opt(1654008728, 0).unwrap();
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
     mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
-    mock_chain_tip_sender.send_best_tip_block_time(fake_tip_time);
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
     // Init RPC
@@ -848,8 +849,9 @@ async fn rpc_getblocktemplate() {
             .respond(ReadResponse::ChainInfo(Some(GetBlockTemplateChainInfo {
                 expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
                 tip: (fake_tip_height, fake_tip_hash),
-                current_system_time: fake_tip_time,
+                current_system_time: fake_cur_time,
                 min_time: fake_min_time,
+                max_time: fake_max_time,
             })));
     });
 
@@ -888,7 +890,7 @@ async fn rpc_getblocktemplate() {
     );
     assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
     assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
-    assert_eq!(get_block_template.cur_time, fake_tip_time.timestamp());
+    assert_eq!(get_block_template.cur_time, fake_cur_time.timestamp());
     assert_eq!(get_block_template.bits, "01010000");
     assert_eq!(get_block_template.height, 1687105); // nu5 height
 

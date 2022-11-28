@@ -10,14 +10,17 @@ use zebra_chain::{
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 
-use crate::service::{
-    any_ancestor_blocks,
-    check::{
-        difficulty::{BLOCK_MAX_TIME_SINCE_MEDIAN, POW_MEDIAN_BLOCK_SPAN},
-        AdjustedDifficulty,
+use crate::{
+    service::{
+        any_ancestor_blocks,
+        check::{
+            difficulty::{BLOCK_MAX_TIME_SINCE_MEDIAN, POW_MEDIAN_BLOCK_SPAN},
+            AdjustedDifficulty,
+        },
+        finalized_state::ZebraDb,
+        NonFinalizedState,
     },
-    finalized_state::ZebraDb,
-    NonFinalizedState,
+    GetBlockTemplateChainInfo,
 };
 
 /// Returns :
@@ -31,26 +34,16 @@ pub fn difficulty_and_time_info(
     db: &ZebraDb,
     tip: (Height, Hash),
     network: Network,
-) -> (
-    CompactDifficulty,
-    DateTime<Utc>,
-    DateTime<Utc>,
-    DateTime<Utc>,
-) {
+) -> GetBlockTemplateChainInfo {
     let relevant_chain = any_ancestor_blocks(non_finalized_state, db, tip.1);
-    difficulty_and_time(relevant_chain, tip.0, network)
+    difficulty_and_time(relevant_chain, tip, network)
 }
 
 fn difficulty_and_time<C>(
     relevant_chain: C,
-    tip_height: Height,
+    tip: (Height, Hash),
     network: Network,
-) -> (
-    CompactDifficulty,
-    DateTime<Utc>,
-    DateTime<Utc>,
-    DateTime<Utc>,
-)
+) -> GetBlockTemplateChainInfo
 where
     C: IntoIterator,
     C::Item: Borrow<Block>,
@@ -84,7 +77,7 @@ where
     // TODO: split out median-time-past into its own struct?
     let median_time_past = AdjustedDifficulty::new_from_header_time(
         current_system_time,
-        tip_height,
+        tip.0,
         network,
         relevant_data.clone(),
     )
@@ -117,7 +110,7 @@ where
     // Now that we have a valid time, get the difficulty for that time.
     let mut difficulty_adjustment = AdjustedDifficulty::new_from_header_time(
         current_system_time,
-        tip_height,
+        tip.0,
         network,
         relevant_data.iter().cloned(),
     );
@@ -140,7 +133,7 @@ where
     if network == Network::Testnet {
         let max_time_difficulty_adjustment = AdjustedDifficulty::new_from_header_time(
             max_time,
-            tip_height,
+            tip.0,
             network,
             relevant_data.iter().cloned(),
         );
@@ -152,7 +145,7 @@ where
         {
             let min_time_difficulty_adjustment = AdjustedDifficulty::new_from_header_time(
                 min_time,
-                tip_height,
+                tip.0,
                 network,
                 relevant_data.iter().cloned(),
             );
@@ -165,7 +158,7 @@ where
             {
                 let preceding_block_time = relevant_data.last().expect("has at least one block").1;
                 let minimum_difficulty_spacing =
-                    NetworkUpgrade::minimum_difficulty_spacing_for_height(network, tip_height)
+                    NetworkUpgrade::minimum_difficulty_spacing_for_height(network, tip.0)
                         .expect("just checked the minimum difficulty rule is active");
 
                 // The first minimum difficulty time is strictly greater than the spacing.
@@ -178,7 +171,7 @@ where
 
                 difficulty_adjustment = AdjustedDifficulty::new_from_header_time(
                     current_system_time,
-                    tip_height,
+                    tip.0,
                     network,
                     relevant_data,
                 );
@@ -186,10 +179,11 @@ where
         }
     }
 
-    (
-        difficulty_adjustment.expected_difficulty_threshold(),
-        current_system_time,
+    GetBlockTemplateChainInfo {
+        tip,
+        expected_difficulty: difficulty_adjustment.expected_difficulty_threshold(),
         min_time,
+        current_system_time,
         max_time,
-    )
+    }
 }

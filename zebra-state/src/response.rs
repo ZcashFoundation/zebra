@@ -129,14 +129,21 @@ pub enum ReadResponse {
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GetBlockTemplateChainInfo {
-    /// Tip height and hash.
+    /// The current state tip height and hash.
+    /// The block template for the candidate block is the next block after this block.
     pub tip: (block::Height, block::Hash),
-    /// Expected difficulty data for the candidate block.
+
+    /// The expected difficulty of the candidate block.
     pub expected_difficulty: CompactDifficulty,
-    /// The current system time to use only once all around the getblocktemplate code.
+
+    /// The current system time, adjusted to fit within `min_time` and `max_time`.
     pub current_system_time: chrono::DateTime<chrono::Utc>,
-    /// The mininimum time the miner can use in a block.
+
+    /// The mininimum time the miner can use in this block.
     pub min_time: chrono::DateTime<chrono::Utc>,
+
+    /// The maximum time the miner can use in this block.
+    pub max_time: chrono::DateTime<chrono::Utc>,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.
