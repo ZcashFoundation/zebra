@@ -47,7 +47,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub struct CommitBlockError(#[from] ValidateContextError);
 
 /// An error describing why a block failed contextual validation.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {

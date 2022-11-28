@@ -22,7 +22,7 @@ use crate::{
 };
 
 /// An error describing why a history tree operation failed.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum HistoryTreeError {
@@ -31,7 +31,7 @@ pub enum HistoryTreeError {
     InnerError { inner: zcash_history::Error },
 
     #[error("I/O error")]
-    IOError(#[from] io::Error),
+    IOError(#[from] Arc<io::Error>),
 }
 
 impl PartialEq for HistoryTreeError {
@@ -99,7 +99,8 @@ impl NonEmptyHistoryTree {
                     size,
                     &peaks,
                     &Default::default(),
-                )?;
+                )
+                .map_err(Arc::new)?;
                 InnerHistoryTree::PreOrchard(tree)
             }
             NetworkUpgrade::Nu5 => {
@@ -109,7 +110,8 @@ impl NonEmptyHistoryTree {
                     size,
                     &peaks,
                     &Default::default(),
-                )?;
+                )
+                .map_err(Arc::new)?;
                 InnerHistoryTree::OrchardOnward(tree)
             }
         };
@@ -153,7 +155,8 @@ impl NonEmptyHistoryTree {
                     block,
                     sapling_root,
                     &Default::default(),
-                )?;
+                )
+                .map_err(Arc::new)?;
                 (InnerHistoryTree::PreOrchard(tree), entry)
             }
             NetworkUpgrade::Nu5 => {
@@ -162,7 +165,8 @@ impl NonEmptyHistoryTree {
                     block,
                     sapling_root,
                     orchard_root,
-                )?;
+                )
+                .map_err(Arc::new)?;
                 (InnerHistoryTree::OrchardOnward(tree), entry)
             }
         };
@@ -232,7 +236,7 @@ impl NonEmptyHistoryTree {
             self.peaks.insert(self.size, entry);
             self.size += 1;
         }
-        self.prune()?;
+        self.prune().map_err(Arc::new)?;
         self.current_height = height;
         Ok(())
     }
