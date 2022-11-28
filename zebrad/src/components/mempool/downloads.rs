@@ -443,7 +443,7 @@ where
     }
 
     /// Check if transaction is already in the best chain.
-    async fn transaction_in_chain(
+    async fn transaction_in_best_chain(
         state: &mut ZS,
         txid: UnminedTxId,
     ) -> Result<(), TransactionDownloadVerifyError> {

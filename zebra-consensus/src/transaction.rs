@@ -410,7 +410,7 @@ where
                                 .expect("CheckBestChainTipNullifiersAndAnchors error must be a ValidateContextError");
                             err.into()
                         });
-                        assert!(res? == zs::Response::ValidBestChainTipNullifiersAndAnchors);
+                        assert!(res? == zs::Response::ValidBestChainTipNullifiersAndAnchors, "unexpected response to CheckBestChainTipNullifiersAndAnchors request");
                         Ok(())
                     }
                 );

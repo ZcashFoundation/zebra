@@ -20,7 +20,7 @@ use crate::{
 ///
 /// This method checks for anchors computed from the final treestate of each block in
 /// the `parent_chain` or `finalized_state`.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip(finalized_state, parent_chain, transaction))]
 fn sapling_orchard_anchors_refer_to_final_treestates(
     finalized_state: &ZebraDb,
     parent_chain: Option<&Arc<Chain>>,
@@ -131,7 +131,7 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
 /// Sprout anchors may also refer to the interstitial output treestate of any prior
 /// `JoinSplit` _within the same transaction_; these are created on the fly
 /// in [`sprout_anchors_refer_to_treestates()`].
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip(sprout_final_treestates, finalized_state, parent_chain, transaction))]
 fn fetch_sprout_final_treestates(
     sprout_final_treestates: &mut HashMap<
         sprout::tree::Root,
@@ -202,7 +202,7 @@ fn fetch_sprout_final_treestates(
 /// (which must be populated with all treestates pointed to in the `prepared` block;
 /// see [`fetch_sprout_final_treestates()`]); or in the interstitial
 /// treestates which are computed on the fly in this function.
-#[tracing::instrument(skip(sprout_final_treestates, transaction, transaction_hash))]
+#[tracing::instrument(skip(sprout_final_treestates, transaction))]
 fn sprout_anchors_refer_to_treestates(
     sprout_final_treestates: &HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
     transaction: &Arc<Transaction>,
@@ -396,7 +396,7 @@ pub(crate) fn block_fetch_sprout_final_treestates(
 /// (which must be populated with all treestates pointed to in the `prepared` block;
 /// see [`fetch_sprout_final_treestates()`]); or in the interstitial
 /// treestates which are computed on the fly in this function.
-#[tracing::instrument(skip(sprout_final_treestates, block))]
+#[tracing::instrument(skip(sprout_final_treestates, block, transaction_hashes))]
 pub(crate) fn block_sprout_anchors_refer_to_treestates(
     sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
     block: Arc<Block>,

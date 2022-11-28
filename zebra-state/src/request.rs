@@ -561,7 +561,7 @@ impl Request {
             Request::Block(_) => "block",
             Request::FindBlockHashes { .. } => "find_block_hashes",
             Request::FindBlockHeaders { .. } => "find_block_headers",
-            Request::CheckBestChainTipNullifiersAndAnchors(_) => "transaction_contextual_validity",
+            Request::CheckBestChainTipNullifiersAndAnchors(_) => "best_chain_tip_nullifiers_anchors",
         }
     }
 
@@ -777,7 +777,7 @@ impl ReadRequest {
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addesses",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
-                "transaction_contextual_validity"
+                "best_chain_tip_nullifiers_anchors"
             }
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
