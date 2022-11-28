@@ -196,7 +196,7 @@ pub async fn run() -> Result<()> {
         counter += 1;
     }
 
-    // Get the first transction of the first block in the mainnet
+    // Get the first transaction of the first block in the mainnet
     let hash = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into::<Block>()
         .expect("block should deserialize")

@@ -37,6 +37,17 @@ jobs:
         with:
           short-length: 7
 
+      # Makes the Zcash network name lowercase.
+      #
+      # Labels in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase ${{ inputs.network }}.
+      #
+      # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
+      - name: Downcase network name for labels
+        run: |
+          NETWORK_CAPS="${{ inputs.network }}"
+          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
+
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
@@ -60,10 +71,11 @@ jobs:
           --container-stdin \
           --container-tty \
           --container-image electriccoinco/zcashd \
-          --container-env ZCASHD_NETWORK="${{ github.event.inputs.network }}" \
+          --container-env ZCASHD_NETWORK="${{ inputs.network }}" \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --service-account ${{ env.DEPLOY_SA }} \
           --scopes cloud-platform \
+          --labels=app=zcashd,environment=prod,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zcashd
 
       # Check if our destination instance group exists already
@@ -71,14 +83,14 @@ jobs:
         id: does-group-exist
         continue-on-error: true
         run: |
-          gcloud compute instance-groups list | grep "zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ github.event.inputs.network }}" | grep "${{ env.REGION }}"
+          gcloud compute instance-groups list | grep "zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ inputs.network }}" | grep "${{ env.REGION }}"
 
       # Deploy new managed instance group using the new instance template
       - name: Create managed instance group
         if: steps.does-group-exist.outcome == 'failure'
         run: |
           gcloud compute instance-groups managed create \
-          "zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ github.event.inputs.network }}" \
+          "zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ inputs.network }}" \
           --template "zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --region "${{ env.REGION }}" \
           --size "${{ github.event.inputs.size }}"
@@ -88,6 +100,6 @@ jobs:
         if: steps.does-group-exist.outcome == 'success'
         run: |
           gcloud compute instance-groups managed rolling-action start-update \
-          "zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ github.event.inputs.network }}" \
+          "zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ inputs.network }}" \
           --version template="zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --region "${{ env.REGION }}"

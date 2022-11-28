@@ -118,7 +118,7 @@ treestate anchor of previous `JoinSplit` in this transaction, and we have to wai
 for that one to be parsed and its root computed to check that ours is
 valid. Luckily, it can only be a previous `JoinSplit` in this transaction, and is
 [usually the immediately previous one](zcashd), so the set of candidate anchors
-is smaller for earlier `JoinSplit`s in a transcation, but larger for the later
+is smaller for earlier `JoinSplit`s in a transaction, but larger for the later
 ones. For these `JoinSplit`s, they can be validated independently of their
 anchor's finalization status as long as the final check of the anchor is done,
 when available, such as at the Transaction level after all the `JoinSplit`s have
@@ -146,7 +146,7 @@ order and if they have `Spend`s and/or `Output`s, we update our Nullifer set for
 the block as nullifiers are revealed in `Spend` descriptions, and update our note
 commitment tree as `NoteCommitment`s are revealed in `Output` descriptions, adding
 them as leaves in positions according to their order as they appear transaction
-to transction, output to output, in the block. This can be done independent of
+to transaction, output to output, in the block. This can be done independent of
 the transaction validations. When the Sapling transactions are all validated,
 the `NoteCommitmentTree` root should be computed: this is the anchor for this
 block. For Sapling and Blossom blocks, we need to check that this root matches

@@ -125,6 +125,17 @@ jobs:
         with:
           short-length: 7
 
+      # Makes the Zcash network name lowercase.
+      #
+      # Labels in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase ${{ inputs.network }}.
+      #
+      # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
+      - name: Downcase network name for labels
+        run: |
+          NETWORK_CAPS="${{ inputs.network }}"
+          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
+
       # Install our SSH secret
       - name: Install private SSH key
         uses: shimataro/ssh-key-action@v2.4.0
@@ -163,6 +174,7 @@ jobs:
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
+          --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
           sleep 60
@@ -271,10 +283,10 @@ jobs:
         with:
           short-length: 7
 
-      - name: Downcase network name for disks
+      - name: Downcase network name for disks and labels
         run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
+          NETWORK_CAPS="${{ inputs.network }}"
+          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
 
       # Install our SSH secret
       - name: Install private SSH key
@@ -384,8 +396,8 @@ jobs:
           echo "Selected Disk: $CACHED_DISK_NAME"
           echo "::set-output name=cached_disk_name::$CACHED_DISK_NAME"
 
-          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
-          echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> $GITHUB_ENV
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> "$GITHUB_ENV"
+          echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> "$GITHUB_ENV"
 
       # Create a Compute Engine virtual machine and attach a cached state disk using the
       # $CACHED_DISK_NAME variable as the source image to populate the disk cached state
@@ -403,6 +415,7 @@ jobs:
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
+          --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ env.ZONE }}
           sleep 60
@@ -1298,10 +1311,10 @@ jobs:
       # Passes ${{ env.GITHUB_REF_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
       - name: Format network name and branch name for disks
         run: |
-          NETWORK_CAPS=${{ inputs.network }}
-          echo "NETWORK=${NETWORK_CAPS,,}" >> $GITHUB_ENV
-          LONG_GITHUB_REF=${{ env.GITHUB_REF_SLUG_URL }}
-          echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> $GITHUB_ENV
+          NETWORK_CAPS="${{ inputs.network }}"
+          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
+          LONG_GITHUB_REF="${{ env.GITHUB_REF_SLUG_URL }}"
+          echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
 
       # Install our SSH secret
       - name: Install private SSH key
@@ -1334,7 +1347,7 @@ jobs:
           LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
           echo "STATE_VERSION: $LOCAL_STATE_VERSION"
 
-          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> $GITHUB_ENV
+          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> "$GITHUB_ENV"
 
       # Sets the $UPDATE_SUFFIX env var to "-u" if updating a previous cached state,
       # and the empty string otherwise.
@@ -1356,8 +1369,8 @@ jobs:
           # We're going to delete old images after a few days, so we only need the time here
           TIME_SUFFIX=$(date '+%H%M%S' --utc)
 
-          echo "UPDATE_SUFFIX=$UPDATE_SUFFIX" >> $GITHUB_ENV
-          echo "TIME_SUFFIX=$TIME_SUFFIX" >> $GITHUB_ENV
+          echo "UPDATE_SUFFIX=$UPDATE_SUFFIX" >> "$GITHUB_ENV"
+          echo "TIME_SUFFIX=$TIME_SUFFIX" >> "$GITHUB_ENV"
 
       # Get the sync height from the test logs, which is later used as part of the
       # disk description and labels.
@@ -1399,7 +1412,7 @@ jobs:
           fi
 
           echo "Found sync height in logs: $SYNC_HEIGHT"
-          echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> $GITHUB_ENV
+          echo "SYNC_HEIGHT=$SYNC_HEIGHT" >> "$GITHUB_ENV"
 
       # Get the original cached state height from google cloud.
       #
@@ -1420,7 +1433,7 @@ jobs:
               echo "$CACHED_DISK_NAME height: $ORIGINAL_HEIGHT"
           fi
 
-          echo "ORIGINAL_HEIGHT=$ORIGINAL_HEIGHT" >> $GITHUB_ENV
+          echo "ORIGINAL_HEIGHT=$ORIGINAL_HEIGHT" >> "$GITHUB_ENV"
 
       # Create an image from the state disk, which will be used for any tests that start
       # after it is created. These tests can be in the same workflow, or in a different PR.
