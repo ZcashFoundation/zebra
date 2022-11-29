@@ -402,6 +402,7 @@ impl Application for ZebradApp {
         // Log git metadata and platform info when zebrad starts up
         if is_server {
             tracing::info!("Diagnostic {}", metadata_section);
+            info!(config_path = ?command.config_path(), config = ?cfg_ref, "loaded zebrad config");
         }
 
         // Activate the global span, so it's visible when we load the other
