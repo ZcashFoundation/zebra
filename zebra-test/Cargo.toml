@@ -11,7 +11,7 @@ edition = "2021"
 hex = "0.4.3"
 indexmap = "1.9.2"
 lazy_static = "1.4.0"
-insta = "1.21.1"
+insta = "1.21.2"
 proptest = "0.10.1"
 once_cell = "1.16.0"
 rand = { version = "0.8.5", package = "rand" }
