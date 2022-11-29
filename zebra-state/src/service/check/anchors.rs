@@ -454,39 +454,67 @@ pub(crate) fn tx_anchors_refer_to_final_treestates(
     parent_chain: Option<&Arc<Chain>>,
     unmined_tx: &UnminedTx,
 ) -> Result<(), ValidateContextError> {
-    sapling_orchard_anchors_refer_to_final_treestates(
-        finalized_state,
-        parent_chain,
-        &unmined_tx.transaction,
-        unmined_tx.id.mined_id(),
-        None,
-        None,
-    )?;
+    if unmined_tx.transaction.has_sprout_joinsplit_data() {
+        let mut sprout_anchors_result = None;
+        let mut sapling_orchard_anchors_result = None;
+        rayon::in_place_scope_fifo(|s| {
+            // This check is expensive, because it updates a note commitment tree for each sprout JoinSplit.
+            // Since we could be processing attacker-controlled mempool transactions, we need to run each one
+            // in its own thread, separately from tokio's blocking I/O threads. And if we are under heavy load,
+            // we want verification to finish in order, so that later transactions can't delay earlier ones.
+            s.spawn_fifo(|_s| {
+                let mut sprout_final_treestates = HashMap::new();
 
-    let mut sprout_final_treestates = HashMap::new();
+                fetch_sprout_final_treestates(
+                    &mut sprout_final_treestates,
+                    finalized_state,
+                    parent_chain,
+                    &unmined_tx.transaction,
+                    None,
+                    None,
+                );
 
-    fetch_sprout_final_treestates(
-        &mut sprout_final_treestates,
-        finalized_state,
-        parent_chain,
-        &unmined_tx.transaction,
-        None,
-        None,
-    );
+                tracing::trace!(
+                    sprout_final_treestate_count = ?sprout_final_treestates.len(),
+                    ?sprout_final_treestates,
+                    "received sprout final treestate anchors",
+                );
 
-    tracing::trace!(
-        sprout_final_treestate_count = ?sprout_final_treestates.len(),
-        ?sprout_final_treestates,
-        "received sprout final treestate anchors",
-    );
+                sprout_anchors_result = Some(sprout_anchors_refer_to_treestates(
+                    &sprout_final_treestates,
+                    &unmined_tx.transaction,
+                    unmined_tx.id.mined_id(),
+                    None,
+                    None,
+                ));
+            });
 
-    sprout_anchors_refer_to_treestates(
-        &sprout_final_treestates,
-        &unmined_tx.transaction,
-        unmined_tx.id.mined_id(),
-        None,
-        None,
-    )?;
+            s.spawn_fifo(|_s| {
+                sapling_orchard_anchors_result =
+                    Some(sapling_orchard_anchors_refer_to_final_treestates(
+                        finalized_state,
+                        parent_chain,
+                        &unmined_tx.transaction,
+                        unmined_tx.id.mined_id(),
+                        None,
+                        None,
+                    ));
+            });
+        });
+
+        sprout_anchors_result.expect("scope has finished")?;
+        sapling_orchard_anchors_result.expect("scope has finished")?;
+    } else {
+        // If there are no sprout transactions in the block, avoid running a rayon scope
+        sapling_orchard_anchors_refer_to_final_treestates(
+            finalized_state,
+            parent_chain,
+            &unmined_tx.transaction,
+            unmined_tx.id.mined_id(),
+            None,
+            None,
+        )?;
+    }
 
     Ok(())
 }
