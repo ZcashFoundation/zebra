@@ -151,6 +151,7 @@ impl Block {
     pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
         // Work around a compiler panic (ICE) with flat_map():
         // https://github.com/rust-lang/rust/issues/105044
+        #[allow(clippy::needless_collect)]
         let nullifiers: Vec<_> = self
             .transactions
             .iter()
