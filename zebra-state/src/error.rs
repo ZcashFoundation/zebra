@@ -224,7 +224,7 @@ pub enum ValidateContextError {
     NoteCommitmentTreeError(#[from] zebra_chain::parallel::tree::NoteCommitmentTreeError),
 
     #[error("error building the history tree")]
-    HistoryTreeError(#[from] HistoryTreeError),
+    HistoryTreeError(#[from] Arc<HistoryTreeError>),
 
     #[error("block contains an invalid commitment")]
     InvalidBlockCommitment(#[from] block::CommitmentError),
