@@ -38,7 +38,7 @@ pub(crate) fn block_precommit_metrics(block: &Block, hash: block::Hash, height: 
     let orchard_nullifier_count: usize = block
         .transactions
         .iter()
-        .map(|t| t.orchard_nullifiers().into_iter().count())
+        .map(|t| t.orchard_nullifiers().count())
         .sum();
 
     tracing::debug!(
