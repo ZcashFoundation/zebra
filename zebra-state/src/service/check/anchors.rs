@@ -3,6 +3,8 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use rayon::prelude::*;
+
 use zebra_chain::{
     block::{Block, Height},
     sprout,
@@ -331,8 +333,12 @@ pub(crate) fn block_sapling_orchard_anchors_refer_to_final_treestates(
     parent_chain: &Arc<Chain>,
     prepared: &PreparedBlock,
 ) -> Result<(), ValidateContextError> {
-    prepared.block.transactions.iter().enumerate().try_for_each(
-        |(tx_index_in_block, transaction)| {
+    prepared
+        .block
+        .transactions
+        .par_iter()
+        .enumerate()
+        .try_for_each(|(tx_index_in_block, transaction)| {
             sapling_orchard_anchors_refer_to_final_treestates(
                 finalized_state,
                 Some(parent_chain),
@@ -341,8 +347,7 @@ pub(crate) fn block_sapling_orchard_anchors_refer_to_final_treestates(
                 Some(tx_index_in_block),
                 Some(prepared.height),
             )
-        },
-    )
+        })
 }
 
 /// Accepts a [`ZebraDb`], [`Arc<Chain>`](Chain), and [`PreparedBlock`].
@@ -406,21 +411,35 @@ pub(crate) fn block_sprout_anchors_refer_to_treestates(
         "received sprout final treestate anchors",
     );
 
-    block
-        .transactions
-        .iter()
-        .enumerate()
-        .try_for_each(|(tx_index_in_block, transaction)| {
-            sprout_anchors_refer_to_treestates(
-                &sprout_final_treestates,
-                transaction,
-                transaction_hashes[tx_index_in_block],
-                Some(tx_index_in_block),
-                Some(height),
-            )?;
+    let check_tx_sprout_anchors = |(tx_index_in_block, transaction)| {
+        sprout_anchors_refer_to_treestates(
+            &sprout_final_treestates,
+            transaction,
+            transaction_hashes[tx_index_in_block],
+            Some(tx_index_in_block),
+            Some(height),
+        )?;
 
-            Ok(())
-        })
+        Ok(())
+    };
+
+    // The overhead for a parallel iterator is unwarranted if sprout_final_treestates is empty
+    // because it will either return an error for the first transaction or only check that `joinsplit_data`
+    // is `None` for each transaction.
+    if sprout_final_treestates.is_empty() {
+        // The block has no valid sprout anchors
+        block
+            .transactions
+            .iter()
+            .enumerate()
+            .try_for_each(check_tx_sprout_anchors)
+    } else {
+        block
+            .transactions
+            .par_iter()
+            .enumerate()
+            .try_for_each(check_tx_sprout_anchors)
+    }
 }
 
 /// Accepts a [`ZebraDb`], an optional [`Option<Arc<Chain>>`](Chain), and an [`UnminedTx`].
