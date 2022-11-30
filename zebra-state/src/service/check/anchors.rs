@@ -333,12 +333,8 @@ pub(crate) fn block_sapling_orchard_anchors_refer_to_final_treestates(
     parent_chain: &Arc<Chain>,
     prepared: &PreparedBlock,
 ) -> Result<(), ValidateContextError> {
-    prepared
-        .block
-        .transactions
-        .par_iter()
-        .enumerate()
-        .try_for_each(|(tx_index_in_block, transaction)| {
+    prepared.block.transactions.iter().enumerate().try_for_each(
+        |(tx_index_in_block, transaction)| {
             sapling_orchard_anchors_refer_to_final_treestates(
                 finalized_state,
                 Some(parent_chain),
@@ -347,7 +343,8 @@ pub(crate) fn block_sapling_orchard_anchors_refer_to_final_treestates(
                 Some(tx_index_in_block),
                 Some(prepared.height),
             )
-        })
+        },
+    )
 }
 
 /// Accepts a [`ZebraDb`], [`Arc<Chain>`](Chain), and [`PreparedBlock`].
