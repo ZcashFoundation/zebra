@@ -182,7 +182,7 @@ tokio = { version = "1.22.0", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.11"
 
 # test feature lightwalletd-grpc-tests
-prost = "0.11.2"
+prost = "0.11.3"
 tonic = "0.8.0"
 
 proptest = "0.10.1"
