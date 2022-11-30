@@ -226,15 +226,18 @@ impl NonFinalizedState {
         )?;
 
         // Reads from disk
-        check::anchors::sapling_orchard_anchors_refer_to_final_treestates(
+        check::anchors::block_sapling_orchard_anchors_refer_to_final_treestates(
             finalized_state,
             &new_chain,
             &prepared,
         )?;
 
         // Reads from disk
-        let sprout_final_treestates =
-            check::anchors::fetch_sprout_final_treestates(finalized_state, &new_chain, &prepared);
+        let sprout_final_treestates = check::anchors::block_fetch_sprout_final_treestates(
+            finalized_state,
+            &new_chain,
+            &prepared,
+        );
 
         // Quick check that doesn't read from disk
         let contextual = ContextuallyValidBlock::with_block_and_spent_utxos(
@@ -285,12 +288,13 @@ impl NonFinalizedState {
             });
 
             scope.spawn_fifo(|_scope| {
-                sprout_anchor_result = Some(check::anchors::sprout_anchors_refer_to_treestates(
-                    sprout_final_treestates,
-                    block2,
-                    height,
-                    transaction_hashes,
-                ));
+                sprout_anchor_result =
+                    Some(check::anchors::block_sprout_anchors_refer_to_treestates(
+                        sprout_final_treestates,
+                        block2,
+                        transaction_hashes,
+                        height,
+                    ));
             });
 
             // We're pretty sure the new block is valid,

@@ -1024,7 +1024,8 @@ impl Service<Request> for StateService {
             | Request::UnspentBestChainUtxo(_)
             | Request::Block(_)
             | Request::FindBlockHashes { .. }
-            | Request::FindBlockHeaders { .. } => {
+            | Request::FindBlockHeaders { .. }
+            | Request::CheckBestChainTipNullifiersAndAnchors(_) => {
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
@@ -1217,7 +1218,6 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
-            // Currently unused.
             ReadRequest::UnspentBestChainUtxo(outpoint) => {
                 let timer = CodeTimer::start();
 
@@ -1516,6 +1516,39 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::UtxosByAddresses"))
+                .boxed()
+            }
+
+            ReadRequest::CheckBestChainTipNullifiersAndAnchors(unmined_tx) => {
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let latest_non_finalized_best_chain =
+                            state.latest_non_finalized_state().best_chain().cloned();
+
+                        check::nullifier::tx_no_duplicates_in_chain(
+                            &state.db,
+                            latest_non_finalized_best_chain.as_ref(),
+                            &unmined_tx.transaction,
+                        )?;
+
+                        check::anchors::tx_anchors_refer_to_final_treestates(
+                            &state.db,
+                            latest_non_finalized_best_chain.as_ref(),
+                            &unmined_tx,
+                        )?;
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::UnspentBestChainUtxo");
+
+                        Ok(ReadResponse::ValidBestChainTipNullifiersAndAnchors)
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::UnspentBestChainUtxo"))
                 .boxed()
             }
 

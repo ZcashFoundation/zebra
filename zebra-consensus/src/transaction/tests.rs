@@ -189,17 +189,28 @@ async fn mempool_request_with_missing_input_is_rejected() {
         .find(|(_, tx)| !(tx.is_coinbase() || tx.inputs().is_empty()))
         .expect("At least one non-coinbase transaction with transparent inputs in test vectors");
 
-    let expected_state_request = zebra_state::Request::UnspentBestChainUtxo(match tx.inputs()[0] {
+    let input_outpoint = match tx.inputs()[0] {
         transparent::Input::PrevOut { outpoint, .. } => outpoint,
         transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
-    });
+    };
 
     tokio::spawn(async move {
         state
-            .expect_request(expected_state_request)
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
             .await
             .expect("verifier should call mock state service")
             .respond(zebra_state::Response::UnspentBestChainUtxo(None));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
     });
 
     let verifier_response = verifier
@@ -251,6 +262,17 @@ async fn mempool_request_with_present_input_is_accepted() {
                     .get(&input_outpoint)
                     .map(|utxo| utxo.utxo.clone()),
             ));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
     });
 
     let verifier_response = verifier
