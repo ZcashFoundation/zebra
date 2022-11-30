@@ -175,10 +175,10 @@ impl Request {
     }
 
     /// The unverified mempool transaction, if this is a mempool request.
-    pub fn into_mempool_transaction(self) -> Option<UnminedTx> {
+    pub fn mempool_transaction(&self) -> Option<UnminedTx> {
         match self {
             Request::Block { .. } => None,
-            Request::Mempool { transaction, .. } => Some(transaction),
+            Request::Mempool { transaction, .. } => Some(transaction.clone()),
         }
     }
 
@@ -357,15 +357,16 @@ where
 
             // Load spent UTXOs from state.
             // TODO: Make this a method of `Request` and replace `tx.clone()` with `self.transaction()`?
-            let (spent_utxos, spent_outputs) =
-                Self::spent_utxos(tx.clone(), req.known_utxos(), req.is_mempool(), state).await?;
+            let load_spent_utxos_fut =
+                Self::spent_utxos(tx.clone(), req.known_utxos(), req.is_mempool(), state.clone());
+            let (spent_utxos, spent_outputs) = load_spent_utxos_fut.await?;
 
             let cached_ffi_transaction =
                 Arc::new(CachedFfiTransaction::new(tx.clone(), spent_outputs));
 
             tracing::trace!(?tx_id, "got state UTXOs");
 
-            let async_checks = match tx.as_ref() {
+            let mut async_checks = match tx.as_ref() {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");
                     return Err(TransactionError::WrongVersion);
@@ -395,6 +396,21 @@ where
                     orchard_shielded_data,
                 )?,
             };
+
+            if let Some(unmined_tx) = req.mempool_transaction() {
+                let check_anchors_and_revealed_nullifiers_query = state
+                    .clone()
+                    .oneshot(zs::Request::CheckBestChainTipNullifiersAndAnchors(
+                        unmined_tx,
+                    ))
+                    .map(|res| {
+                        assert!(res? == zs::Response::ValidBestChainTipNullifiersAndAnchors, "unexpected response to CheckBestChainTipNullifiersAndAnchors request");
+                        Ok(())
+                    }
+                );
+
+                async_checks.push(check_anchors_and_revealed_nullifiers_query);
+            }
 
             tracing::trace!(?tx_id, "awaiting async checks...");
 

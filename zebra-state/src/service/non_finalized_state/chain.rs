@@ -105,11 +105,11 @@ pub struct Chain {
     pub(crate) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
 
     /// The Sprout nullifiers revealed by `blocks`.
-    pub(super) sprout_nullifiers: HashSet<sprout::Nullifier>,
+    pub(crate) sprout_nullifiers: HashSet<sprout::Nullifier>,
     /// The Sapling nullifiers revealed by `blocks`.
-    pub(super) sapling_nullifiers: HashSet<sapling::Nullifier>,
+    pub(crate) sapling_nullifiers: HashSet<sapling::Nullifier>,
     /// The Orchard nullifiers revealed by `blocks`.
-    pub(super) orchard_nullifiers: HashSet<orchard::Nullifier>,
+    pub(crate) orchard_nullifiers: HashSet<orchard::Nullifier>,
 
     /// Partial transparent address index data from `blocks`.
     pub(super) partial_transparent_transfers: HashMap<transparent::Address, TransparentTransfers>,
@@ -410,12 +410,14 @@ impl Chain {
                 .expect("Orchard anchors must exist for pre-fork blocks");
 
             let history_tree_mut = Arc::make_mut(&mut self.history_tree);
-            history_tree_mut.push(
-                self.network,
-                block.block.clone(),
-                *sapling_root,
-                *orchard_root,
-            )?;
+            history_tree_mut
+                .push(
+                    self.network,
+                    block.block.clone(),
+                    *sapling_root,
+                    *orchard_root,
+                )
+                .map_err(Arc::new)?;
         }
 
         Ok(())
@@ -909,12 +911,14 @@ impl Chain {
 
         // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
         let history_tree_mut = Arc::make_mut(&mut self.history_tree);
-        history_tree_mut.push(
-            self.network,
-            contextually_valid.block.clone(),
-            sapling_root,
-            orchard_root,
-        )?;
+        history_tree_mut
+            .push(
+                self.network,
+                contextually_valid.block.clone(),
+                sapling_root,
+                orchard_root,
+            )
+            .map_err(Arc::new)?;
 
         self.history_trees_by_height
             .insert(height, self.history_tree.clone());
