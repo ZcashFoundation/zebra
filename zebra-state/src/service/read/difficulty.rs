@@ -1,11 +1,12 @@
 //! Get context and calculate difficulty for the next block.
 
-use std::borrow::Borrow;
+use std::{borrow::Borrow, sync::Arc};
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
 
 use zebra_chain::{
     block::{Block, Hash, Height},
+    history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade, POW_AVERAGING_WINDOW},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
@@ -18,31 +19,42 @@ use crate::{
             AdjustedDifficulty,
         },
         finalized_state::ZebraDb,
+        read::tree::history_tree,
         NonFinalizedState,
     },
-    GetBlockTemplateChainInfo,
+    GetBlockTemplateChainInfo, HashOrHeight,
 };
 
 /// Returns :
 /// - The `CompactDifficulty`, for the current best chain.
 /// - The current system time.
 /// - The minimum time for a next block.
+/// - The maximum time for a next block.
+/// - The history tree for the current best chain.
 ///
 /// Panic if we don't have enough blocks in the state.
-pub fn difficulty_and_time_info(
+pub fn get_block_template_chain_info(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
     tip: (Height, Hash),
     network: Network,
 ) -> GetBlockTemplateChainInfo {
     let relevant_chain = any_ancestor_blocks(non_finalized_state, db, tip.1);
-    difficulty_and_time(relevant_chain, tip, network)
+    let history_tree = history_tree(
+        non_finalized_state.best_chain(),
+        db,
+        HashOrHeight::Hash(tip.1),
+    )
+    .expect("Hash passed should exist in the chain");
+
+    difficulty_time_and_history_tree(relevant_chain, tip, network, history_tree)
 }
 
-fn difficulty_and_time<C>(
+fn difficulty_time_and_history_tree<C>(
     relevant_chain: C,
     tip: (Height, Hash),
     network: Network,
+    history_tree: Arc<HistoryTree>,
 ) -> GetBlockTemplateChainInfo
 where
     C: IntoIterator,
@@ -185,5 +197,6 @@ where
         min_time,
         current_system_time,
         max_time,
+        history_tree,
     }
 }

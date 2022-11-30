@@ -1576,7 +1576,7 @@ impl Service<ReadRequest> for ReadStateService {
                         let get_block_template_info =
                             read::tip(latest_non_finalized_state.best_chain(), &state.db).map(
                                 |tip| {
-                                    read::difficulty::difficulty_and_time_info(
+                                    read::difficulty::get_block_template_chain_info(
                                         &latest_non_finalized_state,
                                         &state.db,
                                         tip,

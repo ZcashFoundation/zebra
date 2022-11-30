@@ -144,6 +144,9 @@ pub struct GetBlockTemplateChainInfo {
 
     /// The maximum time the miner can use in this block.
     pub max_time: chrono::DateTime<chrono::Utc>,
+
+    /// The history tree of the current best chain.
+    pub history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.

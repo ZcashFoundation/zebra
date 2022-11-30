@@ -9,11 +9,10 @@ use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
-    block::Height,
     block::{
         self,
         merkle::{self, AuthDataRoot},
-        Block, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
+        Block, ChainHistoryBlockTxAuthCommitmentHash, Height, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
     },
     chain_tip::ChainTip,
     parameters::Network,
@@ -349,6 +348,14 @@ where
             let (merkle_root, auth_data_root) =
                 calculate_transaction_roots(&coinbase_tx, &mempool_txs);
 
+            let history_tree = chain_info.history_tree;
+            let chain_history_root = history_tree.hash().expect("history tree can't be empty");
+
+            let block_commitments_hash = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                &chain_history_root,
+                &auth_data_root,
+            );
+
             // Convert into TransactionTemplates
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
 
@@ -360,14 +367,14 @@ where
                 version: ZCASH_BLOCK_VERSION,
 
                 previous_block_hash: GetBlockHash(tip_hash),
-                block_commitments_hash: [0; 32].into(),
-                light_client_root_hash: [0; 32].into(),
-                final_sapling_root_hash: [0; 32].into(),
+                block_commitments_hash,
+                light_client_root_hash: block_commitments_hash,
+                final_sapling_root_hash: block_commitments_hash,
                 default_roots: DefaultRoots {
                     merkle_root,
-                    chain_history_root: [0; 32].into(),
+                    chain_history_root,
                     auth_data_root,
-                    block_commitments_hash: [0; 32].into(),
+                    block_commitments_hash,
                 },
 
                 transactions: mempool_txs,

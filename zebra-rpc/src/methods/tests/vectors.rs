@@ -840,6 +840,8 @@ async fn rpc_getblocktemplate() {
         tower::ServiceBuilder::new().service(chain_verifier),
     );
 
+    let history_tree = crate::methods::tests::utils::test_history_tree(Mainnet);
+
     // Fake the ChainInfo response
     tokio::spawn(async move {
         read_state
@@ -852,6 +854,7 @@ async fn rpc_getblocktemplate() {
                 current_system_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
+                history_tree,
             })));
     });
 

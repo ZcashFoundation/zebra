@@ -35,7 +35,7 @@ pub use block::{
 };
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-pub use {block::hash, difficulty::difficulty_and_time_info};
+pub use {block::hash, difficulty::get_block_template_chain_info};
 
 pub use find::{
     best_tip, block_locator, chain_contains_hash, depth, find_chain_hashes, find_chain_headers,

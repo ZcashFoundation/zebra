@@ -141,6 +141,7 @@ pub async fn test_responses<State, ReadState>(
     );
 
     // `getblocktemplate`
+    let history_tree = crate::methods::tests::utils::test_history_tree(network);
 
     // Fake the ChainInfo response
     tokio::spawn(async move {
@@ -154,6 +155,7 @@ pub async fn test_responses<State, ReadState>(
                 current_system_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
+                history_tree,
             })));
     });
 
