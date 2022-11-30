@@ -100,7 +100,6 @@ pub struct StartCmd {
 impl StartCmd {
     async fn start(&self) -> Result<(), Report> {
         let config = app_config().clone();
-        info!(?config);
 
         info!("initializing node state");
         let (_, max_checkpoint_height) = zebra_consensus::chain::init_checkpoint_list(
