@@ -1,4 +1,4 @@
-//!
+//! Utility functions for RPC method tests.
 
 use std::sync::Arc;
 use zebra_chain::{
@@ -11,8 +11,8 @@ use zebra_chain::{
 
 use zebra_test::vectors;
 
-/// Get a history tree with one single block for a network by using Zebra test vectors.
-pub fn test_history_tree(network: Network) -> Arc<HistoryTree> {
+/// Create a history tree with one single block for a network by using Zebra test vectors.
+pub fn fake_history_tree(network: Network) -> Arc<HistoryTree> {
     let (block, sapling_root) = match network {
         Network::Mainnet => (
             &vectors::BLOCK_MAINNET_1046400_BYTES[..],

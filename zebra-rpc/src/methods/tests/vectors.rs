@@ -789,8 +789,11 @@ async fn rpc_getblocktemplate() {
 
     use chrono::{TimeZone, Utc};
 
-    use crate::methods::get_block_template_rpcs::constants::{
-        GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+    use crate::methods::{
+        get_block_template_rpcs::constants::{
+            GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+        },
+        tests::utils::fake_history_tree,
     };
     use zebra_chain::{
         amount::{Amount, NonNegative},
@@ -840,8 +843,6 @@ async fn rpc_getblocktemplate() {
         tower::ServiceBuilder::new().service(chain_verifier),
     );
 
-    let history_tree = crate::methods::tests::utils::test_history_tree(Mainnet);
-
     // Fake the ChainInfo response
     tokio::spawn(async move {
         read_state
@@ -854,7 +855,7 @@ async fn rpc_getblocktemplate() {
                 current_system_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree,
+                history_tree: fake_history_tree(Mainnet),
             })));
     });
 
