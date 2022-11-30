@@ -8,14 +8,17 @@ use zebra_chain::{
     primitives::Groth16Proof,
     serialization::ZcashDeserializeInto,
     sprout::JoinSplit,
-    transaction::{JoinSplitData, LockTime, Transaction},
+    transaction::{JoinSplitData, LockTime, Transaction, UnminedTx},
 };
 
 use crate::{
     arbitrary::Prepare,
-    service::write::validate_and_commit_non_finalized,
+    service::{
+        check::anchors::tx_anchors_refer_to_final_treestates,
+        write::validate_and_commit_non_finalized,
+    },
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
-    PreparedBlock,
+    PreparedBlock, ValidateContextError,
 };
 
 // Sprout
@@ -41,13 +44,6 @@ fn check_sprout_anchors() {
     // Add initial transactions to [`block_1`].
     let block_1 = prepare_sprout_block(block_1, block_395);
 
-    // Validate and commit [`block_1`]. This will add an anchor referencing the
-    // empty note commitment tree to the state.
-    assert!(
-        validate_and_commit_non_finalized(&finalized_state, &mut non_finalized_state, block_1)
-            .is_ok()
-    );
-
     // Bootstrap a block at height == 2 that references the Sprout note commitment tree state
     // from [`block_1`].
     let block_2 = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
@@ -62,6 +58,43 @@ fn check_sprout_anchors() {
 
     // Add the transactions with the first anchors to [`block_2`].
     let block_2 = prepare_sprout_block(block_2, block_396);
+
+    let unmined_txs: Vec<_> = block_2
+        .block
+        .transactions
+        .iter()
+        .map(UnminedTx::from)
+        .collect();
+
+    let check_unmined_tx_anchors_result = unmined_txs.iter().try_for_each(|unmined_tx| {
+        tx_anchors_refer_to_final_treestates(
+            &finalized_state.db,
+            non_finalized_state.best_chain(),
+            unmined_tx,
+        )
+    });
+
+    assert!(matches!(
+        check_unmined_tx_anchors_result,
+        Err(ValidateContextError::UnknownSproutAnchor { .. })
+    ));
+
+    // Validate and commit [`block_1`]. This will add an anchor referencing the
+    // empty note commitment tree to the state.
+    assert!(
+        validate_and_commit_non_finalized(&finalized_state, &mut non_finalized_state, block_1)
+            .is_ok()
+    );
+
+    let check_unmined_tx_anchors_result = unmined_txs.iter().try_for_each(|unmined_tx| {
+        tx_anchors_refer_to_final_treestates(
+            &finalized_state.db,
+            non_finalized_state.best_chain(),
+            unmined_tx,
+        )
+    });
+
+    assert!(check_unmined_tx_anchors_result.is_ok());
 
     // Validate and commit [`block_2`]. This will also check the anchors.
     assert_eq!(
@@ -188,10 +221,6 @@ fn check_sapling_anchors() {
         });
 
     let block1 = Arc::new(block1).prepare();
-    assert!(
-        validate_and_commit_non_finalized(&finalized_state, &mut non_finalized_state, block1)
-            .is_ok()
-    );
 
     // Bootstrap a block at height == 2 that references the Sapling note commitment tree state
     // from earlier block
@@ -238,6 +267,42 @@ fn check_sapling_anchors() {
         });
 
     let block2 = Arc::new(block2).prepare();
+
+    let unmined_txs: Vec<_> = block2
+        .block
+        .transactions
+        .iter()
+        .map(UnminedTx::from)
+        .collect();
+
+    let check_unmined_tx_anchors_result = unmined_txs.iter().try_for_each(|unmined_tx| {
+        tx_anchors_refer_to_final_treestates(
+            &finalized_state.db,
+            non_finalized_state.best_chain(),
+            unmined_tx,
+        )
+    });
+
+    assert!(matches!(
+        check_unmined_tx_anchors_result,
+        Err(ValidateContextError::UnknownSaplingAnchor { .. })
+    ));
+
+    assert!(
+        validate_and_commit_non_finalized(&finalized_state, &mut non_finalized_state, block1)
+            .is_ok()
+    );
+
+    let check_unmined_tx_anchors_result = unmined_txs.iter().try_for_each(|unmined_tx| {
+        tx_anchors_refer_to_final_treestates(
+            &finalized_state.db,
+            non_finalized_state.best_chain(),
+            unmined_tx,
+        )
+    });
+
+    assert!(check_unmined_tx_anchors_result.is_ok());
+
     assert_eq!(
         validate_and_commit_non_finalized(&finalized_state, &mut non_finalized_state, block2),
         Ok(())
