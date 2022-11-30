@@ -221,7 +221,7 @@ impl ChainHistoryBlockTxAuthCommitmentHash {
 /// implement, and ensures that we don't reject blocks or transactions
 /// for a non-enumerated reason.
 #[allow(missing_docs)]
-#[derive(Error, Debug, PartialEq, Eq)]
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
 pub enum CommitmentError {
     #[error(
         "invalid final sapling root: expected {:?}, actual: {:?}",

@@ -51,6 +51,11 @@ pub enum Response {
 
     /// The response to a `FindBlockHeaders` request.
     BlockHeaders(Vec<block::CountedHeader>),
+
+    /// Response to [`Request::CheckBestChainTipNullifiersAndAnchors`].
+    ///
+    /// Does not check transparent UTXO inputs
+    ValidBestChainTipNullifiersAndAnchors,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,6 +115,11 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::UtxosByAddresses`] with found utxos and transaction data.
     AddressUtxos(AddressUtxos),
+
+    /// Response to [`ReadRequest::CheckBestChainTipNullifiersAndAnchors`].
+    ///
+    /// Does not check transparent UTXO inputs
+    ValidBestChainTipNullifiersAndAnchors,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.
@@ -136,6 +146,8 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockLocator(hashes) => Ok(Response::BlockLocator(hashes)),
             ReadResponse::BlockHashes(hashes) => Ok(Response::BlockHashes(hashes)),
             ReadResponse::BlockHeaders(headers) => Ok(Response::BlockHeaders(headers)),
+
+            ReadResponse::ValidBestChainTipNullifiersAndAnchors => Ok(Response::ValidBestChainTipNullifiersAndAnchors),
 
             ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)

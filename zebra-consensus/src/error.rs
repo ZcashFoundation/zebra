@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use zebra_chain::{amount, block, orchard, sapling, sprout, transparent};
+use zebra_state::ValidateContextError;
 
 use crate::{block::MAX_BLOCK_SIGOPS, BoxError};
 
@@ -180,6 +181,10 @@ pub enum TransactionError {
 
     #[error("could not find a mempool transaction input UTXO in the best chain")]
     TransparentInputNotFound,
+
+    #[error("could not validate nullifiers and anchors on best chain")]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    ValidateNullifiersAndAnchorsError(#[from] ValidateContextError),
 }
 
 impl From<BoxError> for TransactionError {
@@ -187,6 +192,11 @@ impl From<BoxError> for TransactionError {
         // TODO: handle redpallas::Error, ScriptInvalid, InvalidSignature
         match err.downcast::<zebra_chain::primitives::redjubjub::Error>() {
             Ok(e) => return TransactionError::RedJubjub(*e),
+            Err(e) => err = e,
+        }
+
+        match err.downcast::<ValidateContextError>() {
+            Ok(e) => return (*e).into(),
             Err(e) => err = e,
         }
 

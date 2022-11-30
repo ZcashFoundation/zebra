@@ -1,12 +1,14 @@
 //! Checks for nullifier uniqueness.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use tracing::trace;
+use zebra_chain::transaction::Transaction;
 
 use crate::{
-    error::DuplicateNullifierError, service::finalized_state::ZebraDb, PreparedBlock,
-    ValidateContextError,
+    error::DuplicateNullifierError,
+    service::{finalized_state::ZebraDb, non_finalized_state::Chain},
+    PreparedBlock, ValidateContextError,
 };
 
 // Tidy up some doc links
@@ -50,6 +52,73 @@ pub(crate) fn no_duplicates_in_finalized_chain(
             Err(nullifier.duplicate_nullifier_error(true))?;
         }
     }
+
+    Ok(())
+}
+
+/// Accepts an iterator of revealed nullifiers, a predicate fn for checking if a nullifier is in
+/// in the finalized chain, and a predicate fn for checking if the nullifier is in the non-finalized chain
+///
+/// Returns `Err(DuplicateNullifierError)` if any of the `revealed_nullifiers` are found in the
+/// non-finalized or finalized chains.
+///
+/// Returns `Ok(())` if all the `revealed_nullifiers` have not been seen in either chain.
+fn find_duplicate_nullifier<'a, NullifierT, FinalizedStateContainsFn, NonFinalizedStateContainsFn>(
+    revealed_nullifiers: impl IntoIterator<Item = &'a NullifierT>,
+    finalized_chain_contains: FinalizedStateContainsFn,
+    non_finalized_chain_contains: Option<NonFinalizedStateContainsFn>,
+) -> Result<(), ValidateContextError>
+where
+    NullifierT: DuplicateNullifierError + 'a,
+    FinalizedStateContainsFn: Fn(&'a NullifierT) -> bool,
+    NonFinalizedStateContainsFn: Fn(&'a NullifierT) -> bool,
+{
+    for nullifier in revealed_nullifiers {
+        if let Some(true) = non_finalized_chain_contains.as_ref().map(|f| f(nullifier)) {
+            Err(nullifier.duplicate_nullifier_error(false))?
+        } else if finalized_chain_contains(nullifier) {
+            Err(nullifier.duplicate_nullifier_error(true))?
+        }
+    }
+
+    Ok(())
+}
+
+/// Reject double-spends of nullifiers:
+/// - one from this [`Transaction`], and the other already committed to the
+///   provided non-finalized [`Chain`] or [`ZebraDb`].
+///
+/// # Consensus
+///
+/// > A nullifier MUST NOT repeat either within a transaction,
+/// > or across transactions in a valid blockchain.
+/// > Sprout and Sapling and Orchard nullifiers are considered disjoint,
+/// > even if they have the same bit pattern.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#nullifierset>
+#[tracing::instrument(skip_all)]
+pub(crate) fn tx_no_duplicates_in_chain(
+    finalized_chain: &ZebraDb,
+    non_finalized_chain: Option<&Arc<Chain>>,
+    transaction: &Arc<Transaction>,
+) -> Result<(), ValidateContextError> {
+    find_duplicate_nullifier(
+        transaction.sprout_nullifiers(),
+        |nullifier| finalized_chain.contains_sprout_nullifier(nullifier),
+        non_finalized_chain.map(|chain| |nullifier| chain.sprout_nullifiers.contains(nullifier)),
+    )?;
+
+    find_duplicate_nullifier(
+        transaction.sapling_nullifiers(),
+        |nullifier| finalized_chain.contains_sapling_nullifier(nullifier),
+        non_finalized_chain.map(|chain| |nullifier| chain.sapling_nullifiers.contains(nullifier)),
+    )?;
+
+    find_duplicate_nullifier(
+        transaction.orchard_nullifiers(),
+        |nullifier| finalized_chain.contains_orchard_nullifier(nullifier),
+        non_finalized_chain.map(|chain| |nullifier| chain.orchard_nullifiers.contains(nullifier)),
+    )?;
 
     Ok(())
 }

@@ -14,7 +14,8 @@ use zebra_chain::{
     parallel::tree::NoteCommitmentTrees,
     sapling,
     serialization::SerializationError,
-    sprout, transaction,
+    sprout,
+    transaction::{self, UnminedTx},
     transparent::{self, utxos_from_ordered_utxos},
     value_balance::{ValueBalance, ValueBalanceError},
 };
@@ -539,6 +540,11 @@ pub enum Request {
         /// Optionally, the hash of the last header to request.
         stop: Option<block::Hash>,
     },
+
+    /// Contextually validates anchors and nullifiers of a transaction on the best chain
+    ///
+    /// Returns [`Response::ValidBestChainTipNullifiersAndAnchors`]
+    CheckBestChainTipNullifiersAndAnchors(UnminedTx),
 }
 
 impl Request {
@@ -555,6 +561,9 @@ impl Request {
             Request::Block(_) => "block",
             Request::FindBlockHashes { .. } => "find_block_hashes",
             Request::FindBlockHeaders { .. } => "find_block_headers",
+            Request::CheckBestChainTipNullifiersAndAnchors(_) => {
+                "best_chain_tip_nullifiers_anchors"
+            }
         }
     }
 
@@ -735,6 +744,11 @@ pub enum ReadRequest {
     ///
     /// Returns a type with found utxos and transaction information.
     UtxosByAddresses(HashSet<transparent::Address>),
+
+    /// Contextually validates anchors and nullifiers of a transaction on the best chain
+    ///
+    /// Returns [`ReadResponse::ValidBestChainTipNullifiersAndAnchors`].
+    CheckBestChainTipNullifiersAndAnchors(UnminedTx),
 }
 
 impl ReadRequest {
@@ -755,6 +769,9 @@ impl ReadRequest {
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addesses",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
+            ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
+                "best_chain_tip_nullifiers_anchors"
+            }
         }
     }
 
@@ -792,6 +809,10 @@ impl TryFrom<Request> for ReadRequest {
             }
             Request::FindBlockHeaders { known_blocks, stop } => {
                 Ok(ReadRequest::FindBlockHeaders { known_blocks, stop })
+            }
+
+            Request::CheckBestChainTipNullifiersAndAnchors(tx) => {
+                Ok(ReadRequest::CheckBestChainTipNullifiersAndAnchors(tx))
             }
 
             Request::CommitBlock(_) | Request::CommitFinalizedBlock(_) => {

@@ -19,7 +19,9 @@ use zebra_chain::{
 
 use crate::{
     arbitrary::Prepare,
-    service::{read, write::validate_and_commit_non_finalized},
+    service::{
+        check::nullifier::tx_no_duplicates_in_chain, read, write::validate_and_commit_non_finalized,
+    },
     tests::setup::{new_state_with_mainnet_genesis, transaction_v4_from_coinbase},
     FinalizedBlock,
     ValidateContextError::{
@@ -73,7 +75,7 @@ proptest! {
 
         block1.transactions.push(transaction.into());
 
-    let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
+        let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
         finalized_state.populate_with_anchors(&block1);
@@ -102,7 +104,7 @@ proptest! {
             let commit_result = validate_and_commit_non_finalized(
                 &finalized_state,
                 &mut non_finalized_state,
-                 block1.clone()
+                block1.clone()
             );
 
             // the block was committed
@@ -155,7 +157,9 @@ proptest! {
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state,
-            &mut non_finalized_state,  block1);
+            &mut non_finalized_state,
+            block1
+        );
 
         // if the random proptest data produces other errors,
         // we might need to just check `is_err()` here
@@ -214,7 +218,9 @@ proptest! {
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state,
-            &mut non_finalized_state,  block1);
+            &mut non_finalized_state,
+            block1
+        );
 
         prop_assert_eq!(
             commit_result,
@@ -318,22 +324,27 @@ proptest! {
         let duplicate_nullifier = joinsplit1.nullifiers[0];
         joinsplit2.nullifiers[0] = duplicate_nullifier;
 
-        let transaction1 = transaction_v4_with_joinsplit_data(joinsplit_data1.0, [joinsplit1.0]);
+        let transaction1 = Arc::new(transaction_v4_with_joinsplit_data(joinsplit_data1.0, [joinsplit1.0]));
         let transaction2 = transaction_v4_with_joinsplit_data(joinsplit_data2.0, [joinsplit2.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
 
-        block1.transactions.push(transaction1.into());
+        block1.transactions.push(transaction1.clone());
         block2.transactions.push(transaction2.into());
 
-    let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
+        let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
         finalized_state.populate_with_anchors(&block1);
         finalized_state.populate_with_anchors(&block2);
 
         let mut previous_mem = non_finalized_state.clone();
+
+        // makes sure there are no spurious rejections that might hide bugs in `tx_no_duplicates_in_chain`
+        let check_tx_no_duplicates_in_chain =
+            tx_no_duplicates_in_chain(&finalized_state.db, non_finalized_state.best_chain(), &transaction1);
+        prop_assert!(check_tx_no_duplicates_in_chain.is_ok());
 
         let block1_hash;
         // randomly choose to commit the next block to the finalized or non-finalized state
@@ -353,8 +364,10 @@ proptest! {
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block1.clone());
+                &finalized_state,
+                &mut non_finalized_state,
+                block1.clone()
+            );
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -371,7 +384,9 @@ proptest! {
         let block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state,
-            &mut non_finalized_state,  block2);
+            &mut non_finalized_state,
+            block2
+        );
 
         prop_assert_eq!(
             commit_result,
@@ -381,6 +396,18 @@ proptest! {
             }
             .into())
         );
+
+        let check_tx_no_duplicates_in_chain =
+            tx_no_duplicates_in_chain(&finalized_state.db, non_finalized_state.best_chain(), &transaction1);
+
+        prop_assert_eq!(
+            check_tx_no_duplicates_in_chain,
+            Err(DuplicateSproutNullifier {
+                nullifier: duplicate_nullifier,
+                in_finalized_state: duplicate_in_finalized_state,
+            })
+        );
+
         prop_assert_eq!(Some((Height(1), block1_hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
@@ -413,7 +440,7 @@ proptest! {
 
         block1.transactions.push(transaction.into());
 
-    let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
+        let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
         finalized_state.populate_with_anchors(&block1);
@@ -524,7 +551,7 @@ proptest! {
             .transactions
             .extend([transaction1.into(), transaction2.into()]);
 
-            let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
+        let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
         finalized_state.populate_with_anchors(&block1);
@@ -534,7 +561,9 @@ proptest! {
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state,
-            &mut non_finalized_state,  block1);
+            &mut non_finalized_state,
+            block1
+        );
 
         prop_assert_eq!(
             commit_result,
@@ -572,23 +601,28 @@ proptest! {
         spend2.nullifier = duplicate_nullifier;
 
         let transaction1 =
-            transaction_v4_with_sapling_shielded_data(sapling_shielded_data1.0, [spend1.0]);
+            Arc::new(transaction_v4_with_sapling_shielded_data(sapling_shielded_data1.0, [spend1.0]));
         let transaction2 =
             transaction_v4_with_sapling_shielded_data(sapling_shielded_data2.0, [spend2.0]);
 
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
 
-        block1.transactions.push(transaction1.into());
+        block1.transactions.push(transaction1.clone());
         block2.transactions.push(transaction2.into());
 
-    let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
+        let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
 
         // Allows anchor checks to pass
         finalized_state.populate_with_anchors(&block1);
         finalized_state.populate_with_anchors(&block2);
 
         let mut previous_mem = non_finalized_state.clone();
+
+        // makes sure there are no spurious rejections that might hide bugs in `tx_no_duplicates_in_chain`
+        let check_tx_no_duplicates_in_chain =
+            tx_no_duplicates_in_chain(&finalized_state.db, non_finalized_state.best_chain(), &transaction1);
+        prop_assert!(check_tx_no_duplicates_in_chain.is_ok());
 
         let block1_hash;
         // randomly choose to commit the next block to the finalized or non-finalized state
@@ -632,6 +666,18 @@ proptest! {
             }
             .into())
         );
+
+        let check_tx_no_duplicates_in_chain =
+            tx_no_duplicates_in_chain(&finalized_state.db, non_finalized_state.best_chain(), &transaction1);
+
+        prop_assert_eq!(
+            check_tx_no_duplicates_in_chain,
+            Err(DuplicateSaplingNullifier {
+                nullifier: duplicate_nullifier,
+                in_finalized_state: duplicate_in_finalized_state,
+            })
+        );
+
         prop_assert_eq!(Some((Height(1), block1_hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
@@ -829,10 +875,10 @@ proptest! {
         let duplicate_nullifier = authorized_action1.action.nullifier;
         authorized_action2.action.nullifier = duplicate_nullifier;
 
-        let transaction1 = transaction_v5_with_orchard_shielded_data(
+        let transaction1 = Arc::new(transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data1.0,
             [authorized_action1.0],
-        );
+        ));
         let transaction2 = transaction_v5_with_orchard_shielded_data(
             orchard_shielded_data2.0,
             [authorized_action2.0],
@@ -841,7 +887,7 @@ proptest! {
         block1.transactions[0] = transaction_v4_from_coinbase(&block1.transactions[0]).into();
         block2.transactions[0] = transaction_v4_from_coinbase(&block2.transactions[0]).into();
 
-        block1.transactions.push(transaction1.into());
+        block1.transactions.push(transaction1.clone());
         block2.transactions.push(transaction2.into());
 
     let (mut finalized_state, mut non_finalized_state, _genesis) = new_state_with_mainnet_genesis();
@@ -851,6 +897,11 @@ proptest! {
         finalized_state.populate_with_anchors(&block2);
 
         let mut previous_mem = non_finalized_state.clone();
+
+        // makes sure there are no spurious rejections that might hide bugs in `tx_no_duplicates_in_chain`
+        let check_tx_no_duplicates_in_chain =
+            tx_no_duplicates_in_chain(&finalized_state.db, non_finalized_state.best_chain(), &transaction1);
+        prop_assert!(check_tx_no_duplicates_in_chain.is_ok());
 
         let block1_hash;
         // randomly choose to commit the next block to the finalized or non-finalized state
@@ -893,6 +944,18 @@ proptest! {
             }
             .into())
         );
+
+        let check_tx_no_duplicates_in_chain =
+            tx_no_duplicates_in_chain(&finalized_state.db, non_finalized_state.best_chain(), &transaction1);
+
+        prop_assert_eq!(
+            check_tx_no_duplicates_in_chain,
+            Err(DuplicateOrchardNullifier {
+                nullifier: duplicate_nullifier,
+                in_finalized_state: duplicate_in_finalized_state,
+            })
+        );
+
         prop_assert_eq!(Some((Height(1), block1_hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
     }
