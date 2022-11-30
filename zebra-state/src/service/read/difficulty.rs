@@ -6,7 +6,7 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 
 use zebra_chain::{
     block::{Block, Hash, Height},
-    parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING, POW_AVERAGING_WINDOW},
+    parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
     work::difficulty::CompactDifficulty,
 };
 
@@ -14,7 +14,7 @@ use crate::{
     service::{
         any_ancestor_blocks,
         check::{
-            difficulty::{BLOCK_MAX_TIME_SINCE_MEDIAN, POW_MEDIAN_BLOCK_SPAN},
+            difficulty::{BLOCK_MAX_TIME_SINCE_MEDIAN, POW_ADJUSTMENT_BLOCK_SPAN},
             AdjustedDifficulty,
         },
         finalized_state::ZebraDb,
@@ -49,11 +49,9 @@ where
     C::Item: Borrow<Block>,
     C::IntoIter: ExactSizeIterator,
 {
-    const MAX_CONTEXT_BLOCKS: usize = POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN;
-
     let relevant_chain: Vec<_> = relevant_chain
         .into_iter()
-        .take(MAX_CONTEXT_BLOCKS)
+        .take(POW_ADJUSTMENT_BLOCK_SPAN)
         .collect();
 
     let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
@@ -68,7 +66,11 @@ where
 
     // The getblocktemplate RPC returns an error if Zebra is not synced to the tip.
     // So this will never happen in production code.
-    assert!(relevant_data.len() < MAX_CONTEXT_BLOCKS);
+    assert_eq!(
+        relevant_data.len(),
+        POW_ADJUSTMENT_BLOCK_SPAN,
+        "getblocktemplate RPC called with empty state: should have returned an error",
+    );
 
     let cur_time = chrono::Utc::now();
 

@@ -5,9 +5,9 @@
 //!  * the Testnet minimum difficulty adjustment from ZIPs 205 and 208, and
 //!  * `median-time-past`.
 
-use chrono::{DateTime, Duration, Utc};
-
 use std::{cmp::max, cmp::min, convert::TryInto};
+
+use chrono::{DateTime, Duration, Utc};
 
 use zebra_chain::{
     block,
@@ -23,6 +23,11 @@ use zebra_chain::{
 ///
 /// `PoWMedianBlockSpan` in the Zcash specification.
 pub const POW_MEDIAN_BLOCK_SPAN: usize = 11;
+
+/// The overall block span used for adjusting Zcash block difficulty.
+///
+/// `PoWAveragingWindow + PoWMedianBlockSpan` in the Zcash specification.
+pub const POW_ADJUSTMENT_BLOCK_SPAN: usize = POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN;
 
 /// The damping factor for median timespan variance.
 ///
@@ -59,15 +64,14 @@ pub(crate) struct AdjustedDifficulty {
     /// The `header.difficulty_threshold`s from the previous
     /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
     /// order.
-    relevant_difficulty_thresholds:
-        [CompactDifficulty; POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN],
+    relevant_difficulty_thresholds: [CompactDifficulty; POW_ADJUSTMENT_BLOCK_SPAN],
     /// The `header.time`s from the previous
     /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
     /// order.
     ///
     /// Only the first and last `PoWMedianBlockSpan` times are used. Times
     /// `11..=16` are ignored.
-    relevant_times: [DateTime<Utc>; POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN],
+    relevant_times: [DateTime<Utc>; POW_ADJUSTMENT_BLOCK_SPAN],
 }
 
 impl AdjustedDifficulty {
@@ -131,7 +135,7 @@ impl AdjustedDifficulty {
 
         let (relevant_difficulty_thresholds, relevant_times) = context
             .into_iter()
-            .take(POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN)
+            .take(POW_ADJUSTMENT_BLOCK_SPAN)
             .unzip::<_, _, Vec<_>, Vec<_>>();
 
         let relevant_difficulty_thresholds = relevant_difficulty_thresholds
