@@ -120,7 +120,6 @@ async fn connect_isolated_sends_anonymised_version_message_mem_net(network: Netw
 
 /// Wait to receive a version message on `inbound_stream`,
 /// then check that it is correctly anonymised.
-#[track_caller]
 async fn check_version_message<PeerTransport>(
     network: Network,
     inbound_stream: &mut Framed<PeerTransport, Codec>,

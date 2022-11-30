@@ -145,7 +145,8 @@ proptest! {
             }
 
             // Send a request to all peers
-            let _ = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash));
+            let response_future = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash));
+            std::mem::drop(response_future);
 
             // Check how many peers received the request
             let mut received = 0;
@@ -213,7 +214,8 @@ proptest! {
                 let number_of_peers_to_broadcast = peer_set.number_of_peers_to_broadcast();
 
                 // Send a request to all peers we have now
-                let _ = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash));
+                let response_future = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash));
+                std::mem::drop(response_future);
 
                 // Check how many peers received the request
                 let mut received = 0;
@@ -273,7 +275,8 @@ proptest! {
             }
 
             // this will panic as expected
-            let _ = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash));
+            let response_future = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash));
+            std::mem::drop(response_future);
 
             Ok::<_, TestCaseError>(())
         })?;
