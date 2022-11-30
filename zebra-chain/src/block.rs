@@ -149,9 +149,16 @@ impl Block {
 
     /// Access the [`orchard::Nullifier`]s from all transactions in this block.
     pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
-        self.transactions
+        // Work around a compiler panic (ICE) with flat_map():
+        // https://github.com/rust-lang/rust/issues/105044
+        #[allow(clippy::needless_collect)]
+        let nullifiers: Vec<_> = self
+            .transactions
             .iter()
             .flat_map(|transaction| transaction.orchard_nullifiers())
+            .collect();
+
+        nullifiers.into_iter()
     }
 
     /// Count how many Sapling transactions exist in a block,

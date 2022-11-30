@@ -33,11 +33,13 @@ pub(crate) fn block_precommit_metrics(block: &Block, hash: block::Hash, height: 
         .flat_map(|t| t.sapling_nullifiers())
         .count();
 
-    let orchard_nullifier_count = block
+    // Work around a compiler panic (ICE) with flat_map():
+    // https://github.com/rust-lang/rust/issues/105044
+    let orchard_nullifier_count: usize = block
         .transactions
         .iter()
-        .flat_map(|t| t.orchard_nullifiers())
-        .count();
+        .map(|t| t.orchard_nullifiers().count())
+        .sum();
 
     tracing::debug!(
         ?hash,

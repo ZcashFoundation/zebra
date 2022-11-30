@@ -90,10 +90,12 @@ impl ClientTestHarness {
 
     /// Drops the mocked heartbeat shutdown receiver endpoint.
     pub fn drop_heartbeat_shutdown_receiver(&mut self) {
-        let _ = self
+        let hearbeat_future = self
             .shutdown_receiver
             .take()
-            .expect("heartbeat shutdown receiver endpoint has already been dropped");
+            .expect("unexpected test failure: heartbeat shutdown receiver endpoint has already been dropped");
+
+        std::mem::drop(hearbeat_future);
     }
 
     /// Closes the receiver endpoint of [`ClientRequest`]s that are supposed to be sent to the
