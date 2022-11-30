@@ -71,7 +71,7 @@ where
     assert_eq!(
         relevant_data.len(),
         POW_ADJUSTMENT_BLOCK_SPAN,
-        "getblocktemplate RPC called with empty state: should have returned an error",
+        "getblocktemplate RPC called with a near-empty state: should have returned an error",
     );
 
     let cur_time = chrono::Utc::now();
