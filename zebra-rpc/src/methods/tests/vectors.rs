@@ -849,7 +849,7 @@ async fn rpc_getblocktemplate() {
             .respond(ReadResponse::ChainInfo(Some(GetBlockTemplateChainInfo {
                 expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
                 tip: (fake_tip_height, fake_tip_hash),
-                current_system_time: fake_cur_time,
+                cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
             })));
