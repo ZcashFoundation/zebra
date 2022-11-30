@@ -24,11 +24,9 @@ pub fn fake_history_tree(network: Network) -> Arc<HistoryTree> {
         ),
     };
 
-    // Have a random block from our test vevtors
     let block = Arc::<Block>::zcash_deserialize(block).expect("block should deserialize");
-
-    // Build a history tree tree with only 1 block
     let first_sapling_root = Root::try_from(sapling_root).unwrap();
+
     let history_tree = NonEmptyHistoryTree::from_block(
         Network::Mainnet,
         block,
