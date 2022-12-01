@@ -77,6 +77,17 @@ pub enum VerifyBlockError {
     Transaction(#[from] TransactionError),
 }
 
+impl VerifyBlockError {
+    /// Returns `true` if this is definitely a duplicate request.
+    /// Some duplicate requests might not be detected, and therefore return `false`.
+    pub fn is_duplicate_request(&self) -> bool {
+        match self {
+            VerifyBlockError::Block { source, .. } => source.is_duplicate_request(),
+            _ => false,
+        }
+    }
+}
+
 /// The maximum allowed number of legacy signature check operations in a block.
 ///
 /// This consensus rule is not documented, so Zebra follows the `zcashd` implementation.

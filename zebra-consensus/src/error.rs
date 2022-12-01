@@ -188,7 +188,14 @@ pub enum TransactionError {
     TransparentInputNotFound,
 
     #[error("could not validate nullifiers and anchors on best chain")]
-    ValidateNullifiersAndAnchorsError(#[from] ValidateContextError),
+    // This error variant is at least 128 bytes
+    ValidateNullifiersAndAnchorsError(Box<ValidateContextError>),
+}
+
+impl From<ValidateContextError> for TransactionError {
+    fn from(err: ValidateContextError) -> Self {
+        TransactionError::ValidateNullifiersAndAnchorsError(Box::new(err))
+    }
 }
 
 impl From<BoxError> for TransactionError {
@@ -225,12 +232,6 @@ impl From<BoxError> for TransactionError {
             "downcast to known transaction error type failed, original error: {:?}",
             err,
         ))
-    }
-}
-
-impl From<SubsidyError> for BlockError {
-    fn from(err: SubsidyError) -> BlockError {
-        BlockError::Transaction(TransactionError::Subsidy(err))
     }
 }
 
@@ -318,4 +319,18 @@ pub enum BlockError {
         source: amount::Error,
         height: zebra_chain::block::Height,
     },
+}
+
+impl From<SubsidyError> for BlockError {
+    fn from(err: SubsidyError) -> BlockError {
+        BlockError::Transaction(TransactionError::Subsidy(err))
+    }
+}
+
+impl BlockError {
+    /// Returns `true` if this is definitely a duplicate request.
+    /// Some duplicate requests might not be detected, and therefore return `false`.
+    pub fn is_duplicate_request(&self) -> bool {
+        matches!(self, BlockError::AlreadyInChain(..))
+    }
 }

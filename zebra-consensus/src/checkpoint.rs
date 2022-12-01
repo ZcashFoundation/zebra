@@ -880,7 +880,7 @@ pub enum VerifyCheckpointError {
     #[error(transparent)]
     CheckpointList(BoxError),
     #[error(transparent)]
-    VerifyBlock(BoxError),
+    VerifyBlock(VerifyBlockError),
     #[error("too many queued blocks at this height")]
     QueuedLimit,
     #[error("the block hash does not match the chained checkpoint hash, expected {expected:?} found {found:?}")]
@@ -894,7 +894,7 @@ pub enum VerifyCheckpointError {
 
 impl From<VerifyBlockError> for VerifyCheckpointError {
     fn from(err: VerifyBlockError) -> VerifyCheckpointError {
-        VerifyCheckpointError::VerifyBlock(err.into())
+        VerifyCheckpointError::VerifyBlock(err)
     }
 }
 
@@ -907,6 +907,20 @@ impl From<BlockError> for VerifyCheckpointError {
 impl From<equihash::Error> for VerifyCheckpointError {
     fn from(err: equihash::Error) -> VerifyCheckpointError {
         VerifyCheckpointError::VerifyBlock(err.into())
+    }
+}
+
+impl VerifyCheckpointError {
+    /// Returns `true` if this is definitely a duplicate request.
+    /// Some duplicate requests might not be detected, and therefore return `false`.
+    pub fn is_duplicate_request(&self) -> bool {
+        match self {
+            VerifyCheckpointError::AlreadyVerified { .. } => true,
+            // TODO: make this duplicate-incomplete
+            VerifyCheckpointError::NewerRequest { .. } => true,
+            VerifyCheckpointError::VerifyBlock(block_error) => block_error.is_duplicate_request(),
+            _ => false,
+        }
     }
 }
 

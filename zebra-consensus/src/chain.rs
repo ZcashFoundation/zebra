@@ -91,12 +91,41 @@ where
 }
 
 /// An error while semantically verifying a block.
+//
+// One or both of these error variants are at least 140 bytes
 #[derive(Debug, Display, Error)]
 pub enum VerifyChainError {
     /// block could not be checkpointed
-    Checkpoint(#[source] VerifyCheckpointError),
+    Checkpoint { source: Box<VerifyCheckpointError> },
     /// block could not be verified
-    Block(#[source] VerifyBlockError),
+    Block { source: Box<VerifyBlockError> },
+}
+
+impl From<VerifyCheckpointError> for VerifyChainError {
+    fn from(err: VerifyCheckpointError) -> Self {
+        VerifyChainError::Checkpoint {
+            source: Box::new(err),
+        }
+    }
+}
+
+impl From<VerifyBlockError> for VerifyChainError {
+    fn from(err: VerifyBlockError) -> Self {
+        VerifyChainError::Block {
+            source: Box::new(err),
+        }
+    }
+}
+
+impl VerifyChainError {
+    /// Returns `true` if this is definitely a duplicate request.
+    /// Some duplicate requests might not be detected, and therefore return `false`.
+    pub fn is_duplicate_request(&self) -> bool {
+        match self {
+            VerifyChainError::Checkpoint { source, .. } => source.is_duplicate_request(),
+            VerifyChainError::Block { source, .. } => source.is_duplicate_request(),
+        }
+    }
 }
 
 impl<S, V> Service<Arc<Block>> for ChainVerifier<S, V>
@@ -132,28 +161,19 @@ where
         // The chain verifier holds one slot in each verifier, for each concurrent task.
         // Therefore, any shared buffers or batches polled by these verifiers should double
         // their bounds. (For example, the state service buffer.)
-        ready!(self
-            .checkpoint
-            .poll_ready(cx)
-            .map_err(VerifyChainError::Checkpoint))?;
-        ready!(self.block.poll_ready(cx).map_err(VerifyChainError::Block))?;
+        ready!(self.checkpoint.poll_ready(cx))?;
+        ready!(self.block.poll_ready(cx))?;
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         match block.coinbase_height() {
-            Some(height) if height <= self.max_checkpoint_height => self
-                .checkpoint
-                .call(block)
-                .map_err(VerifyChainError::Checkpoint)
-                .boxed(),
+            Some(height) if height <= self.max_checkpoint_height => {
+                self.checkpoint.call(block).map_err(Into::into).boxed()
+            }
             // This also covers blocks with no height, which the block verifier
             // will reject immediately.
-            _ => self
-                .block
-                .call(block)
-                .map_err(VerifyChainError::Block)
-                .boxed(),
+            _ => self.block.call(block).map_err(Into::into).boxed(),
         }
     }
 }

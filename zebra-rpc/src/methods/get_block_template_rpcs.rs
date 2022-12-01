@@ -22,8 +22,8 @@ use zebra_chain::{
     transparent,
 };
 use zebra_consensus::{
-    funding_stream_address, funding_stream_values, miner_subsidy, new_coinbase_script, BlockError,
-    VerifyBlockError, VerifyChainError, VerifyCheckpointError, MAX_BLOCK_SIGOPS,
+    funding_stream_address, funding_stream_values, miner_subsidy, new_coinbase_script,
+    VerifyChainError, MAX_BLOCK_SIGOPS,
 };
 use zebra_node_services::mempool;
 
@@ -445,13 +445,10 @@ where
                     .map(|boxed_chain_error| *boxed_chain_error),
             };
 
-            Ok(match chain_error {
-                Ok(
-                    VerifyChainError::Checkpoint(VerifyCheckpointError::AlreadyVerified { .. })
-                    | VerifyChainError::Block(VerifyBlockError::Block {
-                        source: BlockError::AlreadyInChain(..),
-                    }),
-                ) => submit_block::ErrorResponse::Duplicate,
+            let response = match chain_error {
+                Ok(source) if source.is_duplicate_request() => {
+                    submit_block::ErrorResponse::Duplicate
+                }
 
                 // Currently, these match arms return Reject for the older duplicate in a queue,
                 // but queued duplicates should be DuplicateInconclusive.
@@ -473,8 +470,9 @@ where
                 // This match arm is currently unreachable, but if future changes add extra error types,
                 // we want to turn them into `Rejected`.
                 Err(_unknown_error_type) => submit_block::ErrorResponse::Rejected,
-            }
-            .into())
+            };
+
+            Ok(response.into())
         }
         .boxed()
     }
