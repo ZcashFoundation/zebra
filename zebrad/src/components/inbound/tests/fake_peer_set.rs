@@ -78,13 +78,11 @@ async fn mempool_requests_for_transactions() {
         .await;
     match response {
         Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
-        Ok(Response::Nil) => if !added_transaction_ids.is_empty() {
-            info!(
-                "response {response:?} to `MempoolTransactionIds` request \
-                 should match added_transaction_ids {added_transaction_ids:?}, \
-                 ignoring test failure because this test is unreliable due to timing issues",
-            );
-        }
+        Ok(Response::Nil) => assert!(
+            added_transaction_ids.is_empty(),
+            "`MempoolTransactionIds` request should match added_transaction_ids {:?}, got Ok(Nil)",
+            added_transaction_ids
+        ),
         _ => unreachable!(
             "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`, got {:?}",
             response
@@ -869,9 +867,6 @@ async fn setup(
         chain_tip_change.clone(),
     );
 
-    // Enable the mempool
-    mempool_service.enable(&mut recent_syncs).await;
-
     let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
         sync_status.clone(),
         chain_tip_change.clone(),
@@ -893,6 +888,13 @@ async fn setup(
             .await
             .respond(Response::Nil);
     }
+
+    // Enable the mempool
+    // Note: this needs to be done after the mock peer set service has received the AdvertiseBlock
+    // request to ensure that the call to `last_tip_change` returns the chain tip block for block_one
+    // and not the genesis block, or else the transactions from the genesis block will be added to
+    // the mempool storage's rejection list and tests will fail.
+    mempool_service.enable(&mut recent_syncs).await;
 
     // Add transactions to the mempool, skipping verification and broadcast
     let mut added_transactions = Vec::new();
