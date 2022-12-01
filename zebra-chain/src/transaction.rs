@@ -59,8 +59,6 @@ use crate::{
 /// activation, we do not validate any pre-Sapling transaction types.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]
-// XXX consider boxing the Optional fields of V4 and V5 txs
-#[allow(clippy::large_enum_variant)]
 pub enum Transaction {
     /// A fully transparent transaction (`version = 1`).
     V1 {
