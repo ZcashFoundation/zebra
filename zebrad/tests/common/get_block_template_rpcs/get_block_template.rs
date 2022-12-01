@@ -76,6 +76,10 @@ pub(crate) async fn run() -> Result<()> {
 
     assert!(is_response_success);
 
+    tracing::info!(
+        "waiting {EXPECTED_MEMPOOL_TRANSACTION_TIME:?} for the mempool \
+         to download and verify some transactions...",
+    );
     tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
 
     tracing::info!(
