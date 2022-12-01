@@ -9,6 +9,40 @@ use crate::methods::{
     GetBlockHash,
 };
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GetBlockTemplateRequestMode {
+    Template,
+    Proposal,
+}
+
+impl Default for GetBlockTemplateRequestMode {
+    fn default() -> Self {
+        Self::Template
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GetBlockTemplateCapability {
+    LongPoll,
+    CoinbaseTxn,
+    CoinbaseValue,
+    Proposal,
+    ServerList,
+    WorkId,
+}
+
+/// Optional `jsonparametersobject` argument
+#[derive(Debug, serde::Deserialize)]
+pub struct JsonParameters {
+    #[serde(default)]
+    pub mode: GetBlockTemplateRequestMode,
+    #[serde(default)]
+    pub capabilities: Vec<GetBlockTemplateCapability>,
+    pub longpollid: Option<String>,
+}
+
 /// Documentation to be added after we document all the individual fields.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetBlockTemplate {

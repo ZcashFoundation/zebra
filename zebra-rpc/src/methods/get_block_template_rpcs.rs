@@ -113,7 +113,10 @@ pub trait GetBlockTemplateRpc {
     ///
     /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[rpc(name = "getblocktemplate")]
-    fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>>;
+    fn get_block_template(
+        &self,
+        _options: Option<types::get_block_template::JsonParameters>,
+    ) -> BoxFuture<Result<GetBlockTemplate>>;
 
     /// Submits block to the node to be validated and committed.
     /// Returns the [`submit_block::Response`] for the operation, as a JSON string.
@@ -292,7 +295,10 @@ where
         .boxed()
     }
 
-    fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>> {
+    fn get_block_template(
+        &self,
+        _options: Option<types::get_block_template::JsonParameters>,
+    ) -> BoxFuture<Result<GetBlockTemplate>> {
         let network = self.network;
         let miner_address = self.miner_address;
 
