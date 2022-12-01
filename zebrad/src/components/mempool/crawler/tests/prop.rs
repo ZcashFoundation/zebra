@@ -8,7 +8,9 @@ use proptest::{
 };
 use tokio::time;
 
-use zebra_chain::{parameters::Network, transaction::UnminedTxId};
+use zebra_chain::{
+    chain_sync_status::ChainSyncStatus, parameters::Network, transaction::UnminedTxId,
+};
 use zebra_network as zn;
 use zebra_node_services::mempool::Gossip;
 use zebra_state::ChainTipSender;

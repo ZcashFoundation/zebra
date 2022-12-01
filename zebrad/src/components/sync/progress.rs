@@ -7,6 +7,7 @@ use num_integer::div_ceil;
 
 use zebra_chain::{
     block::Height,
+    chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     fmt::humantime_seconds,
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
