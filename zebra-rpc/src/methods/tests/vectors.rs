@@ -936,7 +936,7 @@ async fn rpc_getblocktemplate() {
     let get_block_template_sync_error = get_block_template_rpc
         .get_block_template()
         .await
-        .expect_err("needs an error when syncer is not close to tip or estimated distance to network chain tip is far");
+        .expect_err("needs an error when syncer is not close to tip");
 
     assert_eq!(
         get_block_template_sync_error.code,
