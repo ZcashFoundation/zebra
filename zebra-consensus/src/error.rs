@@ -194,6 +194,7 @@ impl From<ValidateContextError> for TransactionError {
     }
 }
 
+// TODO: use a dedicated variant and From impl for each concrete type, and update callers (#5732)
 impl From<BoxError> for TransactionError {
     fn from(mut err: BoxError) -> Self {
         // TODO: handle redpallas::Error, ScriptInvalid, InvalidSignature

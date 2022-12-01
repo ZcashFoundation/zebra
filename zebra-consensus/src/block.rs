@@ -71,6 +71,7 @@ pub enum VerifyBlockError {
     Time(zebra_chain::block::BlockTimeError),
 
     #[error("unable to commit block after semantic verification")]
+    // TODO: make this into a concrete type, and add it to is_duplicate_request() (#2908)
     Commit(#[source] BoxError),
 
     #[error("invalid transaction")]

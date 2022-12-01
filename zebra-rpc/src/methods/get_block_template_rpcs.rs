@@ -238,6 +238,7 @@ where
         best_chain_tip_height(&self.latest_chain_tip).map(|height| height.0)
     }
 
+    // TODO: use a generic error constructor (#5548)
     fn get_block_hash(&self, index: i32) -> BoxFuture<Result<GetBlockHash>> {
         let mut state = self.state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
@@ -271,6 +272,7 @@ where
         .boxed()
     }
 
+    // TODO: use HexData to handle block proposal data, and a generic error constructor (#5548)
     fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>> {
         let network = self.network;
         let miner_address = self.miner_address;
