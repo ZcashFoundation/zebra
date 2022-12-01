@@ -42,10 +42,13 @@ pub mod config;
 pub mod constants;
 pub(crate) mod types;
 
-/// The max estimated distance to the chain tip for the getblocktemplate method
-// Set to 30 in case the local time is a little ahead.
-// TODO: Replace this with SyncStatus
-const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: i32 = 30;
+/// The max estimated distance to the chain tip for the getblocktemplate method.
+///
+/// Allows the same clock skew as the Zcash network, which is 100 blocks, based on the standard rule:
+/// > A full validator MUST NOT accept blocks with nTime more than two hours in the future
+/// > according to its clock. This is not strictly a consensus rule because it is nondeterministic,
+/// > and clock time varies between nodes.
+const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: i32 = 100;
 
 /// getblocktemplate RPC method signatures.
 #[rpc(server)]
