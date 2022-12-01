@@ -593,6 +593,32 @@ jobs:
       lwd_state_dir: 'lwd-cache'
     secrets: inherit
 
+  # Test that Zebra can handle a getblocktemplate RPC call, using a cached Zebra tip state
+  #
+  # Runs:
+  # - after every PR is merged to `main`
+  # - on every PR update
+  #
+  # If the state version has changed, waits for the new cached states to be created.
+  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
+  get-block-template-test:
+    name: get block template
+    needs: test-full-sync
+    uses: ./.github/workflows/deploy-gcp-tests.yml
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    with:
+      app_name: zebrad
+      test_id: get-block-template
+      test_description: Test getblocktemplate RPC method via Zebra's rpc server
+      test_variables: '-e TEST_GET_BLOCK_TEMPLATE=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      needs_zebra_state: true
+      needs_lwd_state: false
+      saves_to_disk: false
+      disk_suffix: tip
+      root_state_path: '/var/cache'
+      zebra_state_dir: 'zebrad-cache'
+    secrets: inherit
+
   # Test that Zebra can handle a submit block RPC call, using a cached Zebra tip state
   #
   # Runs:

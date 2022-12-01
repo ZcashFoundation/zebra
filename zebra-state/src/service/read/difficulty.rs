@@ -68,7 +68,11 @@ where
 
     // The getblocktemplate RPC returns an error if Zebra is not synced to the tip.
     // So this will never happen in production code.
-    assert!(relevant_data.len() < MAX_CONTEXT_BLOCKS);
+    assert_eq!(
+        relevant_data.len(),
+        MAX_CONTEXT_BLOCKS,
+        "getblocktemplate RPC called with a near-empty state: should have returned an error",
+    );
 
     let current_system_time = chrono::Utc::now();
 
