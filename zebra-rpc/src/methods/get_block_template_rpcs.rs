@@ -15,6 +15,7 @@ use zebra_chain::{
         merkle::{self, AuthDataRoot},
         Block, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
     },
+    chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::Network,
     serialization::ZcashDeserializeInto,
@@ -124,7 +125,7 @@ pub trait GetBlockTemplateRpc {
 }
 
 /// RPC method implementations.
-pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier>
+pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus>
 where
     Mempool: Service<
         mempool::Request,
@@ -141,6 +142,7 @@ where
         + Send
         + Sync
         + 'static,
+    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     // TODO: Add the other fields from the [`Rpc`] struct as-needed
 
@@ -167,9 +169,13 @@ where
 
     /// The chain verifier, used for submitting blocks.
     chain_verifier: ChainVerifier,
+
+    /// The chain sync status, used for checking if Zebra is likely close to the network chain tip.
+    sync_status: SyncStatus,
 }
 
-impl<Mempool, State, Tip, ChainVerifier> GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier>
+impl<Mempool, State, Tip, ChainVerifier, SyncStatus>
+    GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus>
 where
     Mempool: Service<
             mempool::Request,
@@ -190,6 +196,7 @@ where
         + Send
         + Sync
         + 'static,
+    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the handler for getblocktemplate RPCs.
     pub fn new(
@@ -199,6 +206,7 @@ where
         state: State,
         latest_chain_tip: Tip,
         chain_verifier: ChainVerifier,
+        sync_status: SyncStatus,
     ) -> Self {
         Self {
             network,
@@ -207,12 +215,13 @@ where
             state,
             latest_chain_tip,
             chain_verifier,
+            sync_status,
         }
     }
 }
 
-impl<Mempool, State, Tip, ChainVerifier> GetBlockTemplateRpc
-    for GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier>
+impl<Mempool, State, Tip, ChainVerifier, SyncStatus> GetBlockTemplateRpc
+    for GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus>
 where
     Mempool: Service<
             mempool::Request,
@@ -236,6 +245,7 @@ where
         + Sync
         + 'static,
     <ChainVerifier as Service<Arc<Block>>>::Future: Send,
+    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     fn get_block_count(&self) -> Result<u32> {
         best_chain_tip_height(&self.latest_chain_tip).map(|height| height.0)
@@ -281,6 +291,7 @@ where
         let mempool = self.mempool.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
         let mut state = self.state.clone();
+        let is_zebra_close_to_network_tip = self.sync_status.is_close_to_tip();
 
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
@@ -302,7 +313,7 @@ where
                     data: None,
                 })?;
 
-            if estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
+            if !is_zebra_close_to_network_tip || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
                 tracing::info!(
                     estimated_distance_to_chain_tip,
                     ?tip_height,

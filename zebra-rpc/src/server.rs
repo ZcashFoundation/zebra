@@ -18,6 +18,7 @@ use tracing::{Instrument, *};
 
 use zebra_chain::{
     block::{self, Block},
+    chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::Network,
 };
@@ -71,7 +72,7 @@ impl RpcServer {
     //
     // TODO: put some of the configs or services in their own struct?
     #[allow(clippy::too_many_arguments)]
-    pub fn spawn<Version, Mempool, State, Tip, ChainVerifier>(
+    pub fn spawn<Version, Mempool, State, Tip, ChainVerifier, SyncStatus>(
         config: Config,
         #[cfg(feature = "getblocktemplate-rpcs")]
         mining_config: get_block_template_rpcs::config::Config,
@@ -83,6 +84,8 @@ impl RpcServer {
         state: State,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         chain_verifier: ChainVerifier,
+        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
+        sync_status: SyncStatus,
         latest_chain_tip: Tip,
         network: Network,
     ) -> (JoinHandle<()>, JoinHandle<()>, Option<Self>)
@@ -110,6 +113,7 @@ impl RpcServer {
             + Sync
             + 'static,
         <ChainVerifier as Service<Arc<Block>>>::Future: Send,
+        SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
@@ -144,6 +148,7 @@ impl RpcServer {
                     state.clone(),
                     latest_chain_tip.clone(),
                     chain_verifier,
+                    sync_status,
                 );
 
                 io.extend_with(get_block_template_rpc_impl.to_delegate());

@@ -8,6 +8,7 @@ use tower::buffer::Buffer;
 use zebra_chain::{
     amount::Amount,
     block::Block,
+    chain_sync_status::MockSyncStatus,
     chain_tip::NoChainTip,
     parameters::Network::*,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
@@ -658,6 +659,7 @@ async fn rpc_getblockcount() {
         read_state,
         latest_chain_tip.clone(),
         chain_verifier,
+        MockSyncStatus::default(),
     );
 
     // Get the tip height using RPC method `get_block_count`
@@ -703,6 +705,7 @@ async fn rpc_getblockcount_empty_state() {
         read_state,
         latest_chain_tip.clone(),
         chain_verifier,
+        MockSyncStatus::default(),
     );
 
     // Get the tip height using RPC method `get_block_count
@@ -754,6 +757,7 @@ async fn rpc_getblockhash() {
         read_state,
         latest_chain_tip.clone(),
         tower::ServiceBuilder::new().service(chain_verifier),
+        MockSyncStatus::default(),
     );
 
     // Query the hashes using positive indexes
@@ -809,6 +813,9 @@ async fn rpc_getblocktemplate() {
     let read_state = MockService::build().for_unit_tests();
     let chain_verifier = MockService::build().for_unit_tests();
 
+    let mut mock_sync_status = MockSyncStatus::default();
+    mock_sync_status.set_is_close_to_tip(true);
+
     let mining_config = get_block_template_rpcs::config::Config {
         miner_address: Some(transparent::Address::from_script_hash(Mainnet, [0x7e; 20])),
     };
@@ -837,7 +844,8 @@ async fn rpc_getblocktemplate() {
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         mock_chain_tip,
-        tower::ServiceBuilder::new().service(chain_verifier),
+        chain_verifier,
+        mock_sync_status,
     );
 
     // Fake the ChainInfo response
@@ -958,7 +966,8 @@ async fn rpc_submitblock_errors() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        tower::ServiceBuilder::new().service(chain_verifier),
+        chain_verifier,
+        MockSyncStatus::default(),
     );
 
     // Try to submit pre-populated blocks and assert that it responds with duplicate.
