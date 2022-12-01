@@ -161,7 +161,7 @@ impl VerifiedSet {
                 .collect();
 
             let dist = WeightedIndex::new(weights)
-                .expect("there is at least one weight and all weights are valid");
+                .expect("there is at least one weight, all weights are non-negative, and the total is positive");
 
             Some(self.remove(dist.sample(&mut thread_rng())))
         }
