@@ -617,6 +617,7 @@ jobs:
       disk_suffix: tip
       root_state_path: '/var/cache'
       zebra_state_dir: 'zebrad-cache'
+    secrets: inherit
 
   # Test that Zebra can handle a submit block RPC call, using a cached Zebra tip state
   #
