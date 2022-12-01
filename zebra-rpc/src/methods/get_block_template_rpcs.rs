@@ -290,8 +290,8 @@ where
 
         let mempool = self.mempool.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
+        let sync_status = self.sync_status.clone();
         let mut state = self.state.clone();
-        let is_zebra_close_to_network_tip = self.sync_status.is_close_to_tip();
 
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
@@ -313,7 +313,7 @@ where
                     data: None,
                 })?;
 
-            if !is_zebra_close_to_network_tip || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
+            if !sync_status.is_close_to_tip() || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
                 tracing::info!(
                     estimated_distance_to_chain_tip,
                     ?tip_height,

@@ -847,7 +847,7 @@ async fn rpc_getblocktemplate() {
         read_state.clone(),
         mock_chain_tip,
         chain_verifier,
-        mock_sync_status,
+        mock_sync_status.clone(),
     );
 
     // Fake the ChainInfo response
@@ -919,11 +919,35 @@ async fn rpc_getblocktemplate() {
 
     mempool.expect_no_requests().await;
 
-    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(100));
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
     let get_block_template_sync_error = get_block_template_rpc
         .get_block_template()
         .await
         .expect_err("needs an error when estimated distance to network chain tip is far");
+
+    assert_eq!(
+        get_block_template_sync_error.code,
+        ErrorCode::ServerError(-10)
+    );
+
+    mock_sync_status.set_is_close_to_tip(false);
+
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template()
+        .await
+        .expect_err("needs an error when syncer is not close to tip or estimated distance to network chain tip is far");
+
+    assert_eq!(
+        get_block_template_sync_error.code,
+        ErrorCode::ServerError(-10)
+    );
+
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template()
+        .await
+        .expect_err("needs an error when syncer is not close to tip or estimated distance to network chain tip is far");
 
     assert_eq!(
         get_block_template_sync_error.code,
