@@ -141,15 +141,15 @@ fn adjust_difficulty_and_time_for_testnet(
 
     // On testnet, changing the block time can also change the difficulty,
     // due to the minimum difficulty consensus rule:
-    // > if the block time of a block at height height ≥ 299188
+    // > if the block time of a block at height `height ≥ 299188`
     // > is greater than 6 * PoWTargetSpacing(height) seconds after that of the preceding block,
     // > then the block is a minimum-difficulty block.
     //
     // The max time is always a minimum difficulty block, because the minimum difficulty
-    // gap is 15 minutes, but the maximum gap is 90 minutes. This means that testnet blocks
+    // gap is 7.5 minutes, but the maximum gap is 90 minutes. This means that testnet blocks
     // have two valid time ranges with different difficulties:
-    // * 1s - 15m: standard difficulty
-    // * 15m1s - 90m: minimum difficulty
+    // * 1s - 7m30s: standard difficulty
+    // * 7m31s - 90m: minimum difficulty
     //
     // In rare cases, this could make some testnet miners produce invalid blocks,
     // if they use the full 90 minute time gap in the consensus rules.
