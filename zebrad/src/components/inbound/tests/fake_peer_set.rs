@@ -855,7 +855,8 @@ async fn setup(
         .unwrap();
     committed_blocks.push(block_one);
 
-    // Don't wait for the chain tip update here, we wait for AdvertiseBlock below.
+    // Don't wait for the chain tip update here, we wait for expect_request(AdvertiseBlock) below,
+    // which is called by the gossip_best_tip_block_hashes task once the chain tip changes.
 
     let (mut mempool_service, transaction_receiver) = Mempool::new(
         &MempoolConfig::default(),
@@ -866,6 +867,9 @@ async fn setup(
         latest_chain_tip.clone(),
         chain_tip_change.clone(),
     );
+
+    // Pretend we're close to tip
+    SyncStatus::sync_close_to_tip(&mut recent_syncs);
 
     let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
         sync_status.clone(),
