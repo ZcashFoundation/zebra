@@ -53,7 +53,7 @@ pub struct BlockVerifier<S, V> {
 #[derive(Debug, Error)]
 pub enum VerifyBlockError {
     #[error("unable to verify depth for block {hash} from chain state during block verification")]
-    Depth { source: BoxError, hash: block::Hash },
+    Depth { hash: block::Hash, source: BoxError },
 
     #[error(transparent)]
     Block {
@@ -157,7 +157,10 @@ where
             // Zebra does not support heights greater than
             // [`block::Height::MAX`].
             if height > block::Height::MAX {
-                Err(BlockError::MaxHeight(height, hash, block::Height::MAX))?;
+                Err(BlockError::MaxHeight {
+                    invalid_height: height,
+                    block_hash: hash,
+                })?;
             }
 
             // Do the difficulty checks first, to raise the threshold for

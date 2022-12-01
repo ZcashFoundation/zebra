@@ -859,8 +859,8 @@ pub enum VerifyCheckpointError {
     },
     #[error("rejected older of duplicate verification requests for block at {height:?} {hash:?}")]
     NewerRequest {
-        height: block::Height,
         hash: block::Hash,
+        height: block::Height,
     },
     #[error("the block {hash:?} does not have a coinbase height")]
     CoinbaseHeight { hash: block::Hash },

@@ -1,7 +1,8 @@
 //! Consensus check functions
 
-use chrono::{DateTime, Utc};
 use std::{collections::HashSet, sync::Arc};
+
+use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     amount::{Amount, Error as AmountError, NonNegative},
@@ -69,10 +70,14 @@ pub fn difficulty_is_valid(
     height: &Height,
     hash: &Hash,
 ) -> Result<(), BlockError> {
-    let difficulty_threshold = header
-        .difficulty_threshold
-        .to_expanded()
-        .ok_or(BlockError::InvalidDifficulty(*height, *hash))?;
+    let difficulty_threshold =
+        header
+            .difficulty_threshold
+            .to_expanded()
+            .ok_or(BlockError::InvalidDifficulty {
+                block_height: *height,
+                block_hash: *hash,
+            })?;
 
     // Note: the comparisons in this function are u256 integer comparisons, like
     // zcashd and bitcoin. Greater values represent *less* work.
@@ -80,13 +85,13 @@ pub fn difficulty_is_valid(
     // The PowLimit check is part of `Threshold()` in the spec, but it doesn't
     // actually depend on any previous blocks.
     if difficulty_threshold > ExpandedDifficulty::target_difficulty_limit(network) {
-        Err(BlockError::TargetDifficultyLimit(
-            *height,
-            *hash,
+        Err(BlockError::TargetDifficultyLimit {
+            block_height: *height,
+            block_hash: *hash,
             difficulty_threshold,
             network,
-            ExpandedDifficulty::target_difficulty_limit(network),
-        ))?;
+            min_difficulty: ExpandedDifficulty::target_difficulty_limit(network),
+        })?;
     }
 
     // # Consensus
@@ -97,12 +102,12 @@ pub fn difficulty_is_valid(
     //
     // The difficulty filter is also context-free.
     if hash > &difficulty_threshold {
-        Err(BlockError::DifficultyFilter(
-            *height,
-            *hash,
+        Err(BlockError::DifficultyFilter {
+            block_height: *height,
+            block_hash: *hash,
             difficulty_threshold,
             network,
-        ))?;
+        })?;
     }
 
     Ok(())

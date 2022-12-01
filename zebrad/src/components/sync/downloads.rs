@@ -91,9 +91,9 @@ pub enum BlockDownloadVerifyError {
 
     #[error("error downloading block: {error:?} {hash:?}")]
     DownloadFailed {
+        hash: block::Hash,
         #[source]
         error: BoxError,
-        hash: block::Hash,
     },
 
     /// A downloaded block was a long way ahead of the state chain tip.
@@ -106,14 +106,14 @@ pub enum BlockDownloadVerifyError {
     /// chain, or blocks far ahead of the current state tip.
     #[error("downloaded block was too far ahead of the chain tip: {height:?} {hash:?}")]
     AboveLookaheadHeightLimit {
-        height: block::Height,
         hash: block::Hash,
+        height: block::Height,
     },
 
     #[error("downloaded block was too far behind the chain tip: {height:?} {hash:?}")]
     BehindTipHeightLimit {
-        height: block::Height,
         hash: block::Hash,
+        height: block::Height,
     },
 
     #[error("downloaded block had an invalid height: {hash:?}")]
@@ -121,18 +121,18 @@ pub enum BlockDownloadVerifyError {
 
     #[error("block failed consensus validation: {error:?} {height:?} {hash:?}")]
     Invalid {
+        hash: block::Hash,
         #[source]
         error: zebra_consensus::chain::VerifyChainError,
         height: block::Height,
-        hash: block::Hash,
     },
 
     #[error("block validation request failed: {error:?} {height:?} {hash:?}")]
     ValidationRequestError {
+        hash: block::Hash,
         #[source]
         error: BoxError,
         height: block::Height,
-        hash: block::Hash,
     },
 
     #[error("block download & verification was cancelled during download: {hash:?}")]
@@ -143,16 +143,16 @@ pub enum BlockDownloadVerifyError {
          to become ready: {height:?} {hash:?}"
     )]
     CancelledAwaitingVerifierReadiness {
-        height: block::Height,
         hash: block::Hash,
+        height: block::Height,
     },
 
     #[error(
         "block download & verification was cancelled during verification: {height:?} {hash:?}"
     )]
     CancelledDuringVerification {
-        height: block::Height,
         hash: block::Hash,
+        height: block::Height,
     },
 }
 

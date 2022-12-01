@@ -167,10 +167,10 @@ pub enum ValidateContextError {
     )]
     #[non_exhaustive]
     NegativeRemainingTransactionValue {
-        amount_error: amount::Error,
-        height: block::Height,
-        tx_index_in_block: usize,
         transaction_hash: transaction::Hash,
+        amount_error: amount::Error,
+        tx_index_in_block: usize,
+        height: block::Height,
     },
 
     #[error(
@@ -180,10 +180,10 @@ pub enum ValidateContextError {
     )]
     #[non_exhaustive]
     CalculateRemainingTransactionValue {
-        amount_error: amount::Error,
-        height: block::Height,
-        tx_index_in_block: usize,
         transaction_hash: transaction::Hash,
+        amount_error: amount::Error,
+        tx_index_in_block: usize,
+        height: block::Height,
     },
 
     #[error(
@@ -193,10 +193,10 @@ pub enum ValidateContextError {
     )]
     #[non_exhaustive]
     CalculateTransactionValueBalances {
-        value_balance_error: ValueBalanceError,
-        height: block::Height,
-        tx_index_in_block: usize,
         transaction_hash: transaction::Hash,
+        value_balance_error: ValueBalanceError,
+        tx_index_in_block: usize,
+        height: block::Height,
     },
 
     #[error(
@@ -207,11 +207,11 @@ pub enum ValidateContextError {
     )]
     #[non_exhaustive]
     CalculateBlockChainValueChange {
-        value_balance_error: ValueBalanceError,
-        height: block::Height,
         block_hash: block::Hash,
+        value_balance_error: ValueBalanceError,
         transaction_count: usize,
         spent_utxo_count: usize,
+        height: block::Height,
     },
 
     #[error(
@@ -223,9 +223,9 @@ pub enum ValidateContextError {
     )]
     #[non_exhaustive]
     AddValuePool {
-        value_balance_error: ValueBalanceError,
         chain_value_pools: ValueBalance<NonNegative>,
         block_value_pool_change: ValueBalance<NegativeAllowed>,
+        value_balance_error: ValueBalanceError,
         height: Option<block::Height>,
     },
 
@@ -245,10 +245,10 @@ pub enum ValidateContextError {
     )]
     #[non_exhaustive]
     UnknownSproutAnchor {
-        anchor: sprout::tree::Root,
-        height: Option<block::Height>,
-        tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
+        anchor: sprout::tree::Root,
+        tx_index_in_block: Option<usize>,
+        height: Option<block::Height>,
     },
 
     #[error(
@@ -257,10 +257,10 @@ pub enum ValidateContextError {
     )]
     #[non_exhaustive]
     UnknownSaplingAnchor {
-        anchor: sapling::tree::Root,
-        height: Option<block::Height>,
-        tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
+        anchor: sapling::tree::Root,
+        tx_index_in_block: Option<usize>,
+        height: Option<block::Height>,
     },
 
     #[error(
@@ -269,10 +269,10 @@ pub enum ValidateContextError {
     )]
     #[non_exhaustive]
     UnknownOrchardAnchor {
-        anchor: orchard::tree::Root,
-        height: Option<block::Height>,
-        tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
+        anchor: orchard::tree::Root,
+        tx_index_in_block: Option<usize>,
+        height: Option<block::Height>,
     },
 }
 

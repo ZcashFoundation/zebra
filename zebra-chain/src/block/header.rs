@@ -89,13 +89,17 @@ pub struct Header {
 #[allow(missing_docs)]
 #[derive(Error, Debug)]
 pub enum BlockTimeError {
-    #[error("invalid time {0:?} in block header {1:?} {2:?}: block time is more than 2 hours in the future ({3:?}). Hint: check your machine's date, time, and time zone.")]
-    InvalidBlockTime(
-        DateTime<Utc>,
-        crate::block::Height,
-        crate::block::Hash,
-        DateTime<Utc>,
-    ),
+    #[error(
+        "invalid time {invalid_time:?} in block header {block_height:?} {block_hash:?}: \
+         block time is more than 2 hours in the future (more than {max_valid_time:?}). \
+         Hint: check your machine's date, time, and time zone."
+    )]
+    InvalidBlockTime {
+        block_hash: Hash,
+        invalid_time: DateTime<Utc>,
+        max_valid_time: DateTime<Utc>,
+        block_height: Height,
+    },
 }
 
 impl Header {
@@ -114,12 +118,12 @@ impl Header {
         if self.time <= two_hours_in_the_future {
             Ok(())
         } else {
-            Err(BlockTimeError::InvalidBlockTime(
-                self.time,
-                *height,
-                *hash,
-                two_hours_in_the_future,
-            ))?
+            Err(BlockTimeError::InvalidBlockTime {
+                invalid_time: self.time,
+                block_height: *height,
+                block_hash: *hash,
+                max_valid_time: two_hours_in_the_future,
+            })?
         }
     }
 }

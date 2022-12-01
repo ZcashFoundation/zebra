@@ -77,9 +77,9 @@ pub enum TransactionError {
          after NU5 activation, failing transaction: {transaction_hash:?}"
     )]
     CoinbaseExpiryBlockHeight {
+        transaction_hash: zebra_chain::transaction::Hash,
         expiry_height: Option<zebra_chain::block::Height>,
         block_height: zebra_chain::block::Height,
-        transaction_hash: zebra_chain::transaction::Hash,
     },
 
     #[error(
@@ -87,10 +87,10 @@ pub enum TransactionError {
          coinbase: {is_coinbase}, block: {block_height:?}, failing transaction: {transaction_hash:?}"
     )]
     MaximumExpiryHeight {
-        expiry_height: zebra_chain::block::Height,
-        is_coinbase: bool,
-        block_height: zebra_chain::block::Height,
         transaction_hash: zebra_chain::transaction::Hash,
+        expiry_height: zebra_chain::block::Height,
+        block_height: zebra_chain::block::Height,
+        is_coinbase: bool,
     },
 
     #[error(
@@ -98,9 +98,9 @@ pub enum TransactionError {
          greater than its expiry {expiry_height:?}, failing transaction {transaction_hash:?}"
     )]
     ExpiredTransaction {
+        transaction_hash: zebra_chain::transaction::Hash,
         expiry_height: zebra_chain::block::Height,
         block_height: zebra_chain::block::Height,
-        transaction_hash: zebra_chain::transaction::Hash,
     },
 
     #[error("coinbase transaction failed subsidy validation")]
@@ -258,52 +258,64 @@ pub enum BlockError {
     #[error("invalid block {0:?}: missing block height")]
     MissingHeight(zebra_chain::block::Hash),
 
-    #[error("invalid block height {0:?} in {1:?}: greater than the maximum height {2:?}")]
-    MaxHeight(
-        zebra_chain::block::Height,
-        zebra_chain::block::Hash,
-        zebra_chain::block::Height,
-    ),
+    #[error(
+        "invalid block height {invalid_height:?} in {block_hash:?}: \
+         greater than the maximum height {:?}",
+        block::Height::MAX
+    )]
+    MaxHeight {
+        block_hash: zebra_chain::block::Hash,
+        invalid_height: zebra_chain::block::Height,
+    },
 
-    #[error("invalid difficulty threshold in block header {0:?} {1:?}")]
-    InvalidDifficulty(zebra_chain::block::Height, zebra_chain::block::Hash),
-
-    #[error("block {0:?} has a difficulty threshold {2:?} that is easier than the {3:?} difficulty limit {4:?}, hash: {1:?}")]
-    TargetDifficultyLimit(
-        zebra_chain::block::Height,
-        zebra_chain::block::Hash,
-        zebra_chain::work::difficulty::ExpandedDifficulty,
-        zebra_chain::parameters::Network,
-        zebra_chain::work::difficulty::ExpandedDifficulty,
-    ),
+    #[error("invalid difficulty threshold in block header {block_height:?} {block_hash:?}")]
+    InvalidDifficulty {
+        block_hash: zebra_chain::block::Hash,
+        block_height: zebra_chain::block::Height,
+    },
 
     #[error(
-        "block {0:?} on {3:?} has a hash {1:?} that is easier than its difficulty threshold {2:?}"
+        "block {block_height:?} {block_hash:?} has a \
+         difficulty threshold {difficulty_threshold:?} \
+         that is easier than the {network:?} difficulty limit {min_difficulty:?}"
     )]
-    DifficultyFilter(
-        zebra_chain::block::Height,
-        zebra_chain::block::Hash,
-        zebra_chain::work::difficulty::ExpandedDifficulty,
-        zebra_chain::parameters::Network,
-    ),
+    TargetDifficultyLimit {
+        block_hash: zebra_chain::block::Hash,
+        difficulty_threshold: zebra_chain::work::difficulty::ExpandedDifficulty,
+        min_difficulty: zebra_chain::work::difficulty::ExpandedDifficulty,
+        block_height: zebra_chain::block::Height,
+        network: zebra_chain::parameters::Network,
+    },
+
+    #[error(
+        "block {block_height:?} on {network:?} has a hash {block_hash:?} \
+         that is easier than its difficulty threshold {difficulty_threshold:?}"
+    )]
+    DifficultyFilter {
+        block_hash: zebra_chain::block::Hash,
+        difficulty_threshold: zebra_chain::work::difficulty::ExpandedDifficulty,
+        block_height: zebra_chain::block::Height,
+        network: zebra_chain::parameters::Network,
+    },
 
     #[error("transaction has wrong consensus branch id for block network upgrade")]
     WrongTransactionConsensusBranchId,
 
     #[error(
-        "block {height:?} {hash:?} has {legacy_sigop_count} legacy transparent signature operations, \
+        "block {height:?} {hash:?} has {legacy_sigop_count} \
+         legacy transparent signature operations, \
          but the limit is {MAX_BLOCK_SIGOPS}"
     )]
     TooManyTransparentSignatureOperations {
-        height: zebra_chain::block::Height,
         hash: zebra_chain::block::Hash,
         legacy_sigop_count: u64,
+        height: zebra_chain::block::Height,
     },
 
     #[error("summing miner fees for block {height:?} {hash:?} failed: {source:?}")]
     SummingMinerFees {
-        height: zebra_chain::block::Height,
         hash: zebra_chain::block::Hash,
         source: amount::Error,
+        height: zebra_chain::block::Height,
     },
 }
