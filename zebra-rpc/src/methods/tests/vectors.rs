@@ -8,7 +8,6 @@ use tower::buffer::Buffer;
 use zebra_chain::{
     amount::Amount,
     block::Block,
-    chain_sync_status::MockSyncStatus,
     chain_tip::NoChainTip,
     parameters::Network::*,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
@@ -21,6 +20,9 @@ use zebra_node_services::BoxError;
 use zebra_test::mock_service::MockService;
 
 use super::super::*;
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+use zebra_chain::chain_sync_status::MockSyncStatus;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getinfo() {
