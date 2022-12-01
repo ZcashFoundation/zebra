@@ -100,7 +100,7 @@ impl TransactionTemplate<NegativeOrZero> {
              must have exactly one input, which must be a coinbase input",
         );
 
-        let miner_fee = miner_fee
+        let miner_fee = (-miner_fee)
             .constrain()
             .expect("negating a NonNegative amount always results in a valid NegativeOrZero");
 
