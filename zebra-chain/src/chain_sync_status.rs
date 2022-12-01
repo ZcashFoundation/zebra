@@ -21,12 +21,12 @@ impl MockSyncStatus {
     /// Sets mock sync status determining the return value of `is_close_to_tip()`
     pub fn set_is_close_to_tip(&mut self, is_close_to_tip: bool) {
         self.is_close_to_tip
-            .store(is_close_to_tip, Ordering::Release);
+            .store(is_close_to_tip, Ordering::SeqCst);
     }
 }
 
 impl ChainSyncStatus for MockSyncStatus {
     fn is_close_to_tip(&self) -> bool {
-        self.is_close_to_tip.load(Ordering::Acquire)
+        self.is_close_to_tip.load(Ordering::SeqCst)
     }
 }

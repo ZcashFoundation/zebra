@@ -51,6 +51,12 @@ pub(crate) mod types;
 /// > and clock time varies between nodes.
 const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: i32 = 100;
 
+/// The RPC error code used by `zcashd` for when it's still downloading initial blocks.
+///
+/// `s-nomp` mining pool expects error code `-10` when the node is not synced:
+/// <https://github.com/s-nomp/node-stratum-pool/blob/d86ae73f8ff968d9355bb61aac05e0ebef36ccb5/lib/pool.js#L142>
+pub const NOT_SYNCED_ERROR_CODE: ErrorCode = ErrorCode::ServerError(-10);
+
 /// getblocktemplate RPC method signatures.
 #[rpc(server)]
 pub trait GetBlockTemplateRpc {
@@ -321,9 +327,7 @@ where
                 );
 
                 return Err(Error {
-                    // Return error code -10 (https://github.com/s-nomp/node-stratum-pool/blob/d86ae73f8ff968d9355bb61aac05e0ebef36ccb5/lib/pool.js#L140)
-                    // TODO: Confirm that this is the expected error code for !synced
-                    code: ErrorCode::ServerError(-10),
+                    code: NOT_SYNCED_ERROR_CODE,
                     message: format!("Zebra has not synced to the chain tip, estimated distance: {estimated_distance_to_chain_tip}"),
                     data: None,
                 });
