@@ -94,10 +94,11 @@ where
 //
 // One or both of these error variants are at least 140 bytes
 #[derive(Debug, Display, Error)]
+#[allow(missing_docs)]
 pub enum VerifyChainError {
-    /// block could not be checkpointed
+    /// Block could not be checkpointed
     Checkpoint { source: Box<VerifyCheckpointError> },
-    /// block could not be verified
+    /// Block could not be full-verified
     Block { source: Box<VerifyBlockError> },
 }
 
