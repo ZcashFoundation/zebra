@@ -18,6 +18,9 @@ use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 #[cfg(test)]
 mod tests;
 
@@ -411,6 +414,7 @@ where
 
 #[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq, Eq)]
 #[allow(missing_docs)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 /// Errors that can be returned when validating `Amount`s
 pub enum Error {
     /// input {value} is outside of valid range for zatoshi Amount, valid_range={range:?}
@@ -420,6 +424,7 @@ pub enum Error {
     },
 
     /// {value} could not be converted to an i64 Amount
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Convert {
         value: i128,
         source: std::num::TryFromIntError,

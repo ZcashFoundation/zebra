@@ -7,8 +7,20 @@ edition = "2021"
 
 [features]
 default = []
+
+# Production features that activate extra dependencies, or extra features in dependencies
+
+# Experimental mining RPC support
 getblocktemplate-rpcs = []
-proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
+
+# Test-only features
+proptest-impl = [
+    "proptest",
+    "proptest-derive",
+    "zebra-script/proptest-impl",
+    "zebra-state/proptest-impl",
+    "zebra-chain/proptest-impl"
+]
 
 [dependencies]
 blake2b_simd = "1.0.0"

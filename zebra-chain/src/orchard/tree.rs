@@ -33,6 +33,9 @@ use crate::serialization::{
     serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 /// The type that is used to update the note commitment tree.
 ///
 /// Unfortunately, this is not the same as `orchard::NoteCommitment`.
@@ -254,6 +257,7 @@ impl<'de> serde::Deserialize<'de> for Node {
 
 #[derive(Error, Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[allow(missing_docs)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum NoteCommitmentTreeError {
     #[error("The note commitment tree is full")]
     FullTree,

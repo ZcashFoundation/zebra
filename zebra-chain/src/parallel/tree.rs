@@ -9,6 +9,9 @@ use crate::{
     orchard, sapling, sprout,
 };
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 /// An argument wrapper struct for note commitment trees.
 #[derive(Clone, Debug)]
 pub struct NoteCommitmentTrees {
@@ -24,6 +27,7 @@ pub struct NoteCommitmentTrees {
 
 /// Note commitment tree errors.
 #[derive(Error, Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum NoteCommitmentTreeError {
     /// A sprout tree error
     #[error("sprout error: {0}")]

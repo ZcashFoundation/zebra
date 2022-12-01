@@ -9,6 +9,9 @@ use crate::{
     sapling,
 };
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 /// Zcash blocks contain different kinds of commitments to their contents,
 /// depending on the network and height.
 ///
@@ -333,6 +336,7 @@ impl FromHex for ChainHistoryBlockTxAuthCommitmentHash {
 /// for a non-enumerated reason.
 #[allow(missing_docs)]
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum CommitmentError {
     #[error(
         "invalid final sapling root: expected {:?}, actual: {:?}",

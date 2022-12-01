@@ -25,6 +25,7 @@ proptest-impl = [
     "proptest",
     "proptest-derive",
     "zebra-consensus/proptest-impl",
+    "zebra-script/proptest-impl",
     "zebra-state/proptest-impl",
     "zebra-chain/proptest-impl",
 ]

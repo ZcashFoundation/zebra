@@ -16,6 +16,9 @@ use zebra_chain::{
 
 use crate::constants::MIN_TRANSPARENT_COINBASE_MATURITY;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
 #[derive(Debug, Error, Clone)]
@@ -44,12 +47,14 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// An error describing the reason a block could not be committed to the state.
 #[derive(Debug, Error, PartialEq, Eq)]
 #[error("block is not contextually valid")]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct CommitBlockError(#[from] ValidateContextError);
 
 /// An error describing why a block failed contextual validation.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 #[allow(missing_docs)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum ValidateContextError {
     #[error("block parent not found in any chain")]
     #[non_exhaustive]
@@ -71,6 +76,7 @@ pub enum ValidateContextError {
 
     #[error("block time {candidate_time:?} is less than or equal to the median-time-past for the block {median_time_past:?}")]
     #[non_exhaustive]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     TimeTooEarly {
         candidate_time: DateTime<Utc>,
         median_time_past: DateTime<Utc>,
@@ -78,6 +84,7 @@ pub enum ValidateContextError {
 
     #[error("block time {candidate_time:?} is greater than the median-time-past for the block plus 90 minutes {block_time_max:?}")]
     #[non_exhaustive]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     TimeTooLate {
         candidate_time: DateTime<Utc>,
         block_time_max: DateTime<Utc>,
@@ -92,6 +99,7 @@ pub enum ValidateContextError {
 
     #[error("transparent double-spend: {outpoint:?} is spent twice in {location:?}")]
     #[non_exhaustive]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     DuplicateTransparentSpend {
         outpoint: transparent::OutPoint,
         location: &'static str,
@@ -99,6 +107,7 @@ pub enum ValidateContextError {
 
     #[error("missing transparent output: possible double-spend of {outpoint:?} in {location:?}")]
     #[non_exhaustive]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     MissingTransparentOutput {
         outpoint: transparent::OutPoint,
         location: &'static str,
@@ -224,7 +233,8 @@ pub enum ValidateContextError {
     NoteCommitmentTreeError(#[from] zebra_chain::parallel::tree::NoteCommitmentTreeError),
 
     #[error("error building the history tree")]
-    HistoryTreeError(#[from] Arc<HistoryTreeError>),
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    HistoryTreeError(#[from] HistoryTreeError),
 
     #[error("block contains an invalid commitment")]
     InvalidBlockCommitment(#[from] block::CommitmentError),

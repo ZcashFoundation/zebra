@@ -6,6 +6,7 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [features]
+default = []
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
@@ -47,6 +48,8 @@ tower = { version = "0.4.13", features = ["buffer", "util"] }
 tracing = "0.1.37"
 
 zebra-chain = { path = "../zebra-chain" }
+
+# Test-only feature proptest-impl
 zebra-test = { path = "../zebra-test/", optional = true }
 
 proptest = { version = "0.10.1", optional = true }

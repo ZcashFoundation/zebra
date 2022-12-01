@@ -22,8 +22,12 @@ use zebra_chain::{
     transparent,
 };
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 #[derive(Copy, Clone, Debug, Display, Error, PartialEq, Eq)]
 #[non_exhaustive]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 /// An Error type representing the error codes returned from zcash_script.
 pub enum Error {
     /// script failed to verify

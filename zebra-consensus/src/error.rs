@@ -20,6 +20,7 @@ use proptest_derive::Arbitrary;
 const MAX_EXPIRY_HEIGHT: block::Height = block::Height::MAX_EXPIRY_HEIGHT;
 
 #[derive(Error, Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum SubsidyError {
     #[error("no coinbase transaction in block")]
     NoCoinbase,
@@ -103,7 +104,6 @@ pub enum TransactionError {
     },
 
     #[error("coinbase transaction failed subsidy validation")]
-    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Subsidy(#[from] SubsidyError),
 
     #[error("transaction version number MUST be >= 4")]
@@ -122,19 +122,17 @@ pub enum TransactionError {
     BadBalance,
 
     #[error("could not verify a transparent script")]
-    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Script(#[from] zebra_script::Error),
 
     #[error("spend description cv and rk MUST NOT be of small order")]
     SmallOrder,
 
-    // XXX: the underlying error is bellman::VerificationError, but it does not implement
-    // Arbitrary as required here.
     #[error("spend proof MUST be valid given a primary input formed from the other fields except spendAuthSig")]
+    // the underlying type is bellman::VerificationError, but it doesn't impl PartialEq
     Groth16(String),
 
-    // XXX: the underlying error is io::Error, but it does not implement Clone as required here.
     #[error("Groth16 proof is malformed")]
+    // the underlying type is io::Error, but it doesn't impl PartialEq
     MalformedGroth16(String),
 
     #[error(
@@ -148,11 +146,18 @@ pub enum TransactionError {
     RedJubjub(zebra_chain::primitives::redjubjub::Error),
 
     #[error("Orchard bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
-    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     RedPallas(zebra_chain::primitives::redpallas::Error),
 
-    // temporary error type until #1186 is fixed
-    #[error("Downcast from BoxError to redjubjub::Error failed")]
+    #[error("Verification timed out in a tower service wrapper")]
+    // the underlying type is tower::timeout::error::Elapsed, but it doesn't impl PartialEq
+    TowerTimeout(String),
+
+    #[error("Verification timed out in a tokio timeout future")]
+    // the underlying type is tokio::time::error::Elapsed, but it doesn't impl PartialEq
+    TokioTimeout(String),
+
+    // temporary error type until #1186 and #5372 are fixed
+    #[error("Downcast from BoxError to specific error type failed")]
     InternalDowncastError(String),
 
     #[error("either vpub_old or vpub_new must be zero")]
@@ -183,7 +188,6 @@ pub enum TransactionError {
     TransparentInputNotFound,
 
     #[error("could not validate nullifiers and anchors on best chain")]
-    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     ValidateNullifiersAndAnchorsError(#[from] ValidateContextError),
 }
 
@@ -206,6 +210,17 @@ impl From<BoxError> for TransactionError {
             Err(e) => err = e,
         }
 
+        // generic timeout errors
+        match err.downcast::<tokio::time::error::Elapsed>() {
+            Ok(e) => return Self::TokioTimeout(format!("{e:?}")),
+            Err(e) => err = e,
+        }
+
+        match err.downcast::<tower::timeout::error::Elapsed>() {
+            Ok(e) => return Self::TowerTimeout(format!("{e:?}")),
+            Err(e) => err = e,
+        }
+
         TransactionError::InternalDowncastError(format!(
             "downcast to known transaction error type failed, original error: {:?}",
             err,
@@ -220,6 +235,7 @@ impl From<SubsidyError> for BlockError {
 }
 
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum BlockError {
     #[error("block contains invalid transactions")]
     Transaction(#[from] TransactionError),

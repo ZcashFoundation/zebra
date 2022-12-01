@@ -410,14 +410,12 @@ impl Chain {
                 .expect("Orchard anchors must exist for pre-fork blocks");
 
             let history_tree_mut = Arc::make_mut(&mut self.history_tree);
-            history_tree_mut
-                .push(
-                    self.network,
-                    block.block.clone(),
-                    *sapling_root,
-                    *orchard_root,
-                )
-                .map_err(Arc::new)?;
+            history_tree_mut.push(
+                self.network,
+                block.block.clone(),
+                *sapling_root,
+                *orchard_root,
+            )?;
         }
 
         Ok(())
@@ -911,14 +909,12 @@ impl Chain {
 
         // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
         let history_tree_mut = Arc::make_mut(&mut self.history_tree);
-        history_tree_mut
-            .push(
-                self.network,
-                contextually_valid.block.clone(),
-                sapling_root,
-                orchard_root,
-            )
-            .map_err(Arc::new)?;
+        history_tree_mut.push(
+            self.network,
+            contextually_valid.block.clone(),
+            sapling_root,
+            orchard_root,
+        )?;
 
         self.history_trees_by_height
             .insert(height, self.history_tree.clone());

@@ -14,6 +14,9 @@ use crate::{amount::MAX_MONEY, transaction::Transaction};
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
 #[cfg(test)]
 mod tests;
 
@@ -385,8 +388,9 @@ impl ValueBalance<NonNegative> {
     }
 }
 
-#[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq, Eq)]
 /// Errors that can be returned when validating a [`ValueBalance`]
+#[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum ValueBalanceError {
     /// transparent amount error {0}
     Transparent(amount::Error),

@@ -19,13 +19,11 @@ use std::{
 };
 
 use bitvec::prelude::*;
-
 use incrementalmerkletree::{
     bridgetree::{self, Leaf},
     Frontier,
 };
 use lazy_static::lazy_static;
-
 use thiserror::Error;
 use zcash_encoding::{Optional, Vector};
 use zcash_primitives::merkle_tree::{self, Hashable};
@@ -35,6 +33,9 @@ use super::commitment::pedersen_hashes::pedersen_hash;
 use crate::serialization::{
     serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
 
 /// The type that is used to update the note commitment tree.
 ///
@@ -257,6 +258,7 @@ impl<'de> serde::Deserialize<'de> for Node {
 
 #[derive(Error, Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[allow(missing_docs)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum NoteCommitmentTreeError {
     #[error("The note commitment tree is full")]
     FullTree,

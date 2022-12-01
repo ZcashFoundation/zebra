@@ -1,8 +1,6 @@
 //! History tree (Merkle mountain range) structure that contains information about
 //! the block history as specified in ZIP-221.
 
-mod tests;
-
 use std::{
     collections::{BTreeMap, HashSet},
     io,
@@ -21,17 +19,35 @@ use crate::{
     sapling,
 };
 
+mod tests;
+
 /// An error describing why a history tree operation failed.
-#[derive(Debug, Error)]
+#[derive(Clone, Debug, Error)]
 #[non_exhaustive]
 #[allow(missing_docs)]
+// We can't derive proptest::Arbitrary for this error, because none of the variants implement it
 pub enum HistoryTreeError {
     #[error("zcash_history error: {inner:?}")]
     #[non_exhaustive]
-    InnerError { inner: zcash_history::Error },
+    // Can't be #[from] because zcash_history::Error does not impl Error
+    InnerError { inner: Arc<zcash_history::Error> },
 
-    #[error("I/O error")]
-    IOError(#[from] io::Error),
+    #[error("I/O error: {0:?}")]
+    IOError(#[from] Arc<io::Error>),
+}
+
+impl From<zcash_history::Error> for HistoryTreeError {
+    fn from(error: zcash_history::Error) -> Self {
+        Self::InnerError {
+            inner: Arc::new(error),
+        }
+    }
+}
+
+impl From<io::Error> for HistoryTreeError {
+    fn from(error: io::Error) -> Self {
+        Arc::new(error).into()
+    }
 }
 
 impl PartialEq for HistoryTreeError {
@@ -220,12 +236,13 @@ impl NonEmptyHistoryTree {
         }
 
         let new_entries = match &mut self.inner {
-            InnerHistoryTree::PreOrchard(tree) => tree
-                .append_leaf(block, sapling_root, orchard_root)
-                .map_err(|e| HistoryTreeError::InnerError { inner: e })?,
-            InnerHistoryTree::OrchardOnward(tree) => tree
-                .append_leaf(block, sapling_root, orchard_root)
-                .map_err(|e| HistoryTreeError::InnerError { inner: e })?,
+            InnerHistoryTree::PreOrchard(tree) => {
+                tree.append_leaf(block, sapling_root, orchard_root)?
+            }
+
+            InnerHistoryTree::OrchardOnward(tree) => {
+                tree.append_leaf(block, sapling_root, orchard_root)?
+            }
         };
         for entry in new_entries {
             // Not every entry is a peak; those will be trimmed later

@@ -15,13 +15,13 @@ use std::{fmt, ops::Deref};
 use byteorder::{BigEndian, ByteOrder};
 use incrementalmerkletree::{bridgetree, Frontier};
 use lazy_static::lazy_static;
+use sha2::digest::generic_array::GenericArray;
 use thiserror::Error;
 
 use super::commitment::NoteCommitment;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-use sha2::digest::generic_array::GenericArray;
 
 /// Sprout note commitment trees have a max depth of 29.
 ///
@@ -182,6 +182,7 @@ impl<'de> serde::Deserialize<'de> for Node {
 
 #[derive(Error, Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[allow(missing_docs)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum NoteCommitmentTreeError {
     #[error("the note commitment tree is full")]
     FullTree,

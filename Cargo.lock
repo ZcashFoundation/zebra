@@ -5481,6 +5481,8 @@ dependencies = [
  "displaydoc",
  "hex",
  "lazy_static",
+ "proptest",
+ "proptest-derive",
  "thiserror",
  "zcash_script",
  "zebra-chain",
