@@ -393,7 +393,7 @@ where
 
                 size_limit: MAX_BLOCK_BYTES,
 
-                cur_time: chain_info.current_system_time.timestamp(),
+                cur_time: chain_info.cur_time.timestamp(),
 
                 bits: format!("{:#010x}", chain_info.expected_difficulty.to_value())
                     .drain(2..)
