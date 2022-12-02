@@ -303,13 +303,20 @@ pub struct VerifiedUnminedTx {
     /// transparent inputs and outputs.
     pub legacy_sigop_count: u64,
 
-    /// The block production fee weight for `transaction`, as defined by [ZIP-317].
+    /// The number of unpaid actions `transaction`, as defined by [ZIP-317] for block production.
+    ///
+    /// The number of actions is limited by [`MAX_BLOCK_BYTES`], so it fits in a u32.
+    ///
+    /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
+    pub unpaid_actions: u32,
+
+    /// The fee weight ratio for `transaction`, as defined by [ZIP-317] for block production.
     ///
     /// This is not consensus-critical, so we use `f32` for efficient calculations
     /// when the mempool holds a large number of transactions.
     ///
     /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
-    pub block_production_fee_weight: f32,
+    pub fee_weight_ratio: f32,
 }
 
 impl fmt::Display for VerifiedUnminedTx {
@@ -318,6 +325,8 @@ impl fmt::Display for VerifiedUnminedTx {
             .field("transaction", &self.transaction)
             .field("miner_fee", &self.miner_fee)
             .field("legacy_sigop_count", &self.legacy_sigop_count)
+            .field("unpaid_actions", &self.unpaid_actions)
+            .field("fee_weight_ratio", &self.fee_weight_ratio)
             .finish()
     }
 }
@@ -330,14 +339,15 @@ impl VerifiedUnminedTx {
         miner_fee: Amount<NonNegative>,
         legacy_sigop_count: u64,
     ) -> Self {
-        let block_production_fee_weight =
-            zip317::block_production_fee_weight(&transaction, miner_fee);
+        let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
+        let unpaid_actions = zip317::unpaid_actions(&transaction, miner_fee);
 
         Self {
             transaction,
             miner_fee,
             legacy_sigop_count,
-            block_production_fee_weight,
+            fee_weight_ratio,
+            unpaid_actions,
         }
     }
 
