@@ -80,7 +80,7 @@ async fn mempool_requests_for_transactions() {
         Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
         Ok(Response::Nil) => assert!(
             added_transaction_ids.is_empty(),
-            "response to `MempoolTransactionIds` request should match added_transaction_ids {:?}",
+            "`MempoolTransactionIds` request should match added_transaction_ids {:?}, got Ok(Nil)",
             added_transaction_ids
         ),
         _ => unreachable!(
@@ -855,7 +855,8 @@ async fn setup(
         .unwrap();
     committed_blocks.push(block_one);
 
-    // Don't wait for the chain tip update here, we wait for AdvertiseBlock below.
+    // Don't wait for the chain tip update here, we wait for expect_request(AdvertiseBlock) below,
+    // which is called by the gossip_best_tip_block_hashes task once the chain tip changes.
 
     let (mut mempool_service, transaction_receiver) = Mempool::new(
         &MempoolConfig::default(),
@@ -867,8 +868,8 @@ async fn setup(
         chain_tip_change.clone(),
     );
 
-    // Enable the mempool
-    mempool_service.enable(&mut recent_syncs).await;
+    // Pretend we're close to tip
+    SyncStatus::sync_close_to_tip(&mut recent_syncs);
 
     let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
         sync_status.clone(),
@@ -891,6 +892,13 @@ async fn setup(
             .await
             .respond(Response::Nil);
     }
+
+    // Enable the mempool
+    // Note: this needs to be done after the mock peer set service has received the AdvertiseBlock
+    // request to ensure that the call to `last_tip_change` returns the chain tip block for block_one
+    // and not the genesis block, or else the transactions from the genesis block will be added to
+    // the mempool storage's rejection list and tests will fail.
+    mempool_service.enable(&mut recent_syncs).await;
 
     // Add transactions to the mempool, skipping verification and broadcast
     let mut added_transactions = Vec::new();

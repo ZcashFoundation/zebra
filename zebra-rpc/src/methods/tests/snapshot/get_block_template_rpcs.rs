@@ -12,6 +12,7 @@ use tower::{buffer::Buffer, Service};
 
 use zebra_chain::{
     block::Hash,
+    chain_sync_status::MockSyncStatus,
     chain_tip::mock::MockChainTip,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
@@ -78,6 +79,9 @@ pub async fn test_responses<State, ReadState>(
     )
     .await;
 
+    let mut mock_sync_status = MockSyncStatus::default();
+    mock_sync_status.set_is_close_to_tip(true);
+
     let mining_config = get_block_template_rpcs::config::Config {
         miner_address: Some(transparent::Address::from_script_hash(network, [0xad; 20])),
     };
@@ -108,6 +112,7 @@ pub async fn test_responses<State, ReadState>(
         read_state,
         mock_chain_tip.clone(),
         chain_verifier.clone(),
+        mock_sync_status.clone(),
     );
 
     // `getblockcount`
@@ -139,6 +144,7 @@ pub async fn test_responses<State, ReadState>(
         new_read_state.clone(),
         mock_chain_tip,
         chain_verifier,
+        mock_sync_status,
     );
 
     // `getblocktemplate`
@@ -152,7 +158,7 @@ pub async fn test_responses<State, ReadState>(
             .respond(ReadResponse::ChainInfo(Some(GetBlockTemplateChainInfo {
                 expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
                 tip: (fake_tip_height, fake_tip_hash),
-                current_system_time: fake_cur_time,
+                cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
                 history_tree: fake_history_tree(network),

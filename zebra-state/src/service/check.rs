@@ -7,15 +7,14 @@ use chrono::Duration;
 use zebra_chain::{
     block::{self, Block, ChainHistoryBlockTxAuthCommitmentHash, CommitmentError},
     history_tree::HistoryTree,
-    parameters::POW_AVERAGING_WINDOW,
     parameters::{Network, NetworkUpgrade},
     work::difficulty::CompactDifficulty,
 };
 
 use crate::{
     service::{
-        block_iter::any_ancestor_blocks, finalized_state::FinalizedState,
-        non_finalized_state::NonFinalizedState,
+        block_iter::any_ancestor_blocks, check::difficulty::POW_ADJUSTMENT_BLOCK_SPAN,
+        finalized_state::FinalizedState, non_finalized_state::NonFinalizedState,
     },
     BoxError, PreparedBlock, ValidateContextError,
 };
@@ -35,7 +34,7 @@ pub(crate) mod utxo;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
+pub(crate) use difficulty::AdjustedDifficulty;
 
 /// Check that the `prepared` block is contextually valid for `network`, based
 /// on the `finalized_tip_height` and `relevant_chain`.
@@ -48,8 +47,7 @@ pub(crate) use difficulty::{AdjustedDifficulty, POW_MEDIAN_BLOCK_SPAN};
 ///
 /// # Panics
 ///
-/// If the state contains less than 28
-/// (`POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN`) blocks.
+/// If the state contains less than 28 ([`POW_ADJUSTMENT_BLOCK_SPAN`]) blocks.
 #[tracing::instrument(skip(prepared, finalized_tip_height, relevant_chain))]
 pub(crate) fn block_is_valid_for_recent_chain<C>(
     prepared: &PreparedBlock,
@@ -66,11 +64,9 @@ where
         .expect("finalized state must contain at least one block to do contextual validation");
     check::block_is_not_orphaned(finalized_tip_height, prepared.height)?;
 
-    // The maximum number of blocks used by contextual checks
-    const MAX_CONTEXT_BLOCKS: usize = POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN;
     let relevant_chain: Vec<_> = relevant_chain
         .into_iter()
-        .take(MAX_CONTEXT_BLOCKS)
+        .take(POW_ADJUSTMENT_BLOCK_SPAN)
         .collect();
 
     let parent_block = relevant_chain
@@ -84,14 +80,14 @@ where
 
     // skip this check during tests if we don't have enough blocks in the chain
     #[cfg(test)]
-    if relevant_chain.len() < POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN {
+    if relevant_chain.len() < POW_ADJUSTMENT_BLOCK_SPAN {
         return Ok(());
     }
     // process_queued also checks the chain length, so we can skip this assertion during testing
     // (tests that want to check this code should use the correct number of blocks)
     assert_eq!(
         relevant_chain.len(),
-        POW_AVERAGING_WINDOW + POW_MEDIAN_BLOCK_SPAN,
+        POW_ADJUSTMENT_BLOCK_SPAN,
         "state must contain enough blocks to do proof of work contextual validation, \
          and validation must receive the exact number of required blocks"
     );

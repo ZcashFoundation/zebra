@@ -117,7 +117,7 @@ pub enum Request {
 
 /// The response type for the transaction verifier service.
 /// Responses identify the transaction that was verified.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Response {
     /// A response to a block transaction verification request.
     Block {

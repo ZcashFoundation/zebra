@@ -147,7 +147,7 @@ pub struct GetBlockTemplateChainInfo {
     pub expected_difficulty: CompactDifficulty,
 
     /// The current system time, adjusted to fit within `min_time` and `max_time`.
-    pub current_system_time: chrono::DateTime<chrono::Utc>,
+    pub cur_time: chrono::DateTime<chrono::Utc>,
 
     /// The mininimum time the miner can use in this block.
     pub min_time: chrono::DateTime<chrono::Utc>,
