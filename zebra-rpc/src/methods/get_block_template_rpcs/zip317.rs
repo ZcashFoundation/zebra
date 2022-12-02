@@ -56,7 +56,7 @@ where
     let mut conventional_fee_tx_weights = setup_fee_weighted_index(&conventional_fee_txs);
 
     while let Some(tx_weights) = conventional_fee_tx_weights {
-        let (new_tx_weights, _was_added) = add_transaction_weighted_random(
+        conventional_fee_tx_weights = checked_add_transaction_weighted_random(
             &conventional_fee_txs,
             tx_weights,
             &mut selected_txs,
@@ -66,15 +66,13 @@ where
             // conventional fee, so this check and limit is effectively ignored.
             &mut remaining_block_unpaid_actions,
         );
-
-        conventional_fee_tx_weights = new_tx_weights;
     }
 
     // > Repeat while there is any candidate transaction:
     let mut low_fee_tx_weights = setup_fee_weighted_index(&low_fee_txs);
 
     while let Some(tx_weights) = low_fee_tx_weights {
-        let (new_tx_weights, _was_added) = add_transaction_weighted_random(
+        low_fee_tx_weights = checked_add_transaction_weighted_random(
             &low_fee_txs,
             tx_weights,
             &mut selected_txs,
@@ -82,8 +80,6 @@ where
             &mut remaining_block_sigops,
             &mut remaining_block_unpaid_actions,
         );
-
-        low_fee_tx_weights = new_tx_weights;
     }
 
     Ok(selected_txs)
@@ -129,19 +125,24 @@ fn setup_fee_weighted_index(transactions: &[VerifiedUnminedTx]) -> Option<Weight
     WeightedIndex::new(tx_weights).ok()
 }
 
-/// Choose a random transaction from `txs` using the weighted index `tx_weights`.
+/// Chooses a random transaction from `txs` using the weighted index `tx_weights`,
+/// and tries to add it to `selected_txs`.
 ///
-/// If it fits in the supplied limits, add it to `selected_txs`, set its weight to zero,
-/// update the limits, and return true.
-/// Otherwise, set its weight to zero, and return false.
-fn add_transaction_weighted_random(
+/// If it fits in the supplied limits, adds it to `selected_txs`, and updates the limits.
+///
+/// Updates the weights of chosen transactions to zero, even if they weren't added,
+/// so they can't be chosen again.
+///
+/// Returns the updated transaction weights.
+/// If all transactions have been chosen, returns `None`.
+fn checked_add_transaction_weighted_random(
     candidate_txs: &[VerifiedUnminedTx],
     tx_weights: WeightedIndex<f32>,
     selected_txs: &mut Vec<VerifiedUnminedTx>,
     remaining_block_bytes: &mut usize,
     remaining_block_sigops: &mut u64,
     remaining_block_unpaid_actions: &mut u32,
-) -> (Option<WeightedIndex<f32>>, bool) {
+) -> Option<WeightedIndex<f32>> {
     // > Pick one of those transactions at random with probability in direct proportion
     // > to its weight_ratio, and remove it from the set of candidate transactions
     let (new_tx_weights, candidate_tx) =
@@ -166,11 +167,9 @@ fn add_transaction_weighted_random(
         // Unpaid actions are always zero for transactions that pay the conventional fee,
         // so this limit always remains the same after they are added.
         *remaining_block_unpaid_actions -= candidate_tx.unpaid_actions;
-
-        (new_tx_weights, true)
-    } else {
-        (new_tx_weights, false)
     }
+
+    new_tx_weights
 }
 
 /// Choose a transaction from `transactions`, using the previously set up `weighted_index`.
