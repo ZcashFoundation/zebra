@@ -21,35 +21,39 @@ impl Default for GetBlockTemplateRequestMode {
     }
 }
 
-/// Valid `capabilities` values that indicate client-side support.
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum GetBlockTemplateCapability {
-    /// Long Polling support.
-    /// Currently ignored by zebra.
-    LongPoll,
+// /// Valid `capabilities` values that indicate client-side support.
+// #[derive(Debug, serde::Deserialize)]
+// #[serde(rename_all = "lowercase")]
+// pub enum GetBlockTemplateCapability {
+//     /// Long Polling support.
+//     /// Currently ignored by zebra.
+//     LongPoll,
 
-    /// Information for coinbase transaction, default template data with the `coinbasetxn` field.
-    /// Currently ignored by zebra.
-    CoinbaseTxn,
+//     /// Information for coinbase transaction, default template data with the `coinbasetxn` field.
+//     /// Currently ignored by zebra.
+//     CoinbaseTxn,
 
-    /// Coinbase value, template response provides a `coinbasevalue` field and omits `coinbasetxn` field.
-    /// Currently ignored by zebra.
-    CoinbaseValue,
+//     /// Coinbase value, template response provides a `coinbasevalue` field and omits `coinbasetxn` field.
+//     /// Currently ignored by zebra.
+//     CoinbaseValue,
 
-    /// Components of the coinbase transaction.
-    /// Currently ignored by zebra.
-    CoinbaseAux,
+//     /// Components of the coinbase transaction.
+//     /// Currently ignored by zebra.
+//     CoinbaseAux,
 
-    /// Currently ignored by zcashd and zebra.
-    Proposal,
+//     /// Currently ignored by zcashd and zebra.
+//     Proposal,
 
-    /// Currently ignored by zcashd and zebra.
-    ServerList,
+//     /// Currently ignored by zcashd and zebra.
+//     ServerList,
 
-    /// Currently ignored by zcashd and zebra.
-    WorkId,
-}
+//     /// Currently ignored by zcashd and zebra.
+//     WorkId,
+
+//     /// Mutations
+//     // TODO: Fill out valid mutations capabilities.
+//     UnknownCapability(String),
+// }
 
 /// Optional argument `jsonrequestobject` for `getblocktemplate` RPC request.
 ///
@@ -73,8 +77,9 @@ pub struct JsonParameters {
     pub data: Option<HexData>,
 
     /// A list of client-side supported capability features
+    // TODO: Fill out valid mutations capabilities.
     #[serde(default)]
-    pub capabilities: Vec<GetBlockTemplateCapability>,
+    pub capabilities: Vec<String>,
 
     /// An id to wait for, in zcashd this is the tip hash and an internal counter.
     ///
