@@ -15,9 +15,6 @@ mod tests;
 
 use network_chain_tip_height_estimator::NetworkChainTipHeightEstimator;
 
-#[cfg(any(test, feature = "proptest-impl"))]
-pub use mock::NoChainTip;
-
 /// An interface for querying the chain tip.
 ///
 /// This trait helps avoid dependencies between:
@@ -84,5 +81,38 @@ pub trait ChainTip {
             estimator.estimate_height_at(Utc::now()) - current_height,
             current_height,
         ))
+    }
+}
+
+/// A chain tip that is always empty.
+///
+/// Used in production for isolated network connections,
+/// and as a mock chain tip in tests.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct NoChainTip;
+
+impl ChainTip for NoChainTip {
+    fn best_tip_height(&self) -> Option<block::Height> {
+        None
+    }
+
+    fn best_tip_hash(&self) -> Option<block::Hash> {
+        None
+    }
+
+    fn best_tip_height_and_hash(&self) -> Option<(block::Height, block::Hash)> {
+        None
+    }
+
+    fn best_tip_block_time(&self) -> Option<DateTime<Utc>> {
+        None
+    }
+
+    fn best_tip_height_and_block_time(&self) -> Option<(block::Height, DateTime<Utc>)> {
+        None
+    }
+
+    fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
+        Arc::new([])
     }
 }
