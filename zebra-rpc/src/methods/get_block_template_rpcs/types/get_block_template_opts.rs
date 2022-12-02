@@ -51,9 +51,10 @@ pub enum GetBlockTemplateCapability {
     /// Currently ignored by zcashd and zebra.
     WorkId,
 
-    /// Mutations
+    /// Unknown capability to fill in for mutations.
     // TODO: Fill out valid mutations capabilities.
-    UnknownCapability(String),
+    #[serde(other)]
+    UnknownCapability,
 }
 
 /// Optional argument `jsonrequestobject` for `getblocktemplate` RPC request.
@@ -80,7 +81,7 @@ pub struct JsonParameters {
     /// A list of client-side supported capability features
     // TODO: Fill out valid mutations capabilities.
     #[serde(default)]
-    pub capabilities: Vec<String>,
+    pub capabilities: Vec<GetBlockTemplateCapability>,
 
     /// An id to wait for, in zcashd this is the tip hash and an internal counter.
     ///
