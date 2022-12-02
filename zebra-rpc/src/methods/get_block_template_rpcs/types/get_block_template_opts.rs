@@ -79,5 +79,7 @@ pub struct JsonParameters {
     /// An id to wait for, in zcashd this is the tip hash and an internal counter.
     ///
     /// If provided, the RPC response is delayed until the mempool or chain tip block changes.
+    ///
+    /// Currently unsupported and ignored by Zebra.
     pub longpollid: Option<String>,
 }

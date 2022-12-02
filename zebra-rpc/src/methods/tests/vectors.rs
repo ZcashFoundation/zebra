@@ -963,6 +963,18 @@ async fn rpc_getblocktemplate() {
         .expect_err("needs an error when using unsupported mode");
 
     assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
+
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template(Some(
+            get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
+                longpollid: Some("".to_string()),
+                ..Default::default()
+            },
+        ))
+        .await
+        .expect_err("needs an error when using unsupported option");
+
+    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]
