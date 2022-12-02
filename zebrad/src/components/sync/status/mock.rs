@@ -1,5 +1,8 @@
 //! Test-only mocking code for [`SyncStatus`].
 
+// This code is currently unused with some feature combinations.
+#![allow(dead_code)]
+
 use crate::components::sync::RecentSyncLengths;
 
 use super::SyncStatus;
