@@ -15,6 +15,7 @@ use zebra_chain::{
         merkle::{self, AuthDataRoot},
         Block, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
     },
+    chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::Network,
     serialization::ZcashDeserializeInto,
@@ -44,10 +45,19 @@ pub mod constants;
 pub(crate) mod types;
 pub(crate) mod zip317;
 
-/// The max estimated distance to the chain tip for the getblocktemplate method
-// Set to 30 in case the local time is a little ahead.
-// TODO: Replace this with SyncStatus
-const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: i32 = 30;
+/// The max estimated distance to the chain tip for the getblocktemplate method.
+///
+/// Allows the same clock skew as the Zcash network, which is 100 blocks, based on the standard rule:
+/// > A full validator MUST NOT accept blocks with nTime more than two hours in the future
+/// > according to its clock. This is not strictly a consensus rule because it is nondeterministic,
+/// > and clock time varies between nodes.
+const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: i32 = 100;
+
+/// The RPC error code used by `zcashd` for when it's still downloading initial blocks.
+///
+/// `s-nomp` mining pool expects error code `-10` when the node is not synced:
+/// <https://github.com/s-nomp/node-stratum-pool/blob/d86ae73f8ff968d9355bb61aac05e0ebef36ccb5/lib/pool.js#L142>
+pub const NOT_SYNCED_ERROR_CODE: ErrorCode = ErrorCode::ServerError(-10);
 
 /// getblocktemplate RPC method signatures.
 #[rpc(server)]
@@ -123,7 +133,7 @@ pub trait GetBlockTemplateRpc {
 }
 
 /// RPC method implementations.
-pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier>
+pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus>
 where
     Mempool: Service<
         mempool::Request,
@@ -140,6 +150,7 @@ where
         + Send
         + Sync
         + 'static,
+    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     // TODO: Add the other fields from the [`Rpc`] struct as-needed
 
@@ -166,9 +177,13 @@ where
 
     /// The chain verifier, used for submitting blocks.
     chain_verifier: ChainVerifier,
+
+    /// The chain sync status, used for checking if Zebra is likely close to the network chain tip.
+    sync_status: SyncStatus,
 }
 
-impl<Mempool, State, Tip, ChainVerifier> GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier>
+impl<Mempool, State, Tip, ChainVerifier, SyncStatus>
+    GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus>
 where
     Mempool: Service<
             mempool::Request,
@@ -189,6 +204,7 @@ where
         + Send
         + Sync
         + 'static,
+    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the handler for getblocktemplate RPCs.
     pub fn new(
@@ -198,6 +214,7 @@ where
         state: State,
         latest_chain_tip: Tip,
         chain_verifier: ChainVerifier,
+        sync_status: SyncStatus,
     ) -> Self {
         Self {
             network,
@@ -206,12 +223,13 @@ where
             state,
             latest_chain_tip,
             chain_verifier,
+            sync_status,
         }
     }
 }
 
-impl<Mempool, State, Tip, ChainVerifier> GetBlockTemplateRpc
-    for GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier>
+impl<Mempool, State, Tip, ChainVerifier, SyncStatus> GetBlockTemplateRpc
+    for GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus>
 where
     Mempool: Service<
             mempool::Request,
@@ -235,6 +253,7 @@ where
         + Sync
         + 'static,
     <ChainVerifier as Service<Arc<Block>>>::Future: Send,
+    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     fn get_block_count(&self) -> Result<u32> {
         best_chain_tip_height(&self.latest_chain_tip).map(|height| height.0)
@@ -279,6 +298,7 @@ where
 
         let mempool = self.mempool.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
+        let sync_status = self.sync_status.clone();
         let mut state = self.state.clone();
 
         // Since this is a very large RPC, we use separate functions for each group of fields.
@@ -301,7 +321,7 @@ where
                     data: None,
                 })?;
 
-            if estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
+            if !sync_status.is_close_to_tip() || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
                 tracing::info!(
                     estimated_distance_to_chain_tip,
                     ?tip_height,
@@ -309,9 +329,7 @@ where
                 );
 
                 return Err(Error {
-                    // Return error code -10 (https://github.com/s-nomp/node-stratum-pool/blob/d86ae73f8ff968d9355bb61aac05e0ebef36ccb5/lib/pool.js#L140)
-                    // TODO: Confirm that this is the expected error code for !synced
-                    code: ErrorCode::ServerError(-10),
+                    code: NOT_SYNCED_ERROR_CODE,
                     message: format!("Zebra has not synced to the chain tip, estimated distance: {estimated_distance_to_chain_tip}"),
                     data: None,
                 });

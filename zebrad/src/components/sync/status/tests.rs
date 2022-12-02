@@ -3,6 +3,7 @@ use std::{env, sync::Arc, time::Duration};
 use futures::{select, FutureExt};
 use proptest::prelude::*;
 use tokio::{sync::Semaphore, time::timeout};
+use zebra_chain::chain_sync_status::ChainSyncStatus;
 
 use super::{super::RecentSyncLengths, SyncStatus};
 
