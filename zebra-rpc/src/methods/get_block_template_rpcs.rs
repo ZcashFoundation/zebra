@@ -330,7 +330,7 @@ where
             let miner_address = miner_address.ok_or_else(|| Error {
                 code: ErrorCode::ServerError(0),
                 message: "configure mining.miner_address in zebrad.toml \
-                          with a transparent P2SH single signature address"
+                          with a transparent P2SH address"
                     .to_string(),
                 data: None,
             })?;
