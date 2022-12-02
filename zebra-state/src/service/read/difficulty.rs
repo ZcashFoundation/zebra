@@ -22,29 +22,72 @@ use crate::{
         read::tree::history_tree,
         NonFinalizedState,
     },
-    GetBlockTemplateChainInfo, HashOrHeight,
+    BoxError, GetBlockTemplateChainInfo, HashOrHeight,
 };
+
+use crate::service::block_iter::Iter;
 
 /// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
 ///
 /// # Panics
 ///
-/// If we don't have enough blocks in the state.
+/// - If we don't have enough blocks in the state.
+/// - If a consistency check fails `RETRIES` times.
 pub fn get_block_template_chain_info(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
     tip: (Height, Hash),
     network: Network,
 ) -> GetBlockTemplateChainInfo {
-    let relevant_chain = any_ancestor_blocks(non_finalized_state, db, tip.1);
+    // Amount of retries for a consistency check.
+    const RETRIES: usize = 3;
+
+    let mut relevant_chain_and_history_tree_result =
+        relevant_chain_and_history_tree(non_finalized_state, db, tip.1);
+
+    for _ in 0..RETRIES {
+        if relevant_chain_and_history_tree_result.is_ok() {
+            break;
+        }
+
+        relevant_chain_and_history_tree_result =
+            relevant_chain_and_history_tree(non_finalized_state, db, tip.1);
+    }
+    // remove the unwrap somehow
+    let (relevant_chain, history_tree) =
+        relevant_chain_and_history_tree_result.expect("consistency check failed");
+
+    difficulty_time_and_history_tree(relevant_chain, tip, network, history_tree)
+}
+
+/// Do a consistency check by checking the finalized tip before and after all other database queries.
+/// Returns and error if the tip obtained before and after is not the same.
+///
+/// # Panics
+///
+/// - If we don't have enough blocks in the state.
+fn relevant_chain_and_history_tree<'a>(
+    non_finalized_state: &'a NonFinalizedState,
+    db: &'a ZebraDb,
+    tip_hash: Hash,
+) -> Result<(Iter<'a>, Arc<HistoryTree>), BoxError> {
+    let finalized_tip_before_queries = db.tip();
+
+    let relevant_chain = any_ancestor_blocks(non_finalized_state, db, tip_hash);
     let history_tree = history_tree(
         non_finalized_state.best_chain(),
         db,
-        HashOrHeight::Hash(tip.1),
+        HashOrHeight::Hash(tip_hash),
     )
     .expect("Hash passed should exist in the chain");
 
-    difficulty_time_and_history_tree(relevant_chain, tip, network, history_tree)
+    let finalized_tip_after_queries = db.tip();
+
+    if finalized_tip_before_queries != finalized_tip_after_queries {
+        return Err("Tip inconsistency found".into());
+    }
+
+    Ok((relevant_chain, history_tree))
 }
 
 /// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
