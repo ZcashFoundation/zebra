@@ -143,3 +143,33 @@ impl MockChainTipSender {
             .expect("attempt to send a best tip height to a dropped `MockChainTip`");
     }
 }
+
+/// A chain tip that is always empty.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct NoChainTip;
+
+impl ChainTip for NoChainTip {
+    fn best_tip_height(&self) -> Option<block::Height> {
+        None
+    }
+
+    fn best_tip_hash(&self) -> Option<block::Hash> {
+        None
+    }
+
+    fn best_tip_height_and_hash(&self) -> Option<(block::Height, block::Hash)> {
+        None
+    }
+
+    fn best_tip_block_time(&self) -> Option<DateTime<Utc>> {
+        None
+    }
+
+    fn best_tip_height_and_block_time(&self) -> Option<(block::Height, DateTime<Utc>)> {
+        None
+    }
+
+    fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
+        Arc::new([])
+    }
+}
