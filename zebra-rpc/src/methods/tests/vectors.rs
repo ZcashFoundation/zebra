@@ -865,7 +865,8 @@ async fn rpc_getblocktemplate() {
             })));
     });
 
-    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template(None));
+    let get_block_template =
+        tokio::spawn(get_block_template_rpc.get_block_template(Some(Default::default())));
 
     mempool
         .expect_request(mempool::Request::FullTransactions)
@@ -934,7 +935,7 @@ async fn rpc_getblocktemplate() {
 
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
     let get_block_template_sync_error = get_block_template_rpc
-        .get_block_template()
+        .get_block_template(None)
         .await
         .expect_err("needs an error when syncer is not close to tip");
 
@@ -945,7 +946,7 @@ async fn rpc_getblocktemplate() {
 
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
     let get_block_template_sync_error = get_block_template_rpc
-        .get_block_template()
+        .get_block_template(None)
         .await
         .expect_err("needs an error when syncer is not close to tip or estimated distance to network chain tip is far");
 
@@ -953,6 +954,15 @@ async fn rpc_getblocktemplate() {
         get_block_template_sync_error.code,
         ErrorCode::ServerError(-10)
     );
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template(Some(get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
+            mode: get_block_template_rpcs::types::get_block_template_opts::GetBlockTemplateRequestMode::Proposal,
+            ..Default::default()
+        }))
+        .await
+        .expect_err("needs an error when using unsupported mode");
+
+    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]
