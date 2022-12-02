@@ -70,7 +70,7 @@ pub struct JsonParameters {
     #[serde(default)]
     pub mode: GetBlockTemplateRequestMode,
 
-    /// Must be ommitted as "proposal" mode is currently unsupported.
+    /// Must be omitted as "proposal" mode is currently unsupported.
     ///
     /// Hex-encoded block data to be validated and checked against the server's usual acceptance rules
     /// (excluding the check for a valid proof-of-work) when `mode` is set to `proposal`.
