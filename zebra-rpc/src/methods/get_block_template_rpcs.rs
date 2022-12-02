@@ -41,7 +41,9 @@ use crate::methods::{
 
 pub mod config;
 pub mod constants;
+
 pub(crate) mod types;
+pub(crate) mod zip317;
 
 /// The max estimated distance to the chain tip for the getblocktemplate method.
 ///
@@ -333,7 +335,7 @@ where
                 });
             }
 
-            let mempool_txs = select_mempool_transactions(mempool).await?;
+            let mempool_txs = zip317::select_mempool_transactions(mempool).await?;
 
             let miner_fee = miner_fee(&mempool_txs);
 
@@ -409,7 +411,7 @@ where
 
                 size_limit: MAX_BLOCK_BYTES,
 
-                cur_time: chain_info.current_system_time.timestamp(),
+                cur_time: chain_info.cur_time.timestamp(),
 
                 bits: format!("{:#010x}", chain_info.expected_difficulty.to_value())
                     .drain(2..)
@@ -499,37 +501,6 @@ where
 }
 
 // get_block_template support methods
-
-/// Returns selected transactions in the `mempool`, or an error if the mempool has failed.
-///
-/// TODO: select transactions according to ZIP-317 (#5473)
-pub async fn select_mempool_transactions<Mempool>(
-    mempool: Mempool,
-) -> Result<Vec<VerifiedUnminedTx>>
-where
-    Mempool: Service<
-            mempool::Request,
-            Response = mempool::Response,
-            Error = zebra_node_services::BoxError,
-        > + 'static,
-    Mempool::Future: Send,
-{
-    let response = mempool
-        .oneshot(mempool::Request::FullTransactions)
-        .await
-        .map_err(|error| Error {
-            code: ErrorCode::ServerError(0),
-            message: error.to_string(),
-            data: None,
-        })?;
-
-    if let mempool::Response::FullTransactions(transactions) = response {
-        // TODO: select transactions according to ZIP-317 (#5473)
-        Ok(transactions)
-    } else {
-        unreachable!("unmatched response to a mempool::FullTransactions request");
-    }
-}
 
 /// Returns the total miner fee for `mempool_txs`.
 pub fn miner_fee(mempool_txs: &[VerifiedUnminedTx]) -> Amount<NonNegative> {
