@@ -41,9 +41,8 @@ use crate::methods::{
 
 pub mod config;
 pub mod constants;
-
 pub mod types;
-pub(crate) mod zip317;
+pub mod zip317;
 
 /// The max estimated distance to the chain tip for the getblocktemplate method.
 ///
