@@ -4,7 +4,7 @@ use super::hex_data::HexData;
 
 /// Defines whether the RPC method should generate a block template or attempt to validate a block proposal.
 /// `Proposal` mode is currently unsupported and will return an error.
-#[derive(Debug, serde::Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum GetBlockTemplateRequestMode {
     /// Indicates a request for a block template.
@@ -61,7 +61,7 @@ pub enum GetBlockTemplateCapability {
 ///
 /// The `data` field must be provided in `proposal` mode, and must be omitted in `template` mode.
 /// All other fields are optional.
-#[derive(Debug, serde::Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, Default)]
 pub struct JsonParameters {
     /// Must be set to "template" or omitted, as "proposal" mode is currently unsupported.
     ///
