@@ -38,9 +38,9 @@ where
     Mempool::Future: Send,
 {
     // Setup the transaction lists.
-    let mempool_transactions = fetch_mempool_transactions(mempool).await?;
+    let mempool_txs = fetch_mempool_transactions(mempool).await?;
 
-    let (conventional_fee_txs, low_fee_txs): (Vec<_>, Vec<_>) = mempool_transactions
+    let (conventional_fee_txs, low_fee_txs): (Vec<_>, Vec<_>) = mempool_txs
         .into_iter()
         .partition(VerifiedUnminedTx::pays_conventional_fee);
 
@@ -49,62 +49,41 @@ where
     // Set up limit tracking
     let mut remaining_block_bytes: usize = MAX_BLOCK_BYTES.try_into().expect("fits in memory");
     let mut remaining_block_sigops = MAX_BLOCK_SIGOPS;
-
-    if let Some(conventional_fee_tx_weights) = setup_fee_weighted_index(&conventional_fee_txs) {
-        let mut conventional_fee_tx_weights = Some(conventional_fee_tx_weights);
-
-        // > Repeat while there is any candidate transaction
-        // > that pays at least the conventional fee:
-        while let Some(tx_weights) = conventional_fee_tx_weights {
-            // > Pick one of those transactions at random with probability in direct proportion
-            // > to its weight_ratio, and remove it from the set of candidate transactions
-            let (tx_weights, candidate_tx) =
-                choose_transaction_weighted_random(&conventional_fee_txs, tx_weights);
-            conventional_fee_tx_weights = tx_weights;
-
-            // > If the block template with this transaction included
-            // > would be within the block size limit and block sigop limit,
-            // > add the transaction to the block template
-            if candidate_tx.transaction.size <= remaining_block_bytes
-                && candidate_tx.legacy_sigop_count <= remaining_block_sigops
-            {
-                selected_txs.push(candidate_tx.clone());
-
-                remaining_block_bytes -= candidate_tx.transaction.size;
-                remaining_block_sigops -= candidate_tx.legacy_sigop_count;
-            }
-        }
-    }
-
-    // Set up limit tracking
     let mut remaining_block_unpaid_actions: u32 = BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT;
 
     // > Repeat while there is any candidate transaction
-    if let Some(low_fee_tx_weights) = setup_fee_weighted_index(&low_fee_txs) {
-        let mut low_fee_tx_weights = Some(low_fee_tx_weights);
+    // > that pays at least the conventional fee:
+    let mut conventional_fee_tx_weights = setup_fee_weighted_index(&conventional_fee_txs);
 
-        while let Some(tx_weights) = low_fee_tx_weights {
-            // > Pick one of those transactions at random with probability in direct proportion
-            // > to its weight_ratio, and remove it from the set of candidate transactions
-            let (tx_weights, candidate_tx) =
-                choose_transaction_weighted_random(&low_fee_txs, tx_weights);
-            low_fee_tx_weights = tx_weights;
+    while let Some(tx_weights) = conventional_fee_tx_weights {
+        let (new_tx_weights, _was_added) = add_transaction_weighted_random(
+            &conventional_fee_txs,
+            tx_weights,
+            &mut selected_txs,
+            &mut remaining_block_bytes,
+            &mut remaining_block_sigops,
+            // The number of unpaid actions is always zero for transactions that pay the
+            // conventional fee, so this check and limit is effectively ignored.
+            &mut remaining_block_unpaid_actions,
+        );
 
-            // > If the block template with this transaction included
-            // > would be within the block size limit and block sigop limit,
-            // > and block_unpaid_actions <=  block_unpaid_action_limit,
-            // > add the transaction to the block template
-            if candidate_tx.transaction.size <= remaining_block_bytes
-                && candidate_tx.legacy_sigop_count <= remaining_block_sigops
-                && candidate_tx.unpaid_actions <= remaining_block_unpaid_actions
-            {
-                selected_txs.push(candidate_tx.clone());
+        conventional_fee_tx_weights = new_tx_weights;
+    }
 
-                remaining_block_bytes -= candidate_tx.transaction.size;
-                remaining_block_sigops -= candidate_tx.legacy_sigop_count;
-                remaining_block_unpaid_actions -= candidate_tx.unpaid_actions;
-            }
-        }
+    // > Repeat while there is any candidate transaction:
+    let mut low_fee_tx_weights = setup_fee_weighted_index(&low_fee_txs);
+
+    while let Some(tx_weights) = low_fee_tx_weights {
+        let (new_tx_weights, _was_added) = add_transaction_weighted_random(
+            &low_fee_txs,
+            tx_weights,
+            &mut selected_txs,
+            &mut remaining_block_bytes,
+            &mut remaining_block_sigops,
+            &mut remaining_block_unpaid_actions,
+        );
+
+        low_fee_tx_weights = new_tx_weights;
     }
 
     Ok(selected_txs)
@@ -150,16 +129,60 @@ fn setup_fee_weighted_index(transactions: &[VerifiedUnminedTx]) -> Option<Weight
     WeightedIndex::new(tx_weights).ok()
 }
 
+/// Choose a random transaction from `txs` using the weighted index `tx_weights`.
+///
+/// If it fits in the supplied limits, add it to `selected_txs`, set its weight to zero,
+/// update the limits, and return true.
+/// Otherwise, set its weight to zero, and return false.
+fn add_transaction_weighted_random(
+    candidate_txs: &[VerifiedUnminedTx],
+    tx_weights: WeightedIndex<f32>,
+    selected_txs: &mut Vec<VerifiedUnminedTx>,
+    remaining_block_bytes: &mut usize,
+    remaining_block_sigops: &mut u64,
+    remaining_block_unpaid_actions: &mut u32,
+) -> (Option<WeightedIndex<f32>>, bool) {
+    // > Pick one of those transactions at random with probability in direct proportion
+    // > to its weight_ratio, and remove it from the set of candidate transactions
+    let (new_tx_weights, candidate_tx) =
+        choose_transaction_weighted_random(candidate_txs, tx_weights);
+
+    // > If the block template with this transaction included
+    // > would be within the block size limit and block sigop limit,
+    // > and block_unpaid_actions <=  block_unpaid_action_limit,
+    // > add the transaction to the block template
+    //
+    // Unpaid actions are always zero for transactions that pay the conventional fee,
+    // so the unpaid action check always passes for those transactions.
+    if candidate_tx.transaction.size <= *remaining_block_bytes
+        && candidate_tx.legacy_sigop_count <= *remaining_block_sigops
+        && candidate_tx.unpaid_actions <= *remaining_block_unpaid_actions
+    {
+        selected_txs.push(candidate_tx.clone());
+
+        *remaining_block_bytes -= candidate_tx.transaction.size;
+        *remaining_block_sigops -= candidate_tx.legacy_sigop_count;
+
+        // Unpaid actions are always zero for transactions that pay the conventional fee,
+        // so this limit always remains the same after they are added.
+        *remaining_block_unpaid_actions -= candidate_tx.unpaid_actions;
+
+        (new_tx_weights, true)
+    } else {
+        (new_tx_weights, false)
+    }
+}
+
 /// Choose a transaction from `transactions`, using the previously set up `weighted_index`.
 ///
 /// If some transactions have not yet been chosen, returns the weighted index and the transaction.
 /// Otherwise, just returns the transaction.
 fn choose_transaction_weighted_random(
-    transactions: &[VerifiedUnminedTx],
+    candidate_txs: &[VerifiedUnminedTx],
     mut weighted_index: WeightedIndex<f32>,
 ) -> (Option<WeightedIndex<f32>>, VerifiedUnminedTx) {
     let candidate_position = weighted_index.sample(&mut thread_rng());
-    let candidate_tx = transactions[candidate_position].clone();
+    let candidate_tx = candidate_txs[candidate_position].clone();
 
     // Only pick each transaction once, by setting picked transaction weights to zero
     if weighted_index
