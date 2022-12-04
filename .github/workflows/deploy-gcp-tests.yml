@@ -618,41 +618,13 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.0.1
 
-      # Show all the logs since the container launched,
-      # following until Sapling activation (or the test finishes).
-      #
-      # The log pipeline ignores the exit status of `docker logs`.
-      # It also ignores the expected 'broken pipe' error from `tee`,
-      # which happens when `grep` finds a matching output and moves on to the next job.
-      #
-      # Errors in the tests are caught by the final test status job.
-      - name: Show logs for ${{ inputs.test_id }} test (sprout)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*network_upgrade.*=.*Sapling' \
-          -e 'estimated progress.*network_upgrade.*=.*Blossom' \
-          -e 'estimated progress.*network_upgrade.*=.*Heartwood' \
-          -e 'estimated progress.*network_upgrade.*=.*Canopy' \
-          -e 'estimated progress.*network_upgrade.*=.*Nu5' \
-          -e 'test result:.*finished in' \
-          "
-
   # follow the logs of the test we just launched, up to Canopy activation (or the test finishing)
+  #
+  # If `inputs.is_long_test` is `false`, this job is skipped.
   logs-heartwood:
     name: Log ${{ inputs.test_id }} test (heartwood)
-    needs: [ logs-sprout ]
+    # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
+    needs: [ launch-with-cached-state, launch-without-cached-state ]
     # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
@@ -693,7 +665,14 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.0.1
 
-      # Show recent logs, following until Canopy activation (or the test finishes)
+      # Show all the logs since the container launched,
+      # following until Canopy activation (or the test finishes)
+      #
+      # The log pipeline ignores the exit status of `docker logs`.
+      # It also ignores the expected 'broken pipe' error from `tee`,
+      # which happens when `grep` finds a matching output and moves on to the next job.
+      #
+      # Errors in the tests are caught by the final test status job.
       - name: Show logs for ${{ inputs.test_id }} test (heartwood)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
