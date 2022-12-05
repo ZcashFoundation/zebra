@@ -8,7 +8,7 @@ use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
-    amount::{self, Amount, NonNegative},
+    amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{
         self,
         merkle::{self, AuthDataRoot},
@@ -358,7 +358,8 @@ where
                 });
             }
 
-            let mempool_txs = zip317::select_mempool_transactions(mempool).await?;
+            let fake_coinbase_tx = fake_coinbase_transaction(network, miner_address);
+            let mempool_txs = zip317::select_mempool_transactions(fake_coinbase_tx, mempool).await?;
 
             let miner_fee = miner_fee(&mempool_txs);
 
@@ -577,6 +578,36 @@ pub fn standard_coinbase_outputs(
         .iter()
         .map(|(amount, address)| (*amount, new_coinbase_script(*address)))
         .collect()
+}
+
+/// Returns a fake coinbase transaction that can be used during transaction selection.
+///
+/// This avoids a data dependency loop involving the selected transactions, the miner fee,
+/// and the coinbase transaction.
+///
+/// This transaction's serialized size and sigops must be at least as large as the real coinbase
+/// transaction with the correct height and fee.
+fn fake_coinbase_transaction(
+    network: Network,
+    miner_address: transparent::Address,
+) -> TransactionTemplate<NegativeOrZero> {
+    // Block heights are encoded as variable-length (script) and `u32` (lock time, expiry height).
+    // They can also change the `u32` consensus branch id.
+    // We use the maximum height here, which limits generated blocks to a few bytes smaller
+    // than the consensus maximum. This is ok, because the maximum is an upper limit.
+    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    // https://github.com/zcash/zips/blob/main/zip-0203.rst#changes-for-nu5
+    let block_height = Height::MAX;
+
+    // Transparent amounts are encoded as `i64`,
+    // so a zero amount has the same size as the real amount:
+    // https://developer.bitcoin.org/reference/transactions.html#txout-a-transaction-output
+    let miner_fee = Amount::zero();
+
+    let outputs = standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
+    let coinbase_tx = Transaction::new_v5_coinbase(network, block_height, outputs).into();
+
+    TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee)
 }
 
 /// Returns the transaction effecting and authorizing roots

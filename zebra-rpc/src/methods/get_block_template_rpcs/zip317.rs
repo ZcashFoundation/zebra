@@ -13,20 +13,28 @@ use rand::{
 };
 use tower::{Service, ServiceExt};
 
-use zebra_chain::{block::MAX_BLOCK_BYTES, transaction::VerifiedUnminedTx};
+use zebra_chain::{amount::NegativeOrZero, block::MAX_BLOCK_BYTES, transaction::VerifiedUnminedTx};
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_node_services::mempool;
+
+use super::types::transaction::TransactionTemplate;
 
 /// The ZIP-317 recommended limit on the number of unpaid actions per block.
 /// `block_unpaid_action_limit` in ZIP-317.
 pub const BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT: u32 = 50;
 
-/// Selects mempool transactions for block production according to [ZIP-317].
+/// Selects mempool transactions for block production according to [ZIP-317],
+/// using a fake coinbase transaction and the mempool.
+///
+/// The fake coinbase transaction's serialized size and sigops must be at least as large
+/// as the real coinbase transaction. (The real coinbase transaction depends on the total
+/// fees from the transactions returned by this function.)
 ///
 /// Returns selected transactions from the `mempool`, or an error if the mempool has failed.
 ///
 /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
 pub async fn select_mempool_transactions<Mempool>(
+    fake_coinbase_tx: TransactionTemplate<NegativeOrZero>,
     mempool: Mempool,
 ) -> Result<Vec<VerifiedUnminedTx>>
 where
@@ -50,6 +58,10 @@ where
     let mut remaining_block_bytes: usize = MAX_BLOCK_BYTES.try_into().expect("fits in memory");
     let mut remaining_block_sigops = MAX_BLOCK_SIGOPS;
     let mut remaining_block_unpaid_actions: u32 = BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT;
+
+    // Adjust the limits based on the coinbase transaction
+    remaining_block_bytes -= fake_coinbase_tx.data.as_ref().len();
+    remaining_block_sigops -= fake_coinbase_tx.sigops;
 
     // > Repeat while there is any candidate transaction
     // > that pays at least the conventional fee:
