@@ -223,9 +223,7 @@ fn block_commitment(network: Network) {
             .expect("block is structurally valid");
 
         let commitment = block.commitment(network).unwrap_or_else(|_| {
-            panic!(
-                "unexpected structurally invalid block commitment at {network} {height}"
-            )
+            panic!("unexpected structurally invalid block commitment at {network} {height}")
         });
 
         if let FinalSaplingRoot(final_sapling_root) = commitment {

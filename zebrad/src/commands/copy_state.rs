@@ -157,9 +157,7 @@ impl CopyStateCmd {
             old_zs::Response::Tip(Some(source_tip)) => source_tip,
             old_zs::Response::Tip(None) => Err("empty source state: no blocks to copy")?,
 
-            response => Err(format!(
-                "unexpected response to Tip request: {response:?}",
-            ))?,
+            response => Err(format!("unexpected response to Tip request: {response:?}",))?,
         };
         let source_tip_height = source_tip.0 .0;
 
@@ -171,9 +169,7 @@ impl CopyStateCmd {
         let initial_target_tip = match initial_target_tip {
             new_zs::Response::Tip(target_tip) => target_tip,
 
-            response => Err(format!(
-                "unexpected response to Tip request: {response:?}",
-            ))?,
+            response => Err(format!("unexpected response to Tip request: {response:?}",))?,
         };
         let min_target_height = initial_target_tip
             .map(|target_tip| target_tip.0 .0 + 1)
@@ -219,9 +215,9 @@ impl CopyStateCmd {
                     trace!(?height, %source_block, "read source block");
                     source_block
                 }
-                old_zs::Response::Block(None) => Err(format!(
-                    "unexpected missing source block, height: {height}",
-                ))?,
+                old_zs::Response::Block(None) => {
+                    Err(format!("unexpected missing source block, height: {height}",))?
+                }
 
                 response => Err(format!(
                     "unexpected response to Block request, height: {height}, \n \
@@ -260,9 +256,9 @@ impl CopyStateCmd {
                     trace!(?height, %target_block, "read target block");
                     target_block
                 }
-                new_zs::Response::Block(None) => Err(format!(
-                    "unexpected missing target block, height: {height}",
-                ))?,
+                new_zs::Response::Block(None) => {
+                    Err(format!("unexpected missing target block, height: {height}",))?
+                }
 
                 response => Err(format!(
                     "unexpected response to Block request, height: {height},\n \
@@ -322,9 +318,7 @@ impl CopyStateCmd {
             new_zs::Response::Tip(Some(target_tip)) => target_tip,
             new_zs::Response::Tip(None) => Err("empty target state: expected written blocks")?,
 
-            response => Err(format!(
-                "unexpected response to Tip request: {response:?}",
-            ))?,
+            response => Err(format!("unexpected response to Tip request: {response:?}",))?,
         };
         let final_target_tip_height = final_target_tip.0 .0;
         let final_target_tip_hash = final_target_tip.1;

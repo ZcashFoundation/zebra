@@ -564,9 +564,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
         .unwrap_err();
     assert_eq!(
         error.message,
-        format!(
-            "invalid address \"{address}\": parse error: t-addr decoding error"
-        )
+        format!("invalid address \"{address}\": parse error: t-addr decoding error")
     );
 
     mempool.expect_no_requests().await;

@@ -263,9 +263,7 @@ pub fn check_failure_regexes(
         let ignore_matches = ignore_matches.join(",");
 
         let ignore_msg = if failure_matches.is_empty() {
-            format!(
-                "Log matched ignore regexes: {ignore_matches:?}, but no failure regexes",
-            )
+            format!("Log matched ignore regexes: {ignore_matches:?}, but no failure regexes",)
         } else {
             let failure_matches = failure_matches.join(",");
             format!(

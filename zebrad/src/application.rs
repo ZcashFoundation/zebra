@@ -87,9 +87,7 @@ pub fn app_version() -> Version {
             }
         }
         _ => CARGO_PKG_VERSION.parse().unwrap_or_else(|_| {
-            panic!(
-                "CARGO_PKG_VERSION {CARGO_PKG_VERSION:?} must be valid semver 2.0"
-            )
+            panic!("CARGO_PKG_VERSION {CARGO_PKG_VERSION:?} must be valid semver 2.0")
         }),
     }
 }

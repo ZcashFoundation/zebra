@@ -1789,9 +1789,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
     let mut config = default_test_config()?;
     config.network.listen_addr = listen_addr.parse().unwrap();
     let dir1 = testdir()?.with_config(&mut config)?;
-    let regex1 = regex::escape(&format!(
-        "Opened Zcash protocol endpoint at {listen_addr}"
-    ));
+    let regex1 = regex::escape(&format!("Opened Zcash protocol endpoint at {listen_addr}"));
 
     // From another folder create a configuration with the same listener.
     // `network.listen_addr` will be the same in the 2 nodes.

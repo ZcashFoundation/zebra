@@ -26,15 +26,11 @@ fn is_command_available(cmd: &str, args: &[&str]) -> bool {
 
     match status {
         Err(e) => {
-            eprintln!(
-                "Skipping test because '{cmd} {args:?}' returned error {e:?}"
-            );
+            eprintln!("Skipping test because '{cmd} {args:?}' returned error {e:?}");
             false
         }
         Ok(status) if !status.success() => {
-            eprintln!(
-                "Skipping test because '{cmd} {args:?}' returned status {status:?}"
-            );
+            eprintln!("Skipping test because '{cmd} {args:?}' returned status {status:?}");
             false
         }
         _ => true,
