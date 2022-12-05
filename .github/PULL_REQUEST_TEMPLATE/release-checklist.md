@@ -89,7 +89,7 @@ We use [the Release Drafter workflow](https://github.com/marketplace/actions/rel
 We follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
 To create the final change log:
-- [ ] Copy the draft changelog into `CHANGELOG.md`
+- [ ] Copy the **latest** draft changelog into `CHANGELOG.md` (there can be multiple draft releases)
 - [ ] Delete any trivial changes. Keep the list of those, to include in the PR
 - [ ] Combine duplicate changes
 - [ ] Edit change descriptions so they are consistent, and make sense to non-developers
@@ -141,6 +141,7 @@ After you have the version increments, the updated checkpoints and the updated c
       the previous release.
 - [ ] Mark the release as 'pre-release', until it has been built and tested
 - [ ] Publish the pre-release to GitHub using "Publish Release"
+- [ ] Delete all the [draft releases from the list of releases](https://github.com/ZcashFoundation/zebra/releases)
 
 ## Binary Testing
 
