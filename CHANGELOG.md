@@ -20,6 +20,7 @@ This release has the following breaking changes:
   - The ZIP-317 convention fee increases based on the number of logical transparent or
     shielded actions in a transaction.
   - This change has no impact under normal network conditions.
+- Use HTTP to clone Zebra in Docker documentation (https://github.com/ZcashFoundation/zebra/pull/5529)
 
 ### Security
 
