@@ -72,8 +72,7 @@ pub fn app_version() -> Version {
                 // assume it's a cargo package version or a git tag with no hash
                 [_] | [_, _] => vergen_git_semver.parse().unwrap_or_else(|_| {
                     panic!(
-                        "VERGEN_GIT_SEMVER without a hash {:?} must be valid semver 2.0",
-                        vergen_git_semver
+                        "VERGEN_GIT_SEMVER without a hash {vergen_git_semver:?} must be valid semver 2.0"
                     )
                 }),
 
@@ -81,11 +80,7 @@ pub fn app_version() -> Version {
                 [hash, commit_count, tag] => {
                     let semver_fix = format!("{tag}+{commit_count}.{hash}");
                     semver_fix.parse().unwrap_or_else(|_|
-                                                      panic!("Modified VERGEN_GIT_SEMVER {:?} -> {:?} -> {:?} must be valid. Note: CARGO_PKG_VERSION was {:?}.",
-                                                             vergen_git_semver,
-                                                             rparts,
-                                                             semver_fix,
-                                                             CARGO_PKG_VERSION))
+                                                      panic!("Modified VERGEN_GIT_SEMVER {vergen_git_semver:?} -> {rparts:?} -> {semver_fix:?} must be valid. Note: CARGO_PKG_VERSION was {CARGO_PKG_VERSION:?}."))
                 }
 
                 _ => unreachable!("split is limited to 3 parts"),
@@ -93,8 +88,7 @@ pub fn app_version() -> Version {
         }
         _ => CARGO_PKG_VERSION.parse().unwrap_or_else(|_| {
             panic!(
-                "CARGO_PKG_VERSION {:?} must be valid semver 2.0",
-                CARGO_PKG_VERSION
+                "CARGO_PKG_VERSION {CARGO_PKG_VERSION:?} must be valid semver 2.0"
             )
         }),
     }

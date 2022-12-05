@@ -565,8 +565,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
     assert_eq!(
         error.message,
         format!(
-            "invalid address \"{}\": parse error: t-addr decoding error",
-            address
+            "invalid address \"{address}\": parse error: t-addr decoding error"
         )
     );
 

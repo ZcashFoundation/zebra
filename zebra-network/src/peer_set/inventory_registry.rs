@@ -271,9 +271,7 @@ impl InventoryRegistry {
             use InventoryHash::*;
             assert!(
                 matches!(inv, Block(_) | Tx(_) | Wtx(_)),
-                "unexpected inventory type: {:?} from peer: {:?}",
-                inv,
-                addr,
+                "unexpected inventory type: {inv:?} from peer: {addr:?}",
             );
 
             let current = self.current.entry(inv).or_default();

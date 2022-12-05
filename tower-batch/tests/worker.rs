@@ -39,8 +39,7 @@ async fn wakes_pending_waiters_on_close() {
     let err = assert_ready_err!(response.poll());
     assert!(
         err.is::<error::Closed>(),
-        "response should fail with a Closed, got: {:?}",
-        err,
+        "response should fail with a Closed, got: {err:?}",
     );
 
     assert!(
@@ -50,8 +49,7 @@ async fn wakes_pending_waiters_on_close() {
     let err = assert_ready_err!(ready1.poll());
     assert!(
         err.is::<error::ServiceError>(),
-        "ready 1 should fail with a ServiceError {{ Closed }}, got: {:?}",
-        err,
+        "ready 1 should fail with a ServiceError {{ Closed }}, got: {err:?}",
     );
 
     assert!(
@@ -61,8 +59,7 @@ async fn wakes_pending_waiters_on_close() {
     let err = assert_ready_err!(ready1.poll());
     assert!(
         err.is::<error::ServiceError>(),
-        "ready 2 should fail with a ServiceError {{ Closed }}, got: {:?}",
-        err,
+        "ready 2 should fail with a ServiceError {{ Closed }}, got: {err:?}",
     );
 }
 
@@ -99,8 +96,7 @@ async fn wakes_pending_waiters_on_failure() {
     let err = assert_ready_err!(response.poll());
     assert!(
         err.is::<error::ServiceError>(),
-        "response should fail with a ServiceError, got: {:?}",
-        err
+        "response should fail with a ServiceError, got: {err:?}"
     );
 
     assert!(
@@ -110,8 +106,7 @@ async fn wakes_pending_waiters_on_failure() {
     let err = assert_ready_err!(ready1.poll());
     assert!(
         err.is::<error::ServiceError>(),
-        "ready 1 should fail with a ServiceError, got: {:?}",
-        err
+        "ready 1 should fail with a ServiceError, got: {err:?}"
     );
 
     assert!(
@@ -121,7 +116,6 @@ async fn wakes_pending_waiters_on_failure() {
     let err = assert_ready_err!(ready1.poll());
     assert!(
         err.is::<error::ServiceError>(),
-        "ready 2 should fail with a ServiceError, got: {:?}",
-        err
+        "ready 2 should fail with a ServiceError, got: {err:?}"
     );
 }

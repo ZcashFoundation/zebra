@@ -132,10 +132,8 @@ pub fn truncate_zero_be_bytes(mem_bytes: &[u8], disk_len: usize) -> &[u8] {
 
     assert!(
         discarded.iter().all(|&byte| byte == 0),
-        "unexpected `mem_bytes` content: non-zero discarded bytes: {:?}\n\
-         truncated: {:?}",
-        discarded,
-        truncated,
+        "unexpected `mem_bytes` content: non-zero discarded bytes: {discarded:?}\n\
+         truncated: {truncated:?}",
     );
 
     assert_eq!(truncated.len(), disk_len);

@@ -376,15 +376,13 @@ async fn continuous_blockchain(
                 assert_eq!(
                     handles.len(),
                     0,
-                    "unexpected number of verify tasks for restart height: {:?}",
-                    restart_height,
+                    "unexpected number of verify tasks for restart height: {restart_height:?}",
                 );
             } else {
                 assert_eq!(
                     handles.len(),
                     blockchain_len - restart_height - 1,
-                    "unexpected number of verify tasks for restart height: {:?}",
-                    restart_height,
+                    "unexpected number of verify tasks for restart height: {restart_height:?}",
                 );
             }
         } else {
@@ -404,20 +402,17 @@ async fn continuous_blockchain(
         assert_eq!(
             checkpoint_verifier.previous_checkpoint_height(),
             FinalCheckpoint,
-            "unexpected previous checkpoint for restart height: {:?}",
-            restart_height,
+            "unexpected previous checkpoint for restart height: {restart_height:?}",
         );
         assert_eq!(
             checkpoint_verifier.target_checkpoint_height(),
             FinishedVerifying,
-            "unexpected target checkpoint for restart height: {:?}",
-            restart_height,
+            "unexpected target checkpoint for restart height: {restart_height:?}",
         );
         assert_eq!(
             checkpoint_verifier.checkpoint_list.max_height(),
             expected_max_height,
-            "unexpected max checkpoint height for restart height: {:?}",
-            restart_height,
+            "unexpected max checkpoint height for restart height: {restart_height:?}",
         );
     }
 

@@ -356,8 +356,7 @@ async fn db_init_outside_future_executor() -> Result<()> {
     let block_duration = start.elapsed();
     assert!(
         block_duration <= MAX_ASYNC_BLOCKING_TIME,
-        "futures executor was blocked longer than expected ({:?})",
-        block_duration,
+        "futures executor was blocked longer than expected ({block_duration:?})",
     );
 
     db_init_handle.await?;
@@ -1074,9 +1073,8 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
         )
     } else {
         eprintln!(
-            "Skipped full sync test for {}, \
-            set the {:?} environmental variable to run the test",
-            network, timeout_argument_name,
+            "Skipped full sync test for {network}, \
+            set the {timeout_argument_name:?} environmental variable to run the test",
         );
 
         Ok(())
@@ -1792,8 +1790,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
     config.network.listen_addr = listen_addr.parse().unwrap();
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(
-        "Opened Zcash protocol endpoint at {}",
-        listen_addr
+        "Opened Zcash protocol endpoint at {listen_addr}"
     ));
 
     // From another folder create a configuration with the same listener.
@@ -2054,8 +2051,7 @@ async fn fully_synced_rpc_test() -> Result<()> {
     let expected_hex = hex::encode(expected_bytes);
     assert!(
         res.contains(&expected_hex),
-        "response did not contain the desired block: {}",
-        res
+        "response did not contain the desired block: {res}"
     );
 
     Ok(())
@@ -2109,8 +2105,7 @@ async fn delete_old_databases() -> Result<()> {
 
     // inside dir was deleted
     child.expect_stdout_line_matches(format!(
-        "deleted outdated state directory deleted_state={:?}",
-        canonicalized_inside_dir
+        "deleted outdated state directory deleted_state={canonicalized_inside_dir:?}"
     ))?;
     assert!(!inside_dir.as_path().exists());
 

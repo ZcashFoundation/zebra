@@ -95,8 +95,7 @@ async fn connection_run_loop_spawn_ok() {
     let connection_result = futures::poll!(&mut connection_join_handle);
     assert!(
         matches!(connection_result, Poll::Pending),
-        "unexpected run loop termination: {:?}",
-        connection_result,
+        "unexpected run loop termination: {connection_result:?}",
     );
 
     // We need to abort the connection, because it holds a lock on the outbound channel.
@@ -175,8 +174,7 @@ async fn connection_run_loop_message_ok() {
     let connection_result = futures::poll!(&mut connection_join_handle);
     assert!(
         matches!(connection_result, Poll::Pending),
-        "unexpected run loop termination: {:?}",
-        connection_result,
+        "unexpected run loop termination: {connection_result:?}",
     );
 
     // We need to abort the connection, because it holds a lock on the outbound channel.
@@ -500,8 +498,7 @@ async fn connection_run_loop_send_timeout_nil_response() {
     let connection_result = futures::poll!(&mut connection_join_handle);
     assert!(
         matches!(connection_result, Poll::Ready(Ok(()))),
-        "expected run loop termination, but run loop continued: {:?}",
-        connection_result,
+        "expected run loop termination, but run loop continued: {connection_result:?}",
     );
 
     let outbound_message = peer_outbound_messages.next().await;
@@ -575,8 +572,7 @@ async fn connection_run_loop_send_timeout_expect_response() {
     let connection_result = futures::poll!(&mut connection_join_handle);
     assert!(
         matches!(connection_result, Poll::Ready(Ok(()))),
-        "expected run loop termination, but run loop continued: {:?}",
-        connection_result,
+        "expected run loop termination, but run loop continued: {connection_result:?}",
     );
 
     let outbound_message = peer_outbound_messages.next().await;
@@ -651,8 +647,7 @@ async fn connection_run_loop_receive_timeout() {
     let connection_result = futures::poll!(&mut connection_join_handle);
     assert!(
         matches!(connection_result, Poll::Pending),
-        "unexpected run loop termination: {:?}",
-        connection_result,
+        "unexpected run loop termination: {connection_result:?}",
     );
 
     // We need to abort the connection, because it holds a lock on the outbound channel.

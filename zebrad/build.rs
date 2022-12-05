@@ -48,8 +48,7 @@ fn main() {
         Ok(_) => {}
         Err(e) => {
             eprintln!(
-                "git error in vergen build script: skipping git env vars: {:?}",
-                e,
+                "git error in vergen build script: skipping git env vars: {e:?}",
             );
             *config.git_mut().enabled_mut() = false;
             vergen(config).expect("non-git vergen should succeed");
