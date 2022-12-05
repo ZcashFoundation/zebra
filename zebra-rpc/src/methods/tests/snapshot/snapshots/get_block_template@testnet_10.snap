@@ -3,7 +3,9 @@ source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
 expression: block_template
 ---
 {
-  "capabilities": [],
+  "capabilities": [
+    "longpoll"
+  ],
   "version": 4,
   "previousblockhash": "0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8",
   "blockcommitmentshash": "cb1f1c6a5ad5ff9c4a170e3b747a24f3aec79817adba9a9451f19914481bb422",

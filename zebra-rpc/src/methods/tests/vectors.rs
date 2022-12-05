@@ -881,12 +881,6 @@ async fn rpc_getblocktemplate() {
 
     use chrono::{TimeZone, Utc};
 
-    use crate::methods::{
-        get_block_template_rpcs::constants::{
-            GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
-        },
-        tests::utils::fake_history_tree,
-    };
     use zebra_chain::{
         amount::{Amount, NonNegative},
         block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
@@ -894,8 +888,15 @@ async fn rpc_getblocktemplate() {
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
     };
     use zebra_consensus::MAX_BLOCK_SIGOPS;
-
     use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
+
+    use crate::methods::{
+        get_block_template_rpcs::constants::{
+            GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD, GET_BLOCK_TEMPLATE_MUTABLE_FIELD,
+            GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+        },
+        tests::utils::fake_history_tree,
+    };
 
     let _init_guard = zebra_test::init();
 
@@ -973,7 +974,10 @@ async fn rpc_getblocktemplate() {
         })
         .expect("unexpected error in getblocktemplate RPC call");
 
-    assert_eq!(get_block_template.capabilities, Vec::<String>::new());
+    assert_eq!(
+        get_block_template.capabilities,
+        GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD.to_vec()
+    );
     assert_eq!(get_block_template.version, ZCASH_BLOCK_VERSION);
     assert!(get_block_template.transactions.is_empty());
     assert_eq!(
