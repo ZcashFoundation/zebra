@@ -1,3 +1,5 @@
+//! Tests for syncer status.
+
 use std::{env, sync::Arc, time::Duration};
 
 use futures::{select, FutureExt};
