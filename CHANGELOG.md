@@ -33,7 +33,6 @@ This release has the following breaking changes:
 ### Changed
 
 - Add transaction fields to the `getblocktemplate` RPC ([#5496](https://github.com/ZcashFoundation/zebra/pull/5496) and [#5508](https://github.com/ZcashFoundation/zebra/pull/5508))
-- Refactor RPCs using a state tip height function ([#5540](https://github.com/ZcashFoundation/zebra/pull/5540))
 - Implement coinbase conversion to RPC `TransactionTemplate` type ([#5554](https://github.com/ZcashFoundation/zebra/pull/5554))
 
 ### Fixed
