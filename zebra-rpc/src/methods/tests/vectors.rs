@@ -967,6 +967,18 @@ async fn rpc_getblocktemplate() {
     let get_block_template_sync_error = get_block_template_rpc
         .get_block_template(Some(
             get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
+                data: Some(get_block_template_rpcs::types::hex_data::HexData("".into())),
+                ..Default::default()
+            },
+        ))
+        .await
+        .expect_err("needs an error when passing in block data");
+
+    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
+
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template(Some(
+            get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
                 longpollid: Some("".to_string()),
                 ..Default::default()
             },
