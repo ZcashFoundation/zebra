@@ -3,7 +3,7 @@
 //! These implementation details are private, and should not be relied upon by miners.
 //! They are also different from the `zcashd` implementation of long polling.
 
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
@@ -11,10 +11,12 @@ use zebra_chain::{
     block::{self, Height},
     transaction,
 };
+use zebra_node_services::BoxError;
 
 /// The inputs to the long polling check.
 ///
 /// If these inputs change, Zebra should return a response to any open long polls.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LongPollInput {
     // Fields that invalidate old work:
     //
@@ -46,8 +48,9 @@ pub struct LongPollInput {
 
 /// The encoded long poll ID, generated from the [`LongPollInput`].
 ///
-/// `zcashd` IDs are currently 69 hex digits long.
-/// If Zebra's IDs are less than that, we should have good compatibility with mining pools.
+/// `zcashd` IDs are currently 69 hex/decimal digits long.
+/// Since Zebra's IDs are only 46 hex/decimal digits, mining pools should be able to handle them.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LongPollId {
     // Fields that invalidate old work:
     //
@@ -94,6 +97,7 @@ pub struct LongPollId {
 }
 
 impl From<LongPollInput> for LongPollId {
+    /// Lossy conversion from LongPollInput to LongPollId.
     fn from(input: LongPollInput) -> Self {
         let mut tip_block_checksum = 0;
         update_checksum(&mut tip_block_checksum, input.tip_block_hash.0);
@@ -136,5 +140,47 @@ fn update_checksum(checksum: &mut u32, item: [u8; 32]) {
         // because the first valid block hash a miner generates will pay
         // a significant block subsidy.
         *checksum ^= chunk;
+    }
+}
+
+impl ToString for LongPollId {
+    /// Exact conversion from LongPollId to a string.
+    fn to_string(&self) -> String {
+        let LongPollId {
+            tip_block_height,
+            tip_block_checksum,
+            max_timestamp,
+            mempool_transaction_count,
+            mempool_transaction_content_checksum,
+        } = self;
+
+        // We can't do this using `serde`, because it names each field,
+        // but we want a single string containing all the fields.
+        format!(
+            // Height as decimal, padded with zeroes to the width of Height::MAX
+            // Checksums as hex, padded with zeroes to the width of u32::MAX
+            // Timestamp as decimal, padded with zeroes to the width of u32::MAX
+            // Transaction Count as decimal, padded with zeroes to the width of u32::MAX
+            "{tip_block_height:010}\
+             {tip_block_checksum:08x}\
+             {max_timestamp:010}\
+             {mempool_transaction_count:010}\
+             {mempool_transaction_content_checksum:08x}"
+        )
+    }
+}
+
+impl FromStr for LongPollId {
+    type Err = BoxError;
+
+    /// Exact conversion from a string to LongPollId.
+    fn from_str(long_poll_id: &str) -> Result<Self, Self::Err> {
+        Ok(Self {
+            tip_block_height: long_poll_id[0..10].parse()?,
+            tip_block_checksum: u32::from_str_radix(&long_poll_id[10..18], 16)?,
+            max_timestamp: long_poll_id[18..28].parse()?,
+            mempool_transaction_count: long_poll_id[28..38].parse()?,
+            mempool_transaction_content_checksum: u32::from_str_radix(&long_poll_id[38..46], 16)?,
+        })
     }
 }
