@@ -4,7 +4,7 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.0.0-rc.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.2) - 2022-11-TODO
+## [Zebra 1.0.0-rc.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.2) - 2022-12-05
 
 Zebra's latest release continues work on mining pool RPCs, fixes a rare RPC crash that could lead to memory corruption, and uses the ZIP-317 conventional fee for mempool size limits.
 
@@ -20,14 +20,33 @@ This release has the following breaking changes:
   - The ZIP-317 convention fee increases based on the number of logical transparent or
     shielded actions in a transaction.
   - This change has no impact under normal network conditions.
-- TODO: search the changelog for breaking changes
 
 ### Security
 
 - Fix a rare crash and memory errors when Zebra's RPC server shuts down ([#5591](https://github.com/ZcashFoundation/zebra/pull/5591))
 - Evict transactions from the mempool using the ZIP-317 conventional fee ([#5703](https://github.com/ZcashFoundation/zebra/pull/5703))
 
-TODO: the rest of the changelog
+### Added
+
+- Add submitblock RPC method ([#5526](https://github.com/ZcashFoundation/zebra/pull/5526))
+
+### Changed
+
+- Add some transaction fields to the `getblocktemplate` RPC ([#5496](https://github.com/ZcashFoundation/zebra/pull/5496))
+- Add fee and sigops fields to getblocktemplate transactions ([#5508](https://github.com/ZcashFoundation/zebra/pull/5508))
+- Refactor RPCs using a state tip height function ([#5540](https://github.com/ZcashFoundation/zebra/pull/5540))
+- Implement coinbase conversion to RPC `TransactionTemplate` type ([#5554](https://github.com/ZcashFoundation/zebra/pull/5554))
+
+### Fixed
+
+- Return an error instead of panicking in the batch verifier on shutdown ([#5530](https://github.com/ZcashFoundation/zebra/pull/5530))
+- Use a more reliable release template branch name and docker command ([#5519](https://github.com/ZcashFoundation/zebra/pull/5519))
+- Make the syncer ignore some new block verification errors ([#5537](https://github.com/ZcashFoundation/zebra/pull/5537))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @oxarbitrage, @teor2345, and @mpguerra
 
 
 ## [Zebra 1.0.0-rc.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.1) - 2022-11-02

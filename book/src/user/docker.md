@@ -1,8 +1,8 @@
 # Zebra with Docker
 
-The easiest way to run Zebra is using [Docker](https://docs.docker.com/get-docker/). 
+The easiest way to run Zebra is using [Docker](https://docs.docker.com/get-docker/).
 
-We've embraced Docker in Zebra for most of the solution lifecycle, from development environments to CI (in our pipelines), and deployment to end users. 
+We've embraced Docker in Zebra for most of the solution lifecycle, from development environments to CI (in our pipelines), and deployment to end users.
 
 ## Quick usage
 
@@ -11,13 +11,13 @@ You can deploy Zebra for a daily use with the images available in [Docker Hub](h
 ### Ready to use image
 
 ```shell
-docker run --detach zfnd/zebra:1.0.0-rc.1
+docker run --detach zfnd/zebra:1.0.0-rc.2
 ```
 
 ### Build it locally
 
 ```shell
-git clone --depth 1 --branch v1.0.0-rc.1 https://github.com/ZcashFoundation/zebra.git
+git clone --depth 1 --branch v1.0.0-rc.2 https://github.com/ZcashFoundation/zebra.git
 docker build --file docker/Dockerfile --target runtime --tag zebra:local
 docker run --detach zebra:local
 ```
