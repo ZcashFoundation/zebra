@@ -24,7 +24,6 @@ impl Default for GetBlockTemplateRequestMode {
 /// Valid `capabilities` values that indicate client-side support.
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-#[allow(dead_code)]
 pub enum GetBlockTemplateCapability {
     /// Long Polling support.
     /// Currently ignored by zebra.
