@@ -62,8 +62,8 @@ pub struct LongPollId {
     /// This checksum is not cryptographically secure.
     ///
     /// It's ok to do a probabilistic check here,
-    /// so we choose a 1 in 2^64 chance of missing a block change.
-    pub tip_block_checksum: u64,
+    /// so we choose a 1 in 2^32 chance of missing a block change.
+    pub tip_block_checksum: u32,
 
     /// If the max time is reached, a new template must be provided.
     /// Old work is no longer valid.
@@ -95,32 +95,12 @@ pub struct LongPollId {
 
 impl From<LongPollInput> for LongPollId {
     fn from(input: LongPollInput) -> Self {
-        // TODO: make a generic checksum function?
         let mut tip_block_checksum = 0;
-        for chunk in input.tip_block_hash.0.chunks(8) {
-            let chunk = chunk.try_into().expect("chunk is u64 size");
-            let chunk = u64::from_le_bytes(chunk);
-
-            // This checksum is not cryptographically secure.
-            // But it's ok to use xor here, because long polling checks are probabilistic,
-            // and the height, time, and transaction count fields will detect most changes.
-            //
-            // Without those fields, miners could game the xor-ed block hash,
-            // and hide block changes from other miners, gaining an advantage.
-            // But this would reduce their profit under proof of work,
-            // because the first valid block hash a miner generates will pay
-            // a significant block subsidy.
-            tip_block_checksum ^= chunk;
-        }
+        update_checksum(&mut tip_block_checksum, input.tip_block_hash.0);
 
         let mut mempool_transaction_content_checksum: u32 = 0;
         for tx_mined_id in input.mempool_transaction_mined_ids.iter() {
-            for chunk in tx_mined_id.0.chunks(4) {
-                let chunk = chunk.try_into().expect("chunk is u32 size");
-                let chunk = u32::from_le_bytes(chunk);
-
-                mempool_transaction_content_checksum ^= chunk;
-            }
+            update_checksum(&mut mempool_transaction_content_checksum, tx_mined_id.0);
         }
 
         Self {
@@ -136,5 +116,25 @@ impl From<LongPollInput> for LongPollId {
 
             mempool_transaction_content_checksum,
         }
+    }
+}
+
+/// Update `checksum` from `item`, so changes in `item` are likely to also change `checksum`.
+///
+/// This checksum is not cryptographically secure.
+fn update_checksum(checksum: &mut u32, item: [u8; 32]) {
+    for chunk in item.chunks(4) {
+        let chunk = chunk.try_into().expect("chunk is u32 size");
+        let chunk = u32::from_le_bytes(chunk);
+
+        // It's ok to use xor here, because long polling checks are probabilistic,
+        // and the height, time, and transaction count fields will detect most changes.
+        //
+        // Without those fields, miners could game the xor-ed block hash,
+        // and hide block changes from other miners, gaining an advantage.
+        // But this would reduce their profit under proof of work,
+        // because the first valid block hash a miner generates will pay
+        // a significant block subsidy.
+        *checksum ^= chunk;
     }
 }
