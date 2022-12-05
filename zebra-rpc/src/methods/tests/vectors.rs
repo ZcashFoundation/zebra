@@ -865,8 +865,7 @@ async fn rpc_getblocktemplate() {
             })));
     });
 
-    let get_block_template =
-        tokio::spawn(get_block_template_rpc.get_block_template(Some(Default::default())));
+    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template(None));
 
     mempool
         .expect_request(mempool::Request::FullTransactions)
@@ -968,7 +967,6 @@ async fn rpc_getblocktemplate() {
         .get_block_template(Some(
             get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
                 data: Some(get_block_template_rpcs::types::hex_data::HexData("".into())),
-                capabilities: vec![get_block_template_rpcs::types::get_block_template_opts::GetBlockTemplateCapability::UnknownCapability],
                 ..Default::default()
             },
         ))
