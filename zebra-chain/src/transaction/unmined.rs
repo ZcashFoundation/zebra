@@ -32,6 +32,10 @@ use UnminedTxId::*;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+// Documentation-only
+#[allow(unused_imports)]
+use crate::block::MAX_BLOCK_BYTES;
+
 mod zip317;
 
 /// The minimum cost value for a transaction in the mempool.
