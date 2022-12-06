@@ -29,6 +29,7 @@ This release has the following breaking changes:
 ### Added
 
 - Add submitblock RPC method ([#5526](https://github.com/ZcashFoundation/zebra/pull/5526))
+- Add a `mining` section with miner address to config ([#5491](https://github.com/ZcashFoundation/zebra/pull/5508))
 
 ### Changed
 
