@@ -618,41 +618,13 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.0.1
 
-      # Show all the logs since the container launched,
-      # following until Sapling activation (or the test finishes).
-      #
-      # The log pipeline ignores the exit status of `docker logs`.
-      # It also ignores the expected 'broken pipe' error from `tee`,
-      # which happens when `grep` finds a matching output and moves on to the next job.
-      #
-      # Errors in the tests are caught by the final test status job.
-      - name: Show logs for ${{ inputs.test_id }} test (sprout)
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ env.ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command \
-          "\
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          -e 'estimated progress.*network_upgrade.*=.*Sapling' \
-          -e 'estimated progress.*network_upgrade.*=.*Blossom' \
-          -e 'estimated progress.*network_upgrade.*=.*Heartwood' \
-          -e 'estimated progress.*network_upgrade.*=.*Canopy' \
-          -e 'estimated progress.*network_upgrade.*=.*Nu5' \
-          -e 'test result:.*finished in' \
-          "
-
   # follow the logs of the test we just launched, up to Canopy activation (or the test finishing)
+  #
+  # If `inputs.is_long_test` is `false`, this job is skipped.
   logs-heartwood:
     name: Log ${{ inputs.test_id }} test (heartwood)
-    needs: [ logs-sprout ]
+    # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
+    needs: [ launch-with-cached-state, launch-without-cached-state ]
     # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
@@ -693,7 +665,14 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.0.1
 
-      # Show recent logs, following until Canopy activation (or the test finishes)
+      # Show all the logs since the container launched,
+      # following until Canopy activation (or the test finishes)
+      #
+      # The log pipeline ignores the exit status of `docker logs`.
+      # It also ignores the expected 'broken pipe' error from `tee`,
+      # which happens when `grep` finds a matching output and moves on to the next job.
+      #
+      # Errors in the tests are caught by the final test status job.
       - name: Show logs for ${{ inputs.test_id }} test (heartwood)
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
@@ -1124,10 +1103,149 @@ jobs:
           -e 'test result:.*finished in' \
           "
 
+  # follow the logs of the test we just launched, up to block 1,850,000 or later
+  # (or the test finishing)
+  #
+  # We chose this height because it was about 5 hours from the last job, in December 2022.
+  logs-1850k:
+    name: Log ${{ inputs.test_id }} test (1850k)
+    needs: [ logs-1820k ]
+    # If the previous job fails, we still want to show the logs.
+    if: ${{ !cancelled() && inputs.is_long_test }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.0.0
+        with:
+          retries: '3'
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
+
+      # Show recent logs, following until block 1,850,000 (or the test finishes)
+      - name: Show logs for ${{ inputs.test_id }} test (1850k)
+        run: |
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --ssh-flag="-o ConnectionAttempts=20" \
+          --ssh-flag="-o ConnectTimeout=5" \
+          --command \
+          "\
+          sudo docker logs \
+          --tail all \
+          --follow \
+          ${{ inputs.test_id }} | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          -e 'estimated progress.*current_height.*=.*18[5-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*19[0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'test result:.*finished in' \
+          "
+
+  # follow the logs of the test we just launched, up to block 1,880,000 or later
+  # (or the test finishing)
+  #
+  # We chose this height because it should be about 5 hours from the last job,
+  # but if that's not the case we'll need to fix it.
+  logs-1880k:
+    name: Log ${{ inputs.test_id }} test (1880k)
+    needs: [ logs-1850k ]
+    # If the previous job fails, we still want to show the logs.
+    if: ${{ !cancelled() && inputs.is_long_test }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - uses: actions/checkout@v3.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: '2'
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      # Install our SSH secret
+      - name: Install private SSH key
+        uses: shimataro/ssh-key-action@v2.4.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+
+      - name: Generate public SSH key
+        run: ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.0.0
+        with:
+          retries: '3'
+          workload_identity_provider: 'projects/143793276228/locations/global/workloadIdentityPools/github-actions/providers/github-oidc'
+          service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1.0.1
+
+      # Show recent logs, following until block 1,880,000 (or the test finishes)
+      - name: Show logs for ${{ inputs.test_id }} test (1880k)
+        run: |
+          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          --zone ${{ env.ZONE }} \
+          --ssh-flag="-o ServerAliveInterval=5" \
+          --ssh-flag="-o ConnectionAttempts=20" \
+          --ssh-flag="-o ConnectTimeout=5" \
+          --command \
+          "\
+          sudo docker logs \
+          --tail all \
+          --follow \
+          ${{ inputs.test_id }} | \
+          tee --output-error=exit /dev/stderr | \
+          grep --max-count=1 --extended-regexp --color=always \
+          -e 'estimated progress.*current_height.*=.*18[8-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*19[0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'estimated progress.*current_height.*=.*2[0-9][0-9][0-9][0-9][0-9][0-9].*remaining_sync_blocks' \
+          -e 'test result:.*finished in' \
+          "
+
   # follow the logs of the test we just launched, up to the last checkpoint (or the test finishing)
   logs-checkpoint:
     name: Log ${{ inputs.test_id }} test (checkpoint)
-    needs: [ logs-1820k ]
+    needs: [ logs-1880k ]
     # If the previous job fails, we still want to show the logs.
     if: ${{ !cancelled() && inputs.is_long_test }}
     runs-on: ubuntu-latest
