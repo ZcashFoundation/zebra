@@ -37,6 +37,7 @@ This release has the following breaking changes:
 
 ### Fixed
 
+- Check network and P2SH addresses for mining config and funding streams([#5620](https://github.com/ZcashFoundation/zebra/pull/5620))
 - Return an error instead of panicking in the batch verifier on shutdown ([#5530](https://github.com/ZcashFoundation/zebra/pull/5530))
 - Use a more reliable release template branch name and docker command ([#5519](https://github.com/ZcashFoundation/zebra/pull/5519))
 - Make the syncer ignore some new block verification errors ([#5537](https://github.com/ZcashFoundation/zebra/pull/5537))
