@@ -64,7 +64,7 @@ fastmod --extensions rs,toml,md --fixed-strings '1.0.0-beta.15' '1.0.0-beta.16' 
 fastmod --extensions rs,toml,md --fixed-strings '0.2.30' '0.2.31' tower-batch tower-fallback
 ```
 
-If you use `fastmod`, don't update versions in `CHANGELOG.md`.
+If you use `fastmod`, don't update versions in `CHANGELOG.md` or `zebra-dependencies-for-audit.md`.
 
 ## README
 
