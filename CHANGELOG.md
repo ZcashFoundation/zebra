@@ -36,6 +36,7 @@ This release has the following breaking changes:
 - Implement coinbase conversion to RPC `TransactionTemplate` type ([#5554](https://github.com/ZcashFoundation/zebra/pull/5554))
 - Verify that mempool transaction UTXOs are in the best chain ([#5616](https://github.com/ZcashFoundation/zebra/pull/5616))
 - Check block and transaction Sprout anchors in parallel ([#5742](https://github.com/ZcashFoundation/zebra/pull/5742))
+- Contextually validates mempool transactions in best chain ([#5716](https://github.com/ZcashFoundation/zebra/pull/5716))
 
 ### Fixed
 
