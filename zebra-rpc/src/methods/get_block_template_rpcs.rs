@@ -343,14 +343,6 @@ where
                         data: None,
                     })
                 }
-
-                if options.longpollid.is_some() {
-                    return Err(Error {
-                        code: ErrorCode::InvalidParams,
-                        message: "long polling is currently unsupported by Zebra".to_string(),
-                        data: None,
-                    })
-                }
             }
 
             let miner_address = miner_address.ok_or_else(|| Error {
