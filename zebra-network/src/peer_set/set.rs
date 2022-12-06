@@ -874,9 +874,8 @@ where
             let address_metrics = *self.address_metrics.borrow();
             panic!(
                 "unexpectedly exceeded configured peer set connection limit: \n\
-                 peers: {:?}, ready: {:?}, unready: {:?}, \n\
-                 address_metrics: {:?}",
-                num_peers, num_ready, num_unready, address_metrics,
+                 peers: {num_peers:?}, ready: {num_ready:?}, unready: {num_unready:?}, \n\
+                 address_metrics: {address_metrics:?}",
             );
         }
     }

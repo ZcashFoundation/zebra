@@ -128,8 +128,7 @@ impl EvictionList {
             let removed = self.unique_entries.remove(&key);
             assert!(
                 removed.is_some(),
-                "all entries should exist in both ordered_entries and unique_entries, missing {:?} in unique_entries",
-                key
+                "all entries should exist in both ordered_entries and unique_entries, missing {key:?} in unique_entries"
             );
             Some(key)
         } else {

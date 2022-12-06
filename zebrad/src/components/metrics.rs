@@ -33,10 +33,9 @@ impl MetricsEndpoint {
                     );
                 }
                 Err(e) => panic!(
-                    "Opening metrics endpoint listener {:?} failed: {:?}. \
+                    "Opening metrics endpoint listener {addr:?} failed: {e:?}. \
                      Hint: Check if another zebrad or zcashd process is running. \
                      Try changing the metrics endpoint_addr in the Zebra config.",
-                    addr, e,
                 ),
             }
         }

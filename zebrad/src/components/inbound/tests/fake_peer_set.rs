@@ -80,8 +80,7 @@ async fn mempool_requests_for_transactions() {
         Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
         Ok(Response::Nil) => assert!(
             added_transaction_ids.is_empty(),
-            "`MempoolTransactionIds` request should match added_transaction_ids {:?}, got Ok(Nil)",
-            added_transaction_ids
+            "`MempoolTransactionIds` request should match added_transaction_ids {added_transaction_ids:?}, got Ok(Nil)"
         ),
         _ => unreachable!(
             "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`, got {:?}",
@@ -119,15 +118,13 @@ async fn mempool_requests_for_transactions() {
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
         matches!(sync_gossip_result, None),
-        "unexpected error or panic in sync gossip task: {:?}",
-        sync_gossip_result,
+        "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
         matches!(tx_gossip_result, None),
-        "unexpected error or panic in transaction gossip task: {:?}",
-        tx_gossip_result,
+        "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 }
 
@@ -209,15 +206,13 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
         matches!(sync_gossip_result, None),
-        "unexpected error or panic in sync gossip task: {:?}",
-        sync_gossip_result,
+        "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
         matches!(tx_gossip_result, None),
-        "unexpected error or panic in transaction gossip task: {:?}",
-        tx_gossip_result,
+        "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
     Ok(())
@@ -313,15 +308,13 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
         matches!(sync_gossip_result, None),
-        "unexpected error or panic in sync gossip task: {:?}",
-        sync_gossip_result,
+        "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
         matches!(tx_gossip_result, None),
-        "unexpected error or panic in transaction gossip task: {:?}",
-        tx_gossip_result,
+        "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
     Ok(())
@@ -632,15 +625,13 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
         matches!(sync_gossip_result, None),
-        "unexpected error or panic in sync gossip task: {:?}",
-        sync_gossip_result,
+        "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
         matches!(tx_gossip_result, None),
-        "unexpected error or panic in transaction gossip task: {:?}",
-        tx_gossip_result,
+        "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
     Ok(())
@@ -732,15 +723,13 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
     let sync_gossip_result = sync_gossip_task_handle.now_or_never();
     assert!(
         matches!(sync_gossip_result, None),
-        "unexpected error or panic in sync gossip task: {:?}",
-        sync_gossip_result,
+        "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
         matches!(tx_gossip_result, None),
-        "unexpected error or panic in transaction gossip task: {:?}",
-        tx_gossip_result,
+        "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
     Ok(())

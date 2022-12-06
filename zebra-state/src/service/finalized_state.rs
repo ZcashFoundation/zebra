@@ -207,27 +207,23 @@ impl FinalizedState {
         if self.db.is_empty() {
             assert_eq!(
                 committed_tip_hash, finalized.block.header.previous_block_hash,
-                "the first block added to an empty state must be a genesis block, source: {}",
-                source,
+                "the first block added to an empty state must be a genesis block, source: {source}",
             );
             assert_eq!(
                 block::Height(0),
                 finalized.height,
-                "cannot commit genesis: invalid height, source: {}",
-                source,
+                "cannot commit genesis: invalid height, source: {source}",
             );
         } else {
             assert_eq!(
                 committed_tip_height.expect("state must have a genesis block committed") + 1,
                 Some(finalized.height),
-                "committed block height must be 1 more than the finalized tip height, source: {}",
-                source,
+                "committed block height must be 1 more than the finalized tip height, source: {source}",
             );
 
             assert_eq!(
                 committed_tip_hash, finalized.block.header.previous_block_hash,
-                "committed block must be a child of the finalized tip, source: {}",
-                source,
+                "committed block must be a child of the finalized tip, source: {source}",
             );
         }
 
