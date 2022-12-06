@@ -37,6 +37,7 @@ This release has the following breaking changes:
 - Verify that mempool transaction UTXOs are in the best chain ([#5616](https://github.com/ZcashFoundation/zebra/pull/5616))
 - Check block and transaction Sprout anchors in parallel ([#5742](https://github.com/ZcashFoundation/zebra/pull/5742))
 - Contextually validates mempool transactions in best chain ([#5716](https://github.com/ZcashFoundation/zebra/pull/5716))
+- bump zcash\_proofs from 0.8.0 to 0.9.0 and zcash\_primitives from 0.8.1 to 0.9.0 ([#5631](https://github.com/ZcashFoundation/zebra/pull/5631))
 
 ### Fixed
 
