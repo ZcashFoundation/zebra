@@ -49,6 +49,7 @@ This release has the following breaking changes:
 - Pause new downloads when Zebra reaches the lookahead limit ([#5561](https://github.com/ZcashFoundation/zebra/pull/5561))
 - Shut down the RPC server properly when Zebra shuts down ([#5591](https://github.com/ZcashFoundation/zebra/pull/5591))
 - Print usage info for --help flag ([#5634](https://github.com/ZcashFoundation/zebra/pull/5634))
+- Fix RPC bugs ([#5761](https://github.com/ZcashFoundation/zebra/pull/5761))
 
 ### Contributors
 
