@@ -33,6 +33,7 @@ This release has the following breaking changes:
 
 ### Changed
 
+- Select getblocktemplate RPC transactions according to ZIP-317 ([#5724](https://github.com/ZcashFoundation/zebra/pull/5724))
 - Add transaction fields to the `getblocktemplate` RPC ([#5496](https://github.com/ZcashFoundation/zebra/pull/5496) and [#5508](https://github.com/ZcashFoundation/zebra/pull/5508))
 - Implement coinbase conversion to RPC `TransactionTemplate` type ([#5554](https://github.com/ZcashFoundation/zebra/pull/5554))
 - Verify that mempool transaction UTXOs are in the best chain ([#5616](https://github.com/ZcashFoundation/zebra/pull/5616))
