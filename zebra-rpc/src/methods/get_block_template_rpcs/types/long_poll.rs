@@ -6,12 +6,18 @@
 use std::{str::FromStr, sync::Arc};
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use zebra_chain::{
     block::{self, Height},
     transaction,
 };
 use zebra_node_services::BoxError;
+
+/// The length of a serialized [`LongPollId`] string.
+///
+/// This is an internal Zebra implementation detail, which does not need to match `zcashd`.
+pub const LONG_POLL_ID_LENGTH: usize = 46;
 
 /// The inputs to the long polling check.
 ///
@@ -50,7 +56,8 @@ pub struct LongPollInput {
 ///
 /// `zcashd` IDs are currently 69 hex/decimal digits long.
 /// Since Zebra's IDs are only 46 hex/decimal digits, mining pools should be able to handle them.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct LongPollId {
     // Fields that invalidate old work:
     //
@@ -175,12 +182,37 @@ impl FromStr for LongPollId {
 
     /// Exact conversion from a string to LongPollId.
     fn from_str(long_poll_id: &str) -> Result<Self, Self::Err> {
+        if long_poll_id.len() != LONG_POLL_ID_LENGTH {
+            return Err(format!(
+                "incorrect long poll id length, must be {LONG_POLL_ID_LENGTH} for Zebra"
+            )
+            .into());
+        }
+
         Ok(Self {
             tip_block_height: long_poll_id[0..10].parse()?,
             tip_block_checksum: u32::from_str_radix(&long_poll_id[10..18], 16)?,
             max_timestamp: long_poll_id[18..28].parse()?,
             mempool_transaction_count: long_poll_id[28..38].parse()?,
-            mempool_transaction_content_checksum: u32::from_str_radix(&long_poll_id[38..46], 16)?,
+            mempool_transaction_content_checksum: u32::from_str_radix(
+                &long_poll_id[38..LONG_POLL_ID_LENGTH],
+                16,
+            )?,
         })
+    }
+}
+
+// Wrappers for serde conversion
+impl From<LongPollId> for String {
+    fn from(id: LongPollId) -> Self {
+        id.to_string()
+    }
+}
+
+impl TryFrom<String> for LongPollId {
+    type Error = BoxError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
     }
 }

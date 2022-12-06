@@ -1073,7 +1073,9 @@ async fn rpc_getblocktemplate() {
     let get_block_template_sync_error = get_block_template_rpc
         .get_block_template(Some(
             get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
-                longpollid: Some("".to_string()),
+                // This must parse as a LongPollId.
+                // It must be the correct length and have hex/decimal digits.
+                longpollid: Some("0".repeat(46).parse().expect("invalid LongPollId")),
                 ..Default::default()
             },
         ))
