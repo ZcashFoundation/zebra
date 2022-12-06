@@ -30,7 +30,10 @@ use futures::{future::FutureExt, stream::Stream};
 use tokio::sync::watch;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
-use zebra_chain::{block::Height, chain_tip::ChainTip, transaction::UnminedTxId};
+use zebra_chain::{
+    block::Height, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip,
+    transaction::UnminedTxId,
+};
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
 use zebra_node_services::mempool::{Request, Response};

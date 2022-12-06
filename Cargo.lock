@@ -3698,9 +3698,9 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "sentry"
-version = "0.29.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6425e2a14006415449fb0a3e9a119df5032f59e7a2d9350cf8738eca290dfc5"
+checksum = "17ad137b9df78294b98cab1a650bef237cc6c950e82e5ce164655e674d07c5cc"
 dependencies = [
  "httpdate",
  "reqwest",
@@ -3715,9 +3715,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-backtrace"
-version = "0.29.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04d79c194e5c20fe602e81faf39f3cff0f275ec61283f437a892cfd6544da592"
+checksum = "afe4800806552aab314129761d5d3b3d422284eca3de2ab59e9fd133636cbd3d"
 dependencies = [
  "backtrace",
  "once_cell",
@@ -3727,9 +3727,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-contexts"
-version = "0.29.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1c2a57601eeb870521cc241caee27e57a012f297ece3c1b7eee87f2a531edb5"
+checksum = "a42938426670f6e7974989cd1417837a96dd8bbb01567094f567d6acb360bf88"
 dependencies = [
  "hostname",
  "libc",
@@ -3741,9 +3741,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-core"
-version = "0.29.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8be90ea119c6d0664c8ab534013bc9e90355e7004d782d5d1492ca513393b929"
+checksum = "4df9b9d8de2658a1ecd4e45f7b06c80c5dd97b891bfbc7c501186189b7e9bbdf"
 dependencies = [
  "once_cell",
  "rand 0.8.5",
@@ -3754,9 +3754,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-tracing"
-version = "0.29.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "073a872ab639da1bee23354025ddc9c1b9e5d70eabfe8cd6f10a81914cf6563d"
+checksum = "63fc83ec2cf38726bd18cb1943ff11555b07fd5034cb68b10958ab32e2863a1f"
 dependencies = [
  "sentry-core",
  "tracing-core",
@@ -3765,9 +3765,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-types"
-version = "0.29.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67ad85f0addf16310a1fbcf3facc7acb17ef5dbf6ae059d2f3c38442a471404d"
+checksum = "ccc95faa4078768a6bf8df45e2b894bbf372b3dbbfb364e9429c1c58ab7545c6"
 dependencies = [
  "debugid",
  "getrandom 0.2.5",
@@ -4421,7 +4421,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.32"
+version = "0.2.33"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -4445,7 +4445,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.32"
+version = "0.2.33"
 dependencies = [
  "futures-core",
  "pin-project 0.4.30",
@@ -5295,7 +5295,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.17"
+version = "1.0.0-beta.18"
 dependencies = [
  "aes",
  "bech32 0.9.1",
@@ -5358,7 +5358,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.17"
+version = "1.0.0-beta.18"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -5401,7 +5401,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.17"
+version = "1.0.0-beta.18"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -5437,14 +5437,14 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0-beta.17"
+version = "1.0.0-beta.18"
 dependencies = [
  "zebra-chain",
 ]
 
 [[package]]
 name = "zebra-rpc"
-version = "1.0.0-beta.17"
+version = "1.0.0-beta.18"
 dependencies = [
  "chrono",
  "futures",
@@ -5458,6 +5458,7 @@ dependencies = [
  "num_cpus",
  "proptest",
  "proptest-derive",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "thiserror",
@@ -5476,7 +5477,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.17"
+version = "1.0.0-beta.18"
 dependencies = [
  "displaydoc",
  "hex",
@@ -5489,7 +5490,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.17"
+version = "1.0.0-beta.18"
 dependencies = [
  "bincode",
  "chrono",
@@ -5527,7 +5528,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.17"
+version = "1.0.0-beta.18"
 dependencies = [
  "color-eyre",
  "futures",
@@ -5554,7 +5555,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.17"
+version = "1.0.0-beta.18"
 dependencies = [
  "color-eyre",
  "hex",
@@ -5570,7 +5571,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "abscissa_core",
  "atty",

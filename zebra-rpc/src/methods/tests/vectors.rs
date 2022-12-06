@@ -21,6 +21,9 @@ use zebra_test::mock_service::MockService;
 
 use super::super::*;
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use zebra_chain::chain_sync_status::MockSyncStatus;
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getinfo() {
     let _init_guard = zebra_test::init();
@@ -658,6 +661,7 @@ async fn rpc_getblockcount() {
         read_state,
         latest_chain_tip.clone(),
         chain_verifier,
+        MockSyncStatus::default(),
     );
 
     // Get the tip height using RPC method `get_block_count`
@@ -703,6 +707,7 @@ async fn rpc_getblockcount_empty_state() {
         read_state,
         latest_chain_tip.clone(),
         chain_verifier,
+        MockSyncStatus::default(),
     );
 
     // Get the tip height using RPC method `get_block_count
@@ -754,6 +759,7 @@ async fn rpc_getblockhash() {
         read_state,
         latest_chain_tip.clone(),
         tower::ServiceBuilder::new().service(chain_verifier),
+        MockSyncStatus::default(),
     );
 
     // Query the hashes using positive indexes
@@ -809,6 +815,9 @@ async fn rpc_getblocktemplate() {
     let read_state = MockService::build().for_unit_tests();
     let chain_verifier = MockService::build().for_unit_tests();
 
+    let mut mock_sync_status = MockSyncStatus::default();
+    mock_sync_status.set_is_close_to_tip(true);
+
     let mining_config = get_block_template_rpcs::config::Config {
         miner_address: Some(transparent::Address::from_script_hash(Mainnet, [0x7e; 20])),
     };
@@ -837,7 +846,8 @@ async fn rpc_getblocktemplate() {
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         mock_chain_tip,
-        tower::ServiceBuilder::new().service(chain_verifier),
+        chain_verifier,
+        mock_sync_status.clone(),
     );
 
     // Fake the ChainInfo response
@@ -849,7 +859,7 @@ async fn rpc_getblocktemplate() {
             .respond(ReadResponse::ChainInfo(Some(GetBlockTemplateChainInfo {
                 expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
                 tip: (fake_tip_height, fake_tip_hash),
-                current_system_time: fake_cur_time,
+                cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
             })));
@@ -909,11 +919,35 @@ async fn rpc_getblocktemplate() {
 
     mempool.expect_no_requests().await;
 
-    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(100));
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
     let get_block_template_sync_error = get_block_template_rpc
         .get_block_template()
         .await
         .expect_err("needs an error when estimated distance to network chain tip is far");
+
+    assert_eq!(
+        get_block_template_sync_error.code,
+        ErrorCode::ServerError(-10)
+    );
+
+    mock_sync_status.set_is_close_to_tip(false);
+
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template()
+        .await
+        .expect_err("needs an error when syncer is not close to tip");
+
+    assert_eq!(
+        get_block_template_sync_error.code,
+        ErrorCode::ServerError(-10)
+    );
+
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template()
+        .await
+        .expect_err("needs an error when syncer is not close to tip or estimated distance to network chain tip is far");
 
     assert_eq!(
         get_block_template_sync_error.code,
@@ -958,7 +992,8 @@ async fn rpc_submitblock_errors() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip.clone(),
-        tower::ServiceBuilder::new().service(chain_verifier),
+        chain_verifier,
+        MockSyncStatus::default(),
     );
 
     // Try to submit pre-populated blocks and assert that it responds with duplicate.
