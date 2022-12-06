@@ -125,6 +125,8 @@ After you have the version increments, the updated checkpoints and the updated c
 - [ ] Turn on [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches).
 - [ ] Once the PR is ready to be merged, unfreeze it [here](https://www.mergefreeze.com/installations/3676/branches).
       Do not unfreeze the whole repository.
+- [ ] Update the PR to the latest `main` branch using `@mergifyio update`. Then Mergify should merge it in-place.
+      If it makes a merge PR instead, that PR will get cancelled by the merge freeze. So just merge the changelog PR manually.
 
 ### Create the Release
 
