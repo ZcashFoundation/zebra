@@ -55,6 +55,8 @@ pub struct Config {
     pub debug_force_finished_sync: bool,
 }
 
+// This impl isn't derivable because it depends on features.
+#[allow(clippy::derivable_impls)]
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -62,7 +64,12 @@ impl Default for Config {
             listen_addr: None,
 
             // Use a single thread, so we can detect RPC port conflicts.
+            #[cfg(not(feature = "getblocktemplate-rpcs"))]
             parallel_cpu_threads: 1,
+
+            // Use multiple threads, because we pause requests during getblocktemplate long polling
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            parallel_cpu_threads: 0,
 
             // Debug options are always off by default.
             debug_force_finished_sync: false,
