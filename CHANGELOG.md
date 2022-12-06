@@ -41,10 +41,9 @@ This release has the following breaking changes:
 - Verify that mempool transaction UTXOs are in the best chain ([#5616](https://github.com/ZcashFoundation/zebra/pull/5616))
 - Check block and transaction Sprout anchors in parallel ([#5742](https://github.com/ZcashFoundation/zebra/pull/5742))
 - Contextually validates mempool transactions in best chain ([#5716](https://github.com/ZcashFoundation/zebra/pull/5716))
+- Generate coinbase transactions in the getblocktemplate RPC ([#5580](https://github.com/ZcashFoundation/zebra/pull/5580))
 - Log loaded config path when Zebra starts up ([#5733](https://github.com/ZcashFoundation/zebra/pull/5733))
-
 - Update mainnet and testnet checkpoints on 2022-12-01 ([#5754](https://github.com/ZcashFoundation/zebra/pull/5754))
-
 - Bump zcash\_proofs from 0.8.0 to 0.9.0 and zcash\_primitives from 0.8.1 to 0.9.0 ([#5631](https://github.com/ZcashFoundation/zebra/pull/5631))
 
 ### Fixed
