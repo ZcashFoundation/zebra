@@ -14,12 +14,8 @@ pub const GET_BLOCK_TEMPLATE_MUTABLE_FIELD: &[&str] = &[
 ];
 
 /// A hardcoded list of Zebra's getblocktemplate RPC capabilities.
-pub const GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD: &[&str] = &[
-    // > miners which support long polling SHOULD provide a list including the String "longpoll"
-    //
-    // https://en.bitcoin.it/wiki/BIP_0022#Optional:_Long_Polling
-    "longpoll",
-];
+/// Currently empty.
+pub const GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD: &[&str] = &[];
 
 /// The max estimated distance to the chain tip for the getblocktemplate method.
 ///
