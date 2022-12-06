@@ -27,6 +27,7 @@ expression: block_template
     "sigops": 0,
     "required": true
   },
+  "longpollid": "00016871043eab7f731654008728000000000000000000",
   "target": "0000000000000000000000000000000000000000000000000000000000000001",
   "mintime": 1654008606,
   "mutable": [
