@@ -48,6 +48,7 @@ This release has the following breaking changes:
 - Make the syncer ignore some new block verification errors ([#5537](https://github.com/ZcashFoundation/zebra/pull/5537))
 - Pause new downloads when Zebra reaches the lookahead limit ([#5561](https://github.com/ZcashFoundation/zebra/pull/5561))
 - Shut down the RPC server properly when Zebra shuts down ([#5591](https://github.com/ZcashFoundation/zebra/pull/5591))
+- Print usage info for --help flag ([#5634](https://github.com/ZcashFoundation/zebra/pull/5634))
 
 ### Contributors
 
