@@ -891,9 +891,12 @@ async fn rpc_getblocktemplate() {
     use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
 
     use crate::methods::{
-        get_block_template_rpcs::constants::{
-            GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD, GET_BLOCK_TEMPLATE_MUTABLE_FIELD,
-            GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+        get_block_template_rpcs::{
+            constants::{
+                GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD, GET_BLOCK_TEMPLATE_MUTABLE_FIELD,
+                GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+            },
+            types::long_poll::LONG_POLL_ID_LENGTH,
         },
         tests::utils::fake_history_tree,
     };
@@ -1075,7 +1078,11 @@ async fn rpc_getblocktemplate() {
             get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
                 // This must parse as a LongPollId.
                 // It must be the correct length and have hex/decimal digits.
-                longpollid: Some("0".repeat(46).parse().expect("invalid LongPollId")),
+                longpollid: Some(
+                    "0".repeat(LONG_POLL_ID_LENGTH)
+                        .parse()
+                        .expect("invalid LongPollId"),
+                ),
                 ..Default::default()
             },
         ))
