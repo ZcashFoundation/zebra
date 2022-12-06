@@ -42,3 +42,10 @@ pub use find::{
     hash_by_height, height_by_hash, tip, tip_height,
 };
 pub use tree::{orchard_tree, sapling_tree};
+
+/// If a finalized state query is interrupted by a new finalized block,
+/// retry this many times.
+///
+/// Once we're at the tip, we expect up to 2 blocks to arrive at the same time.
+/// If any more arrive, the client should wait until we're synchronised with our peers.
+pub const FINALIZED_STATE_QUERY_RETRIES: usize = 3;

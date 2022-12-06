@@ -20,11 +20,11 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::{finalized_state::ZebraDb, non_finalized_state::Chain},
+    service::{
+        finalized_state::ZebraDb, non_finalized_state::Chain, read::FINALIZED_STATE_QUERY_RETRIES,
+    },
     BoxError,
 };
-
-use super::FINALIZED_ADDRESS_INDEX_RETRIES;
 
 /// Returns the total transparent balance for the supplied [`transparent::Address`]es.
 ///
@@ -37,7 +37,9 @@ pub fn transparent_balance(
     let mut balance_result = finalized_transparent_balance(db, &addresses);
 
     // Retry the finalized balance query if it was interrupted by a finalizing block
-    for _ in 0..FINALIZED_ADDRESS_INDEX_RETRIES {
+    //
+    // TODO: refactor this into a generic retry(finalized_closure, process_and_check_closure) fn
+    for _ in 0..FINALIZED_STATE_QUERY_RETRIES {
         if balance_result.is_ok() {
             break;
         }

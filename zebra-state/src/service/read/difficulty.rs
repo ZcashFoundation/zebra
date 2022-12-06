@@ -14,18 +14,17 @@ use zebra_chain::{
 use crate::{
     service::{
         any_ancestor_blocks,
+        block_iter::Iter,
         check::{
             difficulty::{BLOCK_MAX_TIME_SINCE_MEDIAN, POW_ADJUSTMENT_BLOCK_SPAN},
             AdjustedDifficulty,
         },
         finalized_state::ZebraDb,
-        read::tree::history_tree,
+        read::{tree::history_tree, FINALIZED_STATE_QUERY_RETRIES},
         NonFinalizedState,
     },
     BoxError, GetBlockTemplateChainInfo, HashOrHeight,
 };
-
-use crate::service::block_iter::Iter;
 
 /// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
 ///
@@ -39,13 +38,13 @@ pub fn get_block_template_chain_info(
     tip: (Height, Hash),
     network: Network,
 ) -> GetBlockTemplateChainInfo {
-    // Amount of retries for a consistency check.
-    const RETRIES: usize = 3;
-
     let mut relevant_chain_and_history_tree_result =
         relevant_chain_and_history_tree(non_finalized_state, db, tip.1);
 
-    for _ in 0..RETRIES {
+    // Retry the finalized state query if it was interrupted by a finalizing block.
+    //
+    // TODO: refactor this into a generic retry(finalized_closure, process_and_check_closure) fn
+    for _ in 0..FINALIZED_STATE_QUERY_RETRIES {
         if relevant_chain_and_history_tree_result.is_ok() {
             break;
         }
