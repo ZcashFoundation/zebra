@@ -133,6 +133,12 @@ pub trait GetBlockTemplateRpc {
         hex_data: HexData,
         _options: Option<submit_block::JsonParameters>,
     ) -> BoxFuture<Result<submit_block::Response>>;
+
+    /// Returns mining-related information.
+    ///
+    /// zcashd reference: [`getmininginfo`](https://zcash.github.io/rpc/getmininginfo.html)
+    #[rpc(name = "getmininginfo")]
+    fn get_mining_info(&self) -> BoxFuture<Result<types::get_mining_info::Response>>;
 }
 
 /// RPC method implementations.
@@ -528,6 +534,11 @@ where
             .into())
         }
         .boxed()
+    }
+
+    fn get_mining_info(&self) -> BoxFuture<Result<types::get_mining_info::Response>> {
+        let network = self.network;
+        async move { Ok(types::get_mining_info::Response::new(network, 0)) }.boxed()
     }
 }
 
