@@ -39,8 +39,8 @@ use crate::methods::{
         },
         types::{
             default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
-            get_block_template_opts::GetBlockTemplateRequestMode, hex_data::HexData, submit_block,
-            transaction::TransactionTemplate,
+            get_block_template_opts::GetBlockTemplateRequestMode, hex_data::HexData,
+            long_poll::LongPollInput, submit_block, transaction::TransactionTemplate,
         },
     },
     GetBlockHash, MISSING_BLOCK_ERROR_CODE,
@@ -429,6 +429,15 @@ where
                 &auth_data_root,
             );
 
+            // TODO: use the entire mempool content via a watch channel,
+            //       rather than the randomly selected transactions
+            let long_poll_id = LongPollInput::new(
+                tip_height,
+                tip_hash,
+                chain_info.max_time,
+                mempool_txs.iter().map(|tx| tx.transaction.id),
+            ).into();
+
             // Convert into TransactionTemplates
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
 
@@ -454,6 +463,8 @@ where
                 transactions: mempool_txs,
 
                 coinbase_txn: TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee),
+
+                long_poll_id,
 
                 target: format!(
                     "{}",

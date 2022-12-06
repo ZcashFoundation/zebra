@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use zebra_chain::{
     block::{self, Height},
-    transaction,
+    transaction::{self, UnminedTxId},
 };
 use zebra_node_services::BoxError;
 
@@ -30,11 +30,11 @@ pub struct LongPollInput {
     /// Old work is no longer valid.
     ///
     /// We use the height as well as the hash, to reduce the probability of a missed tip change.
-    pub tip_block_height: Height,
+    pub tip_height: Height,
 
     /// If the tip block hash changes, a new template must be provided.
     /// Old work is no longer valid.
-    pub tip_block_hash: block::Hash,
+    pub tip_hash: block::Hash,
 
     /// If the max time is reached, a new template must be provided.
     /// Old work is no longer valid.
@@ -52,6 +52,26 @@ pub struct LongPollInput {
     pub mempool_transaction_mined_ids: Arc<[transaction::Hash]>,
 }
 
+impl LongPollInput {
+    /// Returns a new [`LongPollInput`], based on the supplied fields.
+    pub fn new(
+        tip_height: Height,
+        tip_hash: block::Hash,
+        max_time: DateTime<Utc>,
+        mempool_tx_ids: impl IntoIterator<Item = UnminedTxId>,
+    ) -> Self {
+        let mempool_transaction_mined_ids =
+            mempool_tx_ids.into_iter().map(|id| id.mined_id()).collect();
+
+        LongPollInput {
+            tip_height,
+            tip_hash,
+            max_time,
+            mempool_transaction_mined_ids,
+        }
+    }
+}
+
 /// The encoded long poll ID, generated from the [`LongPollInput`].
 ///
 /// `zcashd` IDs are currently 69 hex/decimal digits long.
@@ -65,7 +85,7 @@ pub struct LongPollId {
     /// Old work is no longer valid.
     ///
     /// We use the height as well as the hash, to reduce the probability of a missed tip change.
-    pub tip_block_height: u32,
+    pub tip_height: u32,
 
     /// If the tip block changes, a new template must be provided.
     /// Old work is no longer valid.
@@ -73,7 +93,7 @@ pub struct LongPollId {
     ///
     /// It's ok to do a probabilistic check here,
     /// so we choose a 1 in 2^32 chance of missing a block change.
-    pub tip_block_checksum: u32,
+    pub tip_hash_checksum: u32,
 
     /// If the max time is reached, a new template must be provided.
     /// Old work is no longer valid.
@@ -106,8 +126,8 @@ pub struct LongPollId {
 impl From<LongPollInput> for LongPollId {
     /// Lossy conversion from LongPollInput to LongPollId.
     fn from(input: LongPollInput) -> Self {
-        let mut tip_block_checksum = 0;
-        update_checksum(&mut tip_block_checksum, input.tip_block_hash.0);
+        let mut tip_hash_checksum = 0;
+        update_checksum(&mut tip_hash_checksum, input.tip_hash.0);
 
         let mut mempool_transaction_content_checksum: u32 = 0;
         for tx_mined_id in input.mempool_transaction_mined_ids.iter() {
@@ -115,9 +135,9 @@ impl From<LongPollInput> for LongPollId {
         }
 
         Self {
-            tip_block_height: input.tip_block_height.0,
+            tip_height: input.tip_height.0,
 
-            tip_block_checksum,
+            tip_hash_checksum,
 
             // It's ok to do wrapping conversions here,
             // because long polling checks are probabilistic.
@@ -154,8 +174,8 @@ impl ToString for LongPollId {
     /// Exact conversion from LongPollId to a string.
     fn to_string(&self) -> String {
         let LongPollId {
-            tip_block_height,
-            tip_block_checksum,
+            tip_height,
+            tip_hash_checksum,
             max_timestamp,
             mempool_transaction_count,
             mempool_transaction_content_checksum,
@@ -168,8 +188,8 @@ impl ToString for LongPollId {
             // Checksums as hex, padded with zeroes to the width of u32::MAX
             // Timestamp as decimal, padded with zeroes to the width of u32::MAX
             // Transaction Count as decimal, padded with zeroes to the width of u32::MAX
-            "{tip_block_height:010}\
-             {tip_block_checksum:08x}\
+            "{tip_height:010}\
+             {tip_hash_checksum:08x}\
              {max_timestamp:010}\
              {mempool_transaction_count:010}\
              {mempool_transaction_content_checksum:08x}"
@@ -190,8 +210,8 @@ impl FromStr for LongPollId {
         }
 
         Ok(Self {
-            tip_block_height: long_poll_id[0..10].parse()?,
-            tip_block_checksum: u32::from_str_radix(&long_poll_id[10..18], 16)?,
+            tip_height: long_poll_id[0..10].parse()?,
+            tip_hash_checksum: u32::from_str_radix(&long_poll_id[10..18], 16)?,
             max_timestamp: long_poll_id[18..28].parse()?,
             mempool_transaction_count: long_poll_id[28..38].parse()?,
             mempool_transaction_content_checksum: u32::from_str_radix(
