@@ -76,7 +76,7 @@ You can run Zebra using our Docker image.
 This command will run our latest release, and sync it to the tip:
 
 ```sh
-docker run zfnd/zebra:1.0.0-rc.1
+docker run zfnd/zebra:1.0.0-rc.2
 ```
 
 For more information, read our [Docker documentation](book/src/user/docker.md).
@@ -102,7 +102,7 @@ for your platform:
    - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages
      (these packages will have different names depending on your package manager)
    - **clang** or another C++ compiler: `g++` (all platforms) or `Xcode` (macOS)
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.1 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.2 zebrad`
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 For more detailed instructions, refer to the [documentation](https://zebra.zfnd.org/user/install.html).
@@ -245,7 +245,7 @@ There are a few bugs in Zebra that we're still working on fixing:
 - If Zebra fails downloading the Zcash parameters, use [the Zcash parameters download script](https://github.com/zcash/zcash/blob/master/zcutil/fetch-params.sh) instead. This script might be needed on macOS, even with Rust stable.
 - No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801)
   - We used to test with Windows Server 2019, but not anymore; see issue for details
-  
+
 - Experimental Tor support is disabled until [`arti-client` upgrades to `x25519-dalek` 2.0.0 or later](https://github.com/ZcashFoundation/zebra/issues/5492)
   - This happens due to a Rust dependency conflict, which can only be resolved by changing the dependencies of `x25519-dalek`
 
