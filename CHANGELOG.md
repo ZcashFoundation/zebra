@@ -4,7 +4,7 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.0.0-rc.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.2) - 2022-11-TODO
+## [Zebra 1.0.0-rc.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.2) - 2022-12-06
 
 Zebra's latest release continues work on mining pool RPCs, fixes a rare RPC crash that could lead to memory corruption, and uses the ZIP-317 conventional fee for mempool size limits.
 
@@ -20,14 +20,47 @@ This release has the following breaking changes:
   - The ZIP-317 convention fee increases based on the number of logical transparent or
     shielded actions in a transaction.
   - This change has no impact under normal network conditions.
-- TODO: search the changelog for breaking changes
 
 ### Security
 
 - Fix a rare crash and memory errors when Zebra's RPC server shuts down ([#5591](https://github.com/ZcashFoundation/zebra/pull/5591))
 - Evict transactions from the mempool using the ZIP-317 conventional fee ([#5703](https://github.com/ZcashFoundation/zebra/pull/5703))
 
-TODO: the rest of the changelog
+### Added
+
+- Add submitblock RPC method ([#5526](https://github.com/ZcashFoundation/zebra/pull/5526))
+- Add a `mining` section with miner address to config ([#5491](https://github.com/ZcashFoundation/zebra/pull/5508))
+
+### Changed
+
+- Select getblocktemplate RPC transactions according to ZIP-317 ([#5724](https://github.com/ZcashFoundation/zebra/pull/5724))
+- Add transaction fields to the `getblocktemplate` RPC ([#5496](https://github.com/ZcashFoundation/zebra/pull/5496) and [#5508](https://github.com/ZcashFoundation/zebra/pull/5508))
+- Populate some getblocktemplate RPC block header fields using the state best chain tip  ([#5659](https://github.com/ZcashFoundation/zebra/pull/5659))
+- Return an error from getblocktemplate method if Zebra is not synced to network tip ([#5623](https://github.com/ZcashFoundation/zebra/pull/5623))
+- Implement coinbase conversion to RPC `TransactionTemplate` type ([#5554](https://github.com/ZcashFoundation/zebra/pull/5554))
+- Check block and transaction Sprout anchors in parallel ([#5742](https://github.com/ZcashFoundation/zebra/pull/5742))
+- Contextually validates mempool transactions in best chain ([#5716](https://github.com/ZcashFoundation/zebra/pull/5716) and [#5616](https://github.com/ZcashFoundation/zebra/pull/5616))
+- Generate coinbase transactions in the getblocktemplate RPC ([#5580](https://github.com/ZcashFoundation/zebra/pull/5580))
+- Log loaded config path when Zebra starts up ([#5733](https://github.com/ZcashFoundation/zebra/pull/5733))
+- Update mainnet and testnet checkpoints on 2022-12-01 ([#5754](https://github.com/ZcashFoundation/zebra/pull/5754))
+- Bump zcash\_proofs from 0.8.0 to 0.9.0 and zcash\_primitives from 0.8.1 to 0.9.0 ([#5631](https://github.com/ZcashFoundation/zebra/pull/5631))
+
+### Fixed
+
+- Check network and P2SH addresses for mining config and funding streams([#5620](https://github.com/ZcashFoundation/zebra/pull/5620))
+- Return an error instead of panicking in the batch verifier on shutdown ([#5530](https://github.com/ZcashFoundation/zebra/pull/5530))
+- Use a more reliable release template branch name and docker command ([#5519](https://github.com/ZcashFoundation/zebra/pull/5519))
+- Make the syncer ignore some new block verification errors ([#5537](https://github.com/ZcashFoundation/zebra/pull/5537))
+- Pause new downloads when Zebra reaches the lookahead limit ([#5561](https://github.com/ZcashFoundation/zebra/pull/5561))
+- Shut down the RPC server properly when Zebra shuts down ([#5591](https://github.com/ZcashFoundation/zebra/pull/5591))
+- Print usage info for --help flag ([#5634](https://github.com/ZcashFoundation/zebra/pull/5634))
+- Fix RPC bugs ([#5761](https://github.com/ZcashFoundation/zebra/pull/5761))
+- Clarify inbound and outbound port requirements ([#5584](https://github.com/ZcashFoundation/zebra/pull/5584))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @oxarbitrage, @teor2345, and @mpguerra
 
 
 ## [Zebra 1.0.0-rc.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.1) - 2022-11-02
