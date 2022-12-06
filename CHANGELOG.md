@@ -56,6 +56,7 @@ This release has the following breaking changes:
 - Shut down the RPC server properly when Zebra shuts down ([#5591](https://github.com/ZcashFoundation/zebra/pull/5591))
 - Print usage info for --help flag ([#5634](https://github.com/ZcashFoundation/zebra/pull/5634))
 - Fix RPC bugs ([#5761](https://github.com/ZcashFoundation/zebra/pull/5761))
+- Clarify inbound and outbound port requirements ([#5584](https://github.com/ZcashFoundation/zebra/pull/5584))
 
 ### Contributors
 
