@@ -63,7 +63,11 @@ pub(crate) async fn run() -> Result<()> {
          with a mempool that is likely empty...",
     );
     let getblocktemplate_response = RPCRequestClient::new(rpc_address)
-        .call("getblocktemplate", "[]".to_string())
+        .call(
+            "getblocktemplate",
+            // test that unknown capabilities are parsed as valid input
+            "[{\"capabilities\": [\"generation\"]}]".to_string(),
+        )
         .await?;
 
     let is_response_success = getblocktemplate_response.status().is_success();
