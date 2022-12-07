@@ -19,7 +19,7 @@ use crate::{
             AdjustedDifficulty,
         },
         finalized_state::ZebraDb,
-        read::{tree::history_tree, FINALIZED_STATE_QUERY_RETRIES},
+        read::{self, tree::history_tree, FINALIZED_STATE_QUERY_RETRIES},
         NonFinalizedState,
     },
     BoxError, GetBlockTemplateChainInfo,
@@ -81,12 +81,11 @@ fn relevant_chain_and_history_tree(
     ),
     BoxError,
 > {
-    let finalized_tip_before_queries = db.tip().ok_or_else(|| {
+    let state_tip_before_queries = read::best_tip(non_finalized_state, db).ok_or_else(|| {
         BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
     })?;
 
-    let relevant_chain =
-        any_ancestor_blocks(non_finalized_state, db, finalized_tip_before_queries.1);
+    let relevant_chain = any_ancestor_blocks(non_finalized_state, db, state_tip_before_queries.1);
     let relevant_chain: Vec<_> = relevant_chain
         .into_iter()
         .take(POW_ADJUSTMENT_BLOCK_SPAN)
@@ -98,21 +97,22 @@ fn relevant_chain_and_history_tree(
     let history_tree = history_tree(
         non_finalized_state.best_chain(),
         db,
-        finalized_tip_before_queries.1.into(),
+        state_tip_before_queries.into(),
     )
     .expect("tip hash should exist in the chain");
 
-    let finalized_tip_after_queries = db.tip().expect("already checked for an empty tip");
+    let state_tip_after_queries =
+        read::best_tip(non_finalized_state, db).expect("already checked for an empty tip");
 
-    if finalized_tip_before_queries != finalized_tip_after_queries {
+    if state_tip_before_queries != state_tip_after_queries {
         return Err("Zebra is committing too many blocks to the state, \
                     wait until it syncs to the chain tip"
             .into());
     }
 
     Ok((
-        finalized_tip_before_queries.0,
-        finalized_tip_before_queries.1,
+        state_tip_before_queries.0,
+        state_tip_before_queries.1,
         relevant_chain,
         history_tree,
     ))

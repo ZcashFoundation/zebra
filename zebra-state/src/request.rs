@@ -61,8 +61,21 @@ impl From<block::Hash> for HashOrHeight {
 }
 
 impl From<block::Height> for HashOrHeight {
-    fn from(hash: block::Height) -> Self {
-        Self::Height(hash)
+    fn from(height: block::Height) -> Self {
+        Self::Height(height)
+    }
+}
+
+impl From<(block::Height, block::Hash)> for HashOrHeight {
+    fn from((_height, hash): (block::Height, block::Hash)) -> Self {
+        // Hash is more specific than height for the non-finalized state
+        hash.into()
+    }
+}
+
+impl From<(block::Hash, block::Height)> for HashOrHeight {
+    fn from((hash, _height): (block::Hash, block::Height)) -> Self {
+        hash.into()
     }
 }
 
