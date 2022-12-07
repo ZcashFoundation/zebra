@@ -33,8 +33,9 @@ use zebra_state::{ReadRequest, ReadResponse};
 use crate::methods::{
     best_chain_tip_height,
     get_block_template_rpcs::types::{
-        default_roots::DefaultRoots, get_block_template::GetBlockTemplate, hex_data::HexData,
-        submit_block, transaction::TransactionTemplate,
+        default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
+        get_block_template_opts::GetBlockTemplateRequestMode, hex_data::HexData, submit_block,
+        transaction::TransactionTemplate,
     },
     GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
@@ -42,7 +43,7 @@ use crate::methods::{
 pub mod config;
 pub mod constants;
 
-pub(crate) mod types;
+pub mod types;
 pub(crate) mod zip317;
 
 /// The max estimated distance to the chain tip for the getblocktemplate method.
@@ -113,7 +114,10 @@ pub trait GetBlockTemplateRpc {
     ///
     /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[rpc(name = "getblocktemplate")]
-    fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>>;
+    fn get_block_template(
+        &self,
+        options: Option<types::get_block_template_opts::JsonParameters>,
+    ) -> BoxFuture<Result<GetBlockTemplate>>;
 
     /// Submits block to the node to be validated and committed.
     /// Returns the [`submit_block::Response`] for the operation, as a JSON string.
@@ -292,7 +296,10 @@ where
         .boxed()
     }
 
-    fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>> {
+    fn get_block_template(
+        &self,
+        options: Option<types::get_block_template_opts::JsonParameters>,
+    ) -> BoxFuture<Result<GetBlockTemplate>> {
         let network = self.network;
         let miner_address = self.miner_address;
 
@@ -303,6 +310,24 @@ where
 
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
+            if let Some(options) = options {
+                if options.data.is_some() || options.mode == GetBlockTemplateRequestMode::Proposal {
+                    return Err(Error {
+                        code: ErrorCode::InvalidParams,
+                        message: "\"proposal\" mode is currently unsupported by Zebra".to_string(),
+                        data: None,
+                    })
+                }
+
+                if options.longpollid.is_some() {
+                    return Err(Error {
+                        code: ErrorCode::InvalidParams,
+                        message: "long polling is currently unsupported by Zebra".to_string(),
+                        data: None,
+                    })
+                }
+            }
+
             let miner_address = miner_address.ok_or_else(|| Error {
                 code: ErrorCode::ServerError(0),
                 message: "configure mining.miner_address in zebrad.toml \

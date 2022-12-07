@@ -163,7 +163,7 @@ pub async fn test_responses<State, ReadState>(
             })));
     });
 
-    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
+    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template(None));
 
     mempool
         .expect_request(mempool::Request::FullTransactions)
