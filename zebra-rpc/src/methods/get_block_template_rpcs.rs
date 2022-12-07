@@ -312,7 +312,7 @@ where
 
             // The tip estimate may not be the same as the one coming from the state
             // but this is ok for an estimate
-            let (estimated_distance_to_chain_tip, tip_height) = latest_chain_tip
+            let (estimated_distance_to_chain_tip, estimated_tip_height) = latest_chain_tip
                 .estimate_distance_to_network_chain_tip(network)
                 .ok_or_else(|| Error {
                     code: ErrorCode::ServerError(0),
@@ -323,7 +323,7 @@ where
             if !sync_status.is_close_to_tip() || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
                 tracing::info!(
                     estimated_distance_to_chain_tip,
-                    ?tip_height,
+                    ?estimated_tip_height,
                     "Zebra has not synced to the chain tip"
                 );
 
@@ -351,15 +351,12 @@ where
                             })?;
 
             let chain_info = match response {
-                ReadResponse::ChainInfo(Some(chain_info)) => chain_info,
+                ReadResponse::ChainInfo(chain_info) => chain_info,
                 _ => unreachable!("we should always have enough state data here to get a `GetBlockTemplateChainInfo`"),
             };
 
             // Get the tip data from the state call
-            let tip_height = chain_info.tip.0;
-            let tip_hash = chain_info.tip.1;
-
-            let block_height = (tip_height + 1).expect("tip is far below Height::MAX");
+            let block_height = (chain_info.tip_height + 1).expect("tip is far below Height::MAX");
 
             let outputs =
                 standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
@@ -369,8 +366,10 @@ where
                 calculate_transaction_roots(&coinbase_tx, &mempool_txs);
 
             let history_tree = chain_info.history_tree;
+            // TODO: move expensive cryptography to a rayon thread?
             let chain_history_root = history_tree.hash().expect("history tree can't be empty");
 
+            // TODO: move expensive cryptography to a rayon thread?
             let block_commitments_hash = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
                 &chain_history_root,
                 &auth_data_root,
@@ -386,7 +385,7 @@ where
 
                 version: ZCASH_BLOCK_VERSION,
 
-                previous_block_hash: GetBlockHash(tip_hash),
+                previous_block_hash: GetBlockHash(chain_info.tip_hash),
                 block_commitments_hash,
                 light_client_root_hash: block_commitments_hash,
                 final_sapling_root_hash: block_commitments_hash,

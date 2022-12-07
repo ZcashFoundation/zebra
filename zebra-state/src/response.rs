@@ -132,16 +132,20 @@ pub enum ReadResponse {
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::ChainInfo`](crate::ReadRequest::ChainInfo) with the state
     /// information needed by the `getblocktemplate` RPC method.
-    ChainInfo(Option<GetBlockTemplateChainInfo>),
+    ChainInfo(GetBlockTemplateChainInfo),
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GetBlockTemplateChainInfo {
-    /// The current state tip height and hash.
-    /// The block template for the candidate block is the next block after this block.
-    pub tip: (block::Height, block::Hash),
+    /// The current state tip height.
+    /// The block template OAfor the candidate block is the next block after this block.
+    pub tip_height: block::Height,
+
+    /// The current state tip height.
+    /// The block template for the candidate block has this hash as the previous block hash.
+    pub tip_hash: block::Hash,
 
     /// The expected difficulty of the candidate block.
     pub expected_difficulty: CompactDifficulty,

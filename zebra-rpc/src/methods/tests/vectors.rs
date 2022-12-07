@@ -859,14 +859,15 @@ async fn rpc_getblocktemplate() {
             .clone()
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
-            .respond(ReadResponse::ChainInfo(Some(GetBlockTemplateChainInfo {
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
                 expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
-                tip: (fake_tip_height, fake_tip_hash),
+                tip_height: fake_tip_height,
+                tip_hash: fake_tip_hash,
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
                 history_tree: fake_history_tree(Mainnet),
-            })));
+            }));
     });
 
     let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
