@@ -19,11 +19,11 @@ use std::{
 use zebra_chain::{block::Height, transaction, transparent};
 
 use crate::{
-    service::{finalized_state::ZebraDb, non_finalized_state::Chain},
+    service::{
+        finalized_state::ZebraDb, non_finalized_state::Chain, read::FINALIZED_STATE_QUERY_RETRIES,
+    },
     BoxError, TransactionLocation,
 };
-
-use super::FINALIZED_ADDRESS_INDEX_RETRIES;
 
 /// Returns the transaction IDs that sent or received funds from the supplied [`transparent::Address`]es,
 /// within `query_height_range`, in chain order.
@@ -44,7 +44,9 @@ where
 
     // Retry the finalized tx ID query if it was interrupted by a finalizing block,
     // and the non-finalized chain doesn't overlap the changed heights.
-    for _ in 0..=FINALIZED_ADDRESS_INDEX_RETRIES {
+    //
+    // TODO: refactor this into a generic retry(finalized_closure, process_and_check_closure) fn
+    for _ in 0..=FINALIZED_STATE_QUERY_RETRIES {
         let (finalized_tx_ids, finalized_tip_range) =
             finalized_transparent_tx_ids(db, &addresses, query_height_range.clone());
 

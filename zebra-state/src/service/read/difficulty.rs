@@ -1,11 +1,12 @@
 //! Get context and calculate difficulty for the next block.
 
-use std::borrow::Borrow;
+use std::sync::Arc;
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
 
 use zebra_chain::{
-    block::{Block, Hash, Height},
+    block::{self, Block, Height},
+    history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
     work::difficulty::CompactDifficulty,
 };
@@ -18,70 +19,133 @@ use crate::{
             AdjustedDifficulty,
         },
         finalized_state::ZebraDb,
+        read::{self, tree::history_tree, FINALIZED_STATE_QUERY_RETRIES},
         NonFinalizedState,
     },
-    GetBlockTemplateChainInfo,
+    BoxError, GetBlockTemplateChainInfo,
 };
 
 /// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
 ///
 /// # Panics
 ///
-/// If we don't have enough blocks in the state.
-pub fn difficulty_and_time_info(
+/// - If we don't have enough blocks in the state.
+/// - If a consistency check fails `RETRIES` times.
+pub fn get_block_template_chain_info(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
-    tip: (Height, Hash),
     network: Network,
-) -> GetBlockTemplateChainInfo {
-    let relevant_chain = any_ancestor_blocks(non_finalized_state, db, tip.1);
-    difficulty_and_time(relevant_chain, tip, network)
+) -> Result<GetBlockTemplateChainInfo, BoxError> {
+    let mut relevant_chain_and_history_tree_result =
+        relevant_chain_and_history_tree(non_finalized_state, db);
+
+    // Retry the finalized state query if it was interrupted by a finalizing block.
+    //
+    // TODO: refactor this into a generic retry(finalized_closure, process_and_check_closure) fn
+    for _ in 0..FINALIZED_STATE_QUERY_RETRIES {
+        if relevant_chain_and_history_tree_result.is_ok() {
+            break;
+        }
+
+        relevant_chain_and_history_tree_result =
+            relevant_chain_and_history_tree(non_finalized_state, db);
+    }
+
+    let (tip_height, tip_hash, relevant_chain, history_tree) =
+        relevant_chain_and_history_tree_result?;
+
+    Ok(difficulty_time_and_history_tree(
+        relevant_chain,
+        tip_height,
+        tip_hash,
+        network,
+        history_tree,
+    ))
 }
 
-/// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
+/// Do a consistency check by checking the finalized tip before and after all other database queries.
+/// Returns and error if the tip obtained before and after is not the same.
 ///
-/// See [`difficulty_and_time_info()`] for details.
-fn difficulty_and_time<C>(
-    relevant_chain: C,
-    tip: (Height, Hash),
-    network: Network,
-) -> GetBlockTemplateChainInfo
-where
-    C: IntoIterator,
-    C::Item: Borrow<Block>,
-    C::IntoIter: ExactSizeIterator,
-{
+/// # Panics
+///
+/// - If we don't have enough blocks in the state.
+fn relevant_chain_and_history_tree(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+) -> Result<
+    (
+        Height,
+        block::Hash,
+        [Arc<Block>; POW_ADJUSTMENT_BLOCK_SPAN],
+        Arc<HistoryTree>,
+    ),
+    BoxError,
+> {
+    let state_tip_before_queries = read::best_tip(non_finalized_state, db).ok_or_else(|| {
+        BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
+    })?;
+
+    let relevant_chain = any_ancestor_blocks(non_finalized_state, db, state_tip_before_queries.1);
     let relevant_chain: Vec<_> = relevant_chain
         .into_iter()
         .take(POW_ADJUSTMENT_BLOCK_SPAN)
         .collect();
+    let relevant_chain = relevant_chain.try_into().map_err(|_error| {
+        "Zebra's state only has a few blocks, wait until it syncs to the chain tip"
+    })?;
 
+    let history_tree = history_tree(
+        non_finalized_state.best_chain(),
+        db,
+        state_tip_before_queries.into(),
+    )
+    .expect("tip hash should exist in the chain");
+
+    let state_tip_after_queries =
+        read::best_tip(non_finalized_state, db).expect("already checked for an empty tip");
+
+    if state_tip_before_queries != state_tip_after_queries {
+        return Err("Zebra is committing too many blocks to the state, \
+                    wait until it syncs to the chain tip"
+            .into());
+    }
+
+    Ok((
+        state_tip_before_queries.0,
+        state_tip_before_queries.1,
+        relevant_chain,
+        history_tree,
+    ))
+}
+
+/// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
+///
+/// See [`get_block_template_chain_info()`] for details.
+fn difficulty_time_and_history_tree(
+    relevant_chain: [Arc<Block>; POW_ADJUSTMENT_BLOCK_SPAN],
+    tip_height: Height,
+    tip_hash: block::Hash,
+    network: Network,
+    history_tree: Arc<HistoryTree>,
+) -> GetBlockTemplateChainInfo {
     let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
         .iter()
-        .map(|block| {
-            (
-                block.borrow().header.difficulty_threshold,
-                block.borrow().header.time,
-            )
-        })
+        .map(|block| (block.header.difficulty_threshold, block.header.time))
         .collect();
-
-    // The getblocktemplate RPC returns an error if Zebra is not synced to the tip.
-    // So this will never happen in production code.
-    assert_eq!(
-        relevant_data.len(),
-        POW_ADJUSTMENT_BLOCK_SPAN,
-        "getblocktemplate RPC called with a near-empty state: should have returned an error",
-    );
 
     let cur_time = chrono::Utc::now();
 
     // Get the median-time-past, which doesn't depend on the time or the previous block height.
+    // `context` will always have the correct length, because this function takes an array.
     //
     // TODO: split out median-time-past into its own struct?
-    let median_time_past =
-        AdjustedDifficulty::new_from_header_time(cur_time, tip.0, network, relevant_data.clone())
-            .median_time_past();
+    let median_time_past = AdjustedDifficulty::new_from_header_time(
+        cur_time,
+        tip_height,
+        network,
+        relevant_data.clone(),
+    )
+    .median_time_past();
 
     // > For each block other than the genesis block , nTime MUST be strictly greater than
     // > the median-time-past of that block.
@@ -110,20 +174,22 @@ where
     // Now that we have a valid time, get the difficulty for that time.
     let difficulty_adjustment = AdjustedDifficulty::new_from_header_time(
         cur_time,
-        tip.0,
+        tip_height,
         network,
         relevant_data.iter().cloned(),
     );
 
     let mut result = GetBlockTemplateChainInfo {
-        tip,
+        tip_height,
+        tip_hash,
         expected_difficulty: difficulty_adjustment.expected_difficulty_threshold(),
         min_time,
         cur_time,
         max_time,
+        history_tree,
     };
 
-    adjust_difficulty_and_time_for_testnet(&mut result, network, tip.0, relevant_data);
+    adjust_difficulty_and_time_for_testnet(&mut result, network, tip_height, relevant_data);
 
     result
 }

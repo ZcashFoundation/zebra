@@ -1607,21 +1607,16 @@ impl Service<ReadRequest> for ReadStateService {
                         // In that case, the `getblocktemplate` RPC will return an error because Zebra
                         // is not synced to the tip. That check happens before the RPC makes this request.
                         let get_block_template_info =
-                            read::tip(latest_non_finalized_state.best_chain(), &state.db).map(
-                                |tip| {
-                                    read::difficulty::difficulty_and_time_info(
-                                        &latest_non_finalized_state,
-                                        &state.db,
-                                        tip,
-                                        state.network,
-                                    )
-                                },
+                            read::difficulty::get_block_template_chain_info(
+                                &latest_non_finalized_state,
+                                &state.db,
+                                state.network,
                             );
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");
 
-                        Ok(ReadResponse::ChainInfo(get_block_template_info))
+                        get_block_template_info.map(ReadResponse::ChainInfo)
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::ChainInfo"))
