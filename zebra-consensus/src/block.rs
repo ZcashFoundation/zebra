@@ -226,8 +226,7 @@ where
 
                 assert!(
                     matches!(response, tx::Response::Block { .. }),
-                    "unexpected response from transaction verifier: {:?}",
-                    response
+                    "unexpected response from transaction verifier: {response:?}"
                 );
 
                 legacy_sigop_count += response.legacy_sigop_count();

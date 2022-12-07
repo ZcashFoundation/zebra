@@ -326,8 +326,7 @@ impl<'de> Deserialize<'de> for Config {
             Err(_) => match config.listen_addr.parse::<IpAddr>() {
                 Ok(ip) => Ok(SocketAddr::new(ip, config.network.default_port())),
                 Err(err) => Err(de::Error::custom(format!(
-                    "{}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional",
-                    err
+                    "{err}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional"
                 ))),
             },
         }?;
