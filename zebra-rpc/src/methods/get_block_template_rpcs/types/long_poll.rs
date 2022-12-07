@@ -26,16 +26,23 @@ pub const LONG_POLL_ID_LENGTH: usize = 46;
 pub struct LongPollInput {
     // Fields that invalidate old work:
     //
+    /// The tip height used to generate the template containing this long poll ID.
+    ///
     /// If the tip block height changes, a new template must be provided.
     /// Old work is no longer valid.
     ///
-    /// We use the height as well as the hash, to reduce the probability of a missed tip change.
+    /// The height is technically redundant, but it helps with debugging.
+    /// It also reduces the probability of a missed tip change.
     pub tip_height: Height,
 
-    /// If the tip block hash changes, a new template must be provided.
+    /// The tip hash used to generate the template containing this long poll ID.
+    ///
+    /// If the tip block changes, a new template must be provided.
     /// Old work is no longer valid.
     pub tip_hash: block::Hash,
 
+    /// The max time in the same template as this long poll ID.
+    ///
     /// If the max time is reached, a new template must be provided.
     /// Old work is no longer valid.
     ///
@@ -45,10 +52,14 @@ pub struct LongPollInput {
 
     // Fields that allow old work:
     //
+    /// The effecting hashes of the transactions in the mempool,
+    /// when the template containing this long poll ID was generated.
+    /// We ignore changes to authorizing data.
+    ///
+    /// This might be different from the transactions in the template, due to ZIP-317.
+    ///
     /// If the mempool transactions change, a new template might be provided.
     /// Old work is still valid.
-    ///
-    /// We ignore changes to authorizing data.
     pub mempool_transaction_mined_ids: Arc<[transaction::Hash]>,
 }
 
@@ -81,12 +92,17 @@ impl LongPollInput {
 pub struct LongPollId {
     // Fields that invalidate old work:
     //
+    /// The tip height used to generate the template containing this long poll ID.
+    ///
     /// If the tip block height changes, a new template must be provided.
     /// Old work is no longer valid.
     ///
-    /// We use the height as well as the hash, to reduce the probability of a missed tip change.
+    /// The height is technically redundant, but it helps with debugging.
+    /// It also reduces the probability of a missed tip change.
     pub tip_height: u32,
 
+    /// A checksum of the tip hash used to generate the template containing this long poll ID.
+    ///
     /// If the tip block changes, a new template must be provided.
     /// Old work is no longer valid.
     /// This checksum is not cryptographically secure.
@@ -95,6 +111,8 @@ pub struct LongPollId {
     /// so we choose a 1 in 2^32 chance of missing a block change.
     pub tip_hash_checksum: u32,
 
+    /// The max time in the same template as this long poll ID.
+    ///
     /// If the max time is reached, a new template must be provided.
     /// Old work is no longer valid.
     ///
@@ -106,20 +124,40 @@ pub struct LongPollId {
 
     // Fields that allow old work:
     //
+    /// The number of transactions in the mempool when the template containing this long poll ID
+    /// was generated. This might be different from the number of transactions in the template,
+    /// due to ZIP-317.
+    ///
     /// If the number of mempool transactions changes, a new template might be provided.
     /// Old work is still valid.
     ///
     /// The number of transactions is limited by the mempool DoS limit.
+    ///
+    /// Using the number of transactions makes mempool checksum attacks much harder.
+    /// It also helps with debugging, and reduces the probability of a missed mempool change.
     pub mempool_transaction_count: u32,
 
+    /// A checksum of the effecting hashes of the transactions in the mempool,
+    /// when the template containing this long poll ID was generated.
+    /// We ignore changes to authorizing data.
+    ///
+    /// This might be different from the transactions in the template, due to ZIP-317.
+    ///
     /// If the content of the mempool changes, a new template might be provided.
     /// Old work is still valid.
-    /// This checksum is not cryptographically secure.
     ///
-    /// We ignore changes to authorizing data.
+    /// This checksum is not cryptographically secure.
     ///
     /// It's ok to do a probabilistic check here,
     /// so we choose a 1 in 2^32 chance of missing a transaction change.
+    ///
+    /// # Security
+    ///
+    /// Attackers could use dust transactions to keep the checksum at the same value.
+    /// But this would likely change the number of transactions in the mempool.
+    ///
+    /// If an attacker could also keep the number of transactions constant,
+    /// a new template will be generated when the tip hash changes, or the max time is reached.
     pub mempool_transaction_content_checksum: u32,
 }
 

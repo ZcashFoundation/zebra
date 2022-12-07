@@ -422,7 +422,7 @@ where
             );
 
             // TODO: use the entire mempool content via a watch channel,
-            //       rather than the randomly selected transactions
+            //       rather than just the randomly selected transactions
             let long_poll_id = LongPollInput::new(
                 chain_info.tip_height,
                 chain_info.tip_hash,
