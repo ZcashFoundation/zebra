@@ -27,7 +27,7 @@ use zebra_consensus::{
 };
 use zebra_node_services::mempool;
 
-use zebra_state::{ReadRequest, ReadResponse};
+use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
 
 use crate::methods::{
     best_chain_tip_height,
@@ -310,33 +310,31 @@ where
                 data: None,
             })?;
 
-            // The tip estimate may not be the same as the one coming from the state
-            // but this is ok for an estimate
-            let (estimated_distance_to_chain_tip, estimated_tip_height) = latest_chain_tip
-                .estimate_distance_to_network_chain_tip(network)
-                .ok_or_else(|| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: "No Chain tip available yet".to_string(),
-                    data: None,
-                })?;
+            {
+                // The tip height may change between this call and the `ChainInfo` request,
+                // but this is ok for estimating distance to the network tip and logging debug info.
+                let (estimated_distance_to_chain_tip, tip_height) = latest_chain_tip
+                    .estimate_distance_to_network_chain_tip(network)
+                    .ok_or_else(|| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: "No Chain tip available yet".to_string(),
+                        data: None,
+                    })?;
 
-            if !sync_status.is_close_to_tip() || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
-                tracing::info!(
-                    estimated_distance_to_chain_tip,
-                    ?estimated_tip_height,
-                    "Zebra has not synced to the chain tip"
-                );
+                if !sync_status.is_close_to_tip() || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
+                    tracing::info!(
+                        estimated_distance_to_chain_tip,
+                        ?tip_height,
+                        "Zebra has not synced to the chain tip"
+                    );
 
-                return Err(Error {
-                    code: NOT_SYNCED_ERROR_CODE,
-                    message: format!("Zebra has not synced to the chain tip, estimated distance: {estimated_distance_to_chain_tip}"),
-                    data: None,
-                });
+                    return Err(Error {
+                        code: NOT_SYNCED_ERROR_CODE,
+                        message: format!("Zebra has not synced to the chain tip, estimated distance: {estimated_distance_to_chain_tip}"),
+                        data: None,
+                    });
+                }
             }
-
-            let mempool_txs = zip317::select_mempool_transactions(mempool).await?;
-
-            let miner_fee = miner_fee(&mempool_txs);
 
             // Calling state with `ChainInfo` request for relevant chain data
             let request = ReadRequest::ChainInfo;
@@ -350,13 +348,25 @@ where
                                 data: None,
                             })?;
 
-            let chain_info = match response {
+            let GetBlockTemplateChainInfo {
+                tip_height,
+                tip_hash,
+                expected_difficulty,
+                cur_time,
+                min_time,
+                max_time,
+                history_tree
+            } = match response {
                 ReadResponse::ChainInfo(chain_info) => chain_info,
                 _ => unreachable!("we should always have enough state data here to get a `GetBlockTemplateChainInfo`"),
             };
 
+            let mempool_txs = zip317::select_mempool_transactions(mempool).await?;
+
+            let miner_fee = miner_fee(&mempool_txs);
+
             // Get the tip data from the state call
-            let block_height = (chain_info.tip_height + 1).expect("tip is far below Height::MAX");
+            let block_height = (tip_height + 1).expect("tip is far below Height::MAX");
 
             let outputs =
                 standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
@@ -365,7 +375,6 @@ where
             let (merkle_root, auth_data_root) =
                 calculate_transaction_roots(&coinbase_tx, &mempool_txs);
 
-            let history_tree = chain_info.history_tree;
             // TODO: move expensive cryptography to a rayon thread?
             let chain_history_root = history_tree.hash().expect("history tree can't be empty");
 
@@ -385,7 +394,7 @@ where
 
                 version: ZCASH_BLOCK_VERSION,
 
-                previous_block_hash: GetBlockHash(chain_info.tip_hash),
+                previous_block_hash: GetBlockHash(tip_hash),
                 block_commitments_hash,
                 light_client_root_hash: block_commitments_hash,
                 final_sapling_root_hash: block_commitments_hash,
@@ -402,12 +411,12 @@ where
 
                 target: format!(
                     "{}",
-                    chain_info.expected_difficulty
+                    expected_difficulty
                         .to_expanded()
                         .expect("state always returns a valid difficulty value")
                 ),
 
-                min_time: chain_info.min_time.timestamp(),
+                min_time: min_time.timestamp(),
 
                 mutable,
 
@@ -417,15 +426,15 @@ where
 
                 size_limit: MAX_BLOCK_BYTES,
 
-                cur_time: chain_info.cur_time.timestamp(),
+                cur_time: cur_time.timestamp(),
 
-                bits: format!("{:#010x}", chain_info.expected_difficulty.to_value())
+                bits: format!("{:#010x}", expected_difficulty.to_value())
                     .drain(2..)
                     .collect(),
 
                 height: block_height.0,
 
-                max_time: chain_info.max_time.timestamp(),
+                max_time: max_time.timestamp(),
             })
         }
         .boxed()
