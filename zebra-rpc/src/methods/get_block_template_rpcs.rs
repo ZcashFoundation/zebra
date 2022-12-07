@@ -355,7 +355,7 @@ where
 
             // The tip estimate may not be the same as the one coming from the state
             // but this is ok for an estimate
-            let (estimated_distance_to_chain_tip, estimated_tip_height) = latest_chain_tip
+            let (estimated_distance_to_chain_tip, local_tip_height) = latest_chain_tip
                 .estimate_distance_to_network_chain_tip(network)
                 .ok_or_else(|| Error {
                     code: ErrorCode::ServerError(0),
@@ -366,7 +366,7 @@ where
             if !sync_status.is_close_to_tip() || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
                 tracing::info!(
                     estimated_distance_to_chain_tip,
-                    ?estimated_tip_height,
+                    ?local_tip_height,
                     "Zebra has not synced to the chain tip"
                 );
 
