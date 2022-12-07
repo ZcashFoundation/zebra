@@ -358,11 +358,6 @@ where
                 });
             }
 
-            let fake_coinbase_tx = fake_coinbase_transaction(network, miner_address);
-            let mempool_txs = zip317::select_mempool_transactions(fake_coinbase_tx, mempool).await?;
-
-            let miner_fee = miner_fee(&mempool_txs);
-
             // Calling state with `ChainInfo` request for relevant chain data
             let request = ReadRequest::ChainInfo;
             let response = state
@@ -382,6 +377,11 @@ where
 
             // Get the tip data from the state call
             let block_height = (chain_info.tip_height + 1).expect("tip is far below Height::MAX");
+
+            let fake_coinbase_tx = fake_coinbase_transaction(network, block_height, miner_address);
+            let mempool_txs = zip317::select_mempool_transactions(fake_coinbase_tx, mempool).await?;
+
+            let miner_fee = miner_fee(&mempool_txs);
 
             let outputs =
                 standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
@@ -589,16 +589,15 @@ pub fn standard_coinbase_outputs(
 /// transaction with the correct height and fee.
 fn fake_coinbase_transaction(
     network: Network,
+    block_height: Height,
     miner_address: transparent::Address,
 ) -> TransactionTemplate<NegativeOrZero> {
     // Block heights are encoded as variable-length (script) and `u32` (lock time, expiry height).
     // They can also change the `u32` consensus branch id.
-    // We use the maximum height here, which limits generated blocks to a few bytes smaller
-    // than the consensus maximum. This is ok, because the maximum is an upper limit.
+    // We use the template height here, which has the correct byte length.
     // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     // https://github.com/zcash/zips/blob/main/zip-0203.rst#changes-for-nu5
-    let block_height = Height::MAX;
-
+    //
     // Transparent amounts are encoded as `i64`,
     // so a zero amount has the same size as the real amount:
     // https://developer.bitcoin.org/reference/transactions.html#txout-a-transaction-output
