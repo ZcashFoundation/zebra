@@ -11,7 +11,7 @@ pub struct Response {
     /// The estimated network solution rate in Sol/s.
     networkhashps: u128,
 
-    /// Current network name as defined in BIP70 (main, test, regtest)/
+    /// Current network name as defined in BIP70 (main, test, regtest)
     chain: Network,
 }
 

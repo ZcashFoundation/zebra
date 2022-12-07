@@ -129,8 +129,21 @@ pub async fn test_responses<State, ReadState>(
         .get_block_hash(BLOCK_HEIGHT10)
         .await
         .expect("We should have a GetBlockHash struct");
-
     snapshot_rpc_getblockhash(get_block_hash, &settings);
+
+    // `getmininginfo`
+    let get_mining_info = get_block_template_rpc
+        .get_mining_info()
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getmininginfo(get_mining_info, &settings);
+
+    // `getnetworksolps` (and `getnetworkhashps`)
+    let get_network_sol_ps = get_block_template_rpc
+        .get_network_sol_ps(None, None)
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getnetworksolps(get_network_sol_ps, &settings);
 
     // get a new empty state
     let new_read_state = MockService::build().for_unit_tests();
@@ -196,20 +209,6 @@ pub async fn test_responses<State, ReadState>(
         .expect("unexpected error in submitblock RPC call");
 
     snapshot_rpc_submit_block_invalid(submit_block, &settings);
-
-    // `getmininginfo`
-    let get_mining_info = get_block_template_rpc
-        .get_mining_info()
-        .await
-        .expect("We should have a success response");
-    snapshot_rpc_getmininginfo(get_mining_info, &settings);
-
-    // `getnetworksolps` (and `getnetworkhashps`)
-    let get_network_sol_ps = get_block_template_rpc
-        .get_network_sol_ps(None, None)
-        .await
-        .expect("We should have a success response");
-    snapshot_rpc_getnetworksolps(get_network_sol_ps, &settings);
 }
 
 /// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
