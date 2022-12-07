@@ -5,7 +5,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, TimeZone, Utc};
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Block, Hash, Height},
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
     work::difficulty::CompactDifficulty,
@@ -61,6 +61,60 @@ pub fn get_block_template_chain_info(
         network,
         history_tree,
     ))
+}
+
+/// The default window size specifying how many blocks to check when estimating the chain's solution rate
+/// Based on default value in zcashd.
+const DEFAULT_SOLUTION_RATE_WINDOW_SIZE: usize = 120;
+
+/// Accepts a `non_finalized_state`, [`ZebraDb`], `num_blocks`, and a block hash to start at.
+///
+/// Iterates over up to the last `num_blocks` or [`DEFAULT_SOLUTION_RATE_WINDOW_SIZE`] blocks, summing up
+/// their total work. Divides that total by the number of seconds between the timestamp of the
+/// first block in the iteration and 1 block below the last block.
+///
+/// Returns the solution rate per second for the current best chain, or `None` if the `start_hash` and
+/// at least 1 block below it are not found in the chain.
+pub fn solution_rate(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    num_blocks: Option<usize>,
+    start_hash: Hash,
+) -> Option<u128> {
+    let mut total_work: u128 = 0;
+    let num_blocks = num_blocks.unwrap_or(DEFAULT_SOLUTION_RATE_WINDOW_SIZE);
+
+    let mut block_iter = any_ancestor_blocks(non_finalized_state, db, start_hash)
+        .take(num_blocks.checked_add(1).unwrap_or(num_blocks))
+        .peekable();
+
+    let mut add_block_work_to_total = |block: Arc<Block>| {
+        total_work += block
+            .header
+            .difficulty_threshold
+            .to_work()
+            .expect("work has already been validated")
+            .as_u128()
+    };
+
+    let block = block_iter.next()?;
+    let last_block_time = block.header.time;
+
+    add_block_work_to_total(block);
+
+    loop {
+        // Return `None` if the iterator doesn't yield a second item.
+        let block = block_iter.next()?;
+
+        if block_iter.peek().is_some() {
+            // Add the block's work to `total_work` if it's not the last item in the iterator.
+            add_block_work_to_total(block);
+        } else {
+            let first_block_time = block.header.time;
+            let duration_between_first_and_last_block = last_block_time - first_block_time;
+            return Some(total_work / duration_between_first_and_last_block.num_seconds() as u128);
+        }
+    }
 }
 
 /// Do a consistency check by checking the finalized tip before and after all other database queries.

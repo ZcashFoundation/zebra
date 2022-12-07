@@ -790,6 +790,95 @@ async fn rpc_getblockhash() {
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
+async fn rpc_getmininginfo() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    // Init RPC
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Buffer::new(MockService::build().for_unit_tests(), 1),
+        read_state,
+        latest_chain_tip.clone(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+    );
+
+    get_block_template_rpc
+        .get_mining_info()
+        .await
+        .expect("get_mining_info call should succeed");
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getnetworksolps() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    // Init RPC
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Buffer::new(MockService::build().for_unit_tests(), 1),
+        read_state,
+        latest_chain_tip.clone(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+    );
+
+    let get_network_sol_ps_inputs = [
+        (None, None),
+        (Some(0), None),
+        (Some(0), Some(0)),
+        (Some(0), Some(-1)),
+        (Some(0), Some(10)),
+        (Some(0), Some(i32::MAX)),
+        (Some(1), None),
+        (Some(1), Some(0)),
+        (Some(1), Some(-1)),
+        (Some(1), Some(10)),
+        (Some(1), Some(i32::MAX)),
+        (Some(usize::MAX), None),
+        (Some(usize::MAX), Some(0)),
+        (Some(usize::MAX), Some(-1)),
+        (Some(usize::MAX), Some(10)),
+        (Some(usize::MAX), Some(i32::MAX)),
+    ];
+
+    for (num_blocks_input, height_input) in get_network_sol_ps_inputs {
+        let get_network_sol_ps_result = get_block_template_rpc
+            .get_network_sol_ps(num_blocks_input, height_input)
+            .await;
+        assert!(
+            get_network_sol_ps_result
+                .is_ok(),
+            "get_network_sol_ps({num_blocks_input:?}, {height_input:?}) call with should be ok, got: {get_network_sol_ps_result:?}"
+        );
+    }
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblocktemplate() {
     use std::panic;
 

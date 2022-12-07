@@ -139,6 +139,28 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`getmininginfo`](https://zcash.github.io/rpc/getmininginfo.html)
     #[rpc(name = "getmininginfo")]
     fn get_mining_info(&self) -> BoxFuture<Result<types::get_mining_info::Response>>;
+
+    /// Returns the estimated network solutions per second based on the last n blocks.
+    ///
+    /// zcashd reference: [`getnetworksolps`](https://zcash.github.io/rpc/getnetworksolps.html)
+    #[rpc(name = "getnetworksolps")]
+    fn get_network_sol_ps(
+        &self,
+        num_blocks: Option<usize>,
+        height: Option<i32>,
+    ) -> BoxFuture<Result<u128>>;
+
+    /// Returns the estimated network solutions per second based on the last n blocks.
+    ///
+    /// zcashd reference: [`getnetworkhashps`](https://zcash.github.io/rpc/getnetworkhashps.html)
+    #[rpc(name = "getnetworkhashps")]
+    fn get_network_hash_ps(
+        &self,
+        num_blocks: Option<usize>,
+        height: Option<i32>,
+    ) -> BoxFuture<Result<u128>> {
+        self.get_network_sol_ps(num_blocks, height)
+    }
 }
 
 /// RPC method implementations.
@@ -538,7 +560,50 @@ where
 
     fn get_mining_info(&self) -> BoxFuture<Result<types::get_mining_info::Response>> {
         let network = self.network;
-        async move { Ok(types::get_mining_info::Response::new(network, 0)) }.boxed()
+        let solution_rate_fut = self.get_network_sol_ps(None, None);
+        async move {
+            Ok(types::get_mining_info::Response::new(
+                network,
+                solution_rate_fut.await?,
+            ))
+        }
+        .boxed()
+    }
+
+    fn get_network_sol_ps(
+        &self,
+        num_blocks: Option<usize>,
+        height: Option<i32>,
+    ) -> BoxFuture<Result<u128>> {
+        let num_blocks = num_blocks.map(|num_blocks| num_blocks.max(1));
+        let height = height.and_then(|height| (height > 1).then_some(Height(height as u32)));
+        let mut state = self.state.clone();
+
+        async move {
+            let request = ReadRequest::SolutionRate { num_blocks, height };
+
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            let solution_rate = match response {
+                ReadResponse::SolutionRate(solution_rate) => solution_rate.ok_or(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "No blocks in state".to_string(),
+                    data: None,
+                })?,
+                _ => unreachable!("unmatched response to a solution rate request"),
+            };
+
+            Ok(solution_rate)
+        }
+        .boxed()
     }
 }
 
