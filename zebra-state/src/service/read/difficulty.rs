@@ -1,6 +1,6 @@
 //! Get context and calculate difficulty for the next block.
 
-use std::{borrow::Borrow, sync::Arc};
+use std::sync::Arc;
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
 
@@ -14,7 +14,6 @@ use zebra_chain::{
 use crate::{
     service::{
         any_ancestor_blocks,
-        block_iter::Iter,
         check::{
             difficulty::{BLOCK_MAX_TIME_SINCE_MEDIAN, POW_ADJUSTMENT_BLOCK_SPAN},
             AdjustedDifficulty,
@@ -70,22 +69,38 @@ pub fn get_block_template_chain_info(
 /// # Panics
 ///
 /// - If we don't have enough blocks in the state.
-fn relevant_chain_and_history_tree<'a>(
-    non_finalized_state: &'a NonFinalizedState,
-    db: &'a ZebraDb,
-) -> Result<(Height, block::Hash, Iter<'a>, Arc<HistoryTree>), BoxError> {
+fn relevant_chain_and_history_tree(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+) -> Result<
+    (
+        Height,
+        block::Hash,
+        [Arc<Block>; POW_ADJUSTMENT_BLOCK_SPAN],
+        Arc<HistoryTree>,
+    ),
+    BoxError,
+> {
     let finalized_tip_before_queries = db.tip().ok_or_else(|| {
         BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
     })?;
 
     let relevant_chain =
         any_ancestor_blocks(non_finalized_state, db, finalized_tip_before_queries.1);
+    let relevant_chain: Vec<_> = relevant_chain
+        .into_iter()
+        .take(POW_ADJUSTMENT_BLOCK_SPAN)
+        .collect();
+    let relevant_chain = relevant_chain.try_into().map_err(|_error| {
+        "Zebra's state only has a few blocks, wait until it syncs to the chain tip"
+    })?;
+
     let history_tree = history_tree(
         non_finalized_state.best_chain(),
         db,
         finalized_tip_before_queries.1.into(),
     )
-    .expect("Hash passed should exist in the chain");
+    .expect("tip hash should exist in the chain");
 
     let finalized_tip_after_queries = db.tip().expect("already checked for an empty tip");
 
@@ -106,44 +121,22 @@ fn relevant_chain_and_history_tree<'a>(
 /// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
 ///
 /// See [`get_block_template_chain_info()`] for details.
-fn difficulty_time_and_history_tree<C>(
-    relevant_chain: C,
+fn difficulty_time_and_history_tree(
+    relevant_chain: [Arc<Block>; POW_ADJUSTMENT_BLOCK_SPAN],
     tip_height: Height,
     tip_hash: block::Hash,
     network: Network,
     history_tree: Arc<HistoryTree>,
-) -> GetBlockTemplateChainInfo
-where
-    C: IntoIterator,
-    C::Item: Borrow<Block>,
-    C::IntoIter: ExactSizeIterator,
-{
-    let relevant_chain: Vec<_> = relevant_chain
-        .into_iter()
-        .take(POW_ADJUSTMENT_BLOCK_SPAN)
-        .collect();
-
+) -> GetBlockTemplateChainInfo {
     let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
         .iter()
-        .map(|block| {
-            (
-                block.borrow().header.difficulty_threshold,
-                block.borrow().header.time,
-            )
-        })
+        .map(|block| (block.header.difficulty_threshold, block.header.time))
         .collect();
-
-    // The getblocktemplate RPC returns an error if Zebra is not synced to the tip.
-    // So this will never happen in production code.
-    assert_eq!(
-        relevant_data.len(),
-        POW_ADJUSTMENT_BLOCK_SPAN,
-        "getblocktemplate RPC called with a near-empty state: should have returned an error",
-    );
 
     let cur_time = chrono::Utc::now();
 
     // Get the median-time-past, which doesn't depend on the time or the previous block height.
+    // `context` will always have the correct length, because this function takes an array.
     //
     // TODO: split out median-time-past into its own struct?
     let median_time_past = AdjustedDifficulty::new_from_header_time(
