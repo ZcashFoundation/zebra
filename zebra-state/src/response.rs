@@ -135,7 +135,7 @@ pub enum ReadResponse {
     ChainInfo(GetBlockTemplateChainInfo),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
-    /// Response to [`ReadRequest::ChainSolutionRate`](crate::ReadRequest::ChainSolutionRate)
+    /// Response to [`ReadRequest::SolutionRate`](crate::ReadRequest::SolutionRate)
     SolutionRate(Option<u128>),
 }
 
