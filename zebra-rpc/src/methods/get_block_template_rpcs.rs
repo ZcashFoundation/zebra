@@ -378,6 +378,8 @@ where
             // Get the tip data from the state call
             let block_height = (chain_info.tip_height + 1).expect("tip is far below Height::MAX");
 
+            // Use a fake coinbase transaction to break the dependency between transaction
+            // selection, the miner fee, and the fee payment in the coinbase transaction.
             let fake_coinbase_tx = fake_coinbase_transaction(network, block_height, miner_address);
             let mempool_txs = zip317::select_mempool_transactions(fake_coinbase_tx, mempool).await?;
 
@@ -599,9 +601,9 @@ fn fake_coinbase_transaction(
     // https://github.com/zcash/zips/blob/main/zip-0203.rst#changes-for-nu5
     //
     // Transparent amounts are encoded as `i64`,
-    // so a zero amount has the same size as the real amount:
+    // so one zat has the same size as the real amount:
     // https://developer.bitcoin.org/reference/transactions.html#txout-a-transaction-output
-    let miner_fee = Amount::zero();
+    let miner_fee = 1.try_into().expect("amount is valid and non-negative");
 
     let outputs = standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
     let coinbase_tx = Transaction::new_v5_coinbase(network, block_height, outputs).into();
