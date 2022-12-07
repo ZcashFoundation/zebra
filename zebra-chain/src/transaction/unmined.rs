@@ -307,7 +307,8 @@ pub struct VerifiedUnminedTx {
     /// transparent inputs and outputs.
     pub legacy_sigop_count: u64,
 
-    /// The number of unpaid actions `transaction`, as defined by [ZIP-317] for block production.
+    /// The number of unpaid actions for `transaction`,
+    /// as defined by [ZIP-317] for block production.
     ///
     /// The number of actions is limited by [`MAX_BLOCK_BYTES`], so it fits in a u32.
     ///

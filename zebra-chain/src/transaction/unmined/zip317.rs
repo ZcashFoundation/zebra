@@ -29,10 +29,10 @@ const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
 /// `weight_ratio_cap` in ZIP-317.
 const BLOCK_PRODUCTION_WEIGHT_RATIO_CAP: f32 = 4.0;
 
-/// The minimum fee the block production weight ratio calculation, in zatoshis.
+/// The minimum fee for the block production weight ratio calculation, in zatoshis.
 /// If a transaction has a lower fee, this value is used instead.
 ///
-/// This avoids special handling transactions with zero weight.
+/// This avoids special handling for transactions with zero weight.
 const MIN_BLOCK_PRODUCTION_SUBSTITUTE_FEE: i64 = 1;
 
 /// Returns the conventional fee for `transaction`, as defined by [ZIP-317].
