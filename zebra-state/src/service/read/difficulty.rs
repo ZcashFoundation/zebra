@@ -36,7 +36,7 @@ pub fn get_block_template_chain_info(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
     network: Network,
-) -> GetBlockTemplateChainInfo {
+) -> Result<GetBlockTemplateChainInfo, BoxError> {
     let mut relevant_chain_and_history_tree_result =
         relevant_chain_and_history_tree(non_finalized_state, db);
 
@@ -52,11 +52,16 @@ pub fn get_block_template_chain_info(
             relevant_chain_and_history_tree(non_finalized_state, db);
     }
 
-    // remove the unwrap somehow
     let (tip_height, tip_hash, relevant_chain, history_tree) =
-        relevant_chain_and_history_tree_result.expect("consistency check failed");
+        relevant_chain_and_history_tree_result?;
 
-    difficulty_time_and_history_tree(relevant_chain, tip_height, tip_hash, network, history_tree)
+    Ok(difficulty_time_and_history_tree(
+        relevant_chain,
+        tip_height,
+        tip_hash,
+        network,
+        history_tree,
+    ))
 }
 
 /// Do a consistency check by checking the finalized tip before and after all other database queries.
