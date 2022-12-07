@@ -19,11 +19,11 @@ use std::{
 use zebra_chain::{block::Height, parameters::Network, transaction, transparent};
 
 use crate::{
-    service::{finalized_state::ZebraDb, non_finalized_state::Chain},
+    service::{
+        finalized_state::ZebraDb, non_finalized_state::Chain, read::FINALIZED_STATE_QUERY_RETRIES,
+    },
     BoxError, OutputLocation, TransactionLocation,
 };
-
-use super::FINALIZED_ADDRESS_INDEX_RETRIES;
 
 /// The full range of address heights.
 ///
@@ -108,7 +108,9 @@ where
 
     // Retry the finalized UTXO query if it was interrupted by a finalizing block,
     // and the non-finalized chain doesn't overlap the changed heights.
-    for attempt in 0..=FINALIZED_ADDRESS_INDEX_RETRIES {
+    //
+    // TODO: refactor this into a generic retry(finalized_closure, process_and_check_closure) fn
+    for attempt in 0..=FINALIZED_STATE_QUERY_RETRIES {
         debug!(?attempt, ?address_count, "starting address UTXO query");
 
         let (finalized_utxos, finalized_tip_range) = finalized_address_utxos(db, &addresses);
