@@ -5,5 +5,6 @@ expression: get_mining_info
 {
   "networksolps": 2,
   "networkhashps": 2,
-  "chain": "Mainnet"
+  "chain": "main",
+  "testnet": false
 }
