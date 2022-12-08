@@ -614,7 +614,9 @@ where
                 _ => unreachable!("unmatched response to a solution rate request"),
             };
 
-            Ok(solution_rate.try_into().expect("per-second solution rate always fits in u64"))
+            Ok(solution_rate
+                .try_into()
+                .expect("per-second solution rate always fits in u64"))
         }
         .boxed()
     }
