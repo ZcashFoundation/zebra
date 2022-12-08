@@ -575,6 +575,7 @@ fn config_tests() -> Result<()> {
 }
 
 /// Test that `zebrad` runs the start command with no args
+#[tracing::instrument]
 fn app_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -654,6 +655,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
 }
 
 /// Check if the config produced by current zebrad is stored.
+#[tracing::instrument]
 fn last_config_is_stored() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -732,6 +734,7 @@ fn last_config_is_stored() -> Result<()> {
 
 /// Checks that Zebra prints an informative message when it cannot parse the
 /// config file.
+#[tracing::instrument]
 fn invalid_generated_config() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -804,6 +807,7 @@ fn invalid_generated_config() -> Result<()> {
 }
 
 /// Test all versions of `zebrad.toml` we have stored can be parsed by the latest `zebrad`.
+#[tracing::instrument]
 fn stored_configs_works() -> Result<()> {
     let old_configs_dir = configs_dir();
 
