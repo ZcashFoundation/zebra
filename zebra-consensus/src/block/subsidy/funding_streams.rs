@@ -140,7 +140,7 @@ pub fn new_coinbase_script(address: Address) -> Script {
     assert!(
         address.is_script_hash(),
         "incorrect coinbase script address: {address} \
-         Zebra only supports transparent 'pay to script hash' (P2SH) addresses",
+         Funding streams only support transparent 'pay to script hash' (P2SH) addresses",
     );
 
     // > The “prescribed way” to pay a transparent P2SH address is to use a standard P2SH script

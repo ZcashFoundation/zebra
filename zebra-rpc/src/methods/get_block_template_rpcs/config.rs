@@ -9,7 +9,7 @@ use zebra_chain::transparent;
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The address used for miner payouts.
-    /// Zebra currently only supports single-signature P2SH and P2PKH transparent addresses.
+    /// Zebra currently only supports P2SH and P2PKH transparent addresses.
     ///
     /// Zebra sends mining fees and miner rewards to this address in the
     /// `getblocktemplate` RPC coinbase transaction.
