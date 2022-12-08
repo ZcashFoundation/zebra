@@ -13,6 +13,9 @@ pub struct Response {
 
     /// Current network name as defined in BIP70 (main, test, regtest)
     chain: Network,
+
+    /// If using testnet or not
+    testnet: bool,
 }
 
 impl Response {
@@ -22,6 +25,7 @@ impl Response {
             networksolps,
             networkhashps: networksolps,
             chain,
+            testnet: chain == Network::Testnet,
         }
     }
 }
