@@ -4,16 +4,18 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_test")]
 // Each lazy_static variable uses additional recursion
 #![recursion_limit = "512"]
+
+use std::sync::Once;
+
 use color_eyre::section::PanicMessage;
 use once_cell::sync::Lazy;
 use owo_colors::OwoColorize;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use std::sync::Once;
-
 #[allow(missing_docs)]
 pub mod command;
+
 pub mod mock_service;
 pub mod net;
 pub mod network_addr;
