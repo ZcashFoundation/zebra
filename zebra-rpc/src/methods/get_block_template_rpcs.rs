@@ -154,7 +154,7 @@ pub trait GetBlockTemplateRpc {
         &self,
         num_blocks: Option<usize>,
         height: Option<i32>,
-    ) -> BoxFuture<Result<u128>>;
+    ) -> BoxFuture<Result<u64>>;
 
     /// Returns the estimated network solutions per second based on the last `num_blocks` before `height`.
     /// If `num_blocks` is not supplied, uses 120 blocks.
@@ -166,7 +166,7 @@ pub trait GetBlockTemplateRpc {
         &self,
         num_blocks: Option<usize>,
         height: Option<i32>,
-    ) -> BoxFuture<Result<u128>> {
+    ) -> BoxFuture<Result<u64>> {
         self.get_network_sol_ps(num_blocks, height)
     }
 }
@@ -585,7 +585,7 @@ where
         &self,
         num_blocks: Option<usize>,
         height: Option<i32>,
-    ) -> BoxFuture<Result<u128>> {
+    ) -> BoxFuture<Result<u64>> {
         let num_blocks = num_blocks
             .map(|num_blocks| num_blocks.max(1))
             .unwrap_or(DEFAULT_SOLUTION_RATE_WINDOW_SIZE);
@@ -614,7 +614,7 @@ where
                 _ => unreachable!("unmatched response to a solution rate request"),
             };
 
-            Ok(solution_rate)
+            Ok(solution_rate as u64)
         }
         .boxed()
     }
