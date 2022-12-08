@@ -1,7 +1,8 @@
 //! Randomised property tests for the mempool.
 
-use proptest::collection::vec;
-use proptest::prelude::*;
+use std::env;
+
+use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
 
 use chrono::Duration;
@@ -32,12 +33,21 @@ type MockState = MockService<zs::Request, zs::Response, PropTestAssertion>;
 /// A [`MockService`] representing the Zebra transaction verifier service.
 type MockTxVerifier = MockService<tx::Request, tx::Response, PropTestAssertion, TransactionError>;
 
-const CHAIN_LENGTH: usize = 10;
+const CHAIN_LENGTH: usize = 5;
+
+const DEFAULT_MEMPOOL_PROPTEST_CASES: u32 = 8;
 
 proptest! {
+    // The mempool tests can generate very verbose logs, so we use fewer cases by
+    // default. Set the PROPTEST_CASES env var to override this default.
+    #![proptest_config(proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
+                                          .ok()
+                                          .and_then(|v| v.parse().ok())
+                                          .unwrap_or(DEFAULT_MEMPOOL_PROPTEST_CASES)))]
+
     /// Test if the mempool storage is cleared on a chain reset.
     #[test]
-    fn storage_is_cleared_on_chain_reset(
+    fn storage_is_cleared_on_single_chain_reset(
         network in any::<Network>(),
         transaction in any::<VerifiedUnminedTx>(),
         chain_tip in any::<ChainTipBlock>(),
@@ -87,7 +97,7 @@ proptest! {
 
     /// Test if the mempool storage is cleared on multiple chain resets.
     #[test]
-    fn storage_is_cleared_on_chain_resets(
+    fn storage_is_cleared_on_multiple_chain_resets(
         network in any::<Network>(),
         mut previous_chain_tip in any::<ChainTipBlock>(),
         mut transactions in vec(any::<VerifiedUnminedTx>(), 0..CHAIN_LENGTH),

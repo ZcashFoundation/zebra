@@ -183,7 +183,11 @@ where
     /// Runs until the [`SyncStatus`] loses its connection to the chain syncer, which happens when
     /// Zebra is shutting down.
     pub async fn run(mut self) -> Result<(), BoxError> {
+        // This log is verbose during tests.
+        #[cfg(not(test))]
         info!("initializing mempool crawler task");
+        #[cfg(test)]
+        debug!("initializing mempool crawler task");
 
         loop {
             self.wait_until_enabled().await?;

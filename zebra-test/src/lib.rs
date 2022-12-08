@@ -4,16 +4,18 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_test")]
 // Each lazy_static variable uses additional recursion
 #![recursion_limit = "512"]
+
+use std::sync::Once;
+
 use color_eyre::section::PanicMessage;
 use once_cell::sync::Lazy;
 use owo_colors::OwoColorize;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use std::sync::Once;
-
 #[allow(missing_docs)]
 pub mod command;
+
 pub mod mock_service;
 pub mod net;
 pub mod network_addr;
@@ -85,15 +87,22 @@ pub fn init() -> impl Drop {
         // Use the RUST_LOG env var, or by default:
         //  - warn for most tests, and
         //  - for some modules, hide expected warn logs
-        let filter_layer = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            EnvFilter::try_new("warn")
-                .unwrap()
-                .add_directive("zebra_consensus=error".parse().unwrap())
-                .add_directive("zebra_network=error".parse().unwrap())
-                .add_directive("zebra_state=error".parse().unwrap())
-                .add_directive("zebrad=error".parse().unwrap())
-                .add_directive("tor_circmgr=error".parse().unwrap())
-        });
+        let filter_layer = EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| {
+                // These filters apply when RUST_LOG isn't set
+                EnvFilter::try_new("warn")
+                    .unwrap()
+                    .add_directive("zebra_consensus=error".parse().unwrap())
+                    .add_directive("zebra_network=error".parse().unwrap())
+                    .add_directive("zebra_state=error".parse().unwrap())
+                    .add_directive("zebrad=error".parse().unwrap())
+                    .add_directive("tor_circmgr=error".parse().unwrap())
+            })
+            // These filters apply on top of RUST_LOG.
+            // Avoid adding filters to this list, because users can't override them.
+            //
+            // (There are currently no always-on directives.)
+            ;
 
         tracing_subscriber::registry()
             .with(filter_layer)

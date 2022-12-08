@@ -227,7 +227,7 @@ pub async fn populated_state(
         .await
         .map(|change_result| change_result.expect("unexpected chain tip update failure"))
         {
-            info!(
+            debug!(
                 timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
                 ?timeout_error,
                 "timeout waiting for chain tip change after committing block"

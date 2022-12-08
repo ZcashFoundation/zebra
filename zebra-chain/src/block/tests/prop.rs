@@ -1,3 +1,5 @@
+//! Randomised property tests for Zcash blocks.
+
 use std::{env, io::ErrorKind};
 
 use proptest::{arbitrary::any, prelude::*, test_runner::Config};
