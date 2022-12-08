@@ -8,7 +8,7 @@ use zebra_chain::{
     block::{self, Block, Hash, Height},
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
-    work::difficulty::CompactDifficulty,
+    work::difficulty::{CompactDifficulty, PartialCumulativeWork},
 };
 
 use crate::{
@@ -77,24 +77,22 @@ pub fn solution_rate(
     num_blocks: usize,
     start_hash: Hash,
 ) -> Option<u128> {
-    let mut total_work: u128 = 0;
     let mut block_iter = any_ancestor_blocks(non_finalized_state, db, start_hash)
         .take(num_blocks.checked_add(1).unwrap_or(num_blocks))
         .peekable();
 
-    let mut add_block_work_to_total = |block: Arc<Block>| {
-        total_work += block
+    let get_work = |block: Arc<Block>| {
+        block
             .header
             .difficulty_threshold
             .to_work()
             .expect("work has already been validated")
-            .as_u128()
     };
 
     let block = block_iter.next()?;
     let last_block_time = block.header.time;
 
-    add_block_work_to_total(block);
+    let mut total_work: PartialCumulativeWork = get_work(block).into();
 
     loop {
         // Return `None` if the iterator doesn't yield a second item.
@@ -102,11 +100,11 @@ pub fn solution_rate(
 
         if block_iter.peek().is_some() {
             // Add the block's work to `total_work` if it's not the last item in the iterator.
-            add_block_work_to_total(block);
+            total_work += get_work(block);
         } else {
             let first_block_time = block.header.time;
             let duration_between_first_and_last_block = last_block_time - first_block_time;
-            return Some(total_work / duration_between_first_and_last_block.num_seconds() as u128);
+            return Some(*total_work / duration_between_first_and_last_block.num_seconds() as u128);
         }
     }
 }

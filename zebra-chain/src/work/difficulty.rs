@@ -547,3 +547,11 @@ impl std::ops::SubAssign<Work> for PartialCumulativeWork {
         *self = *self - rhs;
     }
 }
+
+impl std::ops::Deref for PartialCumulativeWork {
+    type Target = u128;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
