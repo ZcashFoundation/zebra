@@ -114,10 +114,7 @@ fn get_transparent_output_address_with_blocks_for_network(network: Network) {
                 }
                 assert!(
                     addr.is_some(),
-                    "address of {:?}; block #{}; tx #{}; must not be None",
-                    output,
-                    height,
-                    idx,
+                    "address of {output:?}; block #{height}; tx #{idx}; must not be None",
                 );
                 valid_addresses += 1;
             }

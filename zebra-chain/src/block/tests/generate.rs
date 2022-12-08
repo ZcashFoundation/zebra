@@ -158,22 +158,16 @@ fn multi_transaction_block(oversized: bool) -> Block {
         oversized,
         serialized_len > MAX_BLOCK_BYTES.try_into().unwrap(),
         "block is over-sized if requested:\n\
-         oversized: {},\n\
-         serialized_len: {},\n\
-         MAX_BLOCK_BYTES: {},",
-        oversized,
-        serialized_len,
-        MAX_BLOCK_BYTES,
+         oversized: {oversized},\n\
+         serialized_len: {serialized_len},\n\
+         MAX_BLOCK_BYTES: {MAX_BLOCK_BYTES},",
     );
     assert!(
         serialized_len > MIN_LARGE_BLOCK_BYTES.try_into().unwrap(),
         "block is large\n\
-         oversized: {},\n\
-         serialized_len: {},\n\
-         MIN_LARGE_BLOCK_BYTES: {},",
-        oversized,
-        serialized_len,
-        MIN_LARGE_BLOCK_BYTES,
+         oversized: {oversized},\n\
+         serialized_len: {serialized_len},\n\
+         MIN_LARGE_BLOCK_BYTES: {MIN_LARGE_BLOCK_BYTES},",
     );
 
     block
@@ -238,22 +232,16 @@ fn single_transaction_block_many_inputs(oversized: bool) -> Block {
         oversized,
         serialized_len > MAX_BLOCK_BYTES.try_into().unwrap(),
         "block is over-sized if requested:\n\
-         oversized: {},\n\
-         serialized_len: {},\n\
-         MAX_BLOCK_BYTES: {},",
-        oversized,
-        serialized_len,
-        MAX_BLOCK_BYTES,
+         oversized: {oversized},\n\
+         serialized_len: {serialized_len},\n\
+         MAX_BLOCK_BYTES: {MAX_BLOCK_BYTES},",
     );
     assert!(
         serialized_len > MIN_LARGE_BLOCK_BYTES.try_into().unwrap(),
         "block is large\n\
-         oversized: {},\n\
-         serialized_len: {},\n\
-         MIN_LARGE_BLOCK_BYTES: {},",
-        oversized,
-        serialized_len,
-        MIN_LARGE_BLOCK_BYTES,
+         oversized: {oversized},\n\
+         serialized_len: {serialized_len},\n\
+         MIN_LARGE_BLOCK_BYTES: {MIN_LARGE_BLOCK_BYTES},",
     );
 
     block
@@ -316,22 +304,16 @@ fn single_transaction_block_many_outputs(oversized: bool) -> Block {
         oversized,
         serialized_len > MAX_BLOCK_BYTES.try_into().unwrap(),
         "block is over-sized if requested:\n\
-         oversized: {},\n\
-         serialized_len: {},\n\
-         MAX_BLOCK_BYTES: {},",
-        oversized,
-        serialized_len,
-        MAX_BLOCK_BYTES,
+         oversized: {oversized},\n\
+         serialized_len: {serialized_len},\n\
+         MAX_BLOCK_BYTES: {MAX_BLOCK_BYTES},",
     );
     assert!(
         serialized_len > MIN_LARGE_BLOCK_BYTES.try_into().unwrap(),
         "block is large\n\
-         oversized: {},\n\
-         serialized_len: {},\n\
-         MIN_LARGE_BLOCK_BYTES: {},",
-        oversized,
-        serialized_len,
-        MIN_LARGE_BLOCK_BYTES,
+         oversized: {oversized},\n\
+         serialized_len: {serialized_len},\n\
+         MIN_LARGE_BLOCK_BYTES: {MIN_LARGE_BLOCK_BYTES},",
     );
 
     block

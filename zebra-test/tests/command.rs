@@ -26,17 +26,11 @@ fn is_command_available(cmd: &str, args: &[&str]) -> bool {
 
     match status {
         Err(e) => {
-            eprintln!(
-                "Skipping test because '{} {:?}' returned error {:?}",
-                cmd, args, e
-            );
+            eprintln!("Skipping test because '{cmd} {args:?}' returned error {e:?}");
             false
         }
         Ok(status) if !status.success() => {
-            eprintln!(
-                "Skipping test because '{} {:?}' returned status {:?}",
-                cmd, args, status
-            );
+            eprintln!("Skipping test because '{cmd} {args:?}' returned status {status:?}");
             false
         }
         _ => true,
@@ -212,8 +206,7 @@ fn failure_regex_matches_stdout_failure_message() {
     let expected_error = format!("{expected_error:?}");
     assert!(
         expected_error.contains("Logged a failure message"),
-        "error did not contain expected failure message: {}",
-        expected_error,
+        "error did not contain expected failure message: {expected_error}",
     );
 }
 
@@ -251,8 +244,7 @@ fn failure_regex_matches_stderr_failure_message() {
     let expected_error = format!("{expected_error:?}");
     assert!(
         expected_error.contains("Logged a failure message"),
-        "error did not contain expected failure message: {}",
-        expected_error,
+        "error did not contain expected failure message: {expected_error}",
     );
 }
 
@@ -322,8 +314,7 @@ Unread Stdout:
    multi-line failure message\
             "
         ),
-        "error did not contain expected failure message: {}",
-        expected_error,
+        "error did not contain expected failure message: {expected_error}",
     );
 }
 
@@ -481,8 +472,7 @@ fn failure_regex_timeout_continuous_output() {
     let expected_error = format!("{expected_error:?}");
     assert!(
         expected_error.contains("Logged a failure message"),
-        "error did not contain expected failure message: {}",
-        expected_error,
+        "error did not contain expected failure message: {expected_error}",
     );
 }
 
@@ -547,8 +537,7 @@ fn failure_regex_iter_matches_stdout_failure_message() {
     let expected_error = format!("{expected_error:?}");
     assert!(
         expected_error.contains("Logged a failure message"),
-        "error did not contain expected failure message: {}",
-        expected_error,
+        "error did not contain expected failure message: {expected_error}",
     );
 }
 
