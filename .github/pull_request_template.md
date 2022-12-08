@@ -14,11 +14,11 @@ If this PR changes network behaviour, quote and link to the Bitcoin network refe
 https://developer.bitcoin.org/reference/p2p_networking.html
 -->
 
-### Designs
+### Complex Code or Requirements
 
 <!--
-If this PR implements a Zebra design, quote and link to the RFC:
-https://github.com/ZcashFoundation/zebra/tree/main/book/src/dev/rfcs/
+Does this PR change concurrency, unsafe code, or complex consensus rules?
+If it does, ask for multiple reviewers on this PR.
 -->
 
 ## Solution
@@ -32,7 +32,7 @@ Does it close any issues?
 
 <!--
 Is this PR blocking any other work?
-If you want a specific reviewer for this PR, tag them here.
+If you want specific reviewers for this PR, tag them here.
 -->
 
 ### Reviewer Checklist
@@ -41,6 +41,7 @@ If you want a specific reviewer for this PR, tag them here.
     - [ ] Does it need extra CHANGELOG info? (new features, breaking changes, large changes)
   - [ ] Are the PR labels correct?
   - [ ] Does the code do what the ticket and PR says?
+    - [ ] Does it change concurrent code, unsafe code, or consensus rules?
   - [ ] How do you know it works? Does it have tests?
 
 ## Follow Up Work

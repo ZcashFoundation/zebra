@@ -71,10 +71,22 @@ pub enum VerifyBlockError {
     Time(zebra_chain::block::BlockTimeError),
 
     #[error("unable to commit block after semantic verification")]
+    // TODO: make this into a concrete type, and add it to is_duplicate_request() (#2908)
     Commit(#[source] BoxError),
 
     #[error("invalid transaction")]
     Transaction(#[from] TransactionError),
+}
+
+impl VerifyBlockError {
+    /// Returns `true` if this is definitely a duplicate request.
+    /// Some duplicate requests might not be detected, and therefore return `false`.
+    pub fn is_duplicate_request(&self) -> bool {
+        match self {
+            VerifyBlockError::Block { source, .. } => source.is_duplicate_request(),
+            _ => false,
+        }
+    }
 }
 
 /// The maximum allowed number of legacy signature check operations in a block.
@@ -226,8 +238,7 @@ where
 
                 assert!(
                     matches!(response, tx::Response::Block { .. }),
-                    "unexpected response from transaction verifier: {:?}",
-                    response
+                    "unexpected response from transaction verifier: {response:?}"
                 );
 
                 legacy_sigop_count += response.legacy_sigop_count();

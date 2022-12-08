@@ -289,8 +289,7 @@ impl MustUseClientResponseSender {
             .take()
             .unwrap_or_else(|| {
                 panic!(
-                    "multiple uses of response sender: response must be sent exactly once: {:?}",
-                    self
+                    "multiple uses of response sender: response must be sent exactly once: {self:?}"
                 )
             })
             .send(response)
@@ -328,8 +327,7 @@ impl Drop for MustUseClientResponseSender {
             // is_canceled() will not panic, because we check is_none() first
             assert!(
                 self.tx.is_none() || self.is_canceled(),
-                "unused client response sender: oneshot must be used or canceled: {:?}",
-                self
+                "unused client response sender: oneshot must be used or canceled: {self:?}"
             );
         }
     }

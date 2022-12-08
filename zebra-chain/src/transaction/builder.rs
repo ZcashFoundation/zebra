@@ -63,7 +63,7 @@ impl Transaction {
             network_upgrade: NetworkUpgrade::current(network, height),
 
             // There is no documented consensus rule for the lock time field in coinbase transactions,
-            // so we just leave it unlocked.
+            // so we just leave it unlocked. (We could also set it to `height`.)
             lock_time: LockTime::unlocked(),
 
             // > The nExpiryHeight field of a coinbase transaction MUST be equal to its block height.

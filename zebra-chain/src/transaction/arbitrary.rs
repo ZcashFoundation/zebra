@@ -346,16 +346,11 @@ impl Transaction {
             .add_transaction(self, outputs)
             .unwrap_or_else(|err| {
                 panic!(
-                    "unexpected chain value pool error: {:?}, \n\
-                     original chain value pools: {:?}, \n\
-                     transaction chain value change: {:?}, \n\
-                     input-only transaction chain value pools: {:?}, \n\
-                     calculated remaining transaction value: {:?}",
-                    err,
-                    chain_value_pools, // old value
-                    transaction_chain_value_pool_change,
-                    input_chain_value_pools,
-                    remaining_transaction_value,
+                    "unexpected chain value pool error: {err:?}, \n\
+                     original chain value pools: {chain_value_pools:?}, \n\
+                     transaction chain value change: {transaction_chain_value_pool_change:?}, \n\
+                     input-only transaction chain value pools: {input_chain_value_pools:?}, \n\
+                     calculated remaining transaction value: {remaining_transaction_value:?}",
                 )
             });
 
@@ -495,9 +490,8 @@ impl Transaction {
             .remaining_transaction_value()
             .unwrap_or_else(|err| {
                 panic!(
-                    "unexpected remaining transaction value: {:?}, \
-                     calculated remaining input value: {:?}",
-                    err, remaining_input_value
+                    "unexpected remaining transaction value: {err:?}, \
+                     calculated remaining input value: {remaining_input_value:?}"
                 )
             });
         assert_eq!(

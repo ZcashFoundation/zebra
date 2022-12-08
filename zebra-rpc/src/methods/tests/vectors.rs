@@ -564,10 +564,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
         .unwrap_err();
     assert_eq!(
         error.message,
-        format!(
-            "invalid address \"{}\": parse error: t-addr decoding error",
-            address
-        )
+        format!("invalid address \"{address}\": parse error: t-addr decoding error")
     );
 
     mempool.expect_no_requests().await;
@@ -790,6 +787,95 @@ async fn rpc_getblockhash() {
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
+async fn rpc_getmininginfo() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    // Init RPC
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Buffer::new(MockService::build().for_unit_tests(), 1),
+        read_state,
+        latest_chain_tip.clone(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+    );
+
+    get_block_template_rpc
+        .get_mining_info()
+        .await
+        .expect("get_mining_info call should succeed");
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getnetworksolps() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    // Init RPC
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Buffer::new(MockService::build().for_unit_tests(), 1),
+        read_state,
+        latest_chain_tip.clone(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+    );
+
+    let get_network_sol_ps_inputs = [
+        (None, None),
+        (Some(0), None),
+        (Some(0), Some(0)),
+        (Some(0), Some(-1)),
+        (Some(0), Some(10)),
+        (Some(0), Some(i32::MAX)),
+        (Some(1), None),
+        (Some(1), Some(0)),
+        (Some(1), Some(-1)),
+        (Some(1), Some(10)),
+        (Some(1), Some(i32::MAX)),
+        (Some(usize::MAX), None),
+        (Some(usize::MAX), Some(0)),
+        (Some(usize::MAX), Some(-1)),
+        (Some(usize::MAX), Some(10)),
+        (Some(usize::MAX), Some(i32::MAX)),
+    ];
+
+    for (num_blocks_input, height_input) in get_network_sol_ps_inputs {
+        let get_network_sol_ps_result = get_block_template_rpc
+            .get_network_sol_ps(num_blocks_input, height_input)
+            .await;
+        assert!(
+            get_network_sol_ps_result
+                .is_ok(),
+            "get_network_sol_ps({num_blocks_input:?}, {height_input:?}) call with should be ok, got: {get_network_sol_ps_result:?}"
+        );
+    }
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblocktemplate() {
     // test getblocktemplate with a miner P2SH address
     rpc_getblocktemplate_mining_address(true).await;
@@ -803,8 +889,11 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     use chrono::TimeZone;
 
-    use crate::methods::get_block_template_rpcs::constants::{
-        GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+    use crate::methods::{
+        get_block_template_rpcs::constants::{
+            GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+        },
+        tests::utils::fake_history_tree,
     };
     use zebra_chain::{
         amount::NonNegative,
@@ -867,16 +956,18 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
             .clone()
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
-            .respond(ReadResponse::ChainInfo(Some(GetBlockTemplateChainInfo {
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
                 expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
-                tip: (fake_tip_height, fake_tip_hash),
+                tip_height: fake_tip_height,
+                tip_hash: fake_tip_hash,
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-            })));
+                history_tree: fake_history_tree(Mainnet),
+            }));
     });
 
-    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
+    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template(None));
 
     mempool
         .expect_request(mempool::Request::FullTransactions)
@@ -937,7 +1028,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
     let get_block_template_sync_error = get_block_template_rpc
-        .get_block_template()
+        .get_block_template(None)
         .await
         .expect_err("needs an error when estimated distance to network chain tip is far");
 
@@ -950,7 +1041,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
     let get_block_template_sync_error = get_block_template_rpc
-        .get_block_template()
+        .get_block_template(None)
         .await
         .expect_err("needs an error when syncer is not close to tip");
 
@@ -961,7 +1052,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
     let get_block_template_sync_error = get_block_template_rpc
-        .get_block_template()
+        .get_block_template(None)
         .await
         .expect_err("needs an error when syncer is not close to tip or estimated distance to network chain tip is far");
 
@@ -969,6 +1060,39 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         get_block_template_sync_error.code,
         ErrorCode::ServerError(-10)
     );
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template(Some(get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
+            mode: get_block_template_rpcs::types::get_block_template_opts::GetBlockTemplateRequestMode::Proposal,
+            ..Default::default()
+        }))
+        .await
+        .expect_err("needs an error when using unsupported mode");
+
+    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
+
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template(Some(
+            get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
+                data: Some(get_block_template_rpcs::types::hex_data::HexData("".into())),
+                ..Default::default()
+            },
+        ))
+        .await
+        .expect_err("needs an error when passing in block data");
+
+    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
+
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template(Some(
+            get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
+                longpollid: Some("".to_string()),
+                ..Default::default()
+            },
+        ))
+        .await
+        .expect_err("needs an error when using unsupported option");
+
+    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]

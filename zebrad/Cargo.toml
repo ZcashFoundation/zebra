@@ -2,7 +2,7 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 edition = "2021"
 # Zebra is only supported on the latest stable Rust version. Some earlier versions might work.
 # Zebra uses features introduced in Rust 1.58.
@@ -98,12 +98,12 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 indexmap = "1.9.2"
 lazy_static = "1.4.0"
-serde = { version = "1.0.148", features = ["serde_derive"] }
+serde = { version = "1.0.149", features = ["serde_derive"] }
 toml = "0.5.9"
 
 futures = "0.3.25"
 rayon = "1.6.0"
-tokio = { version = "1.22.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { version = "1.23.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.0.12"
 
@@ -178,7 +178,7 @@ tempfile = "3.3.0"
 hyper = { version = "0.14.23", features = ["http1", "http2", "server"]}
 reqwest = "0.11.13"
 
-tokio = { version = "1.22.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.23.0", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.11"
 
 # test feature lightwalletd-grpc-tests

@@ -1,8 +1,12 @@
+//! Syncer chain tip status, based on recent block locator responses from peers.
+
 use tokio::sync::watch;
 use zebra_chain::chain_sync_status::ChainSyncStatus;
 
 use super::RecentSyncLengths;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod mock;
 #[cfg(test)]
 mod tests;
 
@@ -42,24 +46,6 @@ impl SyncStatus {
         }
 
         Ok(())
-    }
-
-    /// Feed the given [`RecentSyncLengths`] it order to make the matching
-    /// [`SyncStatus`] report that it's close to the tip.
-    #[cfg(test)]
-    pub(crate) fn sync_close_to_tip(recent_syncs: &mut RecentSyncLengths) {
-        for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
-            recent_syncs.push_extend_tips_length(1);
-        }
-    }
-
-    /// Feed the given [`RecentSyncLengths`] it order to make the matching
-    /// [`SyncStatus`] report that it's not close to the tip.
-    #[cfg(test)]
-    pub(crate) fn sync_far_from_tip(recent_syncs: &mut RecentSyncLengths) {
-        for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
-            recent_syncs.push_extend_tips_length(Self::MIN_DIST_FROM_TIP * 10);
-        }
     }
 }
 

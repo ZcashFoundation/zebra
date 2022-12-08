@@ -263,15 +263,11 @@ pub fn check_failure_regexes(
         let ignore_matches = ignore_matches.join(",");
 
         let ignore_msg = if failure_matches.is_empty() {
-            format!(
-                "Log matched ignore regexes: {:?}, but no failure regexes",
-                ignore_matches,
-            )
+            format!("Log matched ignore regexes: {ignore_matches:?}, but no failure regexes",)
         } else {
             let failure_matches = failure_matches.join(",");
             format!(
-                "Ignoring failure regexes: {:?}, because log matched ignore regexes: {:?}",
-                failure_matches, ignore_matches,
+                "Ignoring failure regexes: {failure_matches:?}, because log matched ignore regexes: {ignore_matches:?}",
             )
         };
 

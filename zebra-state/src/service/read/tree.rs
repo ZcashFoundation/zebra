@@ -61,3 +61,18 @@ where
         .and_then(|chain| chain.as_ref().orchard_tree(hash_or_height))
         .or_else(|| db.orchard_tree(hash_or_height))
 }
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+/// Get the history tree of the provided chain.
+pub fn history_tree<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<Arc<zebra_chain::history_tree::HistoryTree>>
+where
+    C: AsRef<Chain>,
+{
+    chain
+        .and_then(|chain| chain.as_ref().history_tree(hash_or_height))
+        .or_else(|| Some(db.history_tree()))
+}

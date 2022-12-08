@@ -89,7 +89,7 @@ We use [the Release Drafter workflow](https://github.com/marketplace/actions/rel
 We follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
 To create the final change log:
-- [ ] Copy the draft changelog into `CHANGELOG.md`
+- [ ] Copy the **latest** draft changelog into `CHANGELOG.md` (there can be multiple draft releases)
 - [ ] Delete any trivial changes. Keep the list of those, to include in the PR
 - [ ] Combine duplicate changes
 - [ ] Edit change descriptions so they are consistent, and make sense to non-developers
@@ -125,6 +125,8 @@ After you have the version increments, the updated checkpoints and the updated c
 - [ ] Turn on [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches).
 - [ ] Once the PR is ready to be merged, unfreeze it [here](https://www.mergefreeze.com/installations/3676/branches).
       Do not unfreeze the whole repository.
+- [ ] Update the PR to the latest `main` branch using `@mergifyio update`. Then Mergify should merge it in-place.
+      If it makes a merge PR instead, that PR will get cancelled by the merge freeze. So just merge the changelog PR manually.
 
 ### Create the Release
 
@@ -141,12 +143,13 @@ After you have the version increments, the updated checkpoints and the updated c
       the previous release.
 - [ ] Mark the release as 'pre-release', until it has been built and tested
 - [ ] Publish the pre-release to GitHub using "Publish Release"
+- [ ] Delete all the [draft releases from the list of releases](https://github.com/ZcashFoundation/zebra/releases)
 
 ## Binary Testing
 
 - [ ] Wait until the [Docker binaries have been built on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml), and the quick tests have passed.
       (You can ignore the full sync and `lightwalletd` tests, because they take about a day to run.)
-- [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Publish Release"
+- [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Set as the latest release"
 - [ ] Wait until [the Docker images have been published](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml)
 - [ ] Test the Docker image using `docker run --tty --interactive zfnd/zebra:1.0.0-rc.<version>` <!-- TODO: replace with `zfnd/zebra` when we release 1.0.0 -->
 - [ ] Turn off [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches) for the whole repository

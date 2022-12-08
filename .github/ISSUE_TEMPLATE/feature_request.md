@@ -23,11 +23,17 @@ If this changes network behaviour, quote and link to the Bitcoin network referen
 https://developer.bitcoin.org/reference/p2p_networking.html
 -->
 
-### Designs
+### Complex Code or Requirements
 
 <!--
-If this change is part of a Zebra design, quote and link to the RFC:
-https://github.com/ZcashFoundation/zebra/tree/main/book/src/dev/rfcs/
+Does this PR change concurrency, unsafe code, or complex consensus rules?
+If it does, explain how we will implement, review, and test it.
+-->
+
+### Testing
+
+<!--
+How can we check that this change does what we want it to do?
 -->
 
 ## Related Work

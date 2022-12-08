@@ -556,8 +556,7 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
             zebra_chain::block::CommitmentError::InvalidChainHistoryRoot { .. },
         ) => {}
         _ => panic!(
-            "Error must be InvalidBlockCommitment::InvalidChainHistoryRoot instead of {:?}",
-            err
+            "Error must be InvalidBlockCommitment::InvalidChainHistoryRoot instead of {err:?}"
         ),
     };
 
