@@ -711,14 +711,30 @@ fn last_config_is_stored() -> Result<()> {
         }
     }
 
+    println!(
+        "\n\
+         Here is the missing config file: \n\
+         \n\
+         {processed_generated_content}\n"
+    );
+
     Err(eyre!(
-        "latest zebrad config is not being tested for compatibility.\n\
-         Run: \n\
+        "latest zebrad config is not being tested for compatibility. \n\
+         \n\
+         Take the missing config file logged above, \n\
+         and commit it to Zebra's git repository as:\n\
+         zebrad/tests/common/configs/{}<next-release-tag>.toml \n\
+         \n\
+         Or run: \n\
          cargo build {}--bin zebrad && \n\
          zebrad generate | \n\
          sed \"s/cache_dir = '.*'/cache_dir = 'cache_dir'/\" > \n\
-         zebrad/tests/common/configs/{}<next-release-tag>.toml \n\
-         and commit the latest config to Zebra's git repository",
+         zebrad/tests/common/configs/{}<next-release-tag>.toml",
+        if cfg!(feature = "getblocktemplate-rpcs") {
+            GET_BLOCK_TEMPLATE_CONFIG_PREFIX
+        } else {
+            ""
+        },
         if cfg!(feature = "getblocktemplate-rpcs") {
             "--features=getblocktemplate-rpcs "
         } else {
