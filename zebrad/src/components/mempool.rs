@@ -83,6 +83,8 @@ type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, St
 ///
 /// Indicates whether it is enabled or disabled and, if enabled, contains
 /// the necessary data to run it.
+//
+// Zebra only has one mempool, so the enum variant size difference doesn't matter.
 #[allow(clippy::large_enum_variant)]
 enum ActiveState {
     /// The Mempool is disabled.
