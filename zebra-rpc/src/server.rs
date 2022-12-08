@@ -278,7 +278,7 @@ impl RpcServer {
             span.in_scope(|| {
                 info!("Stopping RPC server");
                 close_handle.clone().close();
-                info!("Stopped RPC server");
+                debug!("Stopped RPC server");
             })
         };
 

@@ -268,11 +268,17 @@ impl Drop for ReadStateService {
                 // We are the last state with a reference to this thread, so we can
                 // wait until the block write task finishes, then check for panics (blocking).
                 // (We'd also like to abort the thread, but std::thread::JoinHandle can't do that.)
+
+                // This log is verbose during tests.
+                #[cfg(not(test))]
                 info!("waiting for the block write task to finish");
+                #[cfg(test)]
+                debug!("waiting for the block write task to finish");
+
                 if let Err(thread_panic) = block_write_task_handle.join() {
                     std::panic::resume_unwind(thread_panic);
                 } else {
-                    info!("shutting down the state without waiting for the block write task");
+                    debug!("shutting down the state because the block write task has finished");
                 }
             }
         } else {
@@ -788,7 +794,7 @@ impl ReadStateService {
             block_write_task: Some(block_write_task),
         };
 
-        tracing::info!("created new read-only state service");
+        tracing::debug!("created new read-only state service");
 
         read_service
     }
