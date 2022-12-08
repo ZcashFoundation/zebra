@@ -458,10 +458,9 @@ impl DiskDb {
 
             // TODO: provide a different hint if the disk is full, see #1623
             Err(e) => panic!(
-                "Opening database {:?} failed: {:?}. \
+                "Opening database {path:?} failed: {e:?}. \
                  Hint: Check if another zebrad process is running. \
                  Try changing the state cache_dir in the Zebra config.",
-                path, e,
             ),
         }
     }

@@ -383,15 +383,13 @@ impl ExpandedDifficulty {
         // This assertion also makes sure that size fits in its 8 bit compact field
         assert!(
             size < (31 + OFFSET) as _,
-            "256^size (256^{}) must fit in a u256, after the sign bit adjustment and offset",
-            size
+            "256^size (256^{size}) must fit in a u256, after the sign bit adjustment and offset"
         );
         let size = u32::try_from(size).expect("a 0-6 bit value fits in a u32");
 
         assert!(
             mantissa <= UNSIGNED_MANTISSA_MASK.into(),
-            "mantissa {:x?} must fit in its compact field",
-            mantissa
+            "mantissa {mantissa:x?} must fit in its compact field"
         );
         let mantissa = u32::try_from(mantissa).expect("a 0-23 bit value fits in a u32");
 

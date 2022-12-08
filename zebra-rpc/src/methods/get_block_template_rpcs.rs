@@ -8,12 +8,11 @@ use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
-    amount::{self, Amount, NonNegative},
-    block::Height,
+    amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{
         self,
         merkle::{self, AuthDataRoot},
-        Block, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
+        Block, ChainHistoryBlockTxAuthCommitmentHash, Height, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
@@ -33,17 +32,17 @@ use zebra_state::{ReadRequest, ReadResponse};
 use crate::methods::{
     best_chain_tip_height,
     get_block_template_rpcs::types::{
-        default_roots::DefaultRoots, get_block_template::GetBlockTemplate, hex_data::HexData,
-        submit_block, transaction::TransactionTemplate,
+        default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
+        get_block_template_opts::GetBlockTemplateRequestMode, hex_data::HexData, submit_block,
+        transaction::TransactionTemplate,
     },
     GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
 
 pub mod config;
 pub mod constants;
-
-pub(crate) mod types;
-pub(crate) mod zip317;
+pub mod types;
+pub mod zip317;
 
 /// The max estimated distance to the chain tip for the getblocktemplate method.
 ///
@@ -113,7 +112,10 @@ pub trait GetBlockTemplateRpc {
     ///
     /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[rpc(name = "getblocktemplate")]
-    fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>>;
+    fn get_block_template(
+        &self,
+        options: Option<types::get_block_template_opts::JsonParameters>,
+    ) -> BoxFuture<Result<GetBlockTemplate>>;
 
     /// Submits block to the node to be validated and committed.
     /// Returns the [`submit_block::Response`] for the operation, as a JSON string.
@@ -292,7 +294,10 @@ where
         .boxed()
     }
 
-    fn get_block_template(&self) -> BoxFuture<Result<GetBlockTemplate>> {
+    fn get_block_template(
+        &self,
+        options: Option<types::get_block_template_opts::JsonParameters>,
+    ) -> BoxFuture<Result<GetBlockTemplate>> {
         let network = self.network;
         let miner_address = self.miner_address;
 
@@ -303,17 +308,35 @@ where
 
         // Since this is a very large RPC, we use separate functions for each group of fields.
         async move {
+            if let Some(options) = options {
+                if options.data.is_some() || options.mode == GetBlockTemplateRequestMode::Proposal {
+                    return Err(Error {
+                        code: ErrorCode::InvalidParams,
+                        message: "\"proposal\" mode is currently unsupported by Zebra".to_string(),
+                        data: None,
+                    })
+                }
+
+                if options.longpollid.is_some() {
+                    return Err(Error {
+                        code: ErrorCode::InvalidParams,
+                        message: "long polling is currently unsupported by Zebra".to_string(),
+                        data: None,
+                    })
+                }
+            }
+
             let miner_address = miner_address.ok_or_else(|| Error {
                 code: ErrorCode::ServerError(0),
                 message: "configure mining.miner_address in zebrad.toml \
-                          with a transparent P2SH single signature address"
+                          with a transparent P2SH address"
                     .to_string(),
                 data: None,
             })?;
 
             // The tip estimate may not be the same as the one coming from the state
             // but this is ok for an estimate
-            let (estimated_distance_to_chain_tip, tip_height) = latest_chain_tip
+            let (estimated_distance_to_chain_tip, estimated_tip_height) = latest_chain_tip
                 .estimate_distance_to_network_chain_tip(network)
                 .ok_or_else(|| Error {
                     code: ErrorCode::ServerError(0),
@@ -324,7 +347,7 @@ where
             if !sync_status.is_close_to_tip() || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
                 tracing::info!(
                     estimated_distance_to_chain_tip,
-                    ?tip_height,
+                    ?estimated_tip_height,
                     "Zebra has not synced to the chain tip"
                 );
 
@@ -334,10 +357,6 @@ where
                     data: None,
                 });
             }
-
-            let mempool_txs = zip317::select_mempool_transactions(mempool).await?;
-
-            let miner_fee = miner_fee(&mempool_txs);
 
             // Calling state with `ChainInfo` request for relevant chain data
             let request = ReadRequest::ChainInfo;
@@ -352,15 +371,19 @@ where
                             })?;
 
             let chain_info = match response {
-                ReadResponse::ChainInfo(Some(chain_info)) => chain_info,
+                ReadResponse::ChainInfo(chain_info) => chain_info,
                 _ => unreachable!("we should always have enough state data here to get a `GetBlockTemplateChainInfo`"),
             };
 
             // Get the tip data from the state call
-            let tip_height = chain_info.tip.0;
-            let tip_hash = chain_info.tip.1;
+            let block_height = (chain_info.tip_height + 1).expect("tip is far below Height::MAX");
 
-            let block_height = (tip_height + 1).expect("tip is far below Height::MAX");
+            // Use a fake coinbase transaction to break the dependency between transaction
+            // selection, the miner fee, and the fee payment in the coinbase transaction.
+            let fake_coinbase_tx = fake_coinbase_transaction(network, block_height, miner_address);
+            let mempool_txs = zip317::select_mempool_transactions(fake_coinbase_tx, mempool).await?;
+
+            let miner_fee = miner_fee(&mempool_txs);
 
             let outputs =
                 standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
@@ -368,6 +391,16 @@ where
 
             let (merkle_root, auth_data_root) =
                 calculate_transaction_roots(&coinbase_tx, &mempool_txs);
+
+            let history_tree = chain_info.history_tree;
+            // TODO: move expensive cryptography to a rayon thread?
+            let chain_history_root = history_tree.hash().expect("history tree can't be empty");
+
+            // TODO: move expensive cryptography to a rayon thread?
+            let block_commitments_hash = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                &chain_history_root,
+                &auth_data_root,
+            );
 
             // Convert into TransactionTemplates
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
@@ -379,15 +412,15 @@ where
 
                 version: ZCASH_BLOCK_VERSION,
 
-                previous_block_hash: GetBlockHash(tip_hash),
-                block_commitments_hash: [0; 32].into(),
-                light_client_root_hash: [0; 32].into(),
-                final_sapling_root_hash: [0; 32].into(),
+                previous_block_hash: GetBlockHash(chain_info.tip_hash),
+                block_commitments_hash,
+                light_client_root_hash: block_commitments_hash,
+                final_sapling_root_hash: block_commitments_hash,
                 default_roots: DefaultRoots {
                     merkle_root,
-                    chain_history_root: [0; 32].into(),
+                    chain_history_root,
                     auth_data_root,
-                    block_commitments_hash: [0; 32].into(),
+                    block_commitments_hash,
                 },
 
                 transactions: mempool_txs,
@@ -547,6 +580,35 @@ pub fn standard_coinbase_outputs(
         .iter()
         .map(|(amount, address)| (*amount, new_coinbase_script(*address)))
         .collect()
+}
+
+/// Returns a fake coinbase transaction that can be used during transaction selection.
+///
+/// This avoids a data dependency loop involving the selected transactions, the miner fee,
+/// and the coinbase transaction.
+///
+/// This transaction's serialized size and sigops must be at least as large as the real coinbase
+/// transaction with the correct height and fee.
+fn fake_coinbase_transaction(
+    network: Network,
+    block_height: Height,
+    miner_address: transparent::Address,
+) -> TransactionTemplate<NegativeOrZero> {
+    // Block heights are encoded as variable-length (script) and `u32` (lock time, expiry height).
+    // They can also change the `u32` consensus branch id.
+    // We use the template height here, which has the correct byte length.
+    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    // https://github.com/zcash/zips/blob/main/zip-0203.rst#changes-for-nu5
+    //
+    // Transparent amounts are encoded as `i64`,
+    // so one zat has the same size as the real amount:
+    // https://developer.bitcoin.org/reference/transactions.html#txout-a-transaction-output
+    let miner_fee = 1.try_into().expect("amount is valid and non-negative");
+
+    let outputs = standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
+    let coinbase_tx = Transaction::new_v5_coinbase(network, block_height, outputs).into();
+
+    TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee)
 }
 
 /// Returns the transaction effecting and authorizing roots

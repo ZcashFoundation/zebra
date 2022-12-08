@@ -4,14 +4,16 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
-use self::network_chain_tip_height_estimator::NetworkChainTipHeightEstimator;
 use crate::{block, parameters::Network, transaction};
+
+mod network_chain_tip_height_estimator;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod mock;
-mod network_chain_tip_height_estimator;
 #[cfg(test)]
 mod tests;
+
+use network_chain_tip_height_estimator::NetworkChainTipHeightEstimator;
 
 /// An interface for querying the chain tip.
 ///
@@ -83,6 +85,9 @@ pub trait ChainTip {
 }
 
 /// A chain tip that is always empty.
+///
+/// Used in production for isolated network connections,
+/// and as a mock chain tip in tests.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct NoChainTip;
 

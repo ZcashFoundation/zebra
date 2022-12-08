@@ -564,10 +564,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
         .unwrap_err();
     assert_eq!(
         error.message,
-        format!(
-            "invalid address \"{}\": parse error: t-addr decoding error",
-            address
-        )
+        format!("invalid address \"{address}\": parse error: t-addr decoding error")
     );
 
     mempool.expect_no_requests().await;
@@ -795,8 +792,11 @@ async fn rpc_getblocktemplate() {
 
     use chrono::{TimeZone, Utc};
 
-    use crate::methods::get_block_template_rpcs::constants::{
-        GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+    use crate::methods::{
+        get_block_template_rpcs::constants::{
+            GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+        },
+        tests::utils::fake_history_tree,
     };
     use zebra_chain::{
         amount::{Amount, NonNegative},
@@ -856,16 +856,18 @@ async fn rpc_getblocktemplate() {
             .clone()
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
-            .respond(ReadResponse::ChainInfo(Some(GetBlockTemplateChainInfo {
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
                 expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
-                tip: (fake_tip_height, fake_tip_hash),
+                tip_height: fake_tip_height,
+                tip_hash: fake_tip_hash,
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-            })));
+                history_tree: fake_history_tree(Mainnet),
+            }));
     });
 
-    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template());
+    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template(None));
 
     mempool
         .expect_request(mempool::Request::FullTransactions)
@@ -921,7 +923,7 @@ async fn rpc_getblocktemplate() {
 
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
     let get_block_template_sync_error = get_block_template_rpc
-        .get_block_template()
+        .get_block_template(None)
         .await
         .expect_err("needs an error when estimated distance to network chain tip is far");
 
@@ -934,7 +936,7 @@ async fn rpc_getblocktemplate() {
 
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
     let get_block_template_sync_error = get_block_template_rpc
-        .get_block_template()
+        .get_block_template(None)
         .await
         .expect_err("needs an error when syncer is not close to tip");
 
@@ -945,7 +947,7 @@ async fn rpc_getblocktemplate() {
 
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
     let get_block_template_sync_error = get_block_template_rpc
-        .get_block_template()
+        .get_block_template(None)
         .await
         .expect_err("needs an error when syncer is not close to tip or estimated distance to network chain tip is far");
 
@@ -953,6 +955,39 @@ async fn rpc_getblocktemplate() {
         get_block_template_sync_error.code,
         ErrorCode::ServerError(-10)
     );
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template(Some(get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
+            mode: get_block_template_rpcs::types::get_block_template_opts::GetBlockTemplateRequestMode::Proposal,
+            ..Default::default()
+        }))
+        .await
+        .expect_err("needs an error when using unsupported mode");
+
+    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
+
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template(Some(
+            get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
+                data: Some(get_block_template_rpcs::types::hex_data::HexData("".into())),
+                ..Default::default()
+            },
+        ))
+        .await
+        .expect_err("needs an error when passing in block data");
+
+    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
+
+    let get_block_template_sync_error = get_block_template_rpc
+        .get_block_template(Some(
+            get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
+                longpollid: Some("".to_string()),
+                ..Default::default()
+            },
+        ))
+        .await
+        .expect_err("needs an error when using unsupported option");
+
+    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]

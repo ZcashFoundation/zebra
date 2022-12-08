@@ -103,15 +103,13 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
     let block_gossip_result = block_gossip_task_handle.now_or_never();
     assert!(
         matches!(block_gossip_result, None),
-        "unexpected error or panic in block gossip task: {:?}",
-        block_gossip_result,
+        "unexpected error or panic in block gossip task: {block_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
         matches!(tx_gossip_result, None),
-        "unexpected error or panic in transaction gossip task: {:?}",
-        tx_gossip_result,
+        "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
     Ok(())
@@ -188,15 +186,13 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
     let block_gossip_result = block_gossip_task_handle.now_or_never();
     assert!(
         matches!(block_gossip_result, None),
-        "unexpected error or panic in block gossip task: {:?}",
-        block_gossip_result,
+        "unexpected error or panic in block gossip task: {block_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
         matches!(tx_gossip_result, None),
-        "unexpected error or panic in transaction gossip task: {:?}",
-        tx_gossip_result,
+        "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
     Ok(())
@@ -245,8 +241,7 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
                 for tx in &txs {
                     assert!(
                         response_txs.contains(&Missing(*tx)),
-                        "expected {:?}, but it was not in the response",
-                        tx
+                        "expected {tx:?}, but it was not in the response"
                     );
                 }
                 assert_eq!(response_txs.len(), txs.len());
@@ -295,10 +290,8 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
 
                 assert!(
                     expected.iter().any(|expected| expected == &actual),
-                    "unexpected response: {:?} \
-                     expected one of: {:?}",
-                    actual,
-                    expected,
+                    "unexpected response: {actual:?} \
+                     expected one of: {expected:?}",
                 );
             }
         } else {
@@ -313,15 +306,13 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
     let block_gossip_result = block_gossip_task_handle.now_or_never();
     assert!(
         matches!(block_gossip_result, None),
-        "unexpected error or panic in block gossip task: {:?}",
-        block_gossip_result,
+        "unexpected error or panic in block gossip task: {block_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
         matches!(tx_gossip_result, None),
-        "unexpected error or panic in transaction gossip task: {:?}",
-        tx_gossip_result,
+        "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
     Ok(())
@@ -415,10 +406,8 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
 
                 assert!(
                     expected.iter().any(|expected| expected == &actual),
-                    "unexpected response: {:?} \
-                     expected one of: {:?}",
-                    actual,
-                    expected,
+                    "unexpected response: {actual:?} \
+                     expected one of: {expected:?}",
                 );
             }
         } else {
@@ -467,15 +456,13 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
     let block_gossip_result = block_gossip_task_handle.now_or_never();
     assert!(
         matches!(block_gossip_result, None),
-        "unexpected error or panic in block gossip task: {:?}",
-        block_gossip_result,
+        "unexpected error or panic in block gossip task: {block_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
         matches!(tx_gossip_result, None),
-        "unexpected error or panic in transaction gossip task: {:?}",
-        tx_gossip_result,
+        "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
     Ok(())
@@ -582,15 +569,13 @@ async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> 
     let block_gossip_result = block_gossip_task_handle.now_or_never();
     assert!(
         matches!(block_gossip_result, None),
-        "unexpected error or panic in block gossip task: {:?}",
-        block_gossip_result,
+        "unexpected error or panic in block gossip task: {block_gossip_result:?}",
     );
 
     let tx_gossip_result = tx_gossip_task_handle.now_or_never();
     assert!(
         matches!(tx_gossip_result, None),
-        "unexpected error or panic in transaction gossip task: {:?}",
-        tx_gossip_result,
+        "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
     );
 
     Ok(())

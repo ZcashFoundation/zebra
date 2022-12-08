@@ -154,15 +154,11 @@ where
         now = Instant::now();
         assert!(
             now >= minimum_reconnect_instant,
-            "all candidates should obey the minimum rate-limit: now: {:?} min: {:?}",
-            now,
-            minimum_reconnect_instant,
+            "all candidates should obey the minimum rate-limit: now: {now:?} min: {minimum_reconnect_instant:?}",
         );
         assert!(
             now <= maximum_reconnect_instant,
-            "rate-limited candidates should not be delayed too long: now: {:?} max: {:?}. Hint: is the test machine overloaded?",
-            now,
-            maximum_reconnect_instant,
+            "rate-limited candidates should not be delayed too long: now: {now:?} max: {maximum_reconnect_instant:?}. Hint: is the test machine overloaded?",
         );
 
         minimum_reconnect_instant = now + MIN_PEER_CONNECTION_INTERVAL;

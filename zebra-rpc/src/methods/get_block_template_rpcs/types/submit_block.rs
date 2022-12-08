@@ -7,9 +7,23 @@ use crate::methods::get_block_template_rpcs::GetBlockTemplateRpc;
 /// Optional argument `jsonparametersobject` for `submitblock` RPC request
 ///
 /// See notes for [`GetBlockTemplateRpc::submit_block`] method
-#[derive(Debug, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 pub struct JsonParameters {
-    pub(crate) _work_id: Option<String>,
+    /// The workid for the block template.
+    ///
+    /// > If the server provided a workid, it MUST be included with submissions,
+    /// currently unused.
+    ///
+    /// Rationale:
+    ///
+    /// > If servers allow all mutations, it may be hard to identify which job it is based on.
+    /// > While it may be possible to verify the submission by its content, it is much easier
+    /// > to compare it to the job issued. It is very easy for the miner to keep track of this.
+    /// > Therefore, using a "workid" is a very cheap solution to enable more mutations.
+    ///
+    /// <https://en.bitcoin.it/wiki/BIP_0022#Rationale>
+    #[serde(rename = "workid")]
+    pub _work_id: Option<String>,
 }
 
 /// Response to a `submitblock` RPC request.

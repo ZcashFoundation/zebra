@@ -207,8 +207,7 @@ impl From<BoxError> for TransactionError {
         }
 
         TransactionError::InternalDowncastError(format!(
-            "downcast to known transaction error type failed, original error: {:?}",
-            err,
+            "downcast to known transaction error type failed, original error: {err:?}",
         ))
     }
 }

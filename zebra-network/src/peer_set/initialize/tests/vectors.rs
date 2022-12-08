@@ -303,8 +303,7 @@ async fn crawler_peer_limit_zero_connect_panic() {
         // `Err(_)` means that no peers are available, and the sender has not been dropped.
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
         matches!(peer_result, Err(_) | Ok(None)),
-        "unexpected peer when outbound limit is zero: {:?}",
-        peer_result,
+        "unexpected peer when outbound limit is zero: {peer_result:?}",
     );
 }
 
@@ -327,8 +326,7 @@ async fn crawler_peer_limit_one_connect_error() {
         // `Err(_)` means that no peers are available, and the sender has not been dropped.
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
         matches!(peer_result, Err(_) | Ok(None)),
-        "unexpected peer when all connections error: {:?}",
-        peer_result,
+        "unexpected peer when all connections error: {peer_result:?}",
     );
 }
 
@@ -370,10 +368,8 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
             Ok(Some(peer_result)) => {
                 assert!(
                     matches!(peer_result, Ok((_, _))),
-                    "unexpected connection error: {:?}\n\
-                     {} previous peers succeeded",
-                    peer_result,
-                    peer_count,
+                    "unexpected connection error: {peer_result:?}\n\
+                     {peer_count} previous peers succeeded",
                 );
                 peer_count += 1;
             }
@@ -434,10 +430,8 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
             Ok(Some(peer_change_result)) => {
                 assert!(
                     matches!(peer_change_result, Ok((_, _))),
-                    "unexpected connection error: {:?}\n\
-                     {} previous peers succeeded",
-                    peer_change_result,
-                    peer_change_count,
+                    "unexpected connection error: {peer_change_result:?}\n\
+                     {peer_change_count} previous peers succeeded",
                 );
                 peer_change_count += 1;
             }
@@ -502,8 +496,7 @@ async fn crawler_peer_limit_default_connect_error() {
         // `Err(_)` means that no peers are available, and the sender has not been dropped.
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
         matches!(peer_result, Err(_) | Ok(None)),
-        "unexpected peer when all connections error: {:?}",
-        peer_result,
+        "unexpected peer when all connections error: {peer_result:?}",
     );
 }
 
@@ -547,10 +540,8 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
             Ok(Some(peer_result)) => {
                 assert!(
                     matches!(peer_result, Ok((_, _))),
-                    "unexpected connection error: {:?}\n\
-                     {} previous peers succeeded",
-                    peer_result,
-                    peer_count,
+                    "unexpected connection error: {peer_result:?}\n\
+                     {peer_count} previous peers succeeded",
                 );
                 peer_count += 1;
             }
@@ -612,10 +603,8 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
             Ok(Some(peer_change_result)) => {
                 assert!(
                     matches!(peer_change_result, Ok((_, _))),
-                    "unexpected connection error: {:?}\n\
-                     {} previous peers succeeded",
-                    peer_change_result,
-                    peer_change_count,
+                    "unexpected connection error: {peer_change_result:?}\n\
+                     {peer_change_count} previous peers succeeded",
                 );
                 peer_change_count += 1;
             }
@@ -683,8 +672,7 @@ async fn listener_peer_limit_zero_handshake_panic() {
         // `Err(_)` means that no peers are available, and the sender has not been dropped.
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
         matches!(peer_result, Err(_) | Ok(None)),
-        "unexpected peer when inbound limit is zero: {:?}",
-        peer_result,
+        "unexpected peer when inbound limit is zero: {peer_result:?}",
     );
 }
 
@@ -709,8 +697,7 @@ async fn listener_peer_limit_one_handshake_error() {
         // `Err(_)` means that no peers are available, and the sender has not been dropped.
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
         matches!(peer_result, Err(_) | Ok(None)),
-        "unexpected peer when all handshakes error: {:?}",
-        peer_result,
+        "unexpected peer when all handshakes error: {peer_result:?}",
     );
 }
 
@@ -756,10 +743,8 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
             Ok(Some(peer_result)) => {
                 assert!(
                     matches!(peer_result, Ok((_, _))),
-                    "unexpected connection error: {:?}\n\
-                     {} previous peers succeeded",
-                    peer_result,
-                    peer_count,
+                    "unexpected connection error: {peer_result:?}\n\
+                     {peer_count} previous peers succeeded",
                 );
                 peer_count += 1;
             }
@@ -824,10 +809,8 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
             Ok(Some(peer_change_result)) => {
                 assert!(
                     matches!(peer_change_result, Ok((_, _))),
-                    "unexpected connection error: {:?}\n\
-                     {} previous peers succeeded",
-                    peer_change_result,
-                    peer_change_count,
+                    "unexpected connection error: {peer_change_result:?}\n\
+                     {peer_change_count} previous peers succeeded",
                 );
                 peer_change_count += 1;
             }
@@ -895,8 +878,7 @@ async fn listener_peer_limit_default_handshake_error() {
         // `Err(_)` means that no peers are available, and the sender has not been dropped.
         // `Ok(None)` means that no peers are available, and the sender has been dropped.
         matches!(peer_result, Err(_) | Ok(None)),
-        "unexpected peer when all handshakes error: {:?}",
-        peer_result,
+        "unexpected peer when all handshakes error: {peer_result:?}",
     );
 }
 
@@ -946,10 +928,8 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
             Ok(Some(peer_result)) => {
                 assert!(
                     matches!(peer_result, Ok((_, _))),
-                    "unexpected connection error: {:?}\n\
-                     {} previous peers succeeded",
-                    peer_result,
-                    peer_count,
+                    "unexpected connection error: {peer_result:?}\n\
+                     {peer_count} previous peers succeeded",
                 );
                 peer_count += 1;
             }
@@ -1014,10 +994,8 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
             Ok(Some(peer_change_result)) => {
                 assert!(
                     matches!(peer_change_result, Ok((_, _))),
-                    "unexpected connection error: {:?}\n\
-                     {} previous peers succeeded",
-                    peer_change_result,
-                    peer_change_count,
+                    "unexpected connection error: {peer_change_result:?}\n\
+                     {peer_change_count} previous peers succeeded",
                 );
                 peer_change_count += 1;
             }
@@ -1090,15 +1068,13 @@ async fn add_initial_peers_is_rate_limited() {
     // Make sure the rate limiting worked by checking if it took long enough
     assert!(
         elapsed > constants::MIN_PEER_CONNECTION_INTERVAL.saturating_mul((PEER_COUNT - 1) as u32),
-        "elapsed only {:?}",
-        elapsed
+        "elapsed only {elapsed:?}"
     );
 
     let initial_peers_result = initial_peers_task_handle.await;
     assert!(
         matches!(initial_peers_result, Ok(Ok(_))),
-        "unexpected error or panic in add_initial_peers task: {:?}",
-        initial_peers_result,
+        "unexpected error or panic in add_initial_peers task: {initial_peers_result:?}",
     );
 
     // Check for panics or errors in the address book updater task.
@@ -1110,8 +1086,7 @@ async fn add_initial_peers_is_rate_limited() {
             // We can't check for error equality due to type erasure,
             // and we can't downcast due to ownership.
             || matches!(updater_result, Some(Ok(Err(ref _all_senders_closed)))),
-        "unexpected error or panic in address book updater task: {:?}",
-        updater_result,
+        "unexpected error or panic in address book updater task: {updater_result:?}",
     );
 }
 
@@ -1330,8 +1305,7 @@ where
     assert!(
         matches!(crawl_result, None)
             || matches!(crawl_result, Some(Err(ref e)) if e.is_cancelled()),
-        "unexpected error or panic in peer crawler task: {:?}",
-        crawl_result,
+        "unexpected error or panic in peer crawler task: {crawl_result:?}",
     );
 
     // Check the final address book contents.
@@ -1436,8 +1410,7 @@ where
     assert!(
         matches!(listen_result, None)
             || matches!(listen_result, Some(Err(ref e)) if e.is_cancelled()),
-        "unexpected error or panic in inbound peer listener task: {:?}",
-        listen_result,
+        "unexpected error or panic in inbound peer listener task: {listen_result:?}",
     );
 
     (config, peerset_rx)
