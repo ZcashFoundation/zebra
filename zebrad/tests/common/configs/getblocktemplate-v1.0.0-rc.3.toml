@@ -51,7 +51,7 @@ peerset_initial_target_size = 25
 
 [rpc]
 debug_force_finished_sync = false
-parallel_cpu_threads = 1
+parallel_cpu_threads = 0
 
 [state]
 cache_dir = 'cache_dir'
