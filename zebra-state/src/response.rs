@@ -133,6 +133,10 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::ChainInfo`](crate::ReadRequest::ChainInfo) with the state
     /// information needed by the `getblocktemplate` RPC method.
     ChainInfo(GetBlockTemplateChainInfo),
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Response to [`ReadRequest::SolutionRate`](crate::ReadRequest::SolutionRate)
+    SolutionRate(Option<u128>),
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -204,7 +208,7 @@ impl TryFrom<ReadResponse> for Response {
                 Err("there is no corresponding Response for this ReadResponse")
             }
             #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadResponse::ChainInfo(_) => {
+            ReadResponse::ChainInfo(_) | ReadResponse::SolutionRate(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
         }
