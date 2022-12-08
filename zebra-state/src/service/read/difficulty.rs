@@ -63,27 +63,21 @@ pub fn get_block_template_chain_info(
     ))
 }
 
-/// The default window size specifying how many blocks to check when estimating the chain's solution rate
-/// Based on default value in zcashd.
-const DEFAULT_SOLUTION_RATE_WINDOW_SIZE: usize = 120;
-
 /// Accepts a `non_finalized_state`, [`ZebraDb`], `num_blocks`, and a block hash to start at.
 ///
-/// Iterates over up to the last `num_blocks` or [`DEFAULT_SOLUTION_RATE_WINDOW_SIZE`] blocks, summing up
-/// their total work. Divides that total by the number of seconds between the timestamp of the
+/// Iterates over up to the last `num_blocks` blocks, summing up their total work.
+/// Divides that total by the number of seconds between the timestamp of the
 /// first block in the iteration and 1 block below the last block.
 ///
-/// Returns the solution rate per second for the current best chain, or `None` if the `start_hash` and
-/// at least 1 block below it are not found in the chain.
+/// Returns the solution rate per second for the current best chain, or `None` if
+/// the `start_hash` and at least 1 block below it are not found in the chain.
 pub fn solution_rate(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
-    num_blocks: Option<usize>,
+    num_blocks: usize,
     start_hash: Hash,
 ) -> Option<u128> {
     let mut total_work: u128 = 0;
-    let num_blocks = num_blocks.unwrap_or(DEFAULT_SOLUTION_RATE_WINDOW_SIZE);
-
     let mut block_iter = any_ancestor_blocks(non_finalized_state, db, start_hash)
         .take(num_blocks.checked_add(1).unwrap_or(num_blocks))
         .peekable();

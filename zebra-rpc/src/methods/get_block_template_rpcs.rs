@@ -53,6 +53,11 @@ pub(crate) mod zip317;
 /// > and clock time varies between nodes.
 const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: i32 = 100;
 
+/// The default window size specifying how many blocks to check when estimating the chain's solution rate.
+///
+/// Based on default value in zcashd.
+const DEFAULT_SOLUTION_RATE_WINDOW_SIZE: usize = 120;
+
 /// The RPC error code used by `zcashd` for when it's still downloading initial blocks.
 ///
 /// `s-nomp` mining pool expects error code `-10` when the node is not synced:
@@ -579,7 +584,9 @@ where
         num_blocks: Option<usize>,
         height: Option<i32>,
     ) -> BoxFuture<Result<u128>> {
-        let num_blocks = num_blocks.map(|num_blocks| num_blocks.max(1));
+        let num_blocks = num_blocks
+            .map(|num_blocks| num_blocks.max(1))
+            .unwrap_or(DEFAULT_SOLUTION_RATE_WINDOW_SIZE);
         let height = height.and_then(|height| (height > 1).then_some(Height(height as u32)));
         let mut state = self.state.clone();
 

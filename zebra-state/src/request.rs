@@ -786,7 +786,7 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::SolutionRate`]
     SolutionRate {
         /// Specifies over difficulty averaging window.
-        num_blocks: Option<usize>,
+        num_blocks: usize,
         /// Optionally estimate the network speed at the time when a certain block was found
         height: Option<block::Height>,
     },
