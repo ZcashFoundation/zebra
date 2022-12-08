@@ -140,7 +140,9 @@ pub trait GetBlockTemplateRpc {
     #[rpc(name = "getmininginfo")]
     fn get_mining_info(&self) -> BoxFuture<Result<types::get_mining_info::Response>>;
 
-    /// Returns the estimated network solutions per second based on the last n blocks.
+    /// Returns the estimated network solutions per second based on the last `num_blocks` before `height`.
+    /// If `num_blocks` is not supplied, uses 120 blocks.
+    /// If `height` is not supplied or is 0, uses the tip height.
     ///
     /// zcashd reference: [`getnetworksolps`](https://zcash.github.io/rpc/getnetworksolps.html)
     #[rpc(name = "getnetworksolps")]
@@ -150,7 +152,9 @@ pub trait GetBlockTemplateRpc {
         height: Option<i32>,
     ) -> BoxFuture<Result<u128>>;
 
-    /// Returns the estimated network solutions per second based on the last n blocks.
+    /// Returns the estimated network solutions per second based on the last `num_blocks` before `height`.
+    /// If `num_blocks` is not supplied, uses 120 blocks.
+    /// If `height` is not supplied or is 0, uses the tip height.
     ///
     /// zcashd reference: [`getnetworkhashps`](https://zcash.github.io/rpc/getnetworkhashps.html)
     #[rpc(name = "getnetworkhashps")]

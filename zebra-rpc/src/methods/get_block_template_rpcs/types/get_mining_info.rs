@@ -16,6 +16,7 @@ pub struct Response {
 }
 
 impl Response {
+    /// Creates a new `getmininginfo` response
     pub fn new(chain: Network, networksolps: u128) -> Self {
         Self {
             networksolps,
