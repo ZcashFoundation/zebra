@@ -656,6 +656,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
 
 /// Check if the config produced by current zebrad is stored.
 #[tracing::instrument]
+#[allow(clippy::print_stdout)]
 fn last_config_is_stored() -> Result<()> {
     let _init_guard = zebra_test::init();
 
