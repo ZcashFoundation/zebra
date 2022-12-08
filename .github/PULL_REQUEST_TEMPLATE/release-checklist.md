@@ -149,7 +149,7 @@ After you have the version increments, the updated checkpoints and the updated c
 
 - [ ] Wait until the [Docker binaries have been built on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/continous-integration-docker.yml), and the quick tests have passed.
       (You can ignore the full sync and `lightwalletd` tests, because they take about a day to run.)
-- [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Publish Release"
+- [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Set as the latest release"
 - [ ] Wait until [the Docker images have been published](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml)
 - [ ] Test the Docker image using `docker run --tty --interactive zfnd/zebra:1.0.0-rc.<version>` <!-- TODO: replace with `zfnd/zebra` when we release 1.0.0 -->
 - [ ] Turn off [Merge Freeze](https://www.mergefreeze.com/installations/3676/branches) for the whole repository
