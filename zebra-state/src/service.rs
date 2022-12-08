@@ -1637,6 +1637,13 @@ impl Service<ReadRequest> for ReadStateService {
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
                         let latest_non_finalized_state = state.latest_non_finalized_state();
+                        // # Correctness
+                        //
+                        // It is ok to do these lookups using multiple database calls. Finalized state updates
+                        // can only add overlapping blocks, and block hashes are unique across all chain forks.
+                        //
+                        // The worst that can happen here is that the default `start_hash` will be below
+                        // the chain tip.
                         let (tip_height, tip_hash) =
                             match read::tip(latest_non_finalized_state.best_chain(), &state.db) {
                                 Some(tip_hash) => tip_hash,
