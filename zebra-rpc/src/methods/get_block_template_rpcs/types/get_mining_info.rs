@@ -12,7 +12,7 @@ pub struct Response {
     networkhashps: u128,
 
     /// Current network name as defined in BIP70 (main, test, regtest)
-    chain: Network,
+    chain: String,
 
     /// If using testnet or not
     testnet: bool,
@@ -20,12 +20,12 @@ pub struct Response {
 
 impl Response {
     /// Creates a new `getmininginfo` response
-    pub fn new(chain: Network, networksolps: u128) -> Self {
+    pub fn new(network: Network, networksolps: u128) -> Self {
         Self {
             networksolps,
             networkhashps: networksolps,
-            chain,
-            testnet: chain == Network::Testnet,
+            chain: network.bip70_network_name(),
+            testnet: network == Network::Testnet,
         }
     }
 }
