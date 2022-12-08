@@ -616,13 +616,29 @@ impl DiskDb {
                 DiskDb::IDEAL_OPEN_FILE_LIMIT
             );
         } else if cfg!(windows) {
+            // This log is verbose during tests.
+            #[cfg(not(test))]
             info!(
                 min_limit = ?DiskDb::MIN_OPEN_FILE_LIMIT,
                 ideal_limit = ?DiskDb::IDEAL_OPEN_FILE_LIMIT,
                 "assuming the open file limit is high enough for Zebra",
             );
+            #[cfg(test)]
+            debug!(
+                min_limit = ?DiskDb::MIN_OPEN_FILE_LIMIT,
+                ideal_limit = ?DiskDb::IDEAL_OPEN_FILE_LIMIT,
+                "assuming the open file limit is high enough for Zebra",
+            );
         } else {
+            #[cfg(not(test))]
             info!(
+                ?current_limit,
+                min_limit = ?DiskDb::MIN_OPEN_FILE_LIMIT,
+                ideal_limit = ?DiskDb::IDEAL_OPEN_FILE_LIMIT,
+                "the open file limit is high enough for Zebra",
+            );
+            #[cfg(test)]
+            debug!(
                 ?current_limit,
                 min_limit = ?DiskDb::MIN_OPEN_FILE_LIMIT,
                 ideal_limit = ?DiskDb::IDEAL_OPEN_FILE_LIMIT,
@@ -667,7 +683,15 @@ impl DiskDb {
                     ephemeral_note = " and removing ephemeral files";
                 }
 
+                // This log is verbose during tests.
+                #[cfg(not(test))]
                 info!(
+                    ?path,
+                    "forcing shutdown{} of a state database with multiple active instances",
+                    ephemeral_note,
+                );
+                #[cfg(test)]
+                debug!(
                     ?path,
                     "forcing shutdown{} of a state database with multiple active instances",
                     ephemeral_note,
@@ -696,7 +720,8 @@ impl DiskDb {
         // - Zebra commits each block in a database transaction, any incomplete blocks get rolled back
         // - ephemeral files are placed in the os temp dir and should be cleaned up automatically eventually
         let path = self.path();
-        info!(?path, "flushing database to disk");
+        debug!(?path, "flushing database to disk");
+
         self.db
             .flush()
             .expect("unexpected failure flushing SST data to disk");
@@ -759,7 +784,12 @@ impl DiskDb {
         }
 
         let path = self.path();
+
+        // This log is verbose during tests.
+        #[cfg(not(test))]
         info!(?path, "removing temporary database files");
+        #[cfg(test)]
+        debug!(?path, "removing temporary database files");
 
         // We'd like to use `rocksdb::Env::mem_env` for ephemeral databases,
         // but the Zcash blockchain might not fit in memory. So we just
@@ -776,7 +806,15 @@ impl DiskDb {
         let result = std::fs::remove_dir_all(path);
 
         if result.is_err() {
+            // This log is verbose during tests.
+            #[cfg(not(test))]
             info!(
+                ?result,
+                ?path,
+                "removing temporary database files caused an error",
+            );
+            #[cfg(test)]
+            debug!(
                 ?result,
                 ?path,
                 "removing temporary database files caused an error",
