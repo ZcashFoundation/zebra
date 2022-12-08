@@ -1,11 +1,13 @@
 //! Randomised property tests for Proof of Work.
 
-use proptest::{arbitrary::any, prelude::*, test_runner::Config};
-
 use std::{env, sync::Arc};
 
-use crate::block::{self, Block};
-use crate::serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize};
+use proptest::{arbitrary::any, prelude::*, test_runner::Config};
+
+use crate::{
+    block::{self, Block},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+};
 
 use super::super::*;
 
