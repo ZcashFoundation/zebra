@@ -371,6 +371,7 @@ where
         Ok(response)
     }
 
+    // TODO: use a generic error constructor (#5548)
     #[allow(clippy::unwrap_in_result)]
     fn get_blockchain_info(&self) -> Result<GetBlockChainInfo> {
         let network = self.network;
@@ -473,6 +474,7 @@ where
         Ok(response)
     }
 
+    // TODO: use a generic error constructor (#5548)
     fn get_address_balance(
         &self,
         address_strings: AddressStrings,
@@ -499,6 +501,7 @@ where
         .boxed()
     }
 
+    // TODO: use HexData to handle transaction data, and a generic error constructor (#5548)
     fn send_raw_transaction(
         &self,
         raw_transaction_hex: String,
@@ -553,6 +556,7 @@ where
         .boxed()
     }
 
+    // TODO: use a generic error constructor (#5548)
     fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>> {
         let mut state = self.state.clone();
 
@@ -621,6 +625,7 @@ where
         .boxed()
     }
 
+    // TODO: use a generic error constructor (#5548)
     fn get_best_block_hash(&self) -> Result<GetBlockHash> {
         self.latest_chain_tip
             .best_tip_hash()
@@ -632,6 +637,7 @@ where
             })
     }
 
+    // TODO: use a generic error constructor (#5548)
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {
         let mut mempool = self.mempool.clone();
 
@@ -667,6 +673,7 @@ where
         .boxed()
     }
 
+    // TODO: use HexData to handle the transaction ID, and a generic error constructor (#5548)
     fn get_raw_transaction(
         &self,
         txid_hex: String,
@@ -750,6 +757,7 @@ where
         .boxed()
     }
 
+    // TODO: use a generic error constructor (#5548)
     fn z_get_treestate(&self, hash_or_height: String) -> BoxFuture<Result<GetTreestate>> {
         let mut state = self.state.clone();
 
@@ -864,6 +872,7 @@ where
         .boxed()
     }
 
+    // TODO: use a generic error constructor (#5548)
     fn get_address_tx_ids(
         &self,
         request: GetAddressTxIdsRequest,
@@ -928,6 +937,7 @@ where
         .boxed()
     }
 
+    // TODO: use a generic error constructor (#5548)
     fn get_address_utxos(
         &self,
         address_strings: AddressStrings,
