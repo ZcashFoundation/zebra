@@ -896,10 +896,7 @@ async fn rpc_getblocktemplate() {
                 GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD, GET_BLOCK_TEMPLATE_MUTABLE_FIELD,
                 GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
             },
-            types::{
-                get_block_template_opts::GetBlockTemplateRequestMode,
-                long_poll::LONG_POLL_ID_LENGTH,
-            },
+            types::long_poll::LONG_POLL_ID_LENGTH,
         },
         tests::utils::fake_history_tree,
     };
@@ -1074,18 +1071,6 @@ async fn rpc_getblocktemplate() {
         ))
         .await
         .expect_err("needs an error when passing in block data");
-
-    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
-
-    let get_block_template_sync_error = get_block_template_rpc
-        .get_block_template(Some(
-            get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
-                mode: GetBlockTemplateRequestMode::Proposal,
-                ..Default::default()
-            },
-        ))
-        .await
-        .expect_err("needs an error when the mode is unsupported");
 
     assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
 
