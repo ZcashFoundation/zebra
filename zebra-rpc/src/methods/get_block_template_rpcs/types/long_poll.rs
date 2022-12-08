@@ -194,6 +194,9 @@ impl From<LongPollInput> for LongPollId {
 fn update_checksum(checksum: &mut u32, item: [u8; 32]) {
     for chunk in item.chunks(4) {
         let chunk = chunk.try_into().expect("chunk is u32 size");
+
+        // The endianness of this conversion doesn't matter,
+        // so we make it efficient on the most common platforms.
         let chunk = u32::from_le_bytes(chunk);
 
         // It's ok to use xor here, because long polling checks are probabilistic,
