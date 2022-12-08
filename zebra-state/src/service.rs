@@ -1622,6 +1622,62 @@ impl Service<ReadRequest> for ReadStateService {
                 .map(|join_result| join_result.expect("panic in ReadRequest::ChainInfo"))
                 .boxed()
             }
+
+            // Used by getmininginfo, getnetworksolps, and getnetworkhashps RPCs.
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadRequest::SolutionRate { num_blocks, height } => {
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                // # Performance
+                //
+                // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let latest_non_finalized_state = state.latest_non_finalized_state();
+                        // # Correctness
+                        //
+                        // It is ok to do these lookups using multiple database calls. Finalized state updates
+                        // can only add overlapping blocks, and block hashes are unique across all chain forks.
+                        //
+                        // The worst that can happen here is that the default `start_hash` will be below
+                        // the chain tip.
+                        let (tip_height, tip_hash) =
+                            match read::tip(latest_non_finalized_state.best_chain(), &state.db) {
+                                Some(tip_hash) => tip_hash,
+                                None => return Ok(ReadResponse::SolutionRate(None)),
+                            };
+
+                        let start_hash = match height {
+                            Some(height) if height < tip_height => read::hash_by_height(
+                                latest_non_finalized_state.best_chain(),
+                                &state.db,
+                                height,
+                            ),
+                            // use the chain tip hash if height is above it or not provided.
+                            _ => Some(tip_hash),
+                        };
+
+                        let solution_rate = start_hash.and_then(|start_hash| {
+                            read::difficulty::solution_rate(
+                                &latest_non_finalized_state,
+                                &state.db,
+                                num_blocks,
+                                start_hash,
+                            )
+                        });
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");
+
+                        Ok(ReadResponse::SolutionRate(solution_rate))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::ChainInfo"))
+                .boxed()
+            }
         }
     }
 }

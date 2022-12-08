@@ -503,6 +503,13 @@ impl std::ops::Add for Work {
 /// Partial work used to track relative work in non-finalized chains
 pub struct PartialCumulativeWork(u128);
 
+impl PartialCumulativeWork {
+    /// Return the inner `u128` value.
+    pub fn as_u128(self) -> u128 {
+        self.0
+    }
+}
+
 impl From<Work> for PartialCumulativeWork {
     fn from(work: Work) -> Self {
         PartialCumulativeWork(work.0)

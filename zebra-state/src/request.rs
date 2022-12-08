@@ -779,6 +779,17 @@ pub enum ReadRequest {
     /// [`zebra-state::GetBlockTemplateChainInfo`](zebra-state::GetBlockTemplateChainInfo)` structure containing
     /// best chain state information.
     ChainInfo,
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Get the average solution rate in the best chain.
+    ///
+    /// Returns [`ReadResponse::SolutionRate`]
+    SolutionRate {
+        /// Specifies over difficulty averaging window.
+        num_blocks: usize,
+        /// Optionally estimate the network speed at the time when a certain block was found
+        height: Option<block::Height>,
+    },
 }
 
 impl ReadRequest {
@@ -806,6 +817,8 @@ impl ReadRequest {
             ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::ChainInfo => "chain_info",
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadRequest::SolutionRate { .. } => "solution_rate",
         }
     }
 
