@@ -1,12 +1,14 @@
 //! Transaction LockTime.
 
-use std::{convert::TryInto, io};
+use std::io;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 
-use crate::block::{self, Height};
-use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::{
+    block::{self, Height},
+    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
+};
 
 /// A Bitcoin-style `locktime`, representing either a block height or an epoch
 /// time.
