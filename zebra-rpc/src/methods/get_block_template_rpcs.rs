@@ -21,10 +21,12 @@ use zebra_chain::{
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
+
 use zebra_consensus::{
-    funding_stream_address, funding_stream_values, miner_subsidy, new_coinbase_script,
-    VerifyChainError, MAX_BLOCK_SIGOPS,
+    funding_stream_address, funding_stream_values, miner_subsidy, VerifyChainError,
+    MAX_BLOCK_SIGOPS,
 };
+
 use zebra_node_services::mempool;
 
 use zebra_state::{ReadRequest, ReadResponse};
@@ -657,7 +659,7 @@ pub fn standard_coinbase_outputs(
 
     coinbase_outputs
         .iter()
-        .map(|(amount, address)| (*amount, new_coinbase_script(*address)))
+        .map(|(amount, address)| (*amount, address.create_script_from_address()))
         .collect()
 }
 
