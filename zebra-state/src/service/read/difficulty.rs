@@ -5,10 +5,10 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, TimeZone, Utc};
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Block, Hash, Height},
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
-    work::difficulty::CompactDifficulty,
+    work::difficulty::{CompactDifficulty, PartialCumulativeWork},
 };
 
 use crate::{
@@ -61,6 +61,58 @@ pub fn get_block_template_chain_info(
         network,
         history_tree,
     ))
+}
+
+/// Accepts a `non_finalized_state`, [`ZebraDb`], `num_blocks`, and a block hash to start at.
+///
+/// Iterates over up to the last `num_blocks` blocks, summing up their total work.
+/// Divides that total by the number of seconds between the timestamp of the
+/// first block in the iteration and 1 block below the last block.
+///
+/// Returns the solution rate per second for the current best chain, or `None` if
+/// the `start_hash` and at least 1 block below it are not found in the chain.
+pub fn solution_rate(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    num_blocks: usize,
+    start_hash: Hash,
+) -> Option<u128> {
+    // Take 1 extra block for calculating the number of seconds between when mining on the first block likely started.
+    // The work for the last block in this iterator is not added to `total_work`.
+    let mut block_iter = any_ancestor_blocks(non_finalized_state, db, start_hash)
+        .take(num_blocks.checked_add(1).unwrap_or(num_blocks))
+        .peekable();
+
+    let get_work = |block: Arc<Block>| {
+        block
+            .header
+            .difficulty_threshold
+            .to_work()
+            .expect("work has already been validated")
+    };
+
+    let block = block_iter.next()?;
+    let last_block_time = block.header.time;
+
+    let mut total_work: PartialCumulativeWork = get_work(block).into();
+
+    loop {
+        // Return `None` if the iterator doesn't yield a second item.
+        let block = block_iter.next()?;
+
+        if block_iter.peek().is_some() {
+            // Add the block's work to `total_work` if it's not the last item in the iterator.
+            // The last item in the iterator is only used to estimate when mining on the first block
+            // in the window of `num_blocks` likely started.
+            total_work += get_work(block);
+        } else {
+            let first_block_time = block.header.time;
+            let duration_between_first_and_last_block = last_block_time - first_block_time;
+            return Some(
+                total_work.as_u128() / duration_between_first_and_last_block.num_seconds() as u128,
+            );
+        }
+    }
 }
 
 /// Do a consistency check by checking the finalized tip before and after all other database queries.
