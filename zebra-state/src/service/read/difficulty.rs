@@ -102,6 +102,8 @@ pub fn solution_rate(
 
         if block_iter.peek().is_some() {
             // Add the block's work to `total_work` if it's not the last item in the iterator.
+            // The last item in the iterator is only used to estimate when mining on the first block
+            // in the window of `num_blocks` likely started.
             total_work += get_work(block);
         } else {
             let first_block_time = block.header.time;
