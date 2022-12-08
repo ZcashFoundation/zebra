@@ -10,7 +10,7 @@ use sha2::Sha256;
 use crate::{
     parameters::Network,
     serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
-    transparent::Script,
+    transparent::{opcodes::OpCode, Script},
 };
 
 #[cfg(test)]
@@ -215,6 +215,14 @@ impl Address {
         }
     }
 
+    /// Create an address for the given public key hash and network.
+    pub fn from_public_key_hash(network: Network, pub_key_hash: [u8; 20]) -> Self {
+        Self::PayToPublicKeyHash {
+            network,
+            pub_key_hash,
+        }
+    }
+
     /// Returns the network for this address.
     pub fn network(&self) -> Network {
         match *self {
@@ -253,6 +261,33 @@ impl Address {
         let mut payload = [0u8; 20];
         payload[..].copy_from_slice(&ripe_hash[..]);
         payload
+    }
+
+    /// Given a transparent address (P2SH or a P2PKH), create a script that can be used in a coinbase
+    /// transaction output.
+    pub fn create_script_from_address(&self) -> Script {
+        let mut script_bytes = Vec::new();
+
+        match self {
+            // https://developer.bitcoin.org/devguide/transactions.html#pay-to-script-hash-p2sh
+            Address::PayToScriptHash { .. } => {
+                script_bytes.push(OpCode::Hash160 as u8);
+                script_bytes.push(OpCode::Push20Bytes as u8);
+                script_bytes.extend(self.hash_bytes());
+                script_bytes.push(OpCode::Equal as u8);
+            }
+            // https://developer.bitcoin.org/devguide/transactions.html#pay-to-public-key-hash-p2pkh
+            Address::PayToPublicKeyHash { .. } => {
+                script_bytes.push(OpCode::Dup as u8);
+                script_bytes.push(OpCode::Hash160 as u8);
+                script_bytes.push(OpCode::Push20Bytes as u8);
+                script_bytes.extend(self.hash_bytes());
+                script_bytes.push(OpCode::EqualVerify as u8);
+                script_bytes.push(OpCode::CheckSig as u8);
+            }
+        };
+
+        Script::new(&script_bytes)
     }
 }
 

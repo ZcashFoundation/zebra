@@ -23,8 +23,8 @@ use zebra_chain::{
     transparent,
 };
 use zebra_consensus::{
-    funding_stream_address, funding_stream_values, miner_subsidy, new_coinbase_script, BlockError,
-    VerifyBlockError, VerifyChainError, VerifyCheckpointError, MAX_BLOCK_SIGOPS,
+    funding_stream_address, funding_stream_values, miner_subsidy, BlockError, VerifyBlockError,
+    VerifyChainError, VerifyCheckpointError, MAX_BLOCK_SIGOPS,
 };
 use zebra_node_services::mempool;
 
@@ -545,7 +545,7 @@ pub fn standard_coinbase_outputs(
 
     coinbase_outputs
         .iter()
-        .map(|(amount, address)| (*amount, new_coinbase_script(*address)))
+        .map(|(amount, address)| (*amount, address.create_script_from_address()))
         .collect()
 }
 

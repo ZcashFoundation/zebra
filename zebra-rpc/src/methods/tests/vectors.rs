@@ -791,15 +791,23 @@ async fn rpc_getblockhash() {
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblocktemplate() {
+    // test getblocktemplate with a miner P2SH address
+    rpc_getblocktemplate_mining_address(true).await;
+    // test getblocktemplate with a miner P2PKH address
+    rpc_getblocktemplate_mining_address(false).await;
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     use std::panic;
 
-    use chrono::{TimeZone, Utc};
+    use chrono::TimeZone;
 
     use crate::methods::get_block_template_rpcs::constants::{
         GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
     };
     use zebra_chain::{
-        amount::{Amount, NonNegative},
+        amount::NonNegative,
         block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
         chain_tip::mock::MockChainTip,
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
@@ -818,9 +826,12 @@ async fn rpc_getblocktemplate() {
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
 
-    let mining_config = get_block_template_rpcs::config::Config {
-        miner_address: Some(transparent::Address::from_script_hash(Mainnet, [0x7e; 20])),
+    let miner_address = match use_p2pkh {
+        false => Some(transparent::Address::from_script_hash(Mainnet, [0x7e; 20])),
+        true => Some(transparent::Address::from_pub_key_hash(Mainnet, [0x7e; 20])),
     };
+
+    let mining_config = get_block_template_rpcs::config::Config { miner_address };
 
     // nu5 block height
     let fake_tip_height = NetworkUpgrade::Nu5.activation_height(Mainnet).unwrap();
@@ -909,8 +920,13 @@ async fn rpc_getblocktemplate() {
     assert!(get_block_template.coinbase_txn.required);
     assert!(!get_block_template.coinbase_txn.data.as_ref().is_empty());
     assert_eq!(get_block_template.coinbase_txn.depends.len(), 0);
-    // TODO: should a coinbase transaction have sigops?
-    assert_eq!(get_block_template.coinbase_txn.sigops, 0);
+    if use_p2pkh {
+        // there is one sig operation if miner address is p2pkh.
+        assert_eq!(get_block_template.coinbase_txn.sigops, 1);
+    } else {
+        // everything in the coinbase is p2sh.
+        assert_eq!(get_block_template.coinbase_txn.sigops, 0);
+    }
     // Coinbase transaction checks for empty blocks.
     assert_eq!(
         get_block_template.coinbase_txn.fee,
