@@ -881,12 +881,6 @@ async fn rpc_getblocktemplate() {
 
     use chrono::{TimeZone, Utc};
 
-    use crate::methods::{
-        get_block_template_rpcs::constants::{
-            GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
-        },
-        tests::utils::fake_history_tree,
-    };
     use zebra_chain::{
         amount::{Amount, NonNegative},
         block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
@@ -894,8 +888,18 @@ async fn rpc_getblocktemplate() {
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
     };
     use zebra_consensus::MAX_BLOCK_SIGOPS;
-
     use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
+
+    use crate::methods::{
+        get_block_template_rpcs::{
+            constants::{
+                GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD, GET_BLOCK_TEMPLATE_MUTABLE_FIELD,
+                GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+            },
+            types::long_poll::LONG_POLL_ID_LENGTH,
+        },
+        tests::utils::fake_history_tree,
+    };
 
     let _init_guard = zebra_test::init();
 
@@ -973,7 +977,10 @@ async fn rpc_getblocktemplate() {
         })
         .expect("unexpected error in getblocktemplate RPC call");
 
-    assert_eq!(get_block_template.capabilities, Vec::<String>::new());
+    assert_eq!(
+        get_block_template.capabilities,
+        GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD.to_vec()
+    );
     assert_eq!(get_block_template.version, ZCASH_BLOCK_VERSION);
     assert!(get_block_template.transactions.is_empty());
     assert_eq!(
@@ -1044,6 +1051,7 @@ async fn rpc_getblocktemplate() {
         get_block_template_sync_error.code,
         ErrorCode::ServerError(-10)
     );
+
     let get_block_template_sync_error = get_block_template_rpc
         .get_block_template(Some(get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
             mode: get_block_template_rpcs::types::get_block_template_opts::GetBlockTemplateRequestMode::Proposal,
@@ -1066,17 +1074,27 @@ async fn rpc_getblocktemplate() {
 
     assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
 
+    // The long poll id is valid, so it returns a state error instead
     let get_block_template_sync_error = get_block_template_rpc
         .get_block_template(Some(
             get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
-                longpollid: Some("".to_string()),
+                // This must parse as a LongPollId.
+                // It must be the correct length and have hex/decimal digits.
+                longpollid: Some(
+                    "0".repeat(LONG_POLL_ID_LENGTH)
+                        .parse()
+                        .expect("unexpected invalid LongPollId"),
+                ),
                 ..Default::default()
             },
         ))
         .await
-        .expect_err("needs an error when using unsupported option");
+        .expect_err("needs an error when the state is empty");
 
-    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
+    assert_eq!(
+        get_block_template_sync_error.code,
+        ErrorCode::ServerError(-10)
+    );
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]
