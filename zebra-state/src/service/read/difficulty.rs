@@ -108,7 +108,9 @@ pub fn solution_rate(
         } else {
             let first_block_time = block.header.time;
             let duration_between_first_and_last_block = last_block_time - first_block_time;
-            return Some(*total_work / duration_between_first_and_last_block.num_seconds() as u128);
+            return Some(
+                total_work.as_u128() / duration_between_first_and_last_block.num_seconds() as u128,
+            );
         }
     }
 }

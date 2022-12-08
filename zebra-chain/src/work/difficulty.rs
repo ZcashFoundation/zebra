@@ -505,6 +505,13 @@ impl std::ops::Add for Work {
 /// Partial work used to track relative work in non-finalized chains
 pub struct PartialCumulativeWork(u128);
 
+impl PartialCumulativeWork {
+    /// Return the inner `u128` value.
+    pub fn as_u128(self) -> u128 {
+        self.0
+    }
+}
+
 impl From<Work> for PartialCumulativeWork {
     fn from(work: Work) -> Self {
         PartialCumulativeWork(work.0)
@@ -545,13 +552,5 @@ impl std::ops::Sub<Work> for PartialCumulativeWork {
 impl std::ops::SubAssign<Work> for PartialCumulativeWork {
     fn sub_assign(&mut self, rhs: Work) {
         *self = *self - rhs;
-    }
-}
-
-impl std::ops::Deref for PartialCumulativeWork {
-    type Target = u128;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
