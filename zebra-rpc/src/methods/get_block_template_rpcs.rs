@@ -8,7 +8,7 @@ use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
-    amount::{self, Amount, NonNegative},
+    amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{
         self,
         merkle::{self, AuthDataRoot},
@@ -41,9 +41,8 @@ use crate::methods::{
 
 pub mod config;
 pub mod constants;
-
 pub mod types;
-pub(crate) mod zip317;
+pub mod zip317;
 
 /// The max estimated distance to the chain tip for the getblocktemplate method.
 ///
@@ -330,7 +329,7 @@ where
             let miner_address = miner_address.ok_or_else(|| Error {
                 code: ErrorCode::ServerError(0),
                 message: "configure mining.miner_address in zebrad.toml \
-                          with a transparent P2SH single signature address"
+                          with a transparent P2SH address"
                     .to_string(),
                 data: None,
             })?;
@@ -359,10 +358,6 @@ where
                 });
             }
 
-            let mempool_txs = zip317::select_mempool_transactions(mempool).await?;
-
-            let miner_fee = miner_fee(&mempool_txs);
-
             // Calling state with `ChainInfo` request for relevant chain data
             let request = ReadRequest::ChainInfo;
             let response = state
@@ -382,6 +377,13 @@ where
 
             // Get the tip data from the state call
             let block_height = (chain_info.tip_height + 1).expect("tip is far below Height::MAX");
+
+            // Use a fake coinbase transaction to break the dependency between transaction
+            // selection, the miner fee, and the fee payment in the coinbase transaction.
+            let fake_coinbase_tx = fake_coinbase_transaction(network, block_height, miner_address);
+            let mempool_txs = zip317::select_mempool_transactions(fake_coinbase_tx, mempool).await?;
+
+            let miner_fee = miner_fee(&mempool_txs);
 
             let outputs =
                 standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
@@ -578,6 +580,35 @@ pub fn standard_coinbase_outputs(
         .iter()
         .map(|(amount, address)| (*amount, new_coinbase_script(*address)))
         .collect()
+}
+
+/// Returns a fake coinbase transaction that can be used during transaction selection.
+///
+/// This avoids a data dependency loop involving the selected transactions, the miner fee,
+/// and the coinbase transaction.
+///
+/// This transaction's serialized size and sigops must be at least as large as the real coinbase
+/// transaction with the correct height and fee.
+fn fake_coinbase_transaction(
+    network: Network,
+    block_height: Height,
+    miner_address: transparent::Address,
+) -> TransactionTemplate<NegativeOrZero> {
+    // Block heights are encoded as variable-length (script) and `u32` (lock time, expiry height).
+    // They can also change the `u32` consensus branch id.
+    // We use the template height here, which has the correct byte length.
+    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    // https://github.com/zcash/zips/blob/main/zip-0203.rst#changes-for-nu5
+    //
+    // Transparent amounts are encoded as `i64`,
+    // so one zat has the same size as the real amount:
+    // https://developer.bitcoin.org/reference/transactions.html#txout-a-transaction-output
+    let miner_fee = 1.try_into().expect("amount is valid and non-negative");
+
+    let outputs = standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
+    let coinbase_tx = Transaction::new_v5_coinbase(network, block_height, outputs).into();
+
+    TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee)
 }
 
 /// Returns the transaction effecting and authorizing roots
