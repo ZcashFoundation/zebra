@@ -501,7 +501,8 @@ where
         .boxed()
     }
 
-    // TODO: use HexData to handle transaction data, and a generic error constructor (#5548)
+    // TODO: use HexData or GetRawTransaction::Bytes to handle the transaction data argument
+    //       use a generic error constructor (#5548)
     fn send_raw_transaction(
         &self,
         raw_transaction_hex: String,
@@ -673,7 +674,8 @@ where
         .boxed()
     }
 
-    // TODO: use HexData to handle the transaction ID, and a generic error constructor (#5548)
+    // TODO: use HexData or SentTransactionHash to handle the transaction ID
+    //       use a generic error constructor (#5548)
     fn get_raw_transaction(
         &self,
         txid_hex: String,
