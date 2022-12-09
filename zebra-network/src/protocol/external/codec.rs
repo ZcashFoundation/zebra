@@ -480,10 +480,11 @@ impl Codec {
             nonce: Nonce(reader.read_u64::<LittleEndian>()?),
             user_agent: String::zcash_deserialize(&mut reader)?,
             start_height: block::Height(reader.read_u32::<LittleEndian>()?),
-            relay: match reader.read_u8()? {
-                0 => false,
-                1 => true,
-                _ => return Err(Error::Parse("non-bool value supplied in relay field")),
+            relay: match reader.read_u8() {
+                Ok(val @ 0..=1) => val == 1,
+                Ok(_) => return Err(Error::Parse("non-bool value supplied in relay field")),
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => true,
+                Err(err) => Err(err)?,
             },
         }
         .into())
