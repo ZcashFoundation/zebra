@@ -1,6 +1,6 @@
 //! Parameter types for the `getblocktemplate` RPC.
 
-use super::hex_data::HexData;
+use super::{hex_data::HexData, long_poll::LongPollId};
 
 /// Defines whether the RPC method should generate a block template or attempt to validate a block proposal.
 /// `Proposal` mode is currently unsupported and will return an error.
@@ -82,10 +82,8 @@ pub struct JsonParameters {
     #[serde(default)]
     pub capabilities: Vec<GetBlockTemplateCapability>,
 
-    /// An id to wait for, in zcashd this is the tip hash and an internal counter.
+    /// An ID that delays the RPC response until the template changes.
     ///
-    /// If provided, the RPC response is delayed until the mempool or chain tip block changes.
-    ///
-    /// Currently unsupported and ignored by Zebra.
-    pub longpollid: Option<String>,
+    /// In Zebra, the ID represents the chain tip, max time, and mempool contents.
+    pub longpollid: Option<LongPollId>,
 }

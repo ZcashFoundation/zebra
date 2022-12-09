@@ -575,6 +575,7 @@ fn config_tests() -> Result<()> {
 }
 
 /// Test that `zebrad` runs the start command with no args
+#[tracing::instrument]
 fn app_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -654,6 +655,8 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
 }
 
 /// Check if the config produced by current zebrad is stored.
+#[tracing::instrument]
+#[allow(clippy::print_stdout)]
 fn last_config_is_stored() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -709,14 +712,30 @@ fn last_config_is_stored() -> Result<()> {
         }
     }
 
+    println!(
+        "\n\
+         Here is the missing config file: \n\
+         \n\
+         {processed_generated_content}\n"
+    );
+
     Err(eyre!(
-        "latest zebrad config is not being tested for compatibility.\n\
-         Run: \n\
+        "latest zebrad config is not being tested for compatibility. \n\
+         \n\
+         Take the missing config file logged above, \n\
+         and commit it to Zebra's git repository as:\n\
+         zebrad/tests/common/configs/{}<next-release-tag>.toml \n\
+         \n\
+         Or run: \n\
          cargo build {}--bin zebrad && \n\
          zebrad generate | \n\
          sed \"s/cache_dir = '.*'/cache_dir = 'cache_dir'/\" > \n\
-         zebrad/tests/common/configs/{}<next-release-tag>.toml \n\
-         and commit the latest config to Zebra's git repository",
+         zebrad/tests/common/configs/{}<next-release-tag>.toml",
+        if cfg!(feature = "getblocktemplate-rpcs") {
+            GET_BLOCK_TEMPLATE_CONFIG_PREFIX
+        } else {
+            ""
+        },
         if cfg!(feature = "getblocktemplate-rpcs") {
             "--features=getblocktemplate-rpcs "
         } else {
@@ -732,6 +751,7 @@ fn last_config_is_stored() -> Result<()> {
 
 /// Checks that Zebra prints an informative message when it cannot parse the
 /// config file.
+#[tracing::instrument]
 fn invalid_generated_config() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -804,6 +824,7 @@ fn invalid_generated_config() -> Result<()> {
 }
 
 /// Test all versions of `zebrad.toml` we have stored can be parsed by the latest `zebrad`.
+#[tracing::instrument]
 fn stored_configs_works() -> Result<()> {
     let old_configs_dir = configs_dir();
 

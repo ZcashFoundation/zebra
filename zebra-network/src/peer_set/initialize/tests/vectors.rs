@@ -1377,7 +1377,7 @@ where
                 // Wait until the listener closes the connection.
                 // The handshaker is fake, so it never sends any data.
                 let readable_result = outbound_stream.readable().await;
-                info!(
+                debug!(
                     ?readable_result,
                     "outbound connection became readable or errored: \
                      closing connection to test inbound listener"

@@ -133,11 +133,6 @@ impl RpcServer {
                          network.network {network} and miner address network {} must match",
                         miner_address.network(),
                     );
-                    assert!(
-                        miner_address.is_script_hash(),
-                        "incorrect miner address config: {miner_address} \
-                         Zebra only supports transparent 'pay to script hash' (P2SH) addresses",
-                    );
                 }
 
                 // Initialize the getblocktemplate rpc method handler
@@ -278,7 +273,7 @@ impl RpcServer {
             span.in_scope(|| {
                 info!("Stopping RPC server");
                 close_handle.clone().close();
-                info!("Stopped RPC server");
+                debug!("Stopped RPC server");
             })
         };
 

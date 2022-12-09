@@ -19,9 +19,6 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::genesis_hash,
 };
-use zebra_consensus::{
-    chain::VerifyChainError, BlockError, VerifyBlockError, VerifyCheckpointError,
-};
 use zebra_network as zn;
 use zebra_state as zs;
 
@@ -1008,7 +1005,6 @@ where
     ///
     /// See [`Self::handle_response`] for more details.
     #[allow(unknown_lints)]
-    #[allow(clippy::result_large_err)]
     fn handle_block_response(
         &mut self,
         response: Result<(Height, block::Hash), BlockDownloadVerifyError>,
@@ -1027,7 +1023,6 @@ where
     ///
     /// See [`Self::handle_response`] for more details.
     #[allow(unknown_lints)]
-    #[allow(clippy::result_large_err)]
     fn handle_hash_response(
         response: Result<IndexSet<block::Hash>, BlockDownloadVerifyError>,
     ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
@@ -1044,7 +1039,6 @@ where
     ///
     /// Returns `Err` if an unexpected error occurred, to force the synchronizer to restart.
     #[allow(unknown_lints)]
-    #[allow(clippy::result_large_err)]
     fn handle_response<T>(
         response: Result<T, BlockDownloadVerifyError>,
     ) -> Result<(), BlockDownloadVerifyError> {
@@ -1098,21 +1092,8 @@ where
     fn should_restart_sync(e: &BlockDownloadVerifyError) -> bool {
         match e {
             // Structural matches: downcasts
-            BlockDownloadVerifyError::Invalid {
-                error: VerifyChainError::Checkpoint(VerifyCheckpointError::AlreadyVerified { .. }),
-                ..
-            } => {
+            BlockDownloadVerifyError::Invalid { error, .. } if error.is_duplicate_request() => {
                 debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
-                false
-            }
-            BlockDownloadVerifyError::Invalid {
-                error:
-                    VerifyChainError::Block(VerifyBlockError::Block {
-                        source: BlockError::AlreadyInChain(_, _),
-                    }),
-                ..
-            } => {
-                debug!(error = ?e, "block is already in chain, possibly from a previous sync run, continuing");
                 false
             }
 
@@ -1140,12 +1121,15 @@ where
             }
 
             // String matches
-            BlockDownloadVerifyError::Invalid {
-                error: VerifyChainError::Block(VerifyBlockError::Commit(ref source)),
-                ..
-            } if format!("{source:?}").contains("block is already committed to the state")
-                || format!("{source:?}")
-                    .contains("block has already been sent to be committed to the state") =>
+            //
+            // We want to match VerifyChainError::Block(VerifyBlockError::Commit(ref source)),
+            // but that type is boxed.
+            // TODO:
+            // - turn this check into a function on VerifyChainError, like is_duplicate_request()
+            BlockDownloadVerifyError::Invalid { error, .. }
+                if format!("{error:?}").contains("block is already committed to the state")
+                    || format!("{error:?}")
+                        .contains("block has already been sent to be committed to the state") =>
             {
                 // TODO: improve this by checking the type (#2908)
                 debug!(error = ?e, "block is already committed or pending a commit, possibly from a previous sync run, continuing");

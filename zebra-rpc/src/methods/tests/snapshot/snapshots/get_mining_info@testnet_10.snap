@@ -1,0 +1,10 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+expression: get_mining_info
+---
+{
+  "networksolps": 0,
+  "networkhashps": 0,
+  "chain": "test",
+  "testnet": true
+}

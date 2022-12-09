@@ -21,20 +21,29 @@ use zebra_chain::{
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
+
 use zebra_consensus::{
-    funding_stream_address, funding_stream_values, miner_subsidy, new_coinbase_script, BlockError,
-    VerifyBlockError, VerifyChainError, VerifyCheckpointError, MAX_BLOCK_SIGOPS,
+    funding_stream_address, funding_stream_values, miner_subsidy, VerifyChainError,
+    MAX_BLOCK_SIGOPS,
 };
+
 use zebra_node_services::mempool;
 
 use zebra_state::{ReadRequest, ReadResponse};
 
 use crate::methods::{
     best_chain_tip_height,
-    get_block_template_rpcs::types::{
-        default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
-        get_block_template_opts::GetBlockTemplateRequestMode, hex_data::HexData, submit_block,
-        transaction::TransactionTemplate,
+    get_block_template_rpcs::{
+        constants::{
+            DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD,
+            GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+            MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE,
+        },
+        types::{
+            default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
+            get_block_template_opts::GetBlockTemplateRequestMode, hex_data::HexData,
+            long_poll::LongPollInput, submit_block, transaction::TransactionTemplate,
+        },
     },
     GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
@@ -43,20 +52,6 @@ pub mod config;
 pub mod constants;
 pub mod types;
 pub mod zip317;
-
-/// The max estimated distance to the chain tip for the getblocktemplate method.
-///
-/// Allows the same clock skew as the Zcash network, which is 100 blocks, based on the standard rule:
-/// > A full validator MUST NOT accept blocks with nTime more than two hours in the future
-/// > according to its clock. This is not strictly a consensus rule because it is nondeterministic,
-/// > and clock time varies between nodes.
-const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: i32 = 100;
-
-/// The RPC error code used by `zcashd` for when it's still downloading initial blocks.
-///
-/// `s-nomp` mining pool expects error code `-10` when the node is not synced:
-/// <https://github.com/s-nomp/node-stratum-pool/blob/d86ae73f8ff968d9355bb61aac05e0ebef36ccb5/lib/pool.js#L142>
-pub const NOT_SYNCED_ERROR_CODE: ErrorCode = ErrorCode::ServerError(-10);
 
 /// getblocktemplate RPC method signatures.
 #[rpc(server)]
@@ -132,6 +127,38 @@ pub trait GetBlockTemplateRpc {
         hex_data: HexData,
         _options: Option<submit_block::JsonParameters>,
     ) -> BoxFuture<Result<submit_block::Response>>;
+
+    /// Returns mining-related information.
+    ///
+    /// zcashd reference: [`getmininginfo`](https://zcash.github.io/rpc/getmininginfo.html)
+    #[rpc(name = "getmininginfo")]
+    fn get_mining_info(&self) -> BoxFuture<Result<types::get_mining_info::Response>>;
+
+    /// Returns the estimated network solutions per second based on the last `num_blocks` before `height`.
+    /// If `num_blocks` is not supplied, uses 120 blocks.
+    /// If `height` is not supplied or is 0, uses the tip height.
+    ///
+    /// zcashd reference: [`getnetworksolps`](https://zcash.github.io/rpc/getnetworksolps.html)
+    #[rpc(name = "getnetworksolps")]
+    fn get_network_sol_ps(
+        &self,
+        num_blocks: Option<usize>,
+        height: Option<i32>,
+    ) -> BoxFuture<Result<u64>>;
+
+    /// Returns the estimated network solutions per second based on the last `num_blocks` before `height`.
+    /// If `num_blocks` is not supplied, uses 120 blocks.
+    /// If `height` is not supplied or is 0, uses the tip height.
+    ///
+    /// zcashd reference: [`getnetworkhashps`](https://zcash.github.io/rpc/getnetworkhashps.html)
+    #[rpc(name = "getnetworkhashps")]
+    fn get_network_hash_ps(
+        &self,
+        num_blocks: Option<usize>,
+        height: Option<i32>,
+    ) -> BoxFuture<Result<u64>> {
+        self.get_network_sol_ps(num_blocks, height)
+    }
 }
 
 /// RPC method implementations.
@@ -261,6 +288,7 @@ where
         best_chain_tip_height(&self.latest_chain_tip).map(|height| height.0)
     }
 
+    // TODO: use a generic error constructor (#5548)
     fn get_block_hash(&self, index: i32) -> BoxFuture<Result<GetBlockHash>> {
         let mut state = self.state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
@@ -294,6 +322,7 @@ where
         .boxed()
     }
 
+    // TODO: use HexData to handle block proposal data, and a generic error constructor (#5548)
     fn get_block_template(
         &self,
         options: Option<types::get_block_template_opts::JsonParameters>,
@@ -316,14 +345,6 @@ where
                         data: None,
                     })
                 }
-
-                if options.longpollid.is_some() {
-                    return Err(Error {
-                        code: ErrorCode::InvalidParams,
-                        message: "long polling is currently unsupported by Zebra".to_string(),
-                        data: None,
-                    })
-                }
             }
 
             let miner_address = miner_address.ok_or_else(|| Error {
@@ -336,7 +357,7 @@ where
 
             // The tip estimate may not be the same as the one coming from the state
             // but this is ok for an estimate
-            let (estimated_distance_to_chain_tip, estimated_tip_height) = latest_chain_tip
+            let (estimated_distance_to_chain_tip, local_tip_height) = latest_chain_tip
                 .estimate_distance_to_network_chain_tip(network)
                 .ok_or_else(|| Error {
                     code: ErrorCode::ServerError(0),
@@ -347,7 +368,7 @@ where
             if !sync_status.is_close_to_tip() || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
                 tracing::info!(
                     estimated_distance_to_chain_tip,
-                    ?estimated_tip_height,
+                    ?local_tip_height,
                     "Zebra has not synced to the chain tip"
                 );
 
@@ -402,13 +423,23 @@ where
                 &auth_data_root,
             );
 
+            // TODO: use the entire mempool content via a watch channel,
+            //       rather than just the randomly selected transactions
+            let long_poll_id = LongPollInput::new(
+                chain_info.tip_height,
+                chain_info.tip_hash,
+                chain_info.max_time,
+                mempool_txs.iter().map(|tx| tx.transaction.id),
+            ).into();
+
             // Convert into TransactionTemplates
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
 
-            let mutable: Vec<String> = constants::GET_BLOCK_TEMPLATE_MUTABLE_FIELD.iter().map(ToString::to_string).collect();
+            let capabilities: Vec<String> = GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD.iter().map(ToString::to_string).collect();
+            let mutable: Vec<String> = GET_BLOCK_TEMPLATE_MUTABLE_FIELD.iter().map(ToString::to_string).collect();
 
             Ok(GetBlockTemplate {
-                capabilities: Vec::new(),
+                capabilities,
 
                 version: ZCASH_BLOCK_VERSION,
 
@@ -427,6 +458,8 @@ where
 
                 coinbase_txn: TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee),
 
+                long_poll_id,
+
                 target: format!(
                     "{}",
                     chain_info.expected_difficulty
@@ -438,7 +471,7 @@ where
 
                 mutable,
 
-                nonce_range: constants::GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
+                nonce_range: GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
 
                 sigop_limit: MAX_BLOCK_SIGOPS,
 
@@ -498,13 +531,10 @@ where
                     .map(|boxed_chain_error| *boxed_chain_error),
             };
 
-            Ok(match chain_error {
-                Ok(
-                    VerifyChainError::Checkpoint(VerifyCheckpointError::AlreadyVerified { .. })
-                    | VerifyChainError::Block(VerifyBlockError::Block {
-                        source: BlockError::AlreadyInChain(..),
-                    }),
-                ) => submit_block::ErrorResponse::Duplicate,
+            let response = match chain_error {
+                Ok(source) if source.is_duplicate_request() => {
+                    submit_block::ErrorResponse::Duplicate
+                }
 
                 // Currently, these match arms return Reject for the older duplicate in a queue,
                 // but queued duplicates should be DuplicateInconclusive.
@@ -526,8 +556,61 @@ where
                 // This match arm is currently unreachable, but if future changes add extra error types,
                 // we want to turn them into `Rejected`.
                 Err(_unknown_error_type) => submit_block::ErrorResponse::Rejected,
-            }
-            .into())
+            };
+
+            Ok(response.into())
+        }
+        .boxed()
+    }
+
+    fn get_mining_info(&self) -> BoxFuture<Result<types::get_mining_info::Response>> {
+        let network = self.network;
+        let solution_rate_fut = self.get_network_sol_ps(None, None);
+        async move {
+            Ok(types::get_mining_info::Response::new(
+                network,
+                solution_rate_fut.await?,
+            ))
+        }
+        .boxed()
+    }
+
+    fn get_network_sol_ps(
+        &self,
+        num_blocks: Option<usize>,
+        height: Option<i32>,
+    ) -> BoxFuture<Result<u64>> {
+        let num_blocks = num_blocks
+            .map(|num_blocks| num_blocks.max(1))
+            .unwrap_or(DEFAULT_SOLUTION_RATE_WINDOW_SIZE);
+        let height = height.and_then(|height| (height > 1).then_some(Height(height as u32)));
+        let mut state = self.state.clone();
+
+        async move {
+            let request = ReadRequest::SolutionRate { num_blocks, height };
+
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            let solution_rate = match response {
+                ReadResponse::SolutionRate(solution_rate) => solution_rate.ok_or(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "No blocks in state".to_string(),
+                    data: None,
+                })?,
+                _ => unreachable!("unmatched response to a solution rate request"),
+            };
+
+            Ok(solution_rate
+                .try_into()
+                .expect("per-second solution rate always fits in u64"))
         }
         .boxed()
     }
@@ -578,7 +661,7 @@ pub fn standard_coinbase_outputs(
 
     coinbase_outputs
         .iter()
-        .map(|(amount, address)| (*amount, new_coinbase_script(*address)))
+        .map(|(amount, address)| (*amount, address.create_script_from_address()))
         .collect()
 }
 

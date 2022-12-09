@@ -787,26 +787,127 @@ async fn rpc_getblockhash() {
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
+async fn rpc_getmininginfo() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    // Init RPC
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Buffer::new(MockService::build().for_unit_tests(), 1),
+        read_state,
+        latest_chain_tip.clone(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+    );
+
+    get_block_template_rpc
+        .get_mining_info()
+        .await
+        .expect("get_mining_info call should succeed");
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getnetworksolps() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), Mainnet).await;
+
+    // Init RPC
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Buffer::new(MockService::build().for_unit_tests(), 1),
+        read_state,
+        latest_chain_tip.clone(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+    );
+
+    let get_network_sol_ps_inputs = [
+        (None, None),
+        (Some(0), None),
+        (Some(0), Some(0)),
+        (Some(0), Some(-1)),
+        (Some(0), Some(10)),
+        (Some(0), Some(i32::MAX)),
+        (Some(1), None),
+        (Some(1), Some(0)),
+        (Some(1), Some(-1)),
+        (Some(1), Some(10)),
+        (Some(1), Some(i32::MAX)),
+        (Some(usize::MAX), None),
+        (Some(usize::MAX), Some(0)),
+        (Some(usize::MAX), Some(-1)),
+        (Some(usize::MAX), Some(10)),
+        (Some(usize::MAX), Some(i32::MAX)),
+    ];
+
+    for (num_blocks_input, height_input) in get_network_sol_ps_inputs {
+        let get_network_sol_ps_result = get_block_template_rpc
+            .get_network_sol_ps(num_blocks_input, height_input)
+            .await;
+        assert!(
+            get_network_sol_ps_result
+                .is_ok(),
+            "get_network_sol_ps({num_blocks_input:?}, {height_input:?}) call with should be ok, got: {get_network_sol_ps_result:?}"
+        );
+    }
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblocktemplate() {
+    // test getblocktemplate with a miner P2SH address
+    rpc_getblocktemplate_mining_address(true).await;
+    // test getblocktemplate with a miner P2PKH address
+    rpc_getblocktemplate_mining_address(false).await;
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     use std::panic;
 
-    use chrono::{TimeZone, Utc};
+    use chrono::TimeZone;
 
-    use crate::methods::{
-        get_block_template_rpcs::constants::{
-            GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
-        },
-        tests::utils::fake_history_tree,
-    };
     use zebra_chain::{
-        amount::{Amount, NonNegative},
+        amount::NonNegative,
         block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
         chain_tip::mock::MockChainTip,
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
     };
     use zebra_consensus::MAX_BLOCK_SIGOPS;
-
     use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
+
+    use crate::methods::{
+        get_block_template_rpcs::{
+            constants::{
+                GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD, GET_BLOCK_TEMPLATE_MUTABLE_FIELD,
+                GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+            },
+            types::long_poll::LONG_POLL_ID_LENGTH,
+        },
+        tests::utils::fake_history_tree,
+    };
 
     let _init_guard = zebra_test::init();
 
@@ -818,9 +919,12 @@ async fn rpc_getblocktemplate() {
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
 
-    let mining_config = get_block_template_rpcs::config::Config {
-        miner_address: Some(transparent::Address::from_script_hash(Mainnet, [0x7e; 20])),
+    let miner_address = match use_p2pkh {
+        false => Some(transparent::Address::from_script_hash(Mainnet, [0x7e; 20])),
+        true => Some(transparent::Address::from_pub_key_hash(Mainnet, [0x7e; 20])),
     };
+
+    let mining_config = get_block_template_rpcs::config::Config { miner_address };
 
     // nu5 block height
     let fake_tip_height = NetworkUpgrade::Nu5.activation_height(Mainnet).unwrap();
@@ -884,7 +988,10 @@ async fn rpc_getblocktemplate() {
         })
         .expect("unexpected error in getblocktemplate RPC call");
 
-    assert_eq!(get_block_template.capabilities, Vec::<String>::new());
+    assert_eq!(
+        get_block_template.capabilities,
+        GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD.to_vec()
+    );
     assert_eq!(get_block_template.version, ZCASH_BLOCK_VERSION);
     assert!(get_block_template.transactions.is_empty());
     assert_eq!(
@@ -911,8 +1018,13 @@ async fn rpc_getblocktemplate() {
     assert!(get_block_template.coinbase_txn.required);
     assert!(!get_block_template.coinbase_txn.data.as_ref().is_empty());
     assert_eq!(get_block_template.coinbase_txn.depends.len(), 0);
-    // TODO: should a coinbase transaction have sigops?
-    assert_eq!(get_block_template.coinbase_txn.sigops, 0);
+    if use_p2pkh {
+        // there is one sig operation if miner address is p2pkh.
+        assert_eq!(get_block_template.coinbase_txn.sigops, 1);
+    } else {
+        // everything in the coinbase is p2sh.
+        assert_eq!(get_block_template.coinbase_txn.sigops, 0);
+    }
     // Coinbase transaction checks for empty blocks.
     assert_eq!(
         get_block_template.coinbase_txn.fee,
@@ -955,6 +1067,7 @@ async fn rpc_getblocktemplate() {
         get_block_template_sync_error.code,
         ErrorCode::ServerError(-10)
     );
+
     let get_block_template_sync_error = get_block_template_rpc
         .get_block_template(Some(get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
             mode: get_block_template_rpcs::types::get_block_template_opts::GetBlockTemplateRequestMode::Proposal,
@@ -977,17 +1090,27 @@ async fn rpc_getblocktemplate() {
 
     assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
 
+    // The long poll id is valid, so it returns a state error instead
     let get_block_template_sync_error = get_block_template_rpc
         .get_block_template(Some(
             get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
-                longpollid: Some("".to_string()),
+                // This must parse as a LongPollId.
+                // It must be the correct length and have hex/decimal digits.
+                longpollid: Some(
+                    "0".repeat(LONG_POLL_ID_LENGTH)
+                        .parse()
+                        .expect("unexpected invalid LongPollId"),
+                ),
                 ..Default::default()
             },
         ))
         .await
-        .expect_err("needs an error when using unsupported option");
+        .expect_err("needs an error when the state is empty");
 
-    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
+    assert_eq!(
+        get_block_template_sync_error.code,
+        ErrorCode::ServerError(-10)
+    );
 }
 
 #[cfg(feature = "getblocktemplate-rpcs")]

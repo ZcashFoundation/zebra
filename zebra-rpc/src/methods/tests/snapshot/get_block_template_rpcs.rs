@@ -29,7 +29,9 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 use crate::methods::{
     get_block_template_rpcs::{
         self,
-        types::{get_block_template::GetBlockTemplate, hex_data::HexData, submit_block},
+        types::{
+            get_block_template::GetBlockTemplate, get_mining_info, hex_data::HexData, submit_block,
+        },
     },
     tests::utils::fake_history_tree,
     GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
@@ -127,8 +129,21 @@ pub async fn test_responses<State, ReadState>(
         .get_block_hash(BLOCK_HEIGHT10)
         .await
         .expect("We should have a GetBlockHash struct");
-
     snapshot_rpc_getblockhash(get_block_hash, &settings);
+
+    // `getmininginfo`
+    let get_mining_info = get_block_template_rpc
+        .get_mining_info()
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getmininginfo(get_mining_info, &settings);
+
+    // `getnetworksolps` (and `getnetworkhashps`)
+    let get_network_sol_ps = get_block_template_rpc
+        .get_network_sol_ps(None, None)
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getnetworksolps(get_network_sol_ps, &settings);
 
     // get a new empty state
     let new_read_state = MockService::build().for_unit_tests();
@@ -224,4 +239,17 @@ fn snapshot_rpc_submit_block_invalid(
     settings.bind(|| {
         insta::assert_json_snapshot!("snapshot_rpc_submit_block_invalid", submit_block_response)
     });
+}
+
+/// Snapshot `getmininginfo` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getmininginfo(
+    get_mining_info: get_mining_info::Response,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| insta::assert_json_snapshot!("get_mining_info", get_mining_info));
+}
+
+/// Snapshot `getnetworksolps` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getnetworksolps(get_network_sol_ps: u64, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_network_sol_ps", get_network_sol_ps));
 }
