@@ -21,20 +21,17 @@ use zebra_consensus::{funding_stream_address, funding_stream_values, miner_subsi
 use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::methods::get_block_template_rpcs::{
-    constants::NOT_SYNCED_ERROR_CODE,
-    types::{get_block_template_opts, transaction::TransactionTemplate},
+    constants::{MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE},
+    types::{get_block_template, transaction::TransactionTemplate},
 };
 
-use super::{
-    constants::MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP,
-    types::get_block_template_opts::GetBlockTemplateRequestMode,
-};
+pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
 
 // - Parameter checks
 
 /// Returns an error if the get block template RPC `parameters` are invalid.
 pub fn check_block_template_parameters(
-    parameters: get_block_template_opts::JsonParameters,
+    parameters: get_block_template::JsonParameters,
 ) -> Result<()> {
     if parameters.data.is_some() || parameters.mode == GetBlockTemplateRequestMode::Proposal {
         return Err(Error {

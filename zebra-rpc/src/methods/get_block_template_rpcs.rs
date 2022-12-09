@@ -36,9 +36,9 @@ use crate::methods::{
             miner_fee, standard_coinbase_outputs,
         },
         types::{
-            default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
-            get_block_template_opts, get_mining_info, hex_data::HexData, long_poll::LongPollInput,
-            submit_block, transaction::TransactionTemplate,
+            default_roots::DefaultRoots, get_block_template::GetBlockTemplate, get_mining_info,
+            hex_data::HexData, long_poll::LongPollInput, submit_block,
+            transaction::TransactionTemplate,
         },
     },
     height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
@@ -106,7 +106,7 @@ pub trait GetBlockTemplateRpc {
     #[rpc(name = "getblocktemplate")]
     fn get_block_template(
         &self,
-        parameters: Option<get_block_template_opts::JsonParameters>,
+        parameters: Option<get_block_template::JsonParameters>,
     ) -> BoxFuture<Result<GetBlockTemplate>>;
 
     /// Submits block to the node to be validated and committed.
@@ -321,7 +321,7 @@ where
     // TODO: use HexData to handle block proposal data, and a generic error constructor (#5548)
     fn get_block_template(
         &self,
-        parameters: Option<get_block_template_opts::JsonParameters>,
+        parameters: Option<get_block_template::JsonParameters>,
     ) -> BoxFuture<Result<GetBlockTemplate>> {
         // Clone Config
         let network = self.network;

@@ -1,6 +1,6 @@
 //! Parameter types for the `getblocktemplate` RPC.
 
-use super::{hex_data::HexData, long_poll::LongPollId};
+use crate::methods::get_block_template_rpcs::types::{hex_data::HexData, long_poll::LongPollId};
 
 /// Defines whether the RPC method should generate a block template or attempt to validate a block proposal.
 /// `Proposal` mode is currently unsupported and will return an error.

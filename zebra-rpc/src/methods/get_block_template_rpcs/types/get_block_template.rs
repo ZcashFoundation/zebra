@@ -9,6 +9,10 @@ use crate::methods::{
     GetBlockHash,
 };
 
+pub mod parameters;
+
+pub use parameters::*;
+
 /// Documentation to be added after we document all the individual fields.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetBlockTemplate {
