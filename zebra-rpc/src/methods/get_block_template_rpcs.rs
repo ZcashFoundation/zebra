@@ -441,18 +441,17 @@ where
                         .expect("state always returns a valid difficulty value")
                 ),
 
-                min_time: chain_tip_and_local_time.min_time.timestamp(),
+                min_time: chain_tip_and_local_time.min_time,
 
                 mutable,
 
-                // TODO: make this conversion happen automatically?
                 nonce_range: GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
 
                 sigop_limit: MAX_BLOCK_SIGOPS,
 
                 size_limit: MAX_BLOCK_BYTES,
 
-                cur_time: chain_tip_and_local_time.cur_time.timestamp(),
+                cur_time: chain_tip_and_local_time.cur_time,
 
                 // TODO: move this into another function or make it happen on serialization
                 bits: format!(
@@ -464,7 +463,7 @@ where
 
                 height: next_block_height.0,
 
-                max_time: chain_tip_and_local_time.max_time.timestamp(),
+                max_time: chain_tip_and_local_time.max_time,
             })
         }
         .boxed()

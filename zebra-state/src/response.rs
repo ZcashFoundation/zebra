@@ -11,7 +11,7 @@ use zebra_chain::{
 };
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-use zebra_chain::work::difficulty::CompactDifficulty;
+use zebra_chain::{serialization::DateTime32, work::difficulty::CompactDifficulty};
 
 // Allow *only* these unused imports, so that rustdoc link resolution
 // will work with inline links.
@@ -139,38 +139,44 @@ pub enum ReadResponse {
     SolutionRate(Option<u128>),
 }
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
+#[cfg(feature = "getblocktemplate-rpcs")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GetBlockTemplateChainInfo {
+    // Data fetched directly from the state tip.
+    //
+    /// The current state tip height.
+    /// The block template for the candidate block has this hash as the previous block hash.
+    pub tip_hash: block::Hash,
+
     /// The current state tip height.
     /// The block template OAfor the candidate block is the next block after this block.
     /// Depends on the `tip_hash`.
     pub tip_height: block::Height,
 
-    /// The current state tip height.
-    /// The block template for the candidate block has this hash as the previous block hash.
-    pub tip_hash: block::Hash,
+    /// The history tree of the current best chain.
+    /// Depends on the `tip_hash`.
+    pub history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
 
+    // Data derived from the state tip and recent blocks.
+    //
     /// The expected difficulty of the candidate block.
     /// Depends on the `tip_hash`.
     pub expected_difficulty: CompactDifficulty,
 
+    // Data derived from the state tip and recent blocks, and the current local clock.
+    //
     /// The current system time, adjusted to fit within `min_time` and `max_time`.
     /// Depends on the local clock and the `tip_hash`.
-    pub cur_time: chrono::DateTime<chrono::Utc>,
+    pub cur_time: DateTime32,
 
     /// The mininimum time the miner can use in this block.
     /// Depends on the `tip_hash`, and the local clock on testnet.
-    pub min_time: chrono::DateTime<chrono::Utc>,
+    pub min_time: DateTime32,
 
     /// The maximum time the miner can use in this block.
     /// Depends on the `tip_hash`, and the local clock on testnet.
-    pub max_time: chrono::DateTime<chrono::Utc>,
-
-    /// The history tree of the current best chain.
-    /// Depends on the `tip_hash`.
-    pub history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
+    pub max_time: DateTime32,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.

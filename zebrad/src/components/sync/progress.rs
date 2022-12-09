@@ -13,6 +13,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
 };
 use zebra_consensus::CheckpointList;
+use zebra_state::MAX_BLOCK_REORG_HEIGHT;
 
 use crate::components::sync::SyncStatus;
 
@@ -48,7 +49,7 @@ const SYNC_PERCENT_FRAC_DIGITS: usize = 3;
 ///
 /// We might add tests that sync from a cached tip state,
 /// so we only allow a few extra blocks here.
-const MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE: i32 = 10;
+const MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE: u32 = 10;
 
 /// Logs Zebra's estimated progress towards the chain tip every minute or so.
 ///
@@ -64,9 +65,11 @@ pub async fn show_block_chain_progress(
     // - the non-finalized state limit, and
     // - the minimum number of extra blocks mined between a checkpoint update,
     //   and the automated tests for that update.
-    let min_after_checkpoint_blocks = i32::try_from(zebra_state::MAX_BLOCK_REORG_HEIGHT)
-        .expect("constant fits in i32")
-        + MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE;
+    let min_after_checkpoint_blocks =
+        MAX_BLOCK_REORG_HEIGHT + MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE;
+    let min_after_checkpoint_blocks: i32 = min_after_checkpoint_blocks
+        .try_into()
+        .expect("constant fits in i32");
 
     // The minimum height of the valid best chain, based on:
     // - the hard-coded checkpoint height,
@@ -179,9 +182,8 @@ pub async fn show_block_chain_progress(
             } else if is_syncer_stopped && current_height <= after_checkpoint_height {
                 // We've stopped syncing blocks,
                 // but we're below the minimum height estimated from our checkpoints.
-                let min_minutes_after_checkpoint_update: i64 = div_ceil(
-                    i64::from(MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE)
-                        * POST_BLOSSOM_POW_TARGET_SPACING,
+                let min_minutes_after_checkpoint_update = div_ceil(
+                    MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE * POST_BLOSSOM_POW_TARGET_SPACING,
                     60,
                 );
 

@@ -5,7 +5,6 @@
 //! cargo insta test --review --features getblocktemplate-rpcs --delete-unreferenced-snapshots
 //! ```
 
-use chrono::{TimeZone, Utc};
 use hex::FromHex;
 use insta::Settings;
 use tower::{buffer::Buffer, Service};
@@ -15,7 +14,7 @@ use zebra_chain::{
     chain_sync_status::MockSyncStatus,
     chain_tip::mock::MockChainTip,
     parameters::{Network, NetworkUpgrade},
-    serialization::ZcashDeserializeInto,
+    serialization::{DateTime32, ZcashDeserializeInto},
     transaction::Transaction,
     transparent,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
@@ -95,11 +94,11 @@ pub async fn test_responses<State, ReadState>(
         Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
 
     //  nu5 block time + 1
-    let fake_min_time = Utc.timestamp_opt(1654008606, 0).unwrap();
+    let fake_min_time = DateTime32::from(1654008606);
     // nu5 block time + 12
-    let fake_cur_time = Utc.timestamp_opt(1654008617, 0).unwrap();
+    let fake_cur_time = DateTime32::from(1654008617);
     // nu5 block time + 123
-    let fake_max_time = Utc.timestamp_opt(1654008728, 0).unwrap();
+    let fake_max_time = DateTime32::from(1654008728);
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(fake_tip_height);

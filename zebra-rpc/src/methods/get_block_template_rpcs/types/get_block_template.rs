@@ -1,6 +1,8 @@
 //! The `GetBlockTempate` type is the output of the `getblocktemplate` RPC method.
 
-use zebra_chain::{amount, block::ChainHistoryBlockTxAuthCommitmentHash};
+use zebra_chain::{
+    amount, block::ChainHistoryBlockTxAuthCommitmentHash, serialization::DateTime32,
+};
 
 use crate::methods::{
     get_block_template_rpcs::types::{
@@ -84,8 +86,7 @@ pub struct GetBlockTemplate {
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#blockheader>
     #[serde(rename = "mintime")]
-    // TODO: use DateTime32 type?
-    pub min_time: i64,
+    pub min_time: DateTime32,
 
     /// Hardcoded list of block fields the miner is allowed to change.
     pub mutable: Vec<String>,
@@ -106,9 +107,8 @@ pub struct GetBlockTemplate {
     /// > note this is not necessarily the system clock, and must fall within the mintime/maxtime rules
     ///
     /// <https://en.bitcoin.it/wiki/BIP_0022#Block_Template_Request>
-    // TODO: use DateTime32 type?
     #[serde(rename = "curtime")]
-    pub cur_time: i64,
+    pub cur_time: DateTime32,
 
     /// The expected difficulty for the new block displayed in compact form.
     // TODO: use CompactDifficulty type.
@@ -132,6 +132,5 @@ pub struct GetBlockTemplate {
     /// Some miners don't check the maximum time. This can cause invalid blocks after network downtime,
     /// a significant drop in the hash rate, or after the testnet minimum difficulty interval.
     #[serde(rename = "maxtime")]
-    // TODO: use DateTime32 type?
-    pub max_time: i64,
+    pub max_time: DateTime32,
 }

@@ -894,13 +894,12 @@ async fn rpc_getblocktemplate() {
 async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     use std::panic;
 
-    use chrono::TimeZone;
-
     use zebra_chain::{
         amount::NonNegative,
         block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
         chain_sync_status::MockSyncStatus,
         chain_tip::mock::MockChainTip,
+        serialization::DateTime32,
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
     };
     use zebra_consensus::MAX_BLOCK_SIGOPS;
@@ -942,11 +941,11 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     let fake_tip_hash =
         Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
     //  nu5 block time + 1
-    let fake_min_time = Utc.timestamp_opt(1654008606, 0).unwrap();
+    let fake_min_time = DateTime32::from(1654008606);
     // nu5 block time + 12
-    let fake_cur_time = Utc.timestamp_opt(1654008617, 0).unwrap();
+    let fake_cur_time = DateTime32::from(1654008617);
     // nu5 block time + 123
-    let fake_max_time = Utc.timestamp_opt(1654008728, 0).unwrap();
+    let fake_max_time = DateTime32::from(1654008728);
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
@@ -1008,7 +1007,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         get_block_template.target,
         "0000000000000000000000000000000000000000000000000000000000000001"
     );
-    assert_eq!(get_block_template.min_time, fake_min_time.timestamp());
+    assert_eq!(get_block_template.min_time, fake_min_time);
     assert_eq!(
         get_block_template.mutable,
         GET_BLOCK_TEMPLATE_MUTABLE_FIELD.to_vec()
@@ -1019,10 +1018,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     );
     assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
     assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
-    assert_eq!(get_block_template.cur_time, fake_cur_time.timestamp());
+    assert_eq!(get_block_template.cur_time, fake_cur_time);
     assert_eq!(get_block_template.bits, "01010000");
     assert_eq!(get_block_template.height, 1687105); // nu5 height
-    assert_eq!(get_block_template.max_time, fake_max_time.timestamp());
+    assert_eq!(get_block_template.max_time, fake_max_time);
 
     // Coinbase transaction checks.
     assert!(get_block_template.coinbase_txn.required);

@@ -1,10 +1,6 @@
 //! DateTime types with specific serialization invariants.
 
-use std::{
-    convert::{TryFrom, TryInto},
-    fmt,
-    num::TryFromIntError,
-};
+use std::{fmt, num::TryFromIntError};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
@@ -12,7 +8,8 @@ use chrono::{TimeZone, Utc};
 use super::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A date and time, represented by a 32-bit number of seconds since the UNIX epoch.
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct DateTime32 {
     timestamp: u32,
 }
