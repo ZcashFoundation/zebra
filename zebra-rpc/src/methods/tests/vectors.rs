@@ -21,9 +21,6 @@ use zebra_test::mock_service::MockService;
 
 use super::super::*;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
-use zebra_chain::chain_sync_status::MockSyncStatus;
-
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getinfo() {
     let _init_guard = zebra_test::init();
@@ -618,6 +615,8 @@ async fn rpc_getaddressutxos_response() {
 #[tokio::test(flavor = "multi_thread")]
 #[cfg(feature = "getblocktemplate-rpcs")]
 async fn rpc_getblockcount() {
+    use zebra_chain::chain_sync_status::MockSyncStatus;
+
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -651,7 +650,7 @@ async fn rpc_getblockcount() {
     .await;
 
     // Init RPC
-    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+    let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         Mainnet,
         Default::default(),
         Buffer::new(mempool.clone(), 1),
@@ -675,6 +674,8 @@ async fn rpc_getblockcount() {
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockcount_empty_state() {
+    use zebra_chain::chain_sync_status::MockSyncStatus;
+
     let _init_guard = zebra_test::init();
 
     // Get a mempool handle
@@ -722,6 +723,8 @@ async fn rpc_getblockcount_empty_state() {
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockhash() {
+    use zebra_chain::chain_sync_status::MockSyncStatus;
+
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -788,6 +791,8 @@ async fn rpc_getblockhash() {
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getmininginfo() {
+    use zebra_chain::chain_sync_status::MockSyncStatus;
+
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -820,6 +825,8 @@ async fn rpc_getmininginfo() {
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getnetworksolps() {
+    use zebra_chain::chain_sync_status::MockSyncStatus;
+
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -892,6 +899,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     use zebra_chain::{
         amount::NonNegative,
         block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
+        chain_sync_status::MockSyncStatus,
         chain_tip::mock::MockChainTip,
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
     };
@@ -900,11 +908,13 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     use crate::methods::{
         get_block_template_rpcs::{
+            config::Config,
             constants::{
                 GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD, GET_BLOCK_TEMPLATE_MUTABLE_FIELD,
                 GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
             },
-            types::long_poll::LONG_POLL_ID_LENGTH,
+            get_block_template::{self, GetBlockTemplateRequestMode},
+            types::{hex_data::HexData, long_poll::LONG_POLL_ID_LENGTH},
         },
         tests::utils::fake_history_tree,
     };
@@ -924,7 +934,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         true => Some(transparent::Address::from_pub_key_hash(Mainnet, [0x7e; 20])),
     };
 
-    let mining_config = get_block_template_rpcs::config::Config { miner_address };
+    let mining_config = Config { miner_address };
 
     // nu5 block height
     let fake_tip_height = NetworkUpgrade::Nu5.activation_height(Mainnet).unwrap();
@@ -944,7 +954,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
     // Init RPC
-    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+    let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         Mainnet,
         mining_config,
         Buffer::new(mempool.clone(), 1),
@@ -1069,8 +1079,8 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     );
 
     let get_block_template_sync_error = get_block_template_rpc
-        .get_block_template(Some(get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
-            mode: get_block_template_rpcs::types::get_block_template_opts::GetBlockTemplateRequestMode::Proposal,
+        .get_block_template(Some(get_block_template::JsonParameters {
+            mode: GetBlockTemplateRequestMode::Proposal,
             ..Default::default()
         }))
         .await
@@ -1079,12 +1089,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
 
     let get_block_template_sync_error = get_block_template_rpc
-        .get_block_template(Some(
-            get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
-                data: Some(get_block_template_rpcs::types::hex_data::HexData("".into())),
-                ..Default::default()
-            },
-        ))
+        .get_block_template(Some(get_block_template::JsonParameters {
+            data: Some(HexData("".into())),
+            ..Default::default()
+        }))
         .await
         .expect_err("needs an error when passing in block data");
 
@@ -1092,18 +1100,16 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     // The long poll id is valid, so it returns a state error instead
     let get_block_template_sync_error = get_block_template_rpc
-        .get_block_template(Some(
-            get_block_template_rpcs::types::get_block_template_opts::JsonParameters {
-                // This must parse as a LongPollId.
-                // It must be the correct length and have hex/decimal digits.
-                longpollid: Some(
-                    "0".repeat(LONG_POLL_ID_LENGTH)
-                        .parse()
-                        .expect("unexpected invalid LongPollId"),
-                ),
-                ..Default::default()
-            },
-        ))
+        .get_block_template(Some(get_block_template::JsonParameters {
+            // This must parse as a LongPollId.
+            // It must be the correct length and have hex/decimal digits.
+            longpollid: Some(
+                "0".repeat(LONG_POLL_ID_LENGTH)
+                    .parse()
+                    .expect("unexpected invalid LongPollId"),
+            ),
+            ..Default::default()
+        }))
         .await
         .expect_err("needs an error when the state is empty");
 
@@ -1116,6 +1122,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_submitblock_errors() {
+    use zebra_chain::chain_sync_status::MockSyncStatus;
+
+    use crate::methods::get_block_template_rpcs::types::{hex_data::HexData, submit_block};
+
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -1144,7 +1154,7 @@ async fn rpc_submitblock_errors() {
     .await;
 
     // Init RPC
-    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+    let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         Mainnet,
         Default::default(),
         Buffer::new(mempool.clone(), 1),
@@ -1157,30 +1167,25 @@ async fn rpc_submitblock_errors() {
     // Try to submit pre-populated blocks and assert that it responds with duplicate.
     for (_height, &block_bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter() {
         let submit_block_response = get_block_template_rpc
-            .submit_block(
-                get_block_template_rpcs::types::hex_data::HexData(block_bytes.into()),
-                None,
-            )
+            .submit_block(HexData(block_bytes.into()), None)
             .await;
 
         assert_eq!(
             submit_block_response,
-            Ok(get_block_template_rpcs::types::submit_block::ErrorResponse::Duplicate.into())
+            Ok(submit_block::ErrorResponse::Duplicate.into())
         );
     }
 
     let submit_block_response = get_block_template_rpc
         .submit_block(
-            get_block_template_rpcs::types::hex_data::HexData(
-                zebra_test::vectors::BAD_BLOCK_MAINNET_202_BYTES.to_vec(),
-            ),
+            HexData(zebra_test::vectors::BAD_BLOCK_MAINNET_202_BYTES.to_vec()),
             None,
         )
         .await;
 
     assert_eq!(
         submit_block_response,
-        Ok(get_block_template_rpcs::types::submit_block::ErrorResponse::Rejected.into())
+        Ok(submit_block::ErrorResponse::Rejected.into())
     );
 
     mempool.expect_no_requests().await;
