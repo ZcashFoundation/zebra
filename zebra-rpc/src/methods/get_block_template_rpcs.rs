@@ -8,10 +8,7 @@ use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
-    block::{
-        self, Block, ChainHistoryBlockTxAuthCommitmentHash, Height, MAX_BLOCK_BYTES,
-        ZCASH_BLOCK_VERSION,
-    },
+    block::{self, Block, Height, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::Network,
@@ -30,14 +27,13 @@ use crate::methods::{
             GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
         },
         get_block_template::{
-            calculate_miner_fee, calculate_transaction_roots, check_address,
+            calculate_default_root_hashes, calculate_miner_fee, check_address,
             check_block_template_parameters, check_synced_to_tip, fetch_mempool_transactions,
             fetch_state_tip_and_local_time, generate_coinbase_transaction,
         },
         types::{
-            default_roots::DefaultRoots, get_block_template::GetBlockTemplate, get_mining_info,
-            hex_data::HexData, long_poll::LongPollInput, submit_block,
-            transaction::TransactionTemplate,
+            get_block_template::GetBlockTemplate, get_mining_info, hex_data::HexData,
+            long_poll::LongPollInput, submit_block, transaction::TransactionTemplate,
         },
     },
     height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
@@ -375,6 +371,7 @@ where
             //
             // Apart from random weighted transaction selection,
             // the template only depends on the previously fetched data.
+            // This processing never fails.
 
             // Calculate the next block height.
             let next_block_height =
@@ -396,25 +393,19 @@ where
             let coinbase_tx =
                 generate_coinbase_transaction(network, next_block_height, miner_address, miner_fee);
 
-            // TODO: move into a new block_roots()
-
+            // Calculate block default roots
+            //
             // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
-            let (merkle_root, auth_data_root) =
-                calculate_transaction_roots(&coinbase_tx, &mempool_txs);
-
-            let history_tree = chain_tip_and_local_time.history_tree;
-            let chain_history_root = history_tree.hash().expect("history tree can't be empty");
-
-            let block_commitments_hash = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
-                &chain_history_root,
-                &auth_data_root,
+            let default_roots = calculate_default_root_hashes(
+                &coinbase_tx,
+                &mempool_txs,
+                chain_tip_and_local_time.history_tree,
             );
 
-            // Convert into TransactionTemplates
+            // Convert transactions into TransactionTemplates
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
 
-            // TODO: make these serialize without this complex code?
-
+            // TODO: move this conversion into a separate function?
             let capabilities: Vec<String> = GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD
                 .iter()
                 .map(ToString::to_string)
@@ -430,15 +421,10 @@ where
                 version: ZCASH_BLOCK_VERSION,
 
                 previous_block_hash: GetBlockHash(chain_tip_and_local_time.tip_hash),
-                block_commitments_hash,
-                light_client_root_hash: block_commitments_hash,
-                final_sapling_root_hash: block_commitments_hash,
-                default_roots: DefaultRoots {
-                    merkle_root,
-                    chain_history_root,
-                    auth_data_root,
-                    block_commitments_hash,
-                },
+                block_commitments_hash: default_roots.block_commitments_hash,
+                light_client_root_hash: default_roots.block_commitments_hash,
+                final_sapling_root_hash: default_roots.block_commitments_hash,
+                default_roots,
 
                 transactions: mempool_txs,
 

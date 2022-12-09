@@ -1,6 +1,6 @@
 //! Support functions for the `get_block_template()` RPC.
 
-use std::iter;
+use std::{iter, sync::Arc};
 
 use jsonrpc_core::{Error, ErrorCode, Result};
 use tower::{Service, ServiceExt};
@@ -9,7 +9,7 @@ use zebra_chain::{
     amount::{self, Amount, NonNegative},
     block::{
         merkle::{self, AuthDataRoot},
-        Height,
+        ChainHistoryBlockTxAuthCommitmentHash, Height,
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
@@ -23,7 +23,7 @@ use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::methods::get_block_template_rpcs::{
     constants::{MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE},
-    types::get_block_template,
+    types::{default_roots::DefaultRoots, get_block_template},
 };
 
 pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
@@ -233,6 +233,33 @@ pub fn standard_coinbase_outputs(
 }
 
 // - Transaction roots processing
+
+/// Returns the default block roots for the supplied coinbase and mempool transactions,
+/// and the supplied history tree.
+///
+/// This function runs expensive cryptographic operations.
+pub fn calculate_default_root_hashes(
+    coinbase_tx: &UnminedTx,
+    mempool_txs: &[VerifiedUnminedTx],
+    history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
+) -> DefaultRoots {
+    let (merkle_root, auth_data_root) = calculate_transaction_roots(coinbase_tx, mempool_txs);
+
+    let history_tree = history_tree;
+    let chain_history_root = history_tree.hash().expect("history tree can't be empty");
+
+    let block_commitments_hash = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+        &chain_history_root,
+        &auth_data_root,
+    );
+
+    DefaultRoots {
+        merkle_root,
+        chain_history_root,
+        auth_data_root,
+        block_commitments_hash,
+    }
+}
 
 /// Returns the transaction effecting and authorizing roots
 /// for `coinbase_tx` and `mempool_txs`, which are used in the block header.
