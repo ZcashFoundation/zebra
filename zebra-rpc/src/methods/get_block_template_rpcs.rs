@@ -32,7 +32,7 @@ use crate::methods::{
         },
         get_block_template::{
             calculate_transaction_roots, check_address, check_block_template_parameters,
-            check_synced_to_tip, fake_coinbase_transaction, fetch_state_block_template_data,
+            check_synced_to_tip, fake_coinbase_transaction, fetch_state_tip_and_local_time,
             miner_fee, standard_coinbase_outputs,
         },
         types::{
@@ -350,11 +350,11 @@ where
             // Fetch the state data for the block template:
             // - if the tip block hash changes, we must return from long polling,
             // - if the local clock changes on testnet, we might return from long polling.
-            let chain_info = fetch_state_block_template_data(state).await?;
+            let chain_tip_and_local_time = fetch_state_tip_and_local_time(state).await?;
 
             // Calculate the next block height.
             let next_block_height =
-                (chain_info.tip_height + 1).expect("tip is far below Height::MAX");
+                (chain_tip_and_local_time.tip_height + 1).expect("tip is far below Height::MAX");
 
             // Use a fake coinbase transaction to break the dependency between transaction
             // selection, the miner fee, and the fee payment in the coinbase transaction.
@@ -373,7 +373,7 @@ where
             let (merkle_root, auth_data_root) =
                 calculate_transaction_roots(&coinbase_tx, &mempool_txs);
 
-            let history_tree = chain_info.history_tree;
+            let history_tree = chain_tip_and_local_time.history_tree;
             // TODO: move expensive cryptography to a rayon thread?
             let chain_history_root = history_tree.hash().expect("history tree can't be empty");
 
@@ -386,9 +386,9 @@ where
             // TODO: use the entire mempool content via a watch channel,
             //       rather than just the randomly selected transactions
             let long_poll_id = LongPollInput::new(
-                chain_info.tip_height,
-                chain_info.tip_hash,
-                chain_info.max_time,
+                chain_tip_and_local_time.tip_height,
+                chain_tip_and_local_time.tip_hash,
+                chain_tip_and_local_time.max_time,
                 mempool_txs.iter().map(|tx| tx.transaction.id),
             )
             .into();
@@ -410,7 +410,7 @@ where
 
                 version: ZCASH_BLOCK_VERSION,
 
-                previous_block_hash: GetBlockHash(chain_info.tip_hash),
+                previous_block_hash: GetBlockHash(chain_tip_and_local_time.tip_hash),
                 block_commitments_hash,
                 light_client_root_hash: block_commitments_hash,
                 final_sapling_root_hash: block_commitments_hash,
@@ -429,13 +429,13 @@ where
 
                 target: format!(
                     "{}",
-                    chain_info
+                    chain_tip_and_local_time
                         .expected_difficulty
                         .to_expanded()
                         .expect("state always returns a valid difficulty value")
                 ),
 
-                min_time: chain_info.min_time.timestamp(),
+                min_time: chain_tip_and_local_time.min_time.timestamp(),
 
                 mutable,
 
@@ -445,15 +445,18 @@ where
 
                 size_limit: MAX_BLOCK_BYTES,
 
-                cur_time: chain_info.cur_time.timestamp(),
+                cur_time: chain_tip_and_local_time.cur_time.timestamp(),
 
-                bits: format!("{:#010x}", chain_info.expected_difficulty.to_value())
-                    .drain(2..)
-                    .collect(),
+                bits: format!(
+                    "{:#010x}",
+                    chain_tip_and_local_time.expected_difficulty.to_value()
+                )
+                .drain(2..)
+                .collect(),
 
                 height: next_block_height.0,
 
-                max_time: chain_info.max_time.timestamp(),
+                max_time: chain_tip_and_local_time.max_time.timestamp(),
             })
         }
         .boxed()

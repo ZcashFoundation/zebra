@@ -107,8 +107,11 @@ where
 
 /// Returns the state data for the block template.
 ///
-/// You must call `check_synced_to_tip()` before calling this function.
-pub async fn fetch_state_block_template_data<State>(
+/// # Panics
+///
+/// If `check_synced_to_tip()` would return an error
+/// because there are not enough blocks in the state.
+pub async fn fetch_state_tip_and_local_time<State>(
     state: State,
 ) -> Result<GetBlockTemplateChainInfo>
 where
