@@ -245,6 +245,8 @@ impl CompactDifficulty {
     ///
     /// Zebra displays difficulties in big-endian byte-order,
     /// following the u256 convention set by Bitcoin and zcashd.
+    ///
+    /// Returns an error if the difficulty value is invalid.
     pub fn from_bytes_in_display_order(
         bytes_in_display_order: &[u8; 4],
     ) -> Result<CompactDifficulty, BoxError> {
@@ -451,6 +453,10 @@ impl ExpandedDifficulty {
     ///
     /// Zebra displays difficulties in big-endian byte-order,
     /// following the u256 convention set by Bitcoin and zcashd.
+    ///
+    /// Preserves the exact difficulty value represented by the bytes,
+    /// even if it can't be generated from a [`CompactDifficulty`].
+    /// This means a round-trip conversion to [`CompactDifficulty`] can be lossy.
     pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> ExpandedDifficulty {
         let internal_byte_order = U256::from_big_endian(bytes_in_display_order);
 
