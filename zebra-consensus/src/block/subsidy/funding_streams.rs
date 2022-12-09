@@ -6,7 +6,6 @@ use zebra_chain::{
     amount::{Amount, Error, NonNegative},
     block::Height,
     parameters::{Network, NetworkUpgrade::*},
-    serialization::ZcashSerialize,
     transaction::Transaction,
     transparent::{Address, Output, Script},
 };
@@ -141,25 +140,14 @@ pub fn new_coinbase_script(address: Address) -> Script {
     assert!(
         address.is_script_hash(),
         "incorrect coinbase script address: {address} \
-         Zebra only supports transparent 'pay to script hash' (P2SH) addresses",
+         Funding streams only support transparent 'pay to script hash' (P2SH) addresses",
     );
-
-    let address_hash = address
-        .zcash_serialize_to_vec()
-        .expect("we should get address bytes here");
 
     // > The “prescribed way” to pay a transparent P2SH address is to use a standard P2SH script
     // > of the form OP_HASH160 fs.RedeemScriptHash(height) OP_EQUAL as the scriptPubKey.
     //
     // [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-    let mut script_bytes = Vec::new();
-
-    script_bytes.push(OpCode::Hash160 as u8);
-    script_bytes.push(OpCode::Push20Bytes as u8);
-    script_bytes.extend(&address_hash[2..22]);
-    script_bytes.push(OpCode::Equal as u8);
-
-    Script::new(&script_bytes)
+    address.create_script_from_address()
 }
 
 /// Returns a list of outputs in `Transaction`, which have a script address equal to `Address`.
@@ -170,11 +158,4 @@ pub fn filter_outputs_by_address(transaction: &Transaction, address: Address) ->
         .filter(|o| check_script_form(&o.lock_script, address))
         .cloned()
         .collect()
-}
-
-/// Script opcodes needed to compare the `lock_script` with the funding stream reward address.
-pub enum OpCode {
-    Equal = 0x87,
-    Hash160 = 0xa9,
-    Push20Bytes = 0x14,
 }

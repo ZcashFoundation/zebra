@@ -2,6 +2,7 @@
 
 mod address;
 mod keys;
+mod opcodes;
 mod script;
 mod serialize;
 mod utxo;
