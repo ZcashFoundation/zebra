@@ -1,7 +1,10 @@
 //! The `GetBlockTempate` type is the output of the `getblocktemplate` RPC method.
 
 use zebra_chain::{
-    amount, block::ChainHistoryBlockTxAuthCommitmentHash, serialization::DateTime32,
+    amount,
+    block::ChainHistoryBlockTxAuthCommitmentHash,
+    serialization::DateTime32,
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 
 use crate::methods::{
@@ -78,8 +81,8 @@ pub struct GetBlockTemplate {
     pub long_poll_id: LongPollId,
 
     /// The expected difficulty for the new block displayed in expanded form.
-    // TODO: use ExpandedDifficulty type.
-    pub target: String,
+    #[serde(with = "hex")]
+    pub target: ExpandedDifficulty,
 
     /// > For each block other than the genesis block, nTime MUST be strictly greater than
     /// > the median-time-past of that block.
@@ -111,8 +114,8 @@ pub struct GetBlockTemplate {
     pub cur_time: DateTime32,
 
     /// The expected difficulty for the new block displayed in compact form.
-    // TODO: use CompactDifficulty type.
-    pub bits: String,
+    #[serde(with = "hex")]
+    pub bits: CompactDifficulty,
 
     /// The height of the next block in the best chain.
     // TODO: use Height type?

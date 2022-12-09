@@ -1,9 +1,6 @@
 use std::{fmt, io, sync::Arc};
 
 use hex::{FromHex, ToHex};
-
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 
 use crate::serialization::{
@@ -11,6 +8,9 @@ use crate::serialization::{
 };
 
 use super::Header;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
 
 /// A hash of a block, used to identify blocks and link blocks into a chain. ⛓️
 ///

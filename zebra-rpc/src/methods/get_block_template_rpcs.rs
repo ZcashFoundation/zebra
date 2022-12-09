@@ -432,14 +432,10 @@ where
 
                 long_poll_id,
 
-                // TODO: move this into another function or make it happen on serialization
-                target: format!(
-                    "{}",
-                    chain_tip_and_local_time
-                        .expected_difficulty
-                        .to_expanded()
-                        .expect("state always returns a valid difficulty value")
-                ),
+                target: chain_tip_and_local_time
+                    .expected_difficulty
+                    .to_expanded()
+                    .expect("state always returns a valid difficulty value"),
 
                 min_time: chain_tip_and_local_time.min_time,
 
@@ -453,13 +449,7 @@ where
 
                 cur_time: chain_tip_and_local_time.cur_time,
 
-                // TODO: move this into another function or make it happen on serialization
-                bits: format!(
-                    "{:#010x}",
-                    chain_tip_and_local_time.expected_difficulty.to_value()
-                )
-                .drain(2..)
-                .collect(),
+                bits: chain_tip_and_local_time.expected_difficulty,
 
                 height: next_block_height.0,
 

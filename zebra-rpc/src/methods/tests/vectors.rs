@@ -1005,7 +1005,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     assert!(get_block_template.transactions.is_empty());
     assert_eq!(
         get_block_template.target,
-        "0000000000000000000000000000000000000000000000000000000000000001"
+        ExpandedDifficulty::from_hex(
+            "0000000000000000000000000000000000000000000000000000000000000001"
+        )
+        .expect("test vector is valid")
     );
     assert_eq!(get_block_template.min_time, fake_min_time);
     assert_eq!(
@@ -1019,7 +1022,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     assert_eq!(get_block_template.sigop_limit, MAX_BLOCK_SIGOPS);
     assert_eq!(get_block_template.size_limit, MAX_BLOCK_BYTES);
     assert_eq!(get_block_template.cur_time, fake_cur_time);
-    assert_eq!(get_block_template.bits, "01010000");
+    assert_eq!(
+        get_block_template.bits,
+        CompactDifficulty::from_hex("01010000").expect("test vector is valid")
+    );
     assert_eq!(get_block_template.height, 1687105); // nu5 height
     assert_eq!(get_block_template.max_time, fake_max_time);
 
