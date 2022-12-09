@@ -35,9 +35,6 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # Wait until `orchard` updates `aes`, which depends on `cipher`
-    { name = "cipher", version = "=0.3.0" },
-
     # ticket #3000: upgrade tower-fallback dependencies
     { name = "pin-project", version = "=0.4.30" },
 
@@ -50,10 +47,21 @@ skip-tree = [
     # wait for primitive-types to upgrade
     { name = "proc-macro-crate", version = "=0.1.5" },
 
-    # ECC crates
+    # ZF crates
 
     # wait for zcash_script to upgrade
+    # https://github.com/ZcashFoundation/zcash_script/pulls
     { name = "zcash_primitives", version = "=0.8.1" },
+
+    # wait for ed25519-zebra, indexmap, metrics-util, and metrics to upgrade
+    # ed25519-zebra/hashbrown: https://github.com/ZcashFoundation/ed25519-zebra/pull/63
+    { name = "ahash", version = "=0.7.6" },
+
+    # ECC crates
+
+    # Wait until `orchard` updates `aes`, which depends on `cipher`
+    { name = "cipher", version = "=0.3.0" },
+
 
     # wait for zcash_primitives to remove duplicated dependencies
     { name = "block-buffer", version = "=0.7.3" },
