@@ -352,20 +352,23 @@ where
             // - if the local clock changes on testnet, we might return from long polling.
             let chain_info = fetch_state_block_template_data(state).await?;
 
-            // Get the tip data from the state call
-            let block_height = (chain_info.tip_height + 1).expect("tip is far below Height::MAX");
+            // Calculate the next block height.
+            let next_block_height =
+                (chain_info.tip_height + 1).expect("tip is far below Height::MAX");
 
             // Use a fake coinbase transaction to break the dependency between transaction
             // selection, the miner fee, and the fee payment in the coinbase transaction.
-            let fake_coinbase_tx = fake_coinbase_transaction(network, block_height, miner_address);
+            let fake_coinbase_tx =
+                fake_coinbase_transaction(network, next_block_height, miner_address);
             let mempool_txs =
                 zip317::select_mempool_transactions(fake_coinbase_tx, mempool).await?;
 
             let miner_fee = miner_fee(&mempool_txs);
 
             let outputs =
-                standard_coinbase_outputs(network, block_height, miner_address, miner_fee);
-            let coinbase_tx = Transaction::new_v5_coinbase(network, block_height, outputs).into();
+                standard_coinbase_outputs(network, next_block_height, miner_address, miner_fee);
+            let coinbase_tx =
+                Transaction::new_v5_coinbase(network, next_block_height, outputs).into();
 
             let (merkle_root, auth_data_root) =
                 calculate_transaction_roots(&coinbase_tx, &mempool_txs);
@@ -448,7 +451,7 @@ where
                     .drain(2..)
                     .collect(),
 
-                height: block_height.0,
+                height: next_block_height.0,
 
                 max_time: chain_info.max_time.timestamp(),
             })
