@@ -4,7 +4,7 @@ use zebra_chain::{amount, block::ChainHistoryBlockTxAuthCommitmentHash};
 
 use crate::methods::{
     get_block_template_rpcs::types::{
-        default_roots::DefaultRoots, transaction::TransactionTemplate,
+        default_roots::DefaultRoots, long_poll::LongPollId, transaction::TransactionTemplate,
     },
     GetBlockHash,
 };
@@ -66,6 +66,10 @@ pub struct GetBlockTemplate {
     /// The coinbase transaction generated from `transactions` and `height`.
     #[serde(rename = "coinbasetxn")]
     pub coinbase_txn: TransactionTemplate<amount::NegativeOrZero>,
+
+    /// An ID that represents the chain tip and mempool contents for this template.
+    #[serde(rename = "longpollid")]
+    pub long_poll_id: LongPollId,
 
     /// The expected difficulty for the new block displayed in expanded form.
     // TODO: use ExpandedDifficulty type.
