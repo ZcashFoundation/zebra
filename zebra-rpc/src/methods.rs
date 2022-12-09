@@ -647,6 +647,10 @@ where
         let mut mempool = self.mempool.clone();
 
         async move {
+            // TODO: should we call check_synced_to_tip() here,
+            //       or return an error from the mempool service if it is not active,
+            //       so callers know the difference between an empty and inactive mempool?
+
             let request = mempool::Request::TransactionIds;
 
             let response = mempool

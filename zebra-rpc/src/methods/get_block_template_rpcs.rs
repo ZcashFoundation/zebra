@@ -29,15 +29,13 @@ use crate::methods::{
         constants::{
             DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD,
             GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
-            MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE,
         },
         get_block_template::{
             calculate_transaction_roots, fake_coinbase_transaction, miner_fee,
             standard_coinbase_outputs,
         },
         types::{
-            default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
-            get_block_template_opts::GetBlockTemplateRequestMode, hex_data::HexData,
+            default_roots::DefaultRoots, get_block_template::GetBlockTemplate, hex_data::HexData,
             long_poll::LongPollInput, submit_block, transaction::TransactionTemplate,
         },
     },
@@ -323,57 +321,29 @@ where
         &self,
         options: Option<types::get_block_template_opts::JsonParameters>,
     ) -> BoxFuture<Result<GetBlockTemplate>> {
+        // Clone Config
         let network = self.network;
         let miner_address = self.miner_address;
 
+        // Clone Services
         let mempool = self.mempool.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
         let sync_status = self.sync_status.clone();
         let mut state = self.state.clone();
 
-        // Since this is a very large RPC, we use separate functions for each group of fields.
+        // To implement long polling correctly, we split this RPC into multiple phases.
         async move {
+            // Check config and parameters.
+            // These checks always have the same result during long polling.
+            let miner_address = get_block_template::check_address(miner_address)?;
+
             if let Some(options) = options {
-                if options.data.is_some() || options.mode == GetBlockTemplateRequestMode::Proposal {
-                    return Err(Error {
-                        code: ErrorCode::InvalidParams,
-                        message: "\"proposal\" mode is currently unsupported by Zebra".to_string(),
-                        data: None,
-                    })
-                }
+                get_block_template::check_options(options)?;
             }
 
-            let miner_address = miner_address.ok_or_else(|| Error {
-                code: ErrorCode::ServerError(0),
-                message: "configure mining.miner_address in zebrad.toml \
-                          with a transparent address"
-                    .to_string(),
-                data: None,
-            })?;
-
-            // The tip estimate may not be the same as the one coming from the state
-            // but this is ok for an estimate
-            let (estimated_distance_to_chain_tip, local_tip_height) = latest_chain_tip
-                .estimate_distance_to_network_chain_tip(network)
-                .ok_or_else(|| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: "No Chain tip available yet".to_string(),
-                    data: None,
-                })?;
-
-            if !sync_status.is_close_to_tip() || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP {
-                tracing::info!(
-                    estimated_distance_to_chain_tip,
-                    ?local_tip_height,
-                    "Zebra has not synced to the chain tip"
-                );
-
-                return Err(Error {
-                    code: NOT_SYNCED_ERROR_CODE,
-                    message: format!("Zebra has not synced to the chain tip, estimated distance: {estimated_distance_to_chain_tip}"),
-                    data: None,
-                });
-            }
+            // Check if we are synced to the tip.
+            // The result of this check can change during long polling.
+            get_block_template::check_synced_to_tip(network, latest_chain_tip, sync_status)?;
 
             // Calling state with `ChainInfo` request for relevant chain data
             let request = ReadRequest::ChainInfo;

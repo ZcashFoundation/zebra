@@ -2,21 +2,107 @@
 
 use std::iter;
 
+use jsonrpc_core::{Error, ErrorCode, Result};
+
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{
         merkle::{self, AuthDataRoot},
         Height,
     },
+    chain_sync_status::ChainSyncStatus,
+    chain_tip::ChainTip,
     parameters::Network,
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
 use zebra_consensus::{funding_stream_address, funding_stream_values, miner_subsidy};
 
-use crate::methods::get_block_template_rpcs::types::transaction::TransactionTemplate;
+use crate::methods::get_block_template_rpcs::{
+    constants::NOT_SYNCED_ERROR_CODE,
+    types::{get_block_template_opts, transaction::TransactionTemplate},
+};
 
-// - Coinbase transaction functions
+use super::{
+    constants::MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP,
+    types::get_block_template_opts::GetBlockTemplateRequestMode,
+};
+
+// - Parameter checks
+
+/// Returns an error if the get block template RPC `options` are invalid.
+pub fn check_options(options: get_block_template_opts::JsonParameters) -> Result<()> {
+    if options.data.is_some() || options.mode == GetBlockTemplateRequestMode::Proposal {
+        return Err(Error {
+            code: ErrorCode::InvalidParams,
+            message: "\"proposal\" mode is currently unsupported by Zebra".to_string(),
+            data: None,
+        });
+    }
+
+    Ok(())
+}
+
+/// Returns the miner address, or an error if it is invalid.
+pub fn check_address(miner_address: Option<transparent::Address>) -> Result<transparent::Address> {
+    miner_address.ok_or_else(|| Error {
+        code: ErrorCode::ServerError(0),
+        message: "configure mining.miner_address in zebrad.toml \
+                  with a transparent address"
+            .to_string(),
+        data: None,
+    })
+}
+
+// - Service checks
+
+/// Returns an error if Zebra is not synced to the consensus chain tip.
+/// This error might be incorrect if the local clock is skewed.
+pub fn check_synced_to_tip<Tip, SyncStatus>(
+    network: Network,
+    latest_chain_tip: Tip,
+    sync_status: SyncStatus,
+) -> Result<()>
+where
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
+{
+    // The tip estimate may not be the same as the one coming from the state
+    // but this is ok for an estimate
+    let (estimated_distance_to_chain_tip, local_tip_height) = latest_chain_tip
+        .estimate_distance_to_network_chain_tip(network)
+        .ok_or_else(|| Error {
+            code: ErrorCode::ServerError(0),
+            message: "No Chain tip available yet".to_string(),
+            data: None,
+        })?;
+
+    if !sync_status.is_close_to_tip()
+        || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP
+    {
+        tracing::info!(
+            estimated_distance_to_chain_tip,
+            ?local_tip_height,
+            "Zebra has not synced to the chain tip. \
+             Hint: check your network connection, clock, and time zone settings."
+        );
+
+        return Err(Error {
+            code: NOT_SYNCED_ERROR_CODE,
+            message: format!(
+                "Zebra has not synced to the chain tip, \
+                 estimated distance: {estimated_distance_to_chain_tip}, \
+                 local tip: {local_tip_height:?}. \
+                 Hint: check your network connection, clock, and time zone settings."
+            ),
+            data: None,
+        });
+    }
+
+    Ok(())
+}
+
+// - Coinbase transaction processing
 
 /// Returns the total miner fee for `mempool_txs`.
 pub fn miner_fee(mempool_txs: &[VerifiedUnminedTx]) -> Amount<NonNegative> {
@@ -94,7 +180,7 @@ pub fn fake_coinbase_transaction(
     TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee)
 }
 
-// - Transaction roots functions
+// - Transaction roots processing
 
 /// Returns the transaction effecting and authorizing roots
 /// for `coinbase_tx` and `mempool_txs`, which are used in the block header.
