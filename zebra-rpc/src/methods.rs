@@ -557,7 +557,11 @@ where
         .boxed()
     }
 
-    // TODO: use a generic error constructor (#5548)
+    // TODO:
+    // - use a generic error constructor (#5548)
+    // - use `height_from_signed_int()` to handle negative heights
+    //   (this might be better in the state request, because it needs the state height)
+    // - create a function that handles block hashes or heights, and use it in `z_get_treestate()`
     fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>> {
         let mut state = self.state.clone();
 
@@ -759,7 +763,11 @@ where
         .boxed()
     }
 
-    // TODO: use a generic error constructor (#5548)
+    // TODO:
+    // - use a generic error constructor (#5548)
+    // - use `height_from_signed_int()` to handle negative heights
+    //   (this might be better in the state request, because it needs the state height)
+    // - create a function that handles block hashes or heights, and use it in `get_block()`
     fn z_get_treestate(&self, hash_or_height: String) -> BoxFuture<Result<GetTreestate>> {
         let mut state = self.state.clone();
 
@@ -1347,4 +1355,50 @@ fn check_height_range(start: Height, end: Height, chain_height: Height) -> Resul
     }
 
     Ok(())
+}
+
+/// Given a potentially negative index, find the corresponding `Height`.
+///
+/// This function is used to parse the integer index argument of `get_block_hash`.
+/// This is based on zcashd's implementation:
+/// <https://github.com/zcash/zcash/blob/c267c3ee26510a974554f227d40a89e3ceb5bb4d/src/rpc/blockchain.cpp#L589-L618>
+//
+// TODO: also use this function in `get_block` and `z_get_treestate`
+#[allow(dead_code)]
+pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> {
+    if index >= 0 {
+        let height = index.try_into().expect("Positive i32 always fits in u32");
+        if height > tip_height.0 {
+            return Err(Error::invalid_params(
+                "Provided index is greater than the current tip",
+            ));
+        }
+        Ok(Height(height))
+    } else {
+        // `index + 1` can't overflow, because `index` is always negative here.
+        let height = i32::try_from(tip_height.0)
+            .expect("tip height fits in i32, because Height::MAX fits in i32")
+            .checked_add(index + 1);
+
+        let sanitized_height = match height {
+            None => return Err(Error::invalid_params("Provided index is not valid")),
+            Some(h) => {
+                if h < 0 {
+                    return Err(Error::invalid_params(
+                        "Provided negative index ends up with a negative height",
+                    ));
+                }
+                let h: u32 = h.try_into().expect("Positive i32 always fits in u32");
+                if h > tip_height.0 {
+                    return Err(Error::invalid_params(
+                        "Provided index is greater than the current tip",
+                    ));
+                }
+
+                h
+            }
+        };
+
+        Ok(Height(sanitized_height))
+    }
 }

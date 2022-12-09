@@ -45,7 +45,7 @@ use crate::methods::{
             long_poll::LongPollInput, submit_block, transaction::TransactionTemplate,
         },
     },
-    GetBlockHash, MISSING_BLOCK_ERROR_CODE,
+    height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
 
 pub mod config;
@@ -294,9 +294,10 @@ where
         let latest_chain_tip = self.latest_chain_tip.clone();
 
         async move {
+            // TODO: look up this height as part of the state request?
             let tip_height = best_chain_tip_height(&latest_chain_tip)?;
 
-            let height = get_height_from_int(index, tip_height)?;
+            let height = height_from_signed_int(index, tip_height)?;
 
             let request = zebra_state::ReadRequest::BestChainBlockHash(height);
             let response = state
@@ -710,47 +711,4 @@ pub fn calculate_transaction_roots(
     let auth_data_root = block_transactions().cloned().collect();
 
     (merkle_root, auth_data_root)
-}
-
-// get_block_hash support methods
-
-/// Given a potentially negative index, find the corresponding `Height`.
-///
-/// This function is used to parse the integer index argument of `get_block_hash`.
-fn get_height_from_int(index: i32, tip_height: Height) -> Result<Height> {
-    if index >= 0 {
-        let height = index.try_into().expect("Positive i32 always fits in u32");
-        if height > tip_height.0 {
-            return Err(Error::invalid_params(
-                "Provided index is greater than the current tip",
-            ));
-        }
-        Ok(Height(height))
-    } else {
-        // `index + 1` can't overflow, because `index` is always negative here.
-        let height = i32::try_from(tip_height.0)
-            .expect("tip height fits in i32, because Height::MAX fits in i32")
-            .checked_add(index + 1);
-
-        let sanitized_height = match height {
-            None => return Err(Error::invalid_params("Provided index is not valid")),
-            Some(h) => {
-                if h < 0 {
-                    return Err(Error::invalid_params(
-                        "Provided negative index ends up with a negative height",
-                    ));
-                }
-                let h: u32 = h.try_into().expect("Positive i32 always fits in u32");
-                if h > tip_height.0 {
-                    return Err(Error::invalid_params(
-                        "Provided index is greater than the current tip",
-                    ));
-                }
-
-                h
-            }
-        };
-
-        Ok(Height(sanitized_height))
-    }
 }
