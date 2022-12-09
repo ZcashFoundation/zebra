@@ -27,13 +27,13 @@ use crate::methods::{
             GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
         },
         get_block_template::{
-            calculate_default_root_hashes, calculate_miner_fee, check_address,
-            check_block_template_parameters, check_synced_to_tip, fetch_mempool_transactions,
-            fetch_state_tip_and_local_time, generate_coinbase_transaction,
+            check_address, check_block_template_parameters, check_synced_to_tip,
+            fetch_mempool_transactions, fetch_state_tip_and_local_time,
+            generate_coinbase_and_roots,
         },
         types::{
             get_block_template::GetBlockTemplate, get_mining_info, hex_data::HexData,
-            long_poll::LongPollInput, submit_block, transaction::TransactionTemplate,
+            long_poll::LongPollInput, submit_block,
         },
     },
     height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
@@ -388,16 +388,11 @@ where
             )
             .await;
 
-            // Generate the coinbase transaction
-            let miner_fee = calculate_miner_fee(&mempool_txs);
-            let coinbase_tx =
-                generate_coinbase_transaction(network, next_block_height, miner_address, miner_fee);
-
-            // Calculate block default roots
-            //
-            // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
-            let default_roots = calculate_default_root_hashes(
-                &coinbase_tx,
+            // Generate the coinbase transaction and default roots
+            let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
+                network,
+                next_block_height,
+                miner_address,
                 &mempool_txs,
                 chain_tip_and_local_time.history_tree,
             );
@@ -428,7 +423,7 @@ where
 
                 transactions: mempool_txs,
 
-                coinbase_txn: TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee),
+                coinbase_txn,
 
                 long_poll_id,
 

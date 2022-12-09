@@ -6,7 +6,7 @@ use jsonrpc_core::{Error, ErrorCode, Result};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
-    amount::{self, Amount, NonNegative},
+    amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{
         merkle::{self, AuthDataRoot},
         ChainHistoryBlockTxAuthCommitmentHash, Height,
@@ -23,7 +23,7 @@ use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::methods::get_block_template_rpcs::{
     constants::{MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE},
-    types::{default_roots::DefaultRoots, get_block_template},
+    types::{default_roots::DefaultRoots, get_block_template, transaction::TransactionTemplate},
 };
 
 pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
@@ -171,6 +171,30 @@ where
     }
 }
 
+// - Response processing
+
+/// Generates and returns the coinbase transaction and default roots.
+pub fn generate_coinbase_and_roots(
+    network: Network,
+    height: Height,
+    miner_address: transparent::Address,
+    mempool_txs: &[VerifiedUnminedTx],
+    history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
+) -> (TransactionTemplate<NegativeOrZero>, DefaultRoots) {
+    // Generate the coinbase transaction
+    let miner_fee = calculate_miner_fee(mempool_txs);
+    let coinbase_txn = generate_coinbase_transaction(network, height, miner_address, miner_fee);
+
+    // Calculate block default roots
+    //
+    // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
+    let default_roots = calculate_default_root_hashes(&coinbase_txn, mempool_txs, history_tree);
+
+    let coinbase_txn = TransactionTemplate::from_coinbase(&coinbase_txn, miner_fee);
+
+    (coinbase_txn, default_roots)
+}
+
 // - Coinbase transaction processing
 
 /// Returns a coinbase transaction for the supplied parameters.
@@ -239,11 +263,11 @@ pub fn standard_coinbase_outputs(
 ///
 /// This function runs expensive cryptographic operations.
 pub fn calculate_default_root_hashes(
-    coinbase_tx: &UnminedTx,
+    coinbase_txn: &UnminedTx,
     mempool_txs: &[VerifiedUnminedTx],
     history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
 ) -> DefaultRoots {
-    let (merkle_root, auth_data_root) = calculate_transaction_roots(coinbase_tx, mempool_txs);
+    let (merkle_root, auth_data_root) = calculate_transaction_roots(coinbase_txn, mempool_txs);
 
     let history_tree = history_tree;
     let chain_history_root = history_tree.hash().expect("history tree can't be empty");
@@ -262,16 +286,16 @@ pub fn calculate_default_root_hashes(
 }
 
 /// Returns the transaction effecting and authorizing roots
-/// for `coinbase_tx` and `mempool_txs`, which are used in the block header.
+/// for `coinbase_txn` and `mempool_txs`, which are used in the block header.
 //
 // TODO: should this be spawned into a cryptographic operations pool?
 //       (it would only matter if there were a lot of small transactions in a block)
 pub fn calculate_transaction_roots(
-    coinbase_tx: &UnminedTx,
+    coinbase_txn: &UnminedTx,
     mempool_txs: &[VerifiedUnminedTx],
 ) -> (merkle::Root, AuthDataRoot) {
     let block_transactions =
-        || iter::once(coinbase_tx).chain(mempool_txs.iter().map(|tx| &tx.transaction));
+        || iter::once(coinbase_txn).chain(mempool_txs.iter().map(|tx| &tx.transaction));
 
     let merkle_root = block_transactions().cloned().collect();
     let auth_data_root = block_transactions().cloned().collect();
