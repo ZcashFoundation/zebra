@@ -250,6 +250,6 @@ fn snapshot_rpc_getmininginfo(
 }
 
 /// Snapshot `getnetworksolps` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getnetworksolps(get_network_sol_ps: u128, settings: &insta::Settings) {
+fn snapshot_rpc_getnetworksolps(get_network_sol_ps: u64, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_network_sol_ps", get_network_sol_ps));
 }
