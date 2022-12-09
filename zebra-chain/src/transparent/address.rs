@@ -215,14 +215,6 @@ impl Address {
         }
     }
 
-    /// Create an address for the given public key hash and network.
-    pub fn from_public_key_hash(network: Network, pub_key_hash: [u8; 20]) -> Self {
-        Self::PayToPublicKeyHash {
-            network,
-            pub_key_hash,
-        }
-    }
-
     /// Returns the network for this address.
     pub fn network(&self) -> Network {
         match *self {
