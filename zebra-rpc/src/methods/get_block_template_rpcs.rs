@@ -16,7 +16,6 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::Network,
     serialization::ZcashDeserializeInto,
-    transaction::Transaction,
     transparent,
 };
 use zebra_consensus::{VerifyChainError, MAX_BLOCK_SIGOPS};
@@ -31,9 +30,9 @@ use crate::methods::{
             GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
         },
         get_block_template::{
-            calculate_transaction_roots, check_address, check_block_template_parameters,
-            check_synced_to_tip, fake_coinbase_transaction, fetch_mempool_transactions,
-            fetch_state_tip_and_local_time, miner_fee, standard_coinbase_outputs,
+            calculate_miner_fee, calculate_transaction_roots, check_address,
+            check_block_template_parameters, check_synced_to_tip, fetch_mempool_transactions,
+            fetch_state_tip_and_local_time, generate_coinbase_transaction,
         },
         types::{
             default_roots::DefaultRoots, get_block_template::GetBlockTemplate, get_mining_info,
@@ -381,23 +380,21 @@ where
             let next_block_height =
                 (chain_tip_and_local_time.tip_height + 1).expect("tip is far below Height::MAX");
 
-            // TODO: move fake coinbase into select_mempool_transactions()
+            // Randomly select some mempool transactions.
+            //
+            // TODO: sort these transactions to match zcashd's order, to make testing easier.
+            let mempool_txs = zip317::select_mempool_transactions(
+                network,
+                next_block_height,
+                miner_address,
+                mempool_txs,
+            )
+            .await;
 
-            // Use a fake coinbase transaction to break the dependency between transaction
-            // selection, the miner fee, and the fee payment in the coinbase transaction.
-            let fake_coinbase_tx =
-                fake_coinbase_transaction(network, next_block_height, miner_address);
-            let mempool_txs =
-                zip317::select_mempool_transactions(fake_coinbase_tx, mempool_txs).await;
-
-            let miner_fee = miner_fee(&mempool_txs);
-
-            // TODO: move into a new coinbase_transaction()
-
-            let outputs =
-                standard_coinbase_outputs(network, next_block_height, miner_address, miner_fee);
+            // Generate the coinbase transaction
+            let miner_fee = calculate_miner_fee(&mempool_txs);
             let coinbase_tx =
-                Transaction::new_v5_coinbase(network, next_block_height, outputs).into();
+                generate_coinbase_transaction(network, next_block_height, miner_address, miner_fee);
 
             // TODO: move into a new block_roots()
 
