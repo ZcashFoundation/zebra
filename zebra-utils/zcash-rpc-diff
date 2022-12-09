@@ -69,15 +69,15 @@ echo
 
 if [ "$ZEBRAD_NET" != "$ZCASHD_NET" ]; then
     echo "WARNING: comparing RPC responses from different networks:"
-    echo "$ZCASHD is on: $ZCASHD_NET"
     echo "$ZEBRAD is on: $ZEBRAD_NET"
+    echo "$ZCASHD is on: $ZCASHD_NET"
     echo
 fi
 
 if [ "$ZEBRAD_HEIGHT" -ne "$ZCASHD_HEIGHT" ]; then
     echo "WARNING: comparing RPC responses from different heights:"
-    echo "$ZCASHD is at: $ZCASHD_HEIGHT"
     echo "$ZEBRAD is at: $ZEBRAD_HEIGHT"
+    echo "$ZCASHD is at: $ZCASHD_HEIGHT"
     echo
 fi
 
@@ -98,7 +98,7 @@ echo
 
 echo
 
-echo "Response diff between $ZCASHD and $ZEBRAD:"
+echo "Response diff between $ZEBRAD and $ZCASHD:"
 
 $DIFF "$ZEBRAD_RESPONSE" "$ZCASHD_RESPONSE" \
     && ( \
@@ -140,7 +140,7 @@ $ZCASH_CLI "$@" > "$ZCASHD_CHECK_RESPONSE"
 
 echo
 
-echo "$1 diff between $ZCASHD and $ZEBRAD:"
+echo "$1 diff between $ZEBRAD and $ZCASHD:"
 
 $DIFF "$ZEBRAD_CHECK_RESPONSE" "$ZCASHD_CHECK_RESPONSE" \
     && ( \
@@ -173,7 +173,7 @@ if [ "$1" == "getaddressbalance" ]; then
 
     echo
 
-    echo "Balance diff between $ZCASHD and $ZEBRAD:"
+    echo "Balance diff between $ZEBRAD and $ZCASHD:"
     echo "(for both getaddressbalance and getaddressutxos)"
 
     $DIFF --from-file="$ZEBRAD_NUM_RESPONSE" "$ZCASHD_NUM_RESPONSE" \
