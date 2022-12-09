@@ -349,7 +349,7 @@ fn version_message_omitted_relay() {
         _ => unreachable!("const is the Message::Version variant"),
     };
 
-    let mut codec = Codec::builder().finish();
+    let codec = Codec::builder().finish();
     let mut bytes = BytesMut::new();
 
     codec
@@ -357,20 +357,9 @@ fn version_message_omitted_relay() {
         .expect("encoding should succeed");
     bytes.truncate(bytes.len() - 1);
 
-    codec.state = DecodeState::Body {
-        body_len: codec.body_length(&version) - 1,
-        command: *b"version\0\0\0\0\0",
-        checksum: sha256d::Checksum::from(&bytes[..]),
-    };
-
-    let relay = match codec.decode(&mut bytes) {
-        Ok(Some(Message::Version(VersionMessage { relay, .. }))) => relay,
-        err => panic!(
-            "bytes should successfully decode to version message, \
-            got: {err:?} (bytes.len = {}, codec.state = {:?}",
-            bytes.len(),
-            codec.state
-        ),
+    let relay = match codec.read_version(Cursor::new(&bytes)) {
+        Ok(Message::Version(VersionMessage { relay, .. })) => relay,
+        err => panic!("bytes should successfully decode to version message, got: {err:?}"),
     };
 
     assert!(relay, "relay should be true when omitted from message");
