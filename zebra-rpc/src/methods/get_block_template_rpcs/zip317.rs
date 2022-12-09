@@ -6,18 +6,15 @@
 //! > when computing `size_target`, since there is no consensus requirement for this to be
 //! > exactly the same between implementations.
 
-use jsonrpc_core::{Error, ErrorCode, Result};
 use rand::{
     distributions::{Distribution, WeightedIndex},
     prelude::thread_rng,
 };
-use tower::{Service, ServiceExt};
 
 use zebra_chain::{amount::NegativeOrZero, block::MAX_BLOCK_BYTES, transaction::VerifiedUnminedTx};
 use zebra_consensus::MAX_BLOCK_SIGOPS;
-use zebra_node_services::mempool;
 
-use super::types::transaction::TransactionTemplate;
+use crate::methods::get_block_template_rpcs::types::transaction::TransactionTemplate;
 
 /// The ZIP-317 recommended limit on the number of unpaid actions per block.
 /// `block_unpaid_action_limit` in ZIP-317.
@@ -30,24 +27,14 @@ pub const BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT: u32 = 50;
 /// as the real coinbase transaction. (The real coinbase transaction depends on the total
 /// fees from the transactions returned by this function.)
 ///
-/// Returns selected transactions from the `mempool`, or an error if the mempool has failed.
+/// Returns selected transactions from `mempool_txs`.
 ///
 /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
-pub async fn select_mempool_transactions<Mempool>(
+pub async fn select_mempool_transactions(
     fake_coinbase_tx: TransactionTemplate<NegativeOrZero>,
-    mempool: Mempool,
-) -> Result<Vec<VerifiedUnminedTx>>
-where
-    Mempool: Service<
-            mempool::Request,
-            Response = mempool::Response,
-            Error = zebra_node_services::BoxError,
-        > + 'static,
-    Mempool::Future: Send,
-{
+    mempool_txs: Vec<VerifiedUnminedTx>,
+) -> Vec<VerifiedUnminedTx> {
     // Setup the transaction lists.
-    let mempool_txs = fetch_mempool_transactions(mempool).await?;
-
     let (conventional_fee_txs, low_fee_txs): (Vec<_>, Vec<_>) = mempool_txs
         .into_iter()
         .partition(VerifiedUnminedTx::pays_conventional_fee);
@@ -94,33 +81,7 @@ where
         );
     }
 
-    Ok(selected_txs)
-}
-
-/// Fetch the transactions that are currently in `mempool`.
-async fn fetch_mempool_transactions<Mempool>(mempool: Mempool) -> Result<Vec<VerifiedUnminedTx>>
-where
-    Mempool: Service<
-            mempool::Request,
-            Response = mempool::Response,
-            Error = zebra_node_services::BoxError,
-        > + 'static,
-    Mempool::Future: Send,
-{
-    let response = mempool
-        .oneshot(mempool::Request::FullTransactions)
-        .await
-        .map_err(|error| Error {
-            code: ErrorCode::ServerError(0),
-            message: error.to_string(),
-            data: None,
-        })?;
-
-    if let mempool::Response::FullTransactions(transactions) = response {
-        Ok(transactions)
-    } else {
-        unreachable!("unmatched response to a mempool::FullTransactions request")
-    }
+    selected_txs
 }
 
 /// Returns a fee-weighted index and the total weight of `transactions`.

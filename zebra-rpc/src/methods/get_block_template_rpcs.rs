@@ -32,8 +32,8 @@ use crate::methods::{
         },
         get_block_template::{
             calculate_transaction_roots, check_address, check_block_template_parameters,
-            check_synced_to_tip, fake_coinbase_transaction, fetch_state_tip_and_local_time,
-            miner_fee, standard_coinbase_outputs,
+            check_synced_to_tip, fake_coinbase_transaction, fetch_mempool_transactions,
+            fetch_state_tip_and_local_time, miner_fee, standard_coinbase_outputs,
         },
         types::{
             default_roots::DefaultRoots, get_block_template::GetBlockTemplate, get_mining_info,
@@ -335,6 +335,8 @@ where
 
         // To implement long polling correctly, we split this RPC into multiple phases.
         async move {
+            // - Once-off checks
+
             // Check config and parameters.
             // These checks always have the same result during long polling.
             let miner_address = check_address(miner_address)?;
@@ -343,48 +345,25 @@ where
                 check_block_template_parameters(parameters)?;
             }
 
+            // - Checks and fetches that can change during long polling
+
             // Check if we are synced to the tip.
             // The result of this check can change during long polling.
             check_synced_to_tip(network, latest_chain_tip, sync_status)?;
 
-            // Fetch the state data for the block template:
+            // Fetch the state data and local time for the block template:
             // - if the tip block hash changes, we must return from long polling,
-            // - if the local clock changes on testnet, we might return from long polling.
+            // - if the local clock changes on testnet, we might return from long polling
+            //
+            // We also return after 90 minutes on mainnet, even if we have the same response.
             let chain_tip_and_local_time = fetch_state_tip_and_local_time(state).await?;
 
-            // Calculate the next block height.
-            let next_block_height =
-                (chain_tip_and_local_time.tip_height + 1).expect("tip is far below Height::MAX");
+            // Fetch the mempool data for the block template:
+            // - if the mempool transactions change, we might return from long polling.
+            let mempool_txs = fetch_mempool_transactions(mempool).await?;
 
-            // Use a fake coinbase transaction to break the dependency between transaction
-            // selection, the miner fee, and the fee payment in the coinbase transaction.
-            let fake_coinbase_tx =
-                fake_coinbase_transaction(network, next_block_height, miner_address);
-            let mempool_txs =
-                zip317::select_mempool_transactions(fake_coinbase_tx, mempool).await?;
+            // - Long poll ID calculation
 
-            let miner_fee = miner_fee(&mempool_txs);
-
-            let outputs =
-                standard_coinbase_outputs(network, next_block_height, miner_address, miner_fee);
-            let coinbase_tx =
-                Transaction::new_v5_coinbase(network, next_block_height, outputs).into();
-
-            let (merkle_root, auth_data_root) =
-                calculate_transaction_roots(&coinbase_tx, &mempool_txs);
-
-            let history_tree = chain_tip_and_local_time.history_tree;
-            // TODO: move expensive cryptography to a rayon thread?
-            let chain_history_root = history_tree.hash().expect("history tree can't be empty");
-
-            // TODO: move expensive cryptography to a rayon thread?
-            let block_commitments_hash = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
-                &chain_history_root,
-                &auth_data_root,
-            );
-
-            // TODO: use the entire mempool content via a watch channel,
-            //       rather than just the randomly selected transactions
             let long_poll_id = LongPollInput::new(
                 chain_tip_and_local_time.tip_height,
                 chain_tip_and_local_time.tip_hash,
@@ -393,8 +372,51 @@ where
             )
             .into();
 
+            // - Processing fetched data to create a transaction template
+            //
+            // Apart from random weighted transaction selection,
+            // the template only depends on the previously fetched data.
+
+            // Calculate the next block height.
+            let next_block_height =
+                (chain_tip_and_local_time.tip_height + 1).expect("tip is far below Height::MAX");
+
+            // TODO: move fake coinbase into select_mempool_transactions()
+
+            // Use a fake coinbase transaction to break the dependency between transaction
+            // selection, the miner fee, and the fee payment in the coinbase transaction.
+            let fake_coinbase_tx =
+                fake_coinbase_transaction(network, next_block_height, miner_address);
+            let mempool_txs =
+                zip317::select_mempool_transactions(fake_coinbase_tx, mempool_txs).await;
+
+            let miner_fee = miner_fee(&mempool_txs);
+
+            // TODO: move into a new coinbase_transaction()
+
+            let outputs =
+                standard_coinbase_outputs(network, next_block_height, miner_address, miner_fee);
+            let coinbase_tx =
+                Transaction::new_v5_coinbase(network, next_block_height, outputs).into();
+
+            // TODO: move into a new block_roots()
+
+            // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
+            let (merkle_root, auth_data_root) =
+                calculate_transaction_roots(&coinbase_tx, &mempool_txs);
+
+            let history_tree = chain_tip_and_local_time.history_tree;
+            let chain_history_root = history_tree.hash().expect("history tree can't be empty");
+
+            let block_commitments_hash = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                &chain_history_root,
+                &auth_data_root,
+            );
+
             // Convert into TransactionTemplates
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
+
+            // TODO: make these serialize without this complex code?
 
             let capabilities: Vec<String> = GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD
                 .iter()
@@ -427,6 +449,7 @@ where
 
                 long_poll_id,
 
+                // TODO: move this into another function or make it happen on serialization
                 target: format!(
                     "{}",
                     chain_tip_and_local_time
@@ -439,6 +462,7 @@ where
 
                 mutable,
 
+                // TODO: make this conversion happen automatically?
                 nonce_range: GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
 
                 sigop_limit: MAX_BLOCK_SIGOPS,
@@ -447,6 +471,7 @@ where
 
                 cur_time: chain_tip_and_local_time.cur_time.timestamp(),
 
+                // TODO: move this into another function or make it happen on serialization
                 bits: format!(
                     "{:#010x}",
                     chain_tip_and_local_time.expected_difficulty.to_value()

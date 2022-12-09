@@ -18,6 +18,7 @@ use zebra_chain::{
     transparent,
 };
 use zebra_consensus::{funding_stream_address, funding_stream_values, miner_subsidy};
+use zebra_node_services::mempool;
 use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::methods::get_block_template_rpcs::{
@@ -137,6 +138,37 @@ where
     };
 
     Ok(chain_info)
+}
+
+/// Returns the transactions that are currently in `mempool`.
+///
+/// You should call `check_synced_to_tip()` before calling this function.
+/// If the mempool is inactive because Zebra is not synced to the tip, returns no transactions.
+//
+// TODO: return an error if the mempool is inactive?
+pub async fn fetch_mempool_transactions<Mempool>(mempool: Mempool) -> Result<Vec<VerifiedUnminedTx>>
+where
+    Mempool: Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
+    Mempool::Future: Send,
+{
+    let response = mempool
+        .oneshot(mempool::Request::FullTransactions)
+        .await
+        .map_err(|error| Error {
+            code: ErrorCode::ServerError(0),
+            message: error.to_string(),
+            data: None,
+        })?;
+
+    if let mempool::Response::FullTransactions(transactions) = response {
+        Ok(transactions)
+    } else {
+        unreachable!("unmatched response to a mempool::FullTransactions request")
+    }
 }
 
 // - Coinbase transaction processing
