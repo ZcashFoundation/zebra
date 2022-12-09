@@ -185,7 +185,7 @@ where
 
     /// The configured miner address for this RPC service.
     ///
-    /// Zebra currently only supports single-signature P2SH transparent addresses.
+    /// Zebra currently only supports transparent addresses.
     miner_address: Option<transparent::Address>,
 
     // Services
@@ -346,7 +346,7 @@ where
             let miner_address = miner_address.ok_or_else(|| Error {
                 code: ErrorCode::ServerError(0),
                 message: "configure mining.miner_address in zebrad.toml \
-                          with a transparent P2SH address"
+                          with a transparent address"
                     .to_string(),
                 data: None,
             })?;
