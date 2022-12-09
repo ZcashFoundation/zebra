@@ -8,24 +8,21 @@ use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
-    block::{self, Block, Height, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
+    block::{self, Block, Height},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::Network,
     serialization::ZcashDeserializeInto,
     transparent,
 };
-use zebra_consensus::{VerifyChainError, MAX_BLOCK_SIGOPS};
+use zebra_consensus::VerifyChainError;
 use zebra_node_services::mempool;
 use zebra_state::{ReadRequest, ReadResponse};
 
 use crate::methods::{
     best_chain_tip_height,
     get_block_template_rpcs::{
-        constants::{
-            DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD,
-            GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
-        },
+        constants::DEFAULT_SOLUTION_RATE_WINDOW_SIZE,
         get_block_template::{
             check_address, check_block_template_parameters, check_synced_to_tip,
             fetch_mempool_transactions, fetch_state_tip_and_local_time,
@@ -330,7 +327,7 @@ where
 
         // To implement long polling correctly, we split this RPC into multiple phases.
         async move {
-            // - Once-off checks
+            // - One-off checks
 
             // Check config and parameters.
             // These checks always have the same result during long polling.
@@ -358,6 +355,10 @@ where
             let mempool_txs = fetch_mempool_transactions(mempool).await?;
 
             // - Long poll ID calculation
+            //
+            // TODO: check if the client passed the same long poll id,
+            //       if they did, wait until the inputs change,
+            //       or the max time, or Zebra is no longer synced to the tip.
 
             let long_poll_id = LongPollInput::new(
                 chain_tip_and_local_time.tip_height,
@@ -388,68 +389,29 @@ where
             )
             .await;
 
+            // - After this point, the template only depends on the previously fetched data.
+
             // Generate the coinbase transaction and default roots
+            //
+            // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
             let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
                 network,
                 next_block_height,
                 miner_address,
                 &mempool_txs,
-                chain_tip_and_local_time.history_tree,
+                chain_tip_and_local_time.history_tree.clone(),
             );
 
-            // Convert transactions into TransactionTemplates
-            let mempool_txs = mempool_txs.iter().map(Into::into).collect();
-
-            // TODO: move this conversion into a separate function?
-            let capabilities: Vec<String> = GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD
-                .iter()
-                .map(ToString::to_string)
-                .collect();
-            let mutable: Vec<String> = GET_BLOCK_TEMPLATE_MUTABLE_FIELD
-                .iter()
-                .map(ToString::to_string)
-                .collect();
-
-            Ok(GetBlockTemplate {
-                capabilities,
-
-                version: ZCASH_BLOCK_VERSION,
-
-                previous_block_hash: GetBlockHash(chain_tip_and_local_time.tip_hash),
-                block_commitments_hash: default_roots.block_commitments_hash,
-                light_client_root_hash: default_roots.block_commitments_hash,
-                final_sapling_root_hash: default_roots.block_commitments_hash,
-                default_roots,
-
-                transactions: mempool_txs,
-
-                coinbase_txn,
-
+            let response = GetBlockTemplate::new(
+                next_block_height,
+                &chain_tip_and_local_time,
                 long_poll_id,
+                coinbase_txn,
+                &mempool_txs,
+                default_roots,
+            );
 
-                target: chain_tip_and_local_time
-                    .expected_difficulty
-                    .to_expanded()
-                    .expect("state always returns a valid difficulty value"),
-
-                min_time: chain_tip_and_local_time.min_time,
-
-                mutable,
-
-                nonce_range: GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
-
-                sigop_limit: MAX_BLOCK_SIGOPS,
-
-                size_limit: MAX_BLOCK_BYTES,
-
-                cur_time: chain_tip_and_local_time.cur_time,
-
-                bits: chain_tip_and_local_time.expected_difficulty,
-
-                height: next_block_height.0,
-
-                max_time: chain_tip_and_local_time.max_time,
-            })
+            Ok(response)
         }
         .boxed()
     }

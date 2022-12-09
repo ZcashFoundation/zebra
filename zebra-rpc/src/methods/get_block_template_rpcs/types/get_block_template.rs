@@ -2,14 +2,23 @@
 
 use zebra_chain::{
     amount,
-    block::ChainHistoryBlockTxAuthCommitmentHash,
+    block::{ChainHistoryBlockTxAuthCommitmentHash, Height, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
     serialization::DateTime32,
+    transaction::VerifiedUnminedTx,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
+use zebra_consensus::MAX_BLOCK_SIGOPS;
+use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::methods::{
-    get_block_template_rpcs::types::{
-        default_roots::DefaultRoots, long_poll::LongPollId, transaction::TransactionTemplate,
+    get_block_template_rpcs::{
+        constants::{
+            GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD, GET_BLOCK_TEMPLATE_MUTABLE_FIELD,
+            GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
+        },
+        types::{
+            default_roots::DefaultRoots, long_poll::LongPollId, transaction::TransactionTemplate,
+        },
     },
     GetBlockHash,
 };
@@ -18,7 +27,7 @@ pub mod parameters;
 
 pub use parameters::*;
 
-/// Documentation to be added after we document all the individual fields.
+/// A serialized `getblocktemplate` RPC response.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetBlockTemplate {
     /// The getblocktemplate RPC capabilities supported by Zebra.
@@ -136,4 +145,75 @@ pub struct GetBlockTemplate {
     /// a significant drop in the hash rate, or after the testnet minimum difficulty interval.
     #[serde(rename = "maxtime")]
     pub max_time: DateTime32,
+}
+
+impl GetBlockTemplate {
+    /// Returns a new [`GetBlockTemplate`] struct, based on the supplied arguments and defaults.
+    ///
+    /// The result of this method only depends on the supplied arguments and constants.
+    pub fn new(
+        next_block_height: Height,
+        chain_tip_and_local_time: &GetBlockTemplateChainInfo,
+        long_poll_id: LongPollId,
+        coinbase_txn: TransactionTemplate<amount::NegativeOrZero>,
+        mempool_txs: &[VerifiedUnminedTx],
+        default_roots: DefaultRoots,
+    ) -> Self {
+        // Convert transactions into TransactionTemplates
+        let mempool_txs = mempool_txs.iter().map(Into::into).collect();
+
+        // Convert difficulty
+        let target = chain_tip_and_local_time
+            .expected_difficulty
+            .to_expanded()
+            .expect("state always returns a valid difficulty value");
+
+        // Convert default values
+        let capabilities: Vec<String> = GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let mutable: Vec<String> = GET_BLOCK_TEMPLATE_MUTABLE_FIELD
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+
+        GetBlockTemplate {
+            capabilities,
+
+            version: ZCASH_BLOCK_VERSION,
+
+            previous_block_hash: GetBlockHash(chain_tip_and_local_time.tip_hash),
+            block_commitments_hash: default_roots.block_commitments_hash,
+            light_client_root_hash: default_roots.block_commitments_hash,
+            final_sapling_root_hash: default_roots.block_commitments_hash,
+            default_roots,
+
+            transactions: mempool_txs,
+
+            coinbase_txn,
+
+            long_poll_id,
+
+            target,
+
+            min_time: chain_tip_and_local_time.min_time,
+
+            mutable,
+
+            nonce_range: GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD.to_string(),
+
+            sigop_limit: MAX_BLOCK_SIGOPS,
+
+            size_limit: MAX_BLOCK_BYTES,
+
+            cur_time: chain_tip_and_local_time.cur_time,
+
+            bits: chain_tip_and_local_time.expected_difficulty,
+
+            height: next_block_height.0,
+
+            max_time: chain_tip_and_local_time.max_time,
+        }
+    }
 }
