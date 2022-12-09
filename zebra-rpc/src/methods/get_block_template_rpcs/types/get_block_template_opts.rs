@@ -56,7 +56,7 @@ pub enum GetBlockTemplateCapability {
     UnknownCapability,
 }
 
-/// Optional argument `jsonrequestobject` for `getblocktemplate` RPC request.
+/// Optional parameter `jsonrequestobject` for `getblocktemplate` RPC request.
 ///
 /// The `data` field must be provided in `proposal` mode, and must be omitted in `template` mode.
 /// All other fields are optional.

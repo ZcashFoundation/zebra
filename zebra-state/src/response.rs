@@ -145,6 +145,7 @@ pub enum ReadResponse {
 pub struct GetBlockTemplateChainInfo {
     /// The current state tip height.
     /// The block template OAfor the candidate block is the next block after this block.
+    /// Depends on the `tip_hash`.
     pub tip_height: block::Height,
 
     /// The current state tip height.
@@ -152,18 +153,23 @@ pub struct GetBlockTemplateChainInfo {
     pub tip_hash: block::Hash,
 
     /// The expected difficulty of the candidate block.
+    /// Depends on the `tip_hash`.
     pub expected_difficulty: CompactDifficulty,
 
     /// The current system time, adjusted to fit within `min_time` and `max_time`.
+    /// Depends on the local clock and the `tip_hash`.
     pub cur_time: chrono::DateTime<chrono::Utc>,
 
     /// The mininimum time the miner can use in this block.
+    /// Depends on the `tip_hash`, and the local clock on testnet.
     pub min_time: chrono::DateTime<chrono::Utc>,
 
     /// The maximum time the miner can use in this block.
+    /// Depends on the `tip_hash`, and the local clock on testnet.
     pub max_time: chrono::DateTime<chrono::Utc>,
 
     /// The history tree of the current best chain.
+    /// Depends on the `tip_hash`.
     pub history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
 }
 

@@ -3,6 +3,7 @@
 use std::iter;
 
 use jsonrpc_core::{Error, ErrorCode, Result};
+use tower::{Service, ServiceExt};
 
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
@@ -17,6 +18,7 @@ use zebra_chain::{
     transparent,
 };
 use zebra_consensus::{funding_stream_address, funding_stream_values, miner_subsidy};
+use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::methods::get_block_template_rpcs::{
     constants::NOT_SYNCED_ERROR_CODE,
@@ -30,9 +32,11 @@ use super::{
 
 // - Parameter checks
 
-/// Returns an error if the get block template RPC `options` are invalid.
-pub fn check_options(options: get_block_template_opts::JsonParameters) -> Result<()> {
-    if options.data.is_some() || options.mode == GetBlockTemplateRequestMode::Proposal {
+/// Returns an error if the get block template RPC `parameters` are invalid.
+pub fn check_block_template_parameters(
+    parameters: get_block_template_opts::JsonParameters,
+) -> Result<()> {
+    if parameters.data.is_some() || parameters.mode == GetBlockTemplateRequestMode::Proposal {
         return Err(Error {
             code: ErrorCode::InvalidParams,
             message: "\"proposal\" mode is currently unsupported by Zebra".to_string(),
@@ -54,7 +58,7 @@ pub fn check_address(miner_address: Option<transparent::Address>) -> Result<tran
     })
 }
 
-// - Service checks
+// - State and syncer checks
 
 /// Returns an error if Zebra is not synced to the consensus chain tip.
 /// This error might be incorrect if the local clock is skewed.
@@ -100,6 +104,39 @@ where
     }
 
     Ok(())
+}
+
+// - State and mempool data fetches
+
+/// Returns the state data for the block template.
+///
+/// You must call `check_synced_to_tip()` before calling this function.
+pub async fn fetch_state_block_template_data<State>(
+    state: State,
+) -> Result<GetBlockTemplateChainInfo>
+where
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    let request = zebra_state::ReadRequest::ChainInfo;
+    let response = state.oneshot(request).await.map_err(|error| Error {
+        code: ErrorCode::ServerError(0),
+        message: error.to_string(),
+        data: None,
+    })?;
+
+    let chain_info = match response {
+        zebra_state::ReadResponse::ChainInfo(chain_info) => chain_info,
+        _ => unreachable!("must call check_synced_to_tip() before `GetBlockTemplateChainInfo`"),
+    };
+
+    Ok(chain_info)
 }
 
 // - Coinbase transaction processing

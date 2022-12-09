@@ -31,12 +31,14 @@ use crate::methods::{
             GET_BLOCK_TEMPLATE_MUTABLE_FIELD, GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
         },
         get_block_template::{
-            calculate_transaction_roots, fake_coinbase_transaction, miner_fee,
-            standard_coinbase_outputs,
+            calculate_transaction_roots, check_address, check_block_template_parameters,
+            check_synced_to_tip, fake_coinbase_transaction, fetch_state_block_template_data,
+            miner_fee, standard_coinbase_outputs,
         },
         types::{
-            default_roots::DefaultRoots, get_block_template::GetBlockTemplate, hex_data::HexData,
-            long_poll::LongPollInput, submit_block, transaction::TransactionTemplate,
+            default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
+            get_block_template_opts, get_mining_info, hex_data::HexData, long_poll::LongPollInput,
+            submit_block, transaction::TransactionTemplate,
         },
     },
     height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
@@ -104,7 +106,7 @@ pub trait GetBlockTemplateRpc {
     #[rpc(name = "getblocktemplate")]
     fn get_block_template(
         &self,
-        options: Option<types::get_block_template_opts::JsonParameters>,
+        parameters: Option<get_block_template_opts::JsonParameters>,
     ) -> BoxFuture<Result<GetBlockTemplate>>;
 
     /// Submits block to the node to be validated and committed.
@@ -120,14 +122,14 @@ pub trait GetBlockTemplateRpc {
     fn submit_block(
         &self,
         hex_data: HexData,
-        _options: Option<submit_block::JsonParameters>,
+        _parameters: Option<submit_block::JsonParameters>,
     ) -> BoxFuture<Result<submit_block::Response>>;
 
     /// Returns mining-related information.
     ///
     /// zcashd reference: [`getmininginfo`](https://zcash.github.io/rpc/getmininginfo.html)
     #[rpc(name = "getmininginfo")]
-    fn get_mining_info(&self) -> BoxFuture<Result<types::get_mining_info::Response>>;
+    fn get_mining_info(&self) -> BoxFuture<Result<get_mining_info::Response>>;
 
     /// Returns the estimated network solutions per second based on the last `num_blocks` before `height`.
     /// If `num_blocks` is not supplied, uses 120 blocks.
@@ -319,7 +321,7 @@ where
     // TODO: use HexData to handle block proposal data, and a generic error constructor (#5548)
     fn get_block_template(
         &self,
-        options: Option<types::get_block_template_opts::JsonParameters>,
+        parameters: Option<get_block_template_opts::JsonParameters>,
     ) -> BoxFuture<Result<GetBlockTemplate>> {
         // Clone Config
         let network = self.network;
@@ -329,38 +331,26 @@ where
         let mempool = self.mempool.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
         let sync_status = self.sync_status.clone();
-        let mut state = self.state.clone();
+        let state = self.state.clone();
 
         // To implement long polling correctly, we split this RPC into multiple phases.
         async move {
             // Check config and parameters.
             // These checks always have the same result during long polling.
-            let miner_address = get_block_template::check_address(miner_address)?;
+            let miner_address = check_address(miner_address)?;
 
-            if let Some(options) = options {
-                get_block_template::check_options(options)?;
+            if let Some(parameters) = parameters {
+                check_block_template_parameters(parameters)?;
             }
 
             // Check if we are synced to the tip.
             // The result of this check can change during long polling.
-            get_block_template::check_synced_to_tip(network, latest_chain_tip, sync_status)?;
+            check_synced_to_tip(network, latest_chain_tip, sync_status)?;
 
-            // Calling state with `ChainInfo` request for relevant chain data
-            let request = ReadRequest::ChainInfo;
-            let response = state
-                .ready()
-                .and_then(|service| service.call(request))
-                .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                                data: None,
-                            })?;
-
-            let chain_info = match response {
-                ReadResponse::ChainInfo(chain_info) => chain_info,
-                _ => unreachable!("we should always have enough state data here to get a `GetBlockTemplateChainInfo`"),
-            };
+            // Fetch the state data for the block template:
+            // - if the tip block hash changes, we must return from long polling,
+            // - if the local clock changes on testnet, we might return from long polling.
+            let chain_info = fetch_state_block_template_data(state).await?;
 
             // Get the tip data from the state call
             let block_height = (chain_info.tip_height + 1).expect("tip is far below Height::MAX");
@@ -368,7 +358,8 @@ where
             // Use a fake coinbase transaction to break the dependency between transaction
             // selection, the miner fee, and the fee payment in the coinbase transaction.
             let fake_coinbase_tx = fake_coinbase_transaction(network, block_height, miner_address);
-            let mempool_txs = zip317::select_mempool_transactions(fake_coinbase_tx, mempool).await?;
+            let mempool_txs =
+                zip317::select_mempool_transactions(fake_coinbase_tx, mempool).await?;
 
             let miner_fee = miner_fee(&mempool_txs);
 
@@ -396,13 +387,20 @@ where
                 chain_info.tip_hash,
                 chain_info.max_time,
                 mempool_txs.iter().map(|tx| tx.transaction.id),
-            ).into();
+            )
+            .into();
 
             // Convert into TransactionTemplates
             let mempool_txs = mempool_txs.iter().map(Into::into).collect();
 
-            let capabilities: Vec<String> = GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD.iter().map(ToString::to_string).collect();
-            let mutable: Vec<String> = GET_BLOCK_TEMPLATE_MUTABLE_FIELD.iter().map(ToString::to_string).collect();
+            let capabilities: Vec<String> = GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+            let mutable: Vec<String> = GET_BLOCK_TEMPLATE_MUTABLE_FIELD
+                .iter()
+                .map(ToString::to_string)
+                .collect();
 
             Ok(GetBlockTemplate {
                 capabilities,
@@ -428,7 +426,8 @@ where
 
                 target: format!(
                     "{}",
-                    chain_info.expected_difficulty
+                    chain_info
+                        .expected_difficulty
                         .to_expanded()
                         .expect("state always returns a valid difficulty value")
                 ),
@@ -460,7 +459,7 @@ where
     fn submit_block(
         &self,
         HexData(block_bytes): HexData,
-        _options: Option<submit_block::JsonParameters>,
+        _parameters: Option<submit_block::JsonParameters>,
     ) -> BoxFuture<Result<submit_block::Response>> {
         let mut chain_verifier = self.chain_verifier.clone();
 
@@ -529,11 +528,11 @@ where
         .boxed()
     }
 
-    fn get_mining_info(&self) -> BoxFuture<Result<types::get_mining_info::Response>> {
+    fn get_mining_info(&self) -> BoxFuture<Result<get_mining_info::Response>> {
         let network = self.network;
         let solution_rate_fut = self.get_network_sol_ps(None, None);
         async move {
-            Ok(types::get_mining_info::Response::new(
+            Ok(get_mining_info::Response::new(
                 network,
                 solution_rate_fut.await?,
             ))
