@@ -144,8 +144,6 @@ where
 ///
 /// You should call `check_synced_to_tip()` before calling this function.
 /// If the mempool is inactive because Zebra is not synced to the tip, returns no transactions.
-//
-// TODO: return an error if the mempool is inactive?
 pub async fn fetch_mempool_transactions<Mempool>(mempool: Mempool) -> Result<Vec<VerifiedUnminedTx>>
 where
     Mempool: Service<

@@ -77,8 +77,6 @@ pub struct GetBlockTemplate {
     pub default_roots: DefaultRoots,
 
     /// The non-coinbase transactions selected for this block template.
-    ///
-    /// TODO: select these transactions using ZIP-317 (#5473)
     pub transactions: Vec<TransactionTemplate<amount::NonNegative>>,
 
     /// The coinbase transaction generated from `transactions` and `height`.
@@ -127,7 +125,7 @@ pub struct GetBlockTemplate {
     pub bits: CompactDifficulty,
 
     /// The height of the next block in the best chain.
-    // TODO: use Height type?
+    // Optional TODO: use Height type, but check that deserialized heights are within Height::MAX
     pub height: u32,
 
     /// > the maximum time allowed

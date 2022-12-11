@@ -52,6 +52,7 @@ pub enum GetBlockTemplateCapability {
 
     /// Unknown capability to fill in for mutations.
     // TODO: Fill out valid mutations capabilities.
+    //       The set of possible capabilities is open-ended, so we need to keep UnknownCapability.
     #[serde(other)]
     UnknownCapability,
 }
@@ -78,7 +79,6 @@ pub struct JsonParameters {
     pub data: Option<HexData>,
 
     /// A list of client-side supported capability features
-    // TODO: Fill out valid mutations capabilities.
     #[serde(default)]
     pub capabilities: Vec<GetBlockTemplateCapability>,
 
