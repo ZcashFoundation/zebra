@@ -31,8 +31,10 @@ use tokio::sync::watch;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
-    block::Height, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip,
-    transaction::UnminedTxId,
+    block::Height,
+    chain_sync_status::ChainSyncStatus,
+    chain_tip::ChainTip,
+    transaction::{UnminedTx, UnminedTxId},
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
@@ -111,6 +113,28 @@ impl ActiveState {
     /// Returns the current state, leaving [`Self::Disabled`] in its place.
     fn take(&mut self) -> Self {
         std::mem::take(self)
+    }
+
+    /// Returns the currently stored transactions, and possibly some of the pending mempool
+    /// transactions.
+    fn partial_unverified_transactions(&self) -> Vec<UnminedTx> {
+        match self {
+            ActiveState::Disabled => Vec::new(),
+            ActiveState::Enabled {
+                storage,
+                tx_downloads,
+            } => {
+                let mut transactions = Vec::new();
+
+                let storage = storage.transactions().cloned();
+                transactions.extend(storage);
+
+                let pending = tx_downloads.partial_unverified_transactions().cloned();
+                transactions.extend(pending);
+
+                transactions
+            }
+        }
     }
 }
 
@@ -251,8 +275,8 @@ impl Mempool {
                 "deactivating mempool: Zebra is syncing lots of blocks"
             );
 
-            // This drops the previous ActiveState::Enabled,
-            // cancelling its download tasks.
+            // This drops the previous ActiveState::Enabled, cancelling its download tasks.
+            // We don't preserve the previous transactions, because we are syncing lots of blocks.
             self.active_state = ActiveState::Disabled
         }
 
@@ -311,16 +335,34 @@ impl Service<Request> for Mempool {
                 "resetting mempool: switched best chain, skipped blocks, or activated network upgrade"
             );
 
+            let previous_state = self.active_state.take();
+            let previous_txs = previous_state.partial_unverified_transactions();
+
             // Use the same code for dropping and resetting the mempool,
             // to avoid subtle bugs.
-
+            //
             // Drop the current contents of the state,
             // cancelling any pending download tasks,
             // and dropping completed verification results.
-            std::mem::drop(self.active_state.take());
+            std::mem::drop(previous_state);
 
             // Re-initialise an empty state.
             self.update_state();
+
+            // Re-verify the transactions that were pending or valid at the previous tip.
+            // This saves us the time and data needed to re-download them.
+            if let ActiveState::Enabled { tx_downloads, .. } = &mut self.active_state {
+                info!(
+                    transactions = previous_txs.len(),
+                    "re-verifying mempool transactions after a chain fork"
+                );
+
+                for tx in previous_txs {
+                    // This is just an efficiency optimisation, so we don't care if queueing
+                    // transactions fails.
+                    let _result = tx_downloads.download_if_needed_and_verify(tx.into());
+                }
+            }
 
             return Poll::Ready(Ok(()));
         }

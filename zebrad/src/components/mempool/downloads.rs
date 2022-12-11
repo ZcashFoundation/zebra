@@ -46,7 +46,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::{
     block::Height,
-    transaction::{self, UnminedTxId, VerifiedUnminedTx},
+    transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
@@ -96,6 +96,10 @@ pub(crate) const TRANSACTION_VERIFY_TIMEOUT: Duration = BLOCK_VERIFY_TIMEOUT;
 /// will be directed to the malicious node that originally gossiped the hash.
 /// Therefore, this attack can be carried out by a single malicious node.
 pub const MAX_INBOUND_CONCURRENCY: usize = 10;
+
+/// A marker struct for the oneshot channels which cancel a pending download and verify.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct CancelDownloadAndVerify;
 
 /// Errors that can occur while downloading and verifying a transaction.
 #[derive(Error, Debug)]
@@ -149,7 +153,10 @@ where
 
     /// A list of channels that can be used to cancel pending transaction download and
     /// verify tasks.
-    cancel_handles: HashMap<UnminedTxId, oneshot::Sender<()>>,
+    ///
+    /// If the task was submitted as transaction data, also includes that unmined transaction.
+    cancel_handles:
+        HashMap<UnminedTxId, (oneshot::Sender<CancelDownloadAndVerify>, Option<UnminedTx>)>,
 }
 
 impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
@@ -232,6 +239,7 @@ where
         gossiped_tx: Gossip,
     ) -> Result<(), MempoolError> {
         let txid = gossiped_tx.id();
+        let optional_tx_data = gossiped_tx.tx();
 
         if self.cancel_handles.contains_key(&txid) {
             debug!(
@@ -264,7 +272,7 @@ where
         }
 
         // This oneshot is used to signal cancellation to the download task.
-        let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
+        let (cancel_tx, mut cancel_rx) = oneshot::channel::<CancelDownloadAndVerify>();
 
         let network = self.network.clone();
         let verifier = self.verifier.clone();
@@ -378,7 +386,9 @@ where
 
         self.pending.push(task);
         assert!(
-            self.cancel_handles.insert(txid, cancel_tx).is_none(),
+            self.cancel_handles
+                .insert(txid, (cancel_tx, optional_tx_data))
+                .is_none(),
             "transactions are only queued once"
         );
 
@@ -411,7 +421,7 @@ where
 
         for txid in removed_txids {
             if let Some(handle) = self.cancel_handles.remove(&txid) {
-                let _ = handle.send(());
+                let _ = handle.0.send(CancelDownloadAndVerify);
             }
         }
     }
@@ -425,7 +435,7 @@ where
         // Since we already dropped the JoinHandles above, they should
         // fail silently.
         for (_hash, cancel) in self.cancel_handles.drain() {
-            let _ = cancel.send(());
+            let _ = cancel.0.send(CancelDownloadAndVerify);
         }
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
@@ -440,6 +450,14 @@ where
     #[allow(dead_code)]
     pub fn in_flight(&self) -> usize {
         self.pending.len()
+    }
+
+    /// Get a partial list of the currently pending transactions.
+    /// Transactions that were downloaded in a future are not included.
+    pub fn partial_unverified_transactions(&self) -> impl Iterator<Item = &UnminedTx> {
+        self.cancel_handles
+            .iter()
+            .filter_map(|(_tx_id, (_handle, tx))| tx.as_ref())
     }
 
     /// Check if transaction is already in the best chain.
