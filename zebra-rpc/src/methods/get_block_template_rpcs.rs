@@ -24,7 +24,7 @@ use crate::methods::{
     get_block_template_rpcs::{
         constants::DEFAULT_SOLUTION_RATE_WINDOW_SIZE,
         get_block_template::{
-            check_miner_address, check_block_template_parameters, check_synced_to_tip,
+            check_block_template_parameters, check_miner_address, check_synced_to_tip,
             fetch_mempool_transactions, fetch_state_tip_and_local_time,
             generate_coinbase_and_roots,
         },
