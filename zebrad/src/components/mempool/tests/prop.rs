@@ -1,6 +1,6 @@
 //! Randomised property tests for the mempool.
 
-use std::env;
+use std::{env, fmt};
 
 use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
@@ -11,6 +11,7 @@ use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
     block,
+    fmt::DisplayToDebug,
     parameters::{Network, NetworkUpgrade},
     transaction::VerifiedUnminedTx,
 };
@@ -49,8 +50,8 @@ proptest! {
     #[test]
     fn storage_is_cleared_on_single_chain_reset(
         network in any::<Network>(),
-        transaction in any::<VerifiedUnminedTx>(),
-        chain_tip in any::<ChainTipBlock>(),
+        transaction in any::<DisplayToDebug<VerifiedUnminedTx>>(),
+        chain_tip in any::<DisplayToDebug<ChainTipBlock>>(),
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
 
@@ -71,7 +72,7 @@ proptest! {
             // Insert a dummy transaction.
             mempool
                 .storage()
-                .insert(transaction)
+                .insert(transaction.0)
                 .expect("Inserting a transaction should succeed");
 
             // The first call to `poll_ready` shouldn't clear the storage yet.
@@ -80,7 +81,7 @@ proptest! {
             prop_assert_eq!(mempool.storage().transaction_count(), 1);
 
             // Simulate a chain reset.
-            chain_tip_sender.set_finalized_tip(chain_tip);
+            chain_tip_sender.set_finalized_tip(chain_tip.0);
 
             // This time a call to `poll_ready` should clear the storage.
             mempool.dummy_call().await;
@@ -99,9 +100,9 @@ proptest! {
     #[test]
     fn storage_is_cleared_on_multiple_chain_resets(
         network in any::<Network>(),
-        mut previous_chain_tip in any::<ChainTipBlock>(),
-        mut transactions in vec(any::<VerifiedUnminedTx>(), 0..CHAIN_LENGTH),
-        fake_chain_tips in vec(any::<FakeChainTip>(), 0..CHAIN_LENGTH),
+        mut previous_chain_tip in any::<DisplayToDebug<ChainTipBlock>>(),
+        mut transactions in vec(any::<DisplayToDebug<VerifiedUnminedTx>>(), 0..CHAIN_LENGTH),
+        fake_chain_tips in vec(any::<DisplayToDebug<FakeChainTip>>(), 0..CHAIN_LENGTH),
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
 
@@ -120,7 +121,7 @@ proptest! {
             mempool.enable(&mut recent_syncs).await;
 
             // Set the initial chain tip.
-            chain_tip_sender.set_best_non_finalized_tip(previous_chain_tip.clone());
+            chain_tip_sender.set_best_non_finalized_tip(previous_chain_tip.0.clone());
 
             // Call the mempool so that it is aware of the initial chain tip.
             mempool.dummy_call().await;
@@ -146,7 +147,7 @@ proptest! {
                 // Insert the dummy transaction into the mempool.
                 mempool
                     .storage()
-                    .insert(transaction.clone())
+                    .insert(transaction.0.clone())
                     .expect("Inserting a transaction should succeed");
 
                 // Set the new chain tip.
@@ -155,7 +156,7 @@ proptest! {
                 // Call the mempool so that it is aware of the new chain tip.
                 mempool.dummy_call().await;
 
-                match fake_chain_tip {
+                match fake_chain_tip.0 {
                     FakeChainTip::Grow(_) => {
                         // The mempool should not be empty because we had a regular chain growth.
                         prop_assert_ne!(mempool.storage().transaction_count(), 0);
@@ -168,7 +169,7 @@ proptest! {
                 }
 
                 // Remember the current chain tip so that the next one can refer to it.
-                previous_chain_tip = chain_tip;
+                previous_chain_tip = chain_tip.into();
             }
 
             peer_set.expect_no_requests().await?;
@@ -274,10 +275,21 @@ fn setup(
 }
 
 /// A helper enum for simulating either a chain reset or growth.
-#[derive(Arbitrary, Debug, Clone)]
+#[derive(Arbitrary, Clone, Debug, Eq, PartialEq)]
 enum FakeChainTip {
     Grow(ChainTipBlock),
     Reset(ChainTipBlock),
+}
+
+impl fmt::Display for FakeChainTip {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (mut f, inner) = match self {
+            FakeChainTip::Grow(inner) => (f.debug_tuple("FakeChainTip::Grow"), inner),
+            FakeChainTip::Reset(inner) => (f.debug_tuple("FakeChainTip::Reset"), inner),
+        };
+
+        f.field(&inner).finish()
+    }
 }
 
 impl FakeChainTip {
