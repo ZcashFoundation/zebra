@@ -31,14 +31,12 @@ use tokio::sync::watch;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
-    block::Height,
-    chain_sync_status::ChainSyncStatus,
-    chain_tip::ChainTip,
-    transaction::{UnminedTx, UnminedTxId},
+    block::Height, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip,
+    transaction::UnminedTxId,
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
-use zebra_node_services::mempool::{Request, Response};
+use zebra_node_services::mempool::{Gossip, Request, Response};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
@@ -115,9 +113,8 @@ impl ActiveState {
         std::mem::take(self)
     }
 
-    /// Returns the currently stored transactions, and possibly some of the pending mempool
-    /// transactions.
-    fn partial_unverified_transactions(&self) -> Vec<UnminedTx> {
+    /// Returns a list of requests that will retry every stored and pending transaction.
+    fn transaction_retry_requests(&self) -> Vec<Gossip> {
         match self {
             ActiveState::Disabled => Vec::new(),
             ActiveState::Enabled {
@@ -126,10 +123,10 @@ impl ActiveState {
             } => {
                 let mut transactions = Vec::new();
 
-                let storage = storage.transactions().cloned();
+                let storage = storage.transactions().map(|tx| tx.clone().into());
                 transactions.extend(storage);
 
-                let pending = tx_downloads.partial_unverified_transactions().cloned();
+                let pending = tx_downloads.transaction_requests().cloned();
                 transactions.extend(pending);
 
                 transactions
@@ -336,7 +333,7 @@ impl Service<Request> for Mempool {
             );
 
             let previous_state = self.active_state.take();
-            let previous_txs = previous_state.partial_unverified_transactions();
+            let tx_retries = previous_state.transaction_retry_requests();
 
             // Use the same code for dropping and resetting the mempool,
             // to avoid subtle bugs.
@@ -353,14 +350,14 @@ impl Service<Request> for Mempool {
             // This saves us the time and data needed to re-download them.
             if let ActiveState::Enabled { tx_downloads, .. } = &mut self.active_state {
                 info!(
-                    transactions = previous_txs.len(),
+                    transactions = tx_retries.len(),
                     "re-verifying mempool transactions after a chain fork"
                 );
 
-                for tx in previous_txs {
+                for tx in tx_retries {
                     // This is just an efficiency optimisation, so we don't care if queueing
-                    // transactions fails.
-                    let _result = tx_downloads.download_if_needed_and_verify(tx.into());
+                    // transaction requests fails.
+                    let _result = tx_downloads.download_if_needed_and_verify(tx);
                 }
             }
 

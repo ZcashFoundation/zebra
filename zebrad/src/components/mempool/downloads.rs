@@ -46,7 +46,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::{
     block::Height,
-    transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx},
+    transaction::{self, UnminedTxId, VerifiedUnminedTx},
 };
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
@@ -152,11 +152,8 @@ where
     >,
 
     /// A list of channels that can be used to cancel pending transaction download and
-    /// verify tasks.
-    ///
-    /// If the task was submitted as transaction data, also includes that unmined transaction.
-    cancel_handles:
-        HashMap<UnminedTxId, (oneshot::Sender<CancelDownloadAndVerify>, Option<UnminedTx>)>,
+    /// verify tasks. Each channel also has the corresponding request.
+    cancel_handles: HashMap<UnminedTxId, (oneshot::Sender<CancelDownloadAndVerify>, Gossip)>,
 }
 
 impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
@@ -239,7 +236,6 @@ where
         gossiped_tx: Gossip,
     ) -> Result<(), MempoolError> {
         let txid = gossiped_tx.id();
-        let optional_tx_data = gossiped_tx.tx();
 
         if self.cancel_handles.contains_key(&txid) {
             debug!(
@@ -277,6 +273,8 @@ where
         let network = self.network.clone();
         let verifier = self.verifier.clone();
         let mut state = self.state.clone();
+
+        let gossiped_tx_req = gossiped_tx.clone();
 
         let fut = async move {
             // Don't download/verify if the transaction is already in the best chain.
@@ -387,7 +385,7 @@ where
         self.pending.push(task);
         assert!(
             self.cancel_handles
-                .insert(txid, (cancel_tx, optional_tx_data))
+                .insert(txid, (cancel_tx, gossiped_tx_req))
                 .is_none(),
             "transactions are only queued once"
         );
@@ -452,12 +450,9 @@ where
         self.pending.len()
     }
 
-    /// Get a partial list of the currently pending transactions.
-    /// Transactions that were downloaded in a future are not included.
-    pub fn partial_unverified_transactions(&self) -> impl Iterator<Item = &UnminedTx> {
-        self.cancel_handles
-            .iter()
-            .filter_map(|(_tx_id, (_handle, tx))| tx.as_ref())
+    /// Get a list of the currently pending transaction requests.
+    pub fn transaction_requests(&self) -> impl Iterator<Item = &Gossip> {
+        self.cancel_handles.iter().map(|(_tx_id, (_handle, tx))| tx)
     }
 
     /// Check if transaction is already in the best chain.
