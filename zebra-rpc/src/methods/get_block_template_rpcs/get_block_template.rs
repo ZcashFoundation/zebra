@@ -110,10 +110,8 @@ where
 
 /// Returns the state data for the block template.
 ///
-/// # Panics
-///
-/// If `check_synced_to_tip()` would return an error
-/// because there are not enough blocks in the state.
+/// You should call `check_synced_to_tip()` before calling this function.
+/// If the state does not have enough blocks, returns an error.
 pub async fn fetch_state_tip_and_local_time<State>(
     state: State,
 ) -> Result<GetBlockTemplateChainInfo>
@@ -128,15 +126,18 @@ where
         + 'static,
 {
     let request = zebra_state::ReadRequest::ChainInfo;
-    let response = state.oneshot(request).await.map_err(|error| Error {
-        code: ErrorCode::ServerError(0),
-        message: error.to_string(),
-        data: None,
-    })?;
+    let response = state
+        .oneshot(request.clone())
+        .await
+        .map_err(|error| Error {
+            code: ErrorCode::ServerError(0),
+            message: error.to_string(),
+            data: None,
+        })?;
 
     let chain_info = match response {
         zebra_state::ReadResponse::ChainInfo(chain_info) => chain_info,
-        _ => unreachable!("must call check_synced_to_tip() before `GetBlockTemplateChainInfo`"),
+        _ => unreachable!("incorrect response to {request:?}"),
     };
 
     Ok(chain_info)
