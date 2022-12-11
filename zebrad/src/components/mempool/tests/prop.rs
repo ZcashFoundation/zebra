@@ -58,9 +58,9 @@ proptest! {
         runtime.block_on(async move {
             let (
                 mut mempool,
-                mut peer_set,
-                mut state_service,
-                mut tx_verifier,
+                _peer_set,
+                _state_service,
+                _tx_verifier,
                 mut recent_syncs,
                 mut chain_tip_sender,
             ) = setup(network);
@@ -88,9 +88,8 @@ proptest! {
 
             prop_assert_eq!(mempool.storage().transaction_count(), 0);
 
-            peer_set.expect_no_requests().await?;
-            state_service.expect_no_requests().await?;
-            tx_verifier.expect_no_requests().await?;
+            // The services might or might not get requests,
+            // depending on how many transactions get re-queued, and if they need downloading.
 
             Ok(())
         })?;
@@ -109,9 +108,9 @@ proptest! {
         runtime.block_on(async move {
             let (
                 mut mempool,
-                mut peer_set,
-                mut state_service,
-                mut tx_verifier,
+                _peer_set,
+                _state_service,
+                _tx_verifier,
                 mut recent_syncs,
                 mut chain_tip_sender,
             ) = setup(network);
@@ -172,9 +171,8 @@ proptest! {
                 previous_chain_tip = chain_tip.into();
             }
 
-            peer_set.expect_no_requests().await?;
-            state_service.expect_no_requests().await?;
-            tx_verifier.expect_no_requests().await?;
+            // The services might or might not get requests,
+            // depending on how many transactions get re-queued, and if they need downloading.
 
             Ok(())
         })?;
