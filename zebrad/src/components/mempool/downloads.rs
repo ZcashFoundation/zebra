@@ -122,7 +122,7 @@ pub enum TransactionDownloadVerifyError {
 #[derive(Debug)]
 pub struct Downloads<ZN, ZV, ZS>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
     ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
@@ -467,14 +467,16 @@ where
 #[pinned_drop]
 impl<ZN, ZV, ZS> PinnedDrop for Downloads<ZN, ZV, ZS>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
     ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    fn drop(self: Pin<&mut Self>) {
+    fn drop(mut self: Pin<&mut Self>) {
+        self.cancel_all();
+
         metrics::gauge!("mempool.currently.queued.transactions", 0 as f64);
     }
 }

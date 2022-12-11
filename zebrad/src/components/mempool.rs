@@ -107,14 +107,6 @@ impl Default for ActiveState {
     }
 }
 
-impl Drop for ActiveState {
-    fn drop(&mut self) {
-        if let ActiveState::Enabled { tx_downloads, .. } = self {
-            tx_downloads.cancel_all();
-        }
-    }
-}
-
 impl ActiveState {
     /// Returns the current state, leaving [`Self::Disabled`] in its place.
     fn take(&mut self) -> Self {
