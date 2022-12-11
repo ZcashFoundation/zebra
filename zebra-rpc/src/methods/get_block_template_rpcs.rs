@@ -24,7 +24,7 @@ use crate::methods::{
     get_block_template_rpcs::{
         constants::DEFAULT_SOLUTION_RATE_WINDOW_SIZE,
         get_block_template::{
-            check_address, check_block_template_parameters, check_synced_to_tip,
+            check_miner_address, check_block_template_parameters, check_synced_to_tip,
             fetch_mempool_transactions, fetch_state_tip_and_local_time,
             generate_coinbase_and_roots,
         },
@@ -331,7 +331,7 @@ where
 
             // Check config and parameters.
             // These checks always have the same result during long polling.
-            let miner_address = check_address(miner_address)?;
+            let miner_address = check_miner_address(miner_address)?;
 
             if let Some(parameters) = parameters {
                 check_block_template_parameters(parameters)?;

@@ -46,7 +46,7 @@ pub fn check_block_template_parameters(
 }
 
 /// Returns the miner address, or an error if it is invalid.
-pub fn check_address(miner_address: Option<transparent::Address>) -> Result<transparent::Address> {
+pub fn check_miner_address(miner_address: Option<transparent::Address>) -> Result<transparent::Address> {
     miner_address.ok_or_else(|| Error {
         code: ErrorCode::ServerError(0),
         message: "configure mining.miner_address in zebrad.toml \
