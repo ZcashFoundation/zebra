@@ -846,8 +846,10 @@ impl<T> TestChild<T> {
             self.kill(true)?;
         }
 
-        let timeout =
-            humantime::format_duration(self.timeout.expect("already checked past_deadline()"));
+        let timeout = self
+            .timeout
+            .map(|timeout| humantime::format_duration(timeout).to_string())
+            .unwrap_or_else(|| "unlimited".to_string());
 
         let report = eyre!(
             "{stream_name} of command did not log any matches for the given regex,\n\
