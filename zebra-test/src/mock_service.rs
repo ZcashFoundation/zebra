@@ -434,7 +434,8 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
         }
     }
 
-    /// A helper method to get the next request from the queue.
+    /// Returns the next request from the queue,
+    /// or panics if there are no requests after a short timeout.
     ///
     /// Returns the next request in the internal queue or waits at most the max delay time
     /// configured by [`MockServiceBuilder::with_max_request_delay`] for a new request to be
@@ -687,7 +688,7 @@ impl<Request, Response, Assertion, Error> MockService<Request, Response, Asserti
     /// If too many requests are received and the queue fills up, the oldest requests are dropped
     /// and ignored. This means that calling this may not receive the next request if the queue is
     /// not dimensioned properly with the [`MockServiceBuilder::with_proxy_channel_size`] method.
-    async fn try_next_request(&mut self) -> Option<ResponseSender<Request, Response, Error>> {
+    pub async fn try_next_request(&mut self) -> Option<ResponseSender<Request, Response, Error>> {
         loop {
             match timeout(self.max_request_delay, self.receiver.recv()).await {
                 Ok(Ok(item)) => {

@@ -139,8 +139,17 @@ impl fmt::Display for Transaction {
         let mut fmter = f.debug_struct("Transaction");
 
         fmter.field("version", &self.version());
+
         if let Some(network_upgrade) = self.network_upgrade() {
             fmter.field("network_upgrade", &network_upgrade);
+        }
+
+        if let Some(lock_time) = self.lock_time() {
+            fmter.field("lock_time", &lock_time);
+        }
+
+        if let Some(expiry_height) = self.expiry_height() {
+            fmter.field("expiry_height", &expiry_height);
         }
 
         fmter.field("transparent_inputs", &self.inputs().len());
