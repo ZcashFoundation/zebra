@@ -18,27 +18,44 @@ use crate::{funding_stream_values, parameters::subsidy::*};
 /// `1 << Halving(height)`, as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn halving_divisor(height: Height, network: Network) -> u64 {
+///
+/// Returns `None` if the divisor would overflow a `u64`.
+pub fn halving_divisor(height: Height, network: Network) -> Option<u64> {
     let blossom_height = Blossom
         .activation_height(network)
         .expect("blossom activation height should be available");
 
     if height < SLOW_START_SHIFT {
         unreachable!(
-            "unsupported block height: callers should handle blocks below {:?}",
+            "unsupported block height: checkpoints should handle blocks below {:?}",
             SLOW_START_SHIFT
         )
     } else if height < blossom_height {
-        let scaled_pre_blossom_height = (height - SLOW_START_SHIFT) as u64;
-        let halving_shift = scaled_pre_blossom_height / (PRE_BLOSSOM_HALVING_INTERVAL.0 as u64);
-        1 << halving_shift
+        let pre_blossom_height: u32 = (height - SLOW_START_SHIFT)
+            .try_into()
+            .expect("height is above slow start, and the difference fits in u32");
+        let halving_shift = pre_blossom_height / PRE_BLOSSOM_HALVING_INTERVAL.0;
+
+        let halving_div = 1u64
+            .checked_shl(halving_shift)
+            .expect("pre-blossom heights produce small shifts");
+
+        Some(halving_div)
     } else {
-        let scaled_pre_blossom_height =
-            (blossom_height - SLOW_START_SHIFT) as u64 * BLOSSOM_POW_TARGET_SPACING_RATIO;
-        let post_blossom_height = (height - blossom_height) as u64;
-        let halving_shift = (scaled_pre_blossom_height + post_blossom_height)
-            / (POST_BLOSSOM_HALVING_INTERVAL.0 as u64);
-        1 << halving_shift
+        let pre_blossom_height: u32 = (blossom_height - SLOW_START_SHIFT)
+            .try_into()
+            .expect("blossom height is above slow start, and the difference fits in u32");
+        let scaled_pre_blossom_height = pre_blossom_height * BLOSSOM_POW_TARGET_SPACING_RATIO;
+
+        let post_blossom_height: u32 = (height - blossom_height)
+            .try_into()
+            .expect("height is above blossom, and the difference fits in u32");
+
+        let halving_shift =
+            (scaled_pre_blossom_height + post_blossom_height) / POST_BLOSSOM_HALVING_INTERVAL.0;
+
+        // Some far-future shifts can be more than 63 bits
+        1u64.checked_shl(halving_shift)
     }
 }
 
@@ -49,7 +66,14 @@ pub fn block_subsidy(height: Height, network: Network) -> Result<Amount<NonNegat
     let blossom_height = Blossom
         .activation_height(network)
         .expect("blossom activation height should be available");
-    let halving_div = halving_divisor(height, network);
+
+    // If the halving divisor is larger than u64::MAX, the block subsidy is zero,
+    // because amounts fit in an i64.
+    //
+    // Note: bitcoind incorrectly wraps here, which restarts large block rewards.
+    let Some(halving_div) = halving_divisor(height, network) else {
+        return Ok(Amount::zero());
+    };
 
     if height < SLOW_START_INTERVAL {
         unreachable!(
@@ -60,7 +84,8 @@ pub fn block_subsidy(height: Height, network: Network) -> Result<Amount<NonNegat
         // this calculation is exact, because the halving divisor is 1 here
         Amount::try_from(MAX_BLOCK_SUBSIDY / halving_div)
     } else {
-        let scaled_max_block_subsidy = MAX_BLOCK_SUBSIDY / BLOSSOM_POW_TARGET_SPACING_RATIO;
+        let scaled_max_block_subsidy =
+            MAX_BLOCK_SUBSIDY / u64::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
         // in future halvings, this calculation might not be exact
         // Amount division is implemented using integer division,
         // which truncates (rounds down) the result, as specified
@@ -111,17 +136,20 @@ mod test {
             Network::Testnet => Height(1_116_000),
         };
 
-        assert_eq!(1, halving_divisor((blossom_height - 1).unwrap(), network));
-        assert_eq!(1, halving_divisor(blossom_height, network));
         assert_eq!(
             1,
-            halving_divisor((first_halving_height - 1).unwrap(), network)
+            halving_divisor((blossom_height - 1).unwrap(), network).unwrap()
+        );
+        assert_eq!(1, halving_divisor(blossom_height, network).unwrap());
+        assert_eq!(
+            1,
+            halving_divisor((first_halving_height - 1).unwrap(), network).unwrap()
         );
 
-        assert_eq!(2, halving_divisor(first_halving_height, network));
+        assert_eq!(2, halving_divisor(first_halving_height, network).unwrap());
         assert_eq!(
             2,
-            halving_divisor((first_halving_height + 1).unwrap(), network)
+            halving_divisor((first_halving_height + 1).unwrap(), network).unwrap()
         );
 
         assert_eq!(
@@ -130,6 +158,7 @@ mod test {
                 (first_halving_height + POST_BLOSSOM_HALVING_INTERVAL).unwrap(),
                 network
             )
+            .unwrap()
         );
         assert_eq!(
             8,
@@ -137,6 +166,7 @@ mod test {
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 2)).unwrap(),
                 network
             )
+            .unwrap()
         );
 
         assert_eq!(
@@ -145,6 +175,7 @@ mod test {
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 9)).unwrap(),
                 network
             )
+            .unwrap()
         );
         assert_eq!(
             1024 * 1024,
@@ -152,6 +183,7 @@ mod test {
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 19)).unwrap(),
                 network
             )
+            .unwrap()
         );
         assert_eq!(
             1024 * 1024 * 1024,
@@ -159,6 +191,7 @@ mod test {
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 29)).unwrap(),
                 network
             )
+            .unwrap()
         );
         assert_eq!(
             1024 * 1024 * 1024 * 1024,
@@ -166,16 +199,47 @@ mod test {
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 39)).unwrap(),
                 network
             )
+            .unwrap()
         );
 
-        // The largest possible divisor
+        // The largest possible integer divisor
         assert_eq!(
-            1 << 63,
+            (i64::MAX as u64 + 1),
             halving_divisor(
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 62)).unwrap(),
                 network
             )
+            .unwrap(),
         );
+
+        // Very large divisors which should also result in zero amounts
+        assert_eq!(
+            None,
+            halving_divisor(
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 63)).unwrap(),
+                network,
+            ),
+        );
+
+        assert_eq!(
+            None,
+            halving_divisor(
+                (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL.0 as i32 * 64)).unwrap(),
+                network,
+            ),
+        );
+
+        assert_eq!(
+            None,
+            halving_divisor(Height(Height::MAX_AS_U32 / 4), network),
+        );
+
+        assert_eq!(
+            None,
+            halving_divisor(Height(Height::MAX_AS_U32 / 2), network),
+        );
+
+        assert_eq!(None, halving_divisor(Height::MAX, network));
 
         Ok(())
     }
