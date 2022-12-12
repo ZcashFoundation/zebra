@@ -17,7 +17,7 @@ bls12_381 = "0.7.0"
 halo2 = { package = "halo2_proofs", version = "0.2.0" }
 jubjub = "0.9.0"
 rand = { version = "0.8.5", package = "rand" }
-rayon = "1.6.0"
+rayon = "1.6.1"
 
 chrono = { version = "0.4.23", default-features = false, features = ["clock", "std"] }
 dirs = "4.0.0"
