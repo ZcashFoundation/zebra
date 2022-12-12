@@ -97,6 +97,10 @@ pub(crate) const TRANSACTION_VERIFY_TIMEOUT: Duration = BLOCK_VERIFY_TIMEOUT;
 /// Therefore, this attack can be carried out by a single malicious node.
 pub const MAX_INBOUND_CONCURRENCY: usize = 10;
 
+/// A marker struct for the oneshot channels which cancel a pending download and verify.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct CancelDownloadAndVerify;
+
 /// Errors that can occur while downloading and verifying a transaction.
 #[derive(Error, Debug)]
 #[allow(dead_code)]
@@ -122,7 +126,7 @@ pub enum TransactionDownloadVerifyError {
 #[derive(Debug)]
 pub struct Downloads<ZN, ZV, ZS>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
     ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
@@ -148,8 +152,8 @@ where
     >,
 
     /// A list of channels that can be used to cancel pending transaction download and
-    /// verify tasks.
-    cancel_handles: HashMap<UnminedTxId, oneshot::Sender<()>>,
+    /// verify tasks. Each channel also has the corresponding request.
+    cancel_handles: HashMap<UnminedTxId, (oneshot::Sender<CancelDownloadAndVerify>, Gossip)>,
 }
 
 impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
@@ -264,11 +268,13 @@ where
         }
 
         // This oneshot is used to signal cancellation to the download task.
-        let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
+        let (cancel_tx, mut cancel_rx) = oneshot::channel::<CancelDownloadAndVerify>();
 
         let network = self.network.clone();
         let verifier = self.verifier.clone();
         let mut state = self.state.clone();
+
+        let gossiped_tx_req = gossiped_tx.clone();
 
         let fut = async move {
             // Don't download/verify if the transaction is already in the best chain.
@@ -378,7 +384,9 @@ where
 
         self.pending.push(task);
         assert!(
-            self.cancel_handles.insert(txid, cancel_tx).is_none(),
+            self.cancel_handles
+                .insert(txid, (cancel_tx, gossiped_tx_req))
+                .is_none(),
             "transactions are only queued once"
         );
 
@@ -411,7 +419,7 @@ where
 
         for txid in removed_txids {
             if let Some(handle) = self.cancel_handles.remove(&txid) {
-                let _ = handle.send(());
+                let _ = handle.0.send(CancelDownloadAndVerify);
             }
         }
     }
@@ -425,7 +433,7 @@ where
         // Since we already dropped the JoinHandles above, they should
         // fail silently.
         for (_hash, cancel) in self.cancel_handles.drain() {
-            let _ = cancel.send(());
+            let _ = cancel.0.send(CancelDownloadAndVerify);
         }
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
@@ -440,6 +448,11 @@ where
     #[allow(dead_code)]
     pub fn in_flight(&self) -> usize {
         self.pending.len()
+    }
+
+    /// Get a list of the currently pending transaction requests.
+    pub fn transaction_requests(&self) -> impl Iterator<Item = &Gossip> {
+        self.cancel_handles.iter().map(|(_tx_id, (_handle, tx))| tx)
     }
 
     /// Check if transaction is already in the best chain.
@@ -467,14 +480,16 @@ where
 #[pinned_drop]
 impl<ZN, ZV, ZS> PinnedDrop for Downloads<ZN, ZV, ZS>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
     ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    fn drop(self: Pin<&mut Self>) {
+    fn drop(mut self: Pin<&mut Self>) {
+        self.cancel_all();
+
         metrics::gauge!("mempool.currently.queued.transactions", 0 as f64);
     }
 }

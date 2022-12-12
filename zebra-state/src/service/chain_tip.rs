@@ -5,7 +5,7 @@
 //! * [LatestChainTip] for efficient access to the current best tip, and
 //! * [ChainTipChange] to `await` specific changes to the chain tip.
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use tokio::sync::watch;
@@ -71,6 +71,16 @@ pub struct ChainTipBlock {
     /// If the best chain fork has changed, or some blocks have been skipped,
     /// this hash will be different to the last returned `ChainTipBlock.hash`.
     pub previous_block_hash: block::Hash,
+}
+
+impl fmt::Display for ChainTipBlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ChainTipBlock")
+            .field("height", &self.height)
+            .field("hash", &self.hash)
+            .field("transactions", &self.transactions.len())
+            .finish()
+    }
 }
 
 impl From<ContextuallyValidBlock> for ChainTipBlock {

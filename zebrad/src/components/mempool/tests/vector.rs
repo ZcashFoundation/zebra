@@ -536,7 +536,7 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
 
     let (
         mut mempool,
-        _peer_set,
+        mut peer_set,
         mut state_service,
         mut chain_tip_change,
         _tx_verifier,
@@ -623,11 +623,23 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         );
     }
 
+    // Ignore all the previous network requests.
+    while let Some(_request) = peer_set.try_next_request().await {}
+
     // Query the mempool to make it poll chain_tip_change
     mempool.dummy_call().await;
 
-    // Check if download was cancelled.
-    assert_eq!(mempool.tx_downloads().in_flight(), 0);
+    // Check if download was cancelled and transaction was retried.
+    let request = peer_set
+        .try_next_request()
+        .await
+        .expect("unexpected missing mempool retry");
+
+    assert_eq!(
+        request.request(),
+        &zebra_network::Request::TransactionsById(iter::once(txid).collect()),
+    );
+    assert_eq!(mempool.tx_downloads().in_flight(), 1);
 
     Ok(())
 }

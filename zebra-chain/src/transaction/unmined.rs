@@ -219,7 +219,7 @@ pub struct UnminedTx {
 impl fmt::Display for UnminedTx {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("UnminedTx")
-            .field("transaction", &self.transaction)
+            .field("transaction", &self.transaction.to_string())
             .field("serialized_size", &self.size)
             .field("conventional_fee", &self.conventional_fee)
             .finish()
@@ -303,7 +303,7 @@ pub struct VerifiedUnminedTx {
 impl fmt::Display for VerifiedUnminedTx {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("VerifiedUnminedTx")
-            .field("transaction", &self.transaction)
+            .field("transaction", &self.transaction.to_string())
             .field("miner_fee", &self.miner_fee)
             .finish()
     }
