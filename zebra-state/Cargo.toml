@@ -41,7 +41,7 @@ serde = { version = "1.0.149", features = ["serde_derive"] }
 tempfile = "3.3.0"
 thiserror = "1.0.37"
 
-rayon = "1.6.0"
+rayon = "1.6.1"
 tokio = { version = "1.23.0", features = ["sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
 tracing = "0.1.37"
