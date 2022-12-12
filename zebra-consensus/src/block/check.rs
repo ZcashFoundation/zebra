@@ -1,7 +1,8 @@
 //! Consensus check functions
 
-use chrono::{DateTime, Utc};
 use std::{collections::HashSet, sync::Arc};
+
+use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     amount::{Amount, Error as AmountError, NonNegative},
@@ -126,7 +127,11 @@ pub fn subsidy_is_valid(block: &Block, network: Network) -> Result<(), BlockErro
     let coinbase = block.transactions.get(0).ok_or(SubsidyError::NoCoinbase)?;
 
     // Validate funding streams
-    let halving_div = subsidy::general::halving_divisor(height, network);
+    let Some(halving_div) = subsidy::general::halving_divisor(height, network) else {
+        // Far future halving, with no founders reward or funding streams
+        return Ok(());
+    };
+
     let canopy_activation_height = NetworkUpgrade::Canopy
         .activation_height(network)
         .expect("Canopy activation height is known");
