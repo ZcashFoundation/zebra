@@ -77,8 +77,9 @@ const DEFAULT_PROXY_CHANNEL_SIZE: usize = 100;
 /// Note that if a test checks that no requests are received, each check has to wait for this
 /// amount of time, so this may affect the test execution time.
 ///
-/// We've seen delays up to 67ms on busy Linux and macOS machines.
-pub const DEFAULT_MAX_REQUEST_DELAY: Duration = Duration::from_millis(150);
+/// We've seen delays up to 67ms on busy Linux and macOS machines,
+/// and some other timeout failures even with a 150ms timeout.
+pub const DEFAULT_MAX_REQUEST_DELAY: Duration = Duration::from_millis(300);
 
 /// An internal type representing the item that's sent in the [`broadcast`] channel.
 ///
