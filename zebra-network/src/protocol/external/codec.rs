@@ -24,14 +24,14 @@ use zebra_chain::{
 
 use crate::constants;
 
-#[cfg(test)]
-mod tests;
-
 use super::{
     addr::{AddrInVersion, AddrV1, AddrV2},
     message::{Message, RejectReason, VersionMessage},
     types::*,
 };
+
+#[cfg(test)]
+mod tests;
 
 /// The length of a Bitcoin message header.
 const HEADER_LEN: usize = 24usize;
@@ -467,6 +467,12 @@ impl Decoder for Codec {
 }
 
 impl Codec {
+    /// Deserializes a version message
+    ///
+    /// The relay field is optional, as defined in <https://developer.bitcoin.org/reference/p2p_networking.html#version>
+    ///
+    /// Note: zcashd only requires fields up to `address_recv`, but these are currently required in Zebra.
+    ///       see <https://github.com/zcash/zcash/blob/11d563904933e889a11d9685c3b249f1536cfbe7/src/main.cpp#L6490-L6507>
     fn read_version<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         // Clippy 1.64 is wrong here, this lazy evaluation is necessary, constructors are functions. This is fixed in 1.66.
         #[allow(clippy::unnecessary_lazy_evaluations)]
