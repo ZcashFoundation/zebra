@@ -98,11 +98,11 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 indexmap = "1.9.2"
 lazy_static = "1.4.0"
-serde = { version = "1.0.149", features = ["serde_derive"] }
+serde = { version = "1.0.150", features = ["serde_derive"] }
 toml = "0.5.9"
 
 futures = "0.3.25"
-rayon = "1.6.0"
+rayon = "1.6.1"
 tokio = { version = "1.23.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.0.12"

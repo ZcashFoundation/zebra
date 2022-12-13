@@ -36,7 +36,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
-use zebra_node_services::mempool::{Request, Response};
+use zebra_node_services::mempool::{Gossip, Request, Response};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
@@ -107,18 +107,31 @@ impl Default for ActiveState {
     }
 }
 
-impl Drop for ActiveState {
-    fn drop(&mut self) {
-        if let ActiveState::Enabled { tx_downloads, .. } = self {
-            tx_downloads.cancel_all();
-        }
-    }
-}
-
 impl ActiveState {
     /// Returns the current state, leaving [`Self::Disabled`] in its place.
     fn take(&mut self) -> Self {
         std::mem::take(self)
+    }
+
+    /// Returns a list of requests that will retry every stored and pending transaction.
+    fn transaction_retry_requests(&self) -> Vec<Gossip> {
+        match self {
+            ActiveState::Disabled => Vec::new(),
+            ActiveState::Enabled {
+                storage,
+                tx_downloads,
+            } => {
+                let mut transactions = Vec::new();
+
+                let storage = storage.transactions().map(|tx| tx.clone().into());
+                transactions.extend(storage);
+
+                let pending = tx_downloads.transaction_requests().cloned();
+                transactions.extend(pending);
+
+                transactions
+            }
+        }
     }
 }
 
@@ -259,8 +272,8 @@ impl Mempool {
                 "deactivating mempool: Zebra is syncing lots of blocks"
             );
 
-            // This drops the previous ActiveState::Enabled,
-            // cancelling its download tasks.
+            // This drops the previous ActiveState::Enabled, cancelling its download tasks.
+            // We don't preserve the previous transactions, because we are syncing lots of blocks.
             self.active_state = ActiveState::Disabled
         }
 
@@ -319,16 +332,34 @@ impl Service<Request> for Mempool {
                 "resetting mempool: switched best chain, skipped blocks, or activated network upgrade"
             );
 
+            let previous_state = self.active_state.take();
+            let tx_retries = previous_state.transaction_retry_requests();
+
             // Use the same code for dropping and resetting the mempool,
             // to avoid subtle bugs.
-
+            //
             // Drop the current contents of the state,
             // cancelling any pending download tasks,
             // and dropping completed verification results.
-            std::mem::drop(self.active_state.take());
+            std::mem::drop(previous_state);
 
             // Re-initialise an empty state.
             self.update_state();
+
+            // Re-verify the transactions that were pending or valid at the previous tip.
+            // This saves us the time and data needed to re-download them.
+            if let ActiveState::Enabled { tx_downloads, .. } = &mut self.active_state {
+                info!(
+                    transactions = tx_retries.len(),
+                    "re-verifying mempool transactions after a chain fork"
+                );
+
+                for tx in tx_retries {
+                    // This is just an efficiency optimisation, so we don't care if queueing
+                    // transaction requests fails.
+                    let _result = tx_downloads.download_if_needed_and_verify(tx);
+                }
+            }
 
             return Poll::Ready(Ok(()));
         }
