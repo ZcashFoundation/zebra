@@ -48,7 +48,7 @@ pub const POW_MAX_ADJUST_DOWN_PERCENT: i32 = 32;
 /// and the block's `time` field.
 ///
 /// Part of the block header consensus rules in the Zcash specification.
-pub const BLOCK_MAX_TIME_SINCE_MEDIAN: i64 = 90 * 60;
+pub const BLOCK_MAX_TIME_SINCE_MEDIAN: u32 = 90 * 60;
 
 /// Contains the context needed to calculate the adjusted difficulty for a block.
 pub(crate) struct AdjustedDifficulty {

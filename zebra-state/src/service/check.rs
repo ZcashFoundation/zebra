@@ -243,7 +243,7 @@ fn difficulty_threshold_is_valid(
     let network = difficulty_adjustment.network();
     let median_time_past = difficulty_adjustment.median_time_past();
     let block_time_max =
-        median_time_past + Duration::seconds(difficulty::BLOCK_MAX_TIME_SINCE_MEDIAN);
+        median_time_past + Duration::seconds(difficulty::BLOCK_MAX_TIME_SINCE_MEDIAN.into());
 
     // # Consensus
     //
