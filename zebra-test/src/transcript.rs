@@ -1,16 +1,17 @@
 //! A [`Service`](tower::Service) implementation based on a fixed transcript.
 
+use std::{
+    fmt::Debug,
+    sync::Arc,
+    task::{Context, Poll},
+};
+
 use color_eyre::{
     eyre::{eyre, Report, WrapErr},
     section::Section,
     section::SectionExt,
 };
 use futures::future::{ready, Ready};
-use std::{
-    fmt::Debug,
-    sync::Arc,
-    task::{Context, Poll},
-};
 use tower::{Service, ServiceExt};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -90,7 +91,6 @@ where
     S: Debug + Eq,
 {
     /// Check this transcript against the responses from the `to_check` service
-    #[track_caller]
     pub async fn check<C>(mut self, mut to_check: C) -> Result<(), Report>
     where
         C: Service<R, Response = S>,
