@@ -5,11 +5,11 @@
 
 use std::{str::FromStr, sync::Arc};
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use zebra_chain::{
     block::{self, Height},
+    serialization::DateTime32,
     transaction::{self, UnminedTxId},
 };
 use zebra_node_services::BoxError;
@@ -48,7 +48,7 @@ pub struct LongPollInput {
     ///
     /// Ideally, a new template should be provided at least one target block interval before
     /// the max time. This avoids wasted work.
-    pub max_time: DateTime<Utc>,
+    pub max_time: DateTime32,
 
     // Fields that allow old work:
     //
@@ -68,7 +68,7 @@ impl LongPollInput {
     pub fn new(
         tip_height: Height,
         tip_hash: block::Hash,
-        max_time: DateTime<Utc>,
+        max_time: DateTime32,
         mempool_tx_ids: impl IntoIterator<Item = UnminedTxId>,
     ) -> Self {
         let mempool_transaction_mined_ids =
@@ -177,10 +177,10 @@ impl From<LongPollInput> for LongPollId {
 
             tip_hash_checksum,
 
+            max_timestamp: input.max_time.timestamp(),
+
             // It's ok to do wrapping conversions here,
             // because long polling checks are probabilistic.
-            max_timestamp: input.max_time.timestamp() as u32,
-
             mempool_transaction_count: input.mempool_transaction_mined_ids.len() as u32,
 
             mempool_transaction_content_checksum,

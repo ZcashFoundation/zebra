@@ -40,3 +40,10 @@ pub mod work;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use block::LedgerState;
+
+/// Error type alias to make working with generic errors easier.
+///
+/// Note: the 'static lifetime bound means that the *type* cannot have any
+/// non-'static lifetimes, (e.g., when a type contains a borrow and is
+/// parameterized by 'a), *not* that the object itself has 'static lifetime.
+pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;

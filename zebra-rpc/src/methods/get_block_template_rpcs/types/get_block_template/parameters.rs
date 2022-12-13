@@ -1,6 +1,6 @@
 //! Parameter types for the `getblocktemplate` RPC.
 
-use super::{hex_data::HexData, long_poll::LongPollId};
+use crate::methods::get_block_template_rpcs::types::{hex_data::HexData, long_poll::LongPollId};
 
 /// Defines whether the RPC method should generate a block template or attempt to validate a block proposal.
 /// `Proposal` mode is currently unsupported and will return an error.
@@ -52,11 +52,12 @@ pub enum GetBlockTemplateCapability {
 
     /// Unknown capability to fill in for mutations.
     // TODO: Fill out valid mutations capabilities.
+    //       The set of possible capabilities is open-ended, so we need to keep UnknownCapability.
     #[serde(other)]
     UnknownCapability,
 }
 
-/// Optional argument `jsonrequestobject` for `getblocktemplate` RPC request.
+/// Optional parameter `jsonrequestobject` for `getblocktemplate` RPC request.
 ///
 /// The `data` field must be provided in `proposal` mode, and must be omitted in `template` mode.
 /// All other fields are optional.
@@ -78,7 +79,6 @@ pub struct JsonParameters {
     pub data: Option<HexData>,
 
     /// A list of client-side supported capability features
-    // TODO: Fill out valid mutations capabilities.
     #[serde(default)]
     pub capabilities: Vec<GetBlockTemplateCapability>,
 

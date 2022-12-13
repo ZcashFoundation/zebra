@@ -2,12 +2,13 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     block::{self, Block, Hash, Height},
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
+    serialization::{DateTime32, Duration32},
     work::difficulty::{CompactDifficulty, PartialCumulativeWork},
 };
 
@@ -185,14 +186,14 @@ fn difficulty_time_and_history_tree(
         .map(|block| (block.header.difficulty_threshold, block.header.time))
         .collect();
 
-    let cur_time = chrono::Utc::now();
+    let cur_time = DateTime32::now();
 
     // Get the median-time-past, which doesn't depend on the time or the previous block height.
     // `context` will always have the correct length, because this function takes an array.
     //
     // TODO: split out median-time-past into its own struct?
     let median_time_past = AdjustedDifficulty::new_from_header_time(
-        cur_time,
+        cur_time.into(),
         tip_height,
         network,
         relevant_data.clone(),
@@ -202,43 +203,39 @@ fn difficulty_time_and_history_tree(
     // > For each block other than the genesis block , nTime MUST be strictly greater than
     // > the median-time-past of that block.
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
+    let median_time_past =
+        DateTime32::try_from(median_time_past).expect("valid blocks have in-range times");
+
     let min_time = median_time_past
-        .checked_add_signed(Duration::seconds(1))
-        .expect("median time plus a small constant is far below i64::MAX");
+        .checked_add(Duration32::from_seconds(1))
+        .expect("a valid block time plus a small constant is in-range");
 
     // > For each block at block height 2 or greater on Mainnet, or block height 653606 or greater on Testnet, nTime
     // > MUST be less than or equal to the median-time-past of that block plus 90 * 60 seconds.
     //
     // We ignore the height as we are checkpointing on Canopy or higher in Mainnet and Testnet.
     let max_time = median_time_past
-        .checked_add_signed(Duration::seconds(BLOCK_MAX_TIME_SINCE_MEDIAN))
-        .expect("median time plus a small constant is far below i64::MAX");
+        .checked_add(Duration32::from_seconds(BLOCK_MAX_TIME_SINCE_MEDIAN))
+        .expect("a valid block time plus a small constant is in-range");
 
-    let cur_time = cur_time
-        .timestamp()
-        .clamp(min_time.timestamp(), max_time.timestamp());
-
-    let cur_time = Utc.timestamp_opt(cur_time, 0).single().expect(
-        "clamping a timestamp between two valid times can't make it invalid, and \
-             UTC never has ambiguous time zone conversions",
-    );
+    let cur_time = cur_time.clamp(min_time, max_time);
 
     // Now that we have a valid time, get the difficulty for that time.
     let difficulty_adjustment = AdjustedDifficulty::new_from_header_time(
-        cur_time,
+        cur_time.into(),
         tip_height,
         network,
         relevant_data.iter().cloned(),
     );
 
     let mut result = GetBlockTemplateChainInfo {
-        tip_height,
         tip_hash,
-        expected_difficulty: difficulty_adjustment.expected_difficulty_threshold(),
-        min_time,
-        cur_time,
-        max_time,
+        tip_height,
         history_tree,
+        expected_difficulty: difficulty_adjustment.expected_difficulty_threshold(),
+        cur_time,
+        min_time,
+        max_time,
     };
 
     adjust_difficulty_and_time_for_testnet(&mut result, network, tip_height, relevant_data);
@@ -279,13 +276,24 @@ fn adjust_difficulty_and_time_for_testnet(
     // just below the max time, and don't check it.
 
     let previous_block_time = relevant_data.last().expect("has at least one block").1;
+    let previous_block_time: DateTime32 = previous_block_time
+        .try_into()
+        .expect("valid blocks have in-range times");
+
     let minimum_difficulty_spacing =
         NetworkUpgrade::minimum_difficulty_spacing_for_height(network, previous_block_height)
             .expect("just checked testnet, and the RPC returns an error for low heights");
+    let minimum_difficulty_spacing: Duration32 = minimum_difficulty_spacing
+        .try_into()
+        .expect("small positive values are in-range");
 
     // The first minimum difficulty time is strictly greater than the spacing.
-    let std_difficulty_max_time = previous_block_time + minimum_difficulty_spacing;
-    let min_difficulty_min_time = std_difficulty_max_time + Duration::seconds(1);
+    let std_difficulty_max_time = previous_block_time
+        .checked_add(minimum_difficulty_spacing)
+        .expect("a valid block time plus a small constant is in-range");
+    let min_difficulty_min_time = std_difficulty_max_time
+        .checked_add(Duration32::from_seconds(1))
+        .expect("a valid block time plus a small constant is in-range");
 
     // If a miner is likely to find a block with the cur_time and standard difficulty
     //
@@ -293,9 +301,13 @@ fn adjust_difficulty_and_time_for_testnet(
     // - if cur_time is clamped to min_time, then we're more likely to have a minimum
     //    difficulty block, which makes mining easier;
     // - if cur_time gets clamped to max_time, this is already a minimum difficulty block.
-    if result.cur_time + Duration::seconds(POST_BLOSSOM_POW_TARGET_SPACING * 2)
-        <= std_difficulty_max_time
-    {
+    let local_std_difficulty_limit = std_difficulty_max_time
+        .checked_sub(Duration32::from_seconds(
+            POST_BLOSSOM_POW_TARGET_SPACING * 2,
+        ))
+        .expect("a valid block time minus a small constant is in-range");
+
+    if result.cur_time <= local_std_difficulty_limit {
         // Standard difficulty: the max time needs to exclude min difficulty blocks
         result.max_time = std_difficulty_max_time;
     } else {
@@ -307,7 +319,7 @@ fn adjust_difficulty_and_time_for_testnet(
 
         // And then the difficulty needs to be updated for cur_time
         result.expected_difficulty = AdjustedDifficulty::new_from_header_time(
-            result.cur_time,
+            result.cur_time.into(),
             previous_block_height,
             network,
             relevant_data.iter().cloned(),
