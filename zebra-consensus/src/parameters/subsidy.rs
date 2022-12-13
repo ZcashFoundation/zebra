@@ -1,7 +1,8 @@
 //! Constants for Block Subsidy and Funding Streams
 
-use lazy_static::lazy_static;
 use std::collections::HashMap;
+
+use lazy_static::lazy_static;
 
 use zebra_chain::{amount::COIN, block::Height, parameters::Network};
 
@@ -27,7 +28,7 @@ pub const MAX_BLOCK_SUBSIDY: u64 = ((25 * COIN) / 2) as u64;
 ///
 /// Calculated as `PRE_BLOSSOM_POW_TARGET_SPACING / POST_BLOSSOM_POW_TARGET_SPACING`
 /// in the Zcash specification.
-pub const BLOSSOM_POW_TARGET_SPACING_RATIO: u64 = 2;
+pub const BLOSSOM_POW_TARGET_SPACING_RATIO: u32 = 2;
 
 /// Halving is at about every 4 years, before Blossom block time is 150 seconds.
 ///
@@ -36,7 +37,7 @@ pub const PRE_BLOSSOM_HALVING_INTERVAL: Height = Height(840_000);
 
 /// After Blossom the block time is reduced to 75 seconds but halving period should remain around 4 years.
 pub const POST_BLOSSOM_HALVING_INTERVAL: Height =
-    Height((PRE_BLOSSOM_HALVING_INTERVAL.0 as u64 * BLOSSOM_POW_TARGET_SPACING_RATIO) as u32);
+    Height(PRE_BLOSSOM_HALVING_INTERVAL.0 * BLOSSOM_POW_TARGET_SPACING_RATIO);
 
 /// The first halving height in the testnet is at block height `1_116_000`
 /// as specified in [protocol specification §7.10.1][7.10.1]
