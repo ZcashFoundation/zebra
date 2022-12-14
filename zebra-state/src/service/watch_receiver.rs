@@ -44,6 +44,8 @@ where
     /// This helper method is a shorter way to borrow the value from the [`watch::Receiver`] and
     /// extract some information from it.
     ///
+    /// Does not mark the watched data as seen.
+    ///
     /// # Performance
     ///
     /// A single read lock is acquired to clone `T`, and then released after the
@@ -88,7 +90,9 @@ where
     }
 
     /// Returns a clone of the watch data in the channel.
-    /// This helps avoid deadlocks.
+    /// Cloning the watched data helps avoid deadlocks.
+    ///
+    /// Does not mark the watched data as seen.
     ///
     /// See `with_watch_data()` for details.
     pub fn cloned_watch_data(&self) -> T {
@@ -96,7 +100,14 @@ where
     }
 
     /// Calls [`watch::Receiver::changed`] and returns the result.
+    ///
+    /// Marks the watched data as seen.
     pub async fn changed(&mut self) -> Result<(), watch::error::RecvError> {
         self.receiver.changed().await
+    }
+
+    /// Marks the watched data as seen.
+    pub fn mark_as_seen(&mut self) {
+        self.receiver.borrow_and_update();
     }
 }

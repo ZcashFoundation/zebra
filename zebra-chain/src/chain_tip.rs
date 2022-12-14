@@ -22,31 +22,44 @@ use network_chain_tip_height_estimator::NetworkChainTipHeightEstimator;
 /// * `zebra-chain` and `tokio`
 /// * `zebra-network` and `zebra-state`
 pub trait ChainTip {
-    /// Return the height of the best chain tip.
+    /// Returns the height of the best chain tip.
+    ///
+    /// Does not mark the best tip as seen.
     fn best_tip_height(&self) -> Option<block::Height>;
 
-    /// Return the block hash of the best chain tip.
+    /// Returns the block hash of the best chain tip.
+    ///
+    /// Does not mark the best tip as seen.
     fn best_tip_hash(&self) -> Option<block::Hash>;
 
-    /// Return the height and the hash of the best chain tip.
+    /// Returns the height and the hash of the best chain tip.
+    ///
+    /// Does not mark the best tip as seen.
     fn best_tip_height_and_hash(&self) -> Option<(block::Height, block::Hash)>;
 
-    /// Return the block time of the best chain tip.
+    /// Returns the block time of the best chain tip.
+    ///
+    /// Does not mark the best tip as seen.
     fn best_tip_block_time(&self) -> Option<DateTime<Utc>>;
 
-    /// Return the height and the block time of the best chain tip.
-    ///
+    /// Returns the height and the block time of the best chain tip.
     /// Returning both values at the same time guarantees that they refer to the same chain tip.
+    ///
+    /// Does not mark the best tip as seen.
     fn best_tip_height_and_block_time(&self) -> Option<(block::Height, DateTime<Utc>)>;
 
-    /// Return the mined transaction IDs of the transactions in the best chain tip block.
+    /// Returns the mined transaction IDs of the transactions in the best chain tip block.
     ///
     /// All transactions with these mined IDs should be rejected from the mempool,
     /// even if their authorizing data is different.
+    ///
+    /// Does not mark the best tip as seen.
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]>;
 
     /// A future that returns when the best chain tip changes.
     /// Can return immediately if the latest value in this [`ChainTip`] has not been seen yet.
+    ///
+    /// Marks the best tip as seen.
     ///
     /// Returns an error if Zebra is shutting down, or the state has permanently failed.
     ///
@@ -55,7 +68,13 @@ pub trait ChainTip {
     // TODO:
     // Use async_fn_in_trait or return_position_impl_trait_in_trait when one of them stabilises:
     // https://github.com/rust-lang/rust/issues/91611
-    fn best_tip_changed(&self) -> BestTipChanged;
+    fn best_tip_changed(&mut self) -> BestTipChanged;
+
+    /// Mark the current best tip as seen.
+    ///
+    /// Later calls to [`ChainTip::best_tip_changed()`] will wait for the next change
+    /// before returning.
+    fn mark_best_tip_seen(&mut self);
 
     // Provided methods
     //
@@ -126,7 +145,7 @@ impl<'f> Future for BestTipChanged<'f> {
     }
 }
 
-/// A chain tip that is always empty.
+/// A chain tip that is always empty and never changes.
 ///
 /// Used in production for isolated network connections,
 /// and as a mock chain tip in tests.
@@ -158,7 +177,11 @@ impl ChainTip for NoChainTip {
         Arc::new([])
     }
 
-    fn best_tip_changed(&self) -> BestTipChanged {
+    /// The [`NoChainTip`] best tip never changes, so this never returns.
+    fn best_tip_changed(&mut self) -> BestTipChanged {
         BestTipChanged::new(future::pending())
     }
+
+    /// The [`NoChainTip`] best tip never changes, so this does nothing.
+    fn mark_best_tip_seen(&mut self) {}
 }

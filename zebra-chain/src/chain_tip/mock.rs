@@ -122,15 +122,22 @@ impl ChainTip for MockChainTip {
     }
 
     /// Returns when any sender channel changes.
+    /// Marks all sender channels as seen.
     //
     // Update this method when each new mock field is added.
-    fn best_tip_changed(&self) -> BestTipChanged {
+    fn best_tip_changed(&mut self) -> BestTipChanged {
         // Clone all the watch channels
         let mut best_tip_height = self.best_tip_height.clone();
         let mut best_tip_hash = self.best_tip_hash.clone();
         let mut best_tip_block_time = self.best_tip_block_time.clone();
         let mut estimated_distance_to_network_chain_tip =
             self.estimated_distance_to_network_chain_tip.clone();
+
+        // The cloned channels have the original change status,
+        // so we can mark all the `self` channels as seen.
+        //
+        // Normally `changed()` does this, but we need the clones due to lifetimes.
+        self.mark_best_tip_seen();
 
         // Move them into an async block, to manage lifetimes
         let select_changed = async move {
@@ -150,6 +157,15 @@ impl ChainTip for MockChainTip {
 
         // Erase the un-nameable type of the async block
         BestTipChanged::new(select_changed)
+    }
+
+    /// Marks all sender channels as seen.
+    fn mark_best_tip_seen(&mut self) {
+        self.best_tip_height.borrow_and_update();
+        self.best_tip_hash.borrow_and_update();
+        self.best_tip_block_time.borrow_and_update();
+        self.estimated_distance_to_network_chain_tip
+            .borrow_and_update();
     }
 }
 

@@ -323,7 +323,7 @@ where
 
         // Clone Services
         let mempool = self.mempool.clone();
-        let latest_chain_tip = self.latest_chain_tip.clone();
+        let mut latest_chain_tip = self.latest_chain_tip.clone();
         let sync_status = self.sync_status.clone();
         let state = self.state.clone();
 
@@ -356,6 +356,11 @@ where
                 // Optional TODO:
                 // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
                 check_synced_to_tip(network, latest_chain_tip.clone(), sync_status.clone())?;
+
+                // We're just about to fetch state data, then maybe wait for any changes.
+                // Mark all the changes before the fetch as seen.
+                // Changes are also ignored in any clones made after the mark.
+                latest_chain_tip.mark_best_tip_seen();
 
                 // Fetch the state data and local time for the block template:
                 // - if the tip block hash changes, we must return from long polling,

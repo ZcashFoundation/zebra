@@ -316,6 +316,8 @@ impl LatestChainTip {
     /// A single read lock is acquired to clone `T`, and then released after the clone.
     /// See the performance note on [`WatchReceiver::with_watch_data`].
     ///
+    /// Does not mark the watched data as seen.
+    ///
     /// # Correctness
     ///
     /// To avoid deadlocks, see the correctness note on [`WatchReceiver::with_watch_data`].
@@ -391,13 +393,21 @@ impl ChainTip for LatestChainTip {
     }
 
     /// Returns when the state tip changes.
+    ///
+    /// Marks the state tip as seen.
     #[instrument(skip(self))]
-    fn best_tip_changed(&self) -> BestTipChanged {
+    fn best_tip_changed(&mut self) -> BestTipChanged {
         // The changed() future doesn't lock the value,
         // so we don't need to use `with_chain_tip_block()` here.
         //
         // Clone the watch channel
         let mut best_tip = self.receiver.clone();
+
+        // The cloned channel has the original change status,
+        // so we can mark the `self` channel as seen.
+        //
+        // Normally `changed()` does this, but we need the clone due to lifetimes.
+        self.mark_best_tip_seen();
 
         // Move it into an async block, to manage lifetimes
         let best_tip_changed = async move {
@@ -407,6 +417,11 @@ impl ChainTip for LatestChainTip {
 
         // Erase the un-nameable type of the async block
         BestTipChanged::new(best_tip_changed)
+    }
+
+    /// Marks the state tip as seen.
+    fn mark_best_tip_seen(&mut self) {
+        self.receiver.mark_as_seen();
     }
 }
 
