@@ -395,7 +395,11 @@ where
                     break (server_long_poll_id, chain_tip_and_local_time, mempool_txs);
                 }
 
-                // Set up polling wait condition futures.
+                // - Polling wait conditions
+                //
+                // TODO: when we're happy with this code, split it into a function.
+                //
+                // Periodically check the mempool for changes.
                 //
                 // Optional TODO:
                 // Remove this polling wait if we switch to using futures to detect sync status
@@ -403,6 +407,9 @@ where
                 let wait_for_mempool_request = tokio::time::sleep(Duration::from_secs(
                     GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
                 ));
+
+                // Return immediately if the chain tip has changed.
+                let wait_for_best_tip_change = latest_chain_tip.best_tip_changed();
 
                 // Wait for the maximum block time to elapse. This can change the block header
                 // on testnet. (On mainnet it can happen due to a network disconnection, or a
@@ -425,6 +432,7 @@ where
                 }
                 .into();
 
+                // TODO: change logging to debug after testing
                 tokio::select! {
                     // Poll the futures in the listed order, for efficiency.
                     // We put the most frequent conditions first.
@@ -438,17 +446,50 @@ where
                             ?server_long_poll_id,
                             ?client_long_poll_id,
                             GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
-                            "checking for mempool changes every few seconds"
+                            "checking for a new mempool change after waiting a few seconds"
                         );
                     }
 
                     // The state changes after around a target block interval (75s)
-                    // TODO: check ChainTip here
+                    tip_changed_result = wait_for_best_tip_change => {
+                        match tip_changed_result {
+                            Ok(()) => {
+                                tracing::info!(
+                                    max_time = ?chain_tip_and_local_time.max_time,
+                                    cur_time = ?chain_tip_and_local_time.cur_time,
+                                    ?server_long_poll_id,
+                                    ?client_long_poll_id,
+                                    "returning from long poll because state has changed"
+                                );
+                            }
 
-                    // The max time does not elapse during normal operation on mainnet.
-                    //
-                    // TODO: change logging to debug after testing
+                            Err(recv_error) => {
+                                // This log should stay at info when the others go to debug,
+                                // it will help with debugging.
+                                tracing::info!(
+                                    ?recv_error,
+                                    max_time = ?chain_tip_and_local_time.max_time,
+                                    cur_time = ?chain_tip_and_local_time.cur_time,
+                                    ?server_long_poll_id,
+                                    ?client_long_poll_id,
+                                    "returning from long poll due to a state error.\
+                                     Is Zebra shutting down?"
+                                );
+
+                                return Err(Error {
+                                    code: ErrorCode::ServerError(0),
+                                    message: recv_error.to_string(),
+                                    data: None,
+                                });
+                            }
+                        }
+                    }
+
+                    // The max time does not elapse during normal operation on mainnet,
+                    // and it rarely elapses on testnet.
                     Some(_elapsed) = wait_for_max_time => {
+                        // This log should stay at info when the others go to debug,
+                        // it's very rare.
                         tracing::info!(
                             max_time = ?chain_tip_and_local_time.max_time,
                             cur_time = ?chain_tip_and_local_time.cur_time,
