@@ -82,12 +82,21 @@ async fn rpc_getblock() {
 
     // Make calls with verbosity=0 and check response
     for (i, block) in blocks.iter().enumerate() {
+        let expected_result = GetBlock::Raw(block.clone().into());
+
         let get_block = rpc
             .get_block(i.to_string(), 0u8)
             .await
             .expect("We should have a GetBlock struct");
 
-        assert_eq!(get_block, GetBlock::Raw(block.clone().into()));
+        assert_eq!(get_block, expected_result);
+
+        let get_block = rpc
+            .get_block(block.hash().to_string(), 0u8)
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(get_block, expected_result);
     }
 
     // Make calls with verbosity=1 and check response
