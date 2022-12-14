@@ -394,7 +394,8 @@ impl ChainTip for LatestChainTip {
 
     /// Returns when the state tip changes.
     ///
-    /// Marks the state tip as seen.
+    /// Unconditionally marks the state tip as seen when called.
+    /// (Rather than only marking it as seen when response future returns).
     #[instrument(skip(self))]
     fn best_tip_changed(&mut self) -> BestTipChanged {
         // The changed() future doesn't lock the value,

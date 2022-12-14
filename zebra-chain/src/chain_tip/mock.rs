@@ -122,7 +122,9 @@ impl ChainTip for MockChainTip {
     }
 
     /// Returns when any sender channel changes.
-    /// Marks all sender channels as seen.
+    ///
+    /// Unconditionally marks all channels as seen when called.
+    /// (Rather than only marking a single channel as seen when its response future returns).
     //
     // Update this method when each new mock field is added.
     fn best_tip_changed(&mut self) -> BestTipChanged {
