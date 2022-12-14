@@ -187,6 +187,23 @@ pub struct LongPollId {
     pub mempool_transaction_content_checksum: u32,
 }
 
+impl LongPollId {
+    /// Returns `true` if shares using `old_long_poll_id` can be submitted in response to the
+    /// template for `self`:
+    /// <https://en.bitcoin.it/wiki/BIP_0022#Optional:_Long_Polling>
+    ///
+    /// Old shares may be valid if only the mempool transactions have changed,
+    /// because newer transactions don't have to be included in the old shares.
+    ///
+    /// But if the chain tip has changed, the block header has changed, so old shares are invalid.
+    /// (And if the max time has changed on testnet, the block header has changed.)
+    pub fn submit_old(&self, old_long_poll_id: &LongPollId) -> bool {
+        self.tip_height == old_long_poll_id.tip_height
+            && self.tip_hash_checksum == old_long_poll_id.tip_hash_checksum
+            && self.max_timestamp == old_long_poll_id.max_timestamp
+    }
+}
+
 /// Update `checksum` from `item`, so changes in `item` are likely to also change `checksum`.
 ///
 /// This checksum is not cryptographically secure.

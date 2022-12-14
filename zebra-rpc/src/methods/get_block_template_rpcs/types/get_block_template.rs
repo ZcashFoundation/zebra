@@ -135,7 +135,7 @@ pub struct GetBlockTemplate {
     /// Zebra adjusts the minimum and current times for testnet minimum difficulty blocks,
     /// so we need to tell miners what the maximum valid time is.
     ///
-    /// This field is not in the Zcash RPC reference yet.
+    /// This field is not in `zcashd` or the Zcash RPC reference yet.
     ///
     /// Currently, some miners just use `min_time` or `cur_time`. Others calculate `max_time` from the
     /// fixed 90 minute consensus rule, or a smaller fixed interval (like 1000s).
@@ -143,6 +143,20 @@ pub struct GetBlockTemplate {
     /// a significant drop in the hash rate, or after the testnet minimum difficulty interval.
     #[serde(rename = "maxtime")]
     pub max_time: DateTime32,
+
+    /// > only relevant for long poll responses:
+    /// > indicates if work received prior to this response remains potentially valid (default)
+    /// > and should have its shares submitted;
+    /// > if false, the miner may wish to discard its share queue
+    ///
+    /// <https://en.bitcoin.it/wiki/BIP_0022#Optional:_Long_Polling>
+    ///
+    /// This field is not in `zcashd` or the Zcash RPC reference yet.
+    ///
+    /// In Zebra, `submit_old` is `false` when the tip block or max time is reached,
+    /// and `true` if only the mempool transactions have changed.
+    #[serde(rename = "submitold")]
+    pub submit_old: Option<bool>,
 }
 
 impl GetBlockTemplate {
@@ -156,6 +170,7 @@ impl GetBlockTemplate {
         coinbase_txn: TransactionTemplate<amount::NegativeOrZero>,
         mempool_txs: &[VerifiedUnminedTx],
         default_roots: DefaultRoots,
+        submit_old: Option<bool>,
     ) -> Self {
         // Convert transactions into TransactionTemplates
         let mempool_txs = mempool_txs.iter().map(Into::into).collect();
@@ -212,6 +227,8 @@ impl GetBlockTemplate {
             height: next_block_height.0,
 
             max_time: chain_tip_and_local_time.max_time,
+
+            submit_old,
         }
     }
 }

@@ -349,7 +349,7 @@ where
 
             // The loop returns the server long poll ID,
             // which should be different to the client long poll ID.
-            let (server_long_poll_id, chain_tip_and_local_time, mempool_txs) = loop {
+            let (server_long_poll_id, chain_tip_and_local_time, mempool_txs, submit_old) = loop {
                 // Check if we are synced to the tip.
                 // The result of this check can change during long polling.
                 //
@@ -397,7 +397,22 @@ where
                 // - the server long poll ID is different to the client long poll ID, or
                 // - the previous loop iteration waited until the max time.
                 if Some(&server_long_poll_id) != client_long_poll_id.as_ref() || max_time_reached {
-                    break (server_long_poll_id, chain_tip_and_local_time, mempool_txs);
+                    let mut submit_old = client_long_poll_id
+                        .as_ref()
+                        .map(|old_long_poll_id| server_long_poll_id.submit_old(old_long_poll_id));
+
+                    // On testnet, the max time changes the block difficulty,
+                    // so old shares are invalid.
+                    if max_time_reached {
+                        submit_old = Some(false);
+                    }
+
+                    break (
+                        server_long_poll_id,
+                        chain_tip_and_local_time,
+                        mempool_txs,
+                        submit_old,
+                    );
                 }
 
                 // - Polling wait conditions
@@ -549,6 +564,7 @@ where
                 coinbase_txn,
                 &mempool_txs,
                 default_roots,
+                submit_old,
             );
 
             Ok(response)
