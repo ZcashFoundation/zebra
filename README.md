@@ -124,7 +124,7 @@ It is recommended to use [adityapk00/lightwalletd](https://github.com/adityapk00
 
 If using [zcash/lightwalletd](https://github.com/zcash/lightwalletd.git):
 - note that it will require a zcash.conf file:
-  - `rpcuser` and `rpcpassword` are required but ignored by Zebra
+  - `rpcuser` and `rpcpassword` are required by `lightwalletd`, but Zebra ignores them if it receives them from `lightwalletd`
   - when using a non-default port, use `rpcport=28232` and `rpcbind=127.0.0.1`
   - when using testnet, use `testnet=1`
 
