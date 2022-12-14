@@ -123,10 +123,10 @@ parallel_cpu_threads = 0
 It is recommended to use [adityapk00/lightwalletd](https://github.com/adityapk00/lightwalletd) because that is used in testing.
 
 If using [zcash/lightwalletd](https://github.com/zcash/lightwalletd.git):
-- note that it will require a zcash.conf file 
-- `rpcuser` and `rpcpassword` are required but ignored by Zebra
-- when using a non-default port, use `rpcport=28232` and `rpcbind=127.0.0.1`
-- when using testnet, use testnet=1
+- note that it will require a zcash.conf file:
+  - `rpcuser` and `rpcpassword` are required but ignored by Zebra
+  - when using a non-default port, use `rpcport=28232` and `rpcbind=127.0.0.1`
+  - when using testnet, use `testnet=1`
 
 **WARNING:** This config allows multiple Zebra instances to share the same RPC port.
 See the [RPC config documentation](https://doc.zebra.zfnd.org/zebra_rpc/config/struct.Config.html) for details.
