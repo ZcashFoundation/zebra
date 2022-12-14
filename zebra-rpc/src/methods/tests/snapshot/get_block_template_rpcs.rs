@@ -29,7 +29,11 @@ use crate::methods::{
     get_block_template_rpcs::{
         self,
         types::{
-            get_block_template::GetBlockTemplate, get_mining_info, hex_data::HexData, submit_block,
+            get_block_template::{self, GetBlockTemplate},
+            get_mining_info,
+            hex_data::HexData,
+            long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
+            submit_block,
         },
     },
     tests::utils::fake_history_tree,
@@ -144,6 +148,8 @@ pub async fn test_responses<State, ReadState>(
         .expect("We should have a success response");
     snapshot_rpc_getnetworksolps(get_network_sol_ps, &settings);
 
+    // `getblocktemplate`
+
     // get a new empty state
     let new_read_state = MockService::build().for_unit_tests();
 
@@ -161,11 +167,13 @@ pub async fn test_responses<State, ReadState>(
         mock_sync_status,
     );
 
-    // `getblocktemplate`
+    // Basic variant (default mode and no extra features)
 
     // Fake the ChainInfo response
+    let response_read_state = new_read_state.clone();
+
     tokio::spawn(async move {
-        new_read_state
+        response_read_state
             .clone()
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
@@ -199,9 +207,65 @@ pub async fn test_responses<State, ReadState>(
         .zcash_deserialize_into()
         .expect("coinbase bytes are valid");
 
-    snapshot_rpc_getblocktemplate(get_block_template, coinbase_tx, &settings);
+    snapshot_rpc_getblocktemplate("basic", get_block_template, coinbase_tx, &settings);
+
+    // long polling feature with submit old field
+
+    let long_poll_id: LongPollId = "0"
+        .repeat(LONG_POLL_ID_LENGTH)
+        .parse()
+        .expect("unexpected invalid LongPollId");
+
+    // Fake the ChainInfo response
+    let response_read_state = new_read_state.clone();
+
+    tokio::spawn(async move {
+        response_read_state
+            .clone()
+            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .await
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                tip_height: fake_tip_height,
+                tip_hash: fake_tip_hash,
+                cur_time: fake_cur_time,
+                min_time: fake_min_time,
+                max_time: fake_max_time,
+                history_tree: fake_history_tree(network),
+            }));
+    });
+
+    let get_block_template = tokio::spawn(
+        get_block_template_rpc.get_block_template(
+            get_block_template::JsonParameters {
+                long_poll_id: long_poll_id.into(),
+                ..Default::default()
+            }
+            .into(),
+        ),
+    );
+
+    mempool
+        .expect_request(mempool::Request::FullTransactions)
+        .await
+        .respond(mempool::Response::FullTransactions(vec![]));
+
+    let get_block_template = get_block_template
+        .await
+        .expect("unexpected panic in getblocktemplate RPC task")
+        .expect("unexpected error in getblocktemplate RPC call");
+
+    let coinbase_tx: Transaction = get_block_template
+        .coinbase_txn
+        .data
+        .as_ref()
+        .zcash_deserialize_into()
+        .expect("coinbase bytes are valid");
+
+    snapshot_rpc_getblocktemplate("long_poll", get_block_template, coinbase_tx, &settings);
 
     // `submitblock`
+
     let submit_block = get_block_template_rpc
         .submit_block(HexData("".into()), None)
         .await
@@ -222,12 +286,20 @@ fn snapshot_rpc_getblockhash(block_hash: GetBlockHash, settings: &insta::Setting
 
 /// Snapshot `getblocktemplate` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblocktemplate(
+    variant: &'static str,
     block_template: GetBlockTemplate,
     coinbase_tx: Transaction,
     settings: &insta::Settings,
 ) {
-    settings.bind(|| insta::assert_json_snapshot!("get_block_template", block_template));
-    settings.bind(|| insta::assert_json_snapshot!("get_block_template.coinbase_tx", coinbase_tx));
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("get_block_template_{variant}"), block_template)
+    });
+    settings.bind(|| {
+        insta::assert_ron_snapshot!(
+            format!("get_block_template_{variant}.coinbase_tx"),
+            coinbase_tx
+        )
+    });
 }
 
 /// Snapshot `submitblock` response, using `cargo insta` and JSON serialization.
