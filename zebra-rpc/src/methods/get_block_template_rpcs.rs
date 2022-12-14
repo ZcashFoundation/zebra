@@ -22,7 +22,9 @@ use zebra_state::{ReadRequest, ReadResponse};
 use crate::methods::{
     best_chain_tip_height,
     get_block_template_rpcs::{
-        constants::DEFAULT_SOLUTION_RATE_WINDOW_SIZE,
+        constants::{
+            DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
+        },
         get_block_template::{
             check_block_template_parameters, check_miner_address, check_synced_to_tip,
             fetch_mempool_transactions, fetch_state_tip_and_local_time,
@@ -351,9 +353,8 @@ where
                 // Check if we are synced to the tip.
                 // The result of this check can change during long polling.
                 //
-                // TODO:
-                // - add `async changed()` methods to ChainTip and ChainSyncStatus
-                //   (using `changed() -> Changed` and `impl Future<()> for Changed`)
+                // Optional TODO:
+                // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
                 check_synced_to_tip(network, latest_chain_tip.clone(), sync_status.clone())?;
 
                 // Fetch the state data and local time for the block template:
@@ -362,18 +363,19 @@ where
                 //
                 // We always return after 90 minutes on mainnet, even if we have the same response,
                 // because the max time has been reached.
-                //
-                // TODO: timeout and exit the loop when max time is reached
                 let chain_tip_and_local_time =
                     fetch_state_tip_and_local_time(state.clone()).await?;
 
                 // Fetch the mempool data for the block template:
                 // - if the mempool transactions change, we might return from long polling.
                 //
-                // TODO:
-                // - add a `MempoolChange` type with an `async changed()` method.
-                // - if we are long polling, pause between state and mempool,
-                //   to allow transactions to re-verify (only works after PR #5841)
+                // If the chain fork has just changed, miners want to get the new block as fast
+                // as possible, rather than wait for transactions to re-verify. This increases
+                // miner profits (and any delays can cause chain forks). So we don't wait between
+                // the chain tip changing and getting mempool transactions.
+                //
+                // Optional TODO:
+                // - add a `MempoolChange` type with an `async changed()` method (like `ChainTip`)
                 let mempool_txs = fetch_mempool_transactions(mempool.clone()).await?;
 
                 // - Long poll ID calculation
@@ -393,11 +395,26 @@ where
                     break (server_long_poll_id, chain_tip_and_local_time, mempool_txs);
                 }
 
-                // This duration can be slightly lower than needed, if cur_time was clamped
-                // to min_time. In that case the wait is very long, and it's ok to return early.
+                // Set up polling wait condition futures.
                 //
-                // It can also be zero if cur_time was clamped to max_time.
-                // In that case, we want to wait for another change, and ignore this timeout.
+                // Optional TODO:
+                // Remove this polling wait if we switch to using futures to detect sync status
+                // and mempool changes.
+                let wait_for_mempool_request = tokio::time::sleep(Duration::from_secs(
+                    GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
+                ));
+
+                // Wait for the maximum block time to elapse. This can change the block header
+                // on testnet. (On mainnet it can happen due to a network disconnection, or a
+                // rapid dropp in hash rate.)
+                //
+                // This duration might be slightly lower than the actual maximum,
+                // if cur_time was clamped to min_time. In that case the wait is very long,
+                // and it's ok to return early.
+                //
+                // It can also be zero if cur_time was clamped to max_time. In that case,
+                // we want to wait for another change, and ignore this timeout. So we use an
+                // `OptionFuture::None`.
                 let duration_until_max_time = chain_tip_and_local_time
                     .max_time
                     .saturating_duration_since(chain_tip_and_local_time.cur_time);
@@ -408,14 +425,28 @@ where
                 }
                 .into();
 
-                // TODO: remove this polling wait after we've switched to
-                //       using futures to detect state tip, sync status, and mempool changes
-                let temp_wait_before_requests = tokio::time::sleep(Duration::from_secs(5));
-
                 tokio::select! {
-                    // Poll the futures in the same order as they are listed here.
+                    // Poll the futures in the listed order, for efficiency.
+                    // We put the most frequent conditions first.
                     biased;
 
+                    // This timer elapses every few seconds
+                    _elapsed = wait_for_mempool_request => {
+                        tracing::info!(
+                            max_time = ?chain_tip_and_local_time.max_time,
+                            cur_time = ?chain_tip_and_local_time.cur_time,
+                            ?server_long_poll_id,
+                            ?client_long_poll_id,
+                            GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
+                            "checking for mempool changes every few seconds"
+                        );
+                    }
+
+                    // The state changes after around a target block interval (75s)
+                    // TODO: check ChainTip here
+
+                    // The max time does not elapse during normal operation on mainnet.
+                    //
                     // TODO: change logging to debug after testing
                     Some(_elapsed) = wait_for_max_time => {
                         tracing::info!(
@@ -427,16 +458,6 @@ where
                         );
 
                         max_time_reached = true;
-                    }
-
-                    _elapsed = temp_wait_before_requests => {
-                        tracing::info!(
-                            max_time = ?chain_tip_and_local_time.max_time,
-                            cur_time = ?chain_tip_and_local_time.cur_time,
-                            ?server_long_poll_id,
-                            ?client_long_poll_id,
-                            "checking long poll inputs again after waiting 5 seconds"
-                        );
                     }
                 }
             };
