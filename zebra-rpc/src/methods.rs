@@ -30,7 +30,7 @@ use zebra_chain::{
 };
 use zebra_network::constants::USER_AGENT;
 use zebra_node_services::mempool;
-use zebra_state::{OutputIndex, OutputLocation, TransactionLocation};
+use zebra_state::{HashOrHeight, OutputIndex, OutputLocation, TransactionLocation};
 
 use crate::queue::Queue;
 
@@ -562,18 +562,21 @@ where
     // - use `height_from_signed_int()` to handle negative heights
     //   (this might be better in the state request, because it needs the state height)
     // - create a function that handles block hashes or heights, and use it in `z_get_treestate()`
-    fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>> {
+    fn get_block(&self, hash_or_height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>> {
         let mut state = self.state.clone();
 
         async move {
-            let height: Height = height.parse().map_err(|error: SerializationError| Error {
-                code: ErrorCode::ServerError(0),
-                message: error.to_string(),
-                data: None,
-            })?;
+            let hash_or_height: HashOrHeight =
+                hash_or_height
+                    .parse()
+                    .map_err(|error: SerializationError| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
 
             if verbosity == 0 {
-                let request = zebra_state::ReadRequest::Block(height.into());
+                let request = zebra_state::ReadRequest::Block(hash_or_height);
                 let response = state
                     .ready()
                     .and_then(|service| service.call(request))
@@ -596,7 +599,7 @@ where
                     _ => unreachable!("unmatched response to a block request"),
                 }
             } else if verbosity == 1 {
-                let request = zebra_state::ReadRequest::TransactionIdsForBlock(height.into());
+                let request = zebra_state::ReadRequest::TransactionIdsForBlock(hash_or_height);
                 let response = state
                     .ready()
                     .and_then(|service| service.call(request))
