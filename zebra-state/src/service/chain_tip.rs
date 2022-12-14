@@ -8,17 +8,13 @@
 use std::{fmt, sync::Arc};
 
 use chrono::{DateTime, Utc};
+use futures::TryFutureExt;
 use tokio::sync::watch;
 use tracing::{field, instrument};
 
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
-
-#[cfg(any(test, feature = "proptest-impl"))]
-use zebra_chain::serialization::arbitrary::datetime_full;
 use zebra_chain::{
     block,
-    chain_tip::ChainTip,
+    chain_tip::{BestTipChanged, ChainTip},
     parameters::{Network, NetworkUpgrade},
     transaction::{self, Transaction},
 };
@@ -28,6 +24,12 @@ use crate::{
 };
 
 use TipAction::*;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use zebra_chain::serialization::arbitrary::datetime_full;
 
 #[cfg(test)]
 mod tests;
@@ -386,6 +388,25 @@ impl ChainTip for LatestChainTip {
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         self.with_chain_tip_block(|block| block.transaction_hashes.clone())
             .unwrap_or_else(|| Arc::new([]))
+    }
+
+    /// Returns when the state tip changes.
+    #[instrument(skip(self))]
+    fn best_tip_changed(&self) -> BestTipChanged {
+        // The changed() future doesn't lock the value,
+        // so we don't need to use `with_chain_tip_block()` here.
+        //
+        // Clone the watch channel
+        let mut best_tip = self.receiver.clone();
+
+        // Move it into an async block, to manage lifetimes
+        let best_tip_changed = async move {
+            // Map its error type
+            best_tip.changed().err_into().await
+        };
+
+        // Erase the un-nameable type of the async block
+        BestTipChanged::new(best_tip_changed)
     }
 }
 

@@ -1,10 +1,11 @@
 //! Zebra interfaces for access to chain tip information.
 
-use std::sync::Arc;
+use std::{future, sync::Arc};
 
 use chrono::{DateTime, Utc};
+use futures::{future::BoxFuture, Future, FutureExt};
 
-use crate::{block, parameters::Network, transaction};
+use crate::{block, parameters::Network, transaction, BoxError};
 
 mod network_chain_tip_height_estimator;
 
@@ -18,8 +19,8 @@ use network_chain_tip_height_estimator::NetworkChainTipHeightEstimator;
 /// An interface for querying the chain tip.
 ///
 /// This trait helps avoid dependencies between:
-/// * zebra-chain and tokio
-/// * zebra-network and zebra-state
+/// * `zebra-chain` and `tokio`
+/// * `zebra-network` and `zebra-state`
 pub trait ChainTip {
     /// Return the height of the best chain tip.
     fn best_tip_height(&self) -> Option<block::Height>;
@@ -44,6 +45,20 @@ pub trait ChainTip {
     /// even if their authorizing data is different.
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]>;
 
+    /// A future that returns when the best chain tip changes.
+    /// Can return immediately if the latest value in this [`ChainTip`] has not been seen yet.
+    ///
+    /// Returns an error if Zebra is shutting down, or the state has permanently failed.
+    ///
+    /// See [`tokio::watch::Receiver::changed()`](https://docs.rs/tokio/latest/tokio/sync/watch/struct.Receiver.html#method.changed) for details.
+    //
+    // TODO:
+    // Use async_fn_in_trait or return_position_impl_trait_in_trait when one of them stabilises:
+    // https://github.com/rust-lang/rust/issues/91611
+    fn best_tip_changed(&self) -> BestTipChanged;
+
+    // Provided methods
+    //
     /// Return an estimate of the network chain tip's height.
     ///
     /// The estimate is calculated based on the current local time, the block time of the best tip
@@ -84,6 +99,33 @@ pub trait ChainTip {
     }
 }
 
+/// A future for the [`ChainTip::best_tip_changed()`] method.
+/// See that method for details.
+pub struct BestTipChanged<'f> {
+    fut: BoxFuture<'f, Result<(), BoxError>>,
+}
+
+impl<'f> BestTipChanged<'f> {
+    /// Returns a new [`BestTipChanged`] containing `fut`.
+    pub fn new<Fut>(fut: Fut) -> Self
+    where
+        Fut: Future<Output = Result<(), BoxError>> + Send + 'f,
+    {
+        Self { fut: Box::pin(fut) }
+    }
+}
+
+impl<'f> Future for BestTipChanged<'f> {
+    type Output = Result<(), BoxError>;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        self.fut.poll_unpin(cx)
+    }
+}
+
 /// A chain tip that is always empty.
 ///
 /// Used in production for isolated network connections,
@@ -114,5 +156,9 @@ impl ChainTip for NoChainTip {
 
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         Arc::new([])
+    }
+
+    fn best_tip_changed(&self) -> BestTipChanged {
+        BestTipChanged::new(future::pending())
     }
 }
