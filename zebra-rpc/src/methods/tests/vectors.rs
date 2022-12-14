@@ -1117,7 +1117,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         .get_block_template(Some(get_block_template::JsonParameters {
             // This must parse as a LongPollId.
             // It must be the correct length and have hex/decimal digits.
-            longpollid: Some(
+            long_poll_id: Some(
                 "0".repeat(LONG_POLL_ID_LENGTH)
                     .parse()
                     .expect("unexpected invalid LongPollId"),

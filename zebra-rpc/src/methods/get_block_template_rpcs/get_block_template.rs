@@ -32,7 +32,7 @@ pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
 
 /// Returns an error if the get block template RPC `parameters` are invalid.
 pub fn check_block_template_parameters(
-    parameters: get_block_template::JsonParameters,
+    parameters: &get_block_template::JsonParameters,
 ) -> Result<()> {
     if parameters.data.is_some() || parameters.mode == GetBlockTemplateRequestMode::Proposal {
         return Err(Error {

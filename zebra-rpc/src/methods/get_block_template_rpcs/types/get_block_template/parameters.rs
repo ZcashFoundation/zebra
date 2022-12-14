@@ -85,5 +85,6 @@ pub struct JsonParameters {
     /// An ID that delays the RPC response until the template changes.
     ///
     /// In Zebra, the ID represents the chain tip, max time, and mempool contents.
-    pub longpollid: Option<LongPollId>,
+    #[serde(rename = "longpollid")]
+    pub long_poll_id: Option<LongPollId>,
 }
