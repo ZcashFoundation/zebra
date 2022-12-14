@@ -155,6 +155,8 @@ pub struct GetBlockTemplate {
     ///
     /// In Zebra, `submit_old` is `false` when the tip block or max time is reached,
     /// and `true` if only the mempool transactions have changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     #[serde(rename = "submitold")]
     pub submit_old: Option<bool>,
 }
