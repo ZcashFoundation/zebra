@@ -122,42 +122,27 @@ impl ChainTip for MockChainTip {
     }
 
     /// Returns when any sender channel changes.
+    /// Returns an error if any sender was dropped.
     ///
-    /// Unconditionally marks all channels as seen when called.
-    /// (Rather than only marking a single channel as seen when its response future returns).
+    /// Marks the changed channel as seen when the returned future completes.
     //
     // Update this method when each new mock field is added.
     fn best_tip_changed(&mut self) -> BestTipChanged {
-        // Clone all the watch channels
-        let mut best_tip_height = self.best_tip_height.clone();
-        let mut best_tip_hash = self.best_tip_hash.clone();
-        let mut best_tip_block_time = self.best_tip_block_time.clone();
-        let mut estimated_distance_to_network_chain_tip =
-            self.estimated_distance_to_network_chain_tip.clone();
+        // A future that returns when the first watch channel has changed
+        let select_changed = future::select_all([
+            // Erase the differing future types for each channel, and map their error types
+            BestTipChanged::new(self.best_tip_height.changed().err_into()),
+            BestTipChanged::new(self.best_tip_hash.changed().err_into()),
+            BestTipChanged::new(self.best_tip_block_time.changed().err_into()),
+            BestTipChanged::new(
+                self.estimated_distance_to_network_chain_tip
+                    .changed()
+                    .err_into(),
+            ),
+        ])
+        // Map the select result to the expected type, dropping the unused channels
+        .map(|(changed_result, _changed_index, _remaining_futures)| changed_result);
 
-        // The cloned channels have the original change status,
-        // so we can mark all the `self` channels as seen.
-        //
-        // Normally `changed()` does this, but we need the clones due to lifetimes.
-        self.mark_best_tip_seen();
-
-        // Move them into an async block, to manage lifetimes
-        let select_changed = async move {
-            // Get the first watch channel that has changed
-            future::select_all([
-                // Erase the differing future types for each channel, and map their error types
-                BestTipChanged::new(best_tip_height.changed().err_into()),
-                BestTipChanged::new(best_tip_hash.changed().err_into()),
-                BestTipChanged::new(best_tip_block_time.changed().err_into()),
-                BestTipChanged::new(estimated_distance_to_network_chain_tip.changed().err_into()),
-            ])
-            // Map the select result to the expected type, dropping the unused channels,
-            // any removing any dependencies on their lifetimes
-            .map(|(changed_result, _changed_index, _remaining_futures)| changed_result)
-            .await
-        };
-
-        // Erase the un-nameable type of the async block
         BestTipChanged::new(select_changed)
     }
 

@@ -394,33 +394,13 @@ impl ChainTip for LatestChainTip {
 
     /// Returns when the state tip changes.
     ///
-    /// Unconditionally marks the state tip as seen when called.
-    /// (Rather than only marking it as seen when response future returns).
+    /// Marks the state tip as seen when the returned future completes.
     #[instrument(skip(self))]
     fn best_tip_changed(&mut self) -> BestTipChanged {
-        // The changed() future doesn't lock the value,
-        // so we don't need to use `with_chain_tip_block()` here.
-        //
-        // Clone the watch channel
-        let mut best_tip = self.receiver.clone();
-
-        // The cloned channel has the original change status,
-        // so we can mark the `self` channel as seen.
-        //
-        // Normally `changed()` does this, but we need the clone due to lifetimes.
-        self.mark_best_tip_seen();
-
-        // Move it into an async block, to manage lifetimes
-        let best_tip_changed = async move {
-            // Map its error type
-            best_tip.changed().err_into().await
-        };
-
-        // Erase the un-nameable type of the async block
-        BestTipChanged::new(best_tip_changed)
+        BestTipChanged::new(self.receiver.changed().err_into())
     }
 
-    /// Marks the state tip as seen.
+    /// Mark the current best state tip as seen.
     fn mark_best_tip_seen(&mut self) {
         self.receiver.mark_as_seen();
     }
