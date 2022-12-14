@@ -401,8 +401,10 @@ where
                         .as_ref()
                         .map(|old_long_poll_id| server_long_poll_id.submit_old(old_long_poll_id));
 
-                    // On testnet, the max time changes the block difficulty,
-                    // so old shares are invalid.
+                    // On testnet, the max time changes the block difficulty, so old shares are
+                    // invalid. On mainnet, this means there has been 90 minutes without a new
+                    // block or mempool transaction, which is very unlikely. So the miner should
+                    // probably reset anyway.
                     if max_time_reached {
                         submit_old = Some(false);
                     }
@@ -451,6 +453,12 @@ where
                     None
                 }
                 .into();
+
+                // Optional TODO:
+                // `zcashd` generates the next coinbase transaction while waiting for changes.
+                // When Zebra supports shielded coinbase, we might want to do this in parallel.
+                // But the coinbase value depends on the selected transactions, so this needs
+                // further analysis to check if it actually saves us any time.
 
                 // TODO: change logging to debug after testing
                 tokio::select! {
