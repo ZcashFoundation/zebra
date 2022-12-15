@@ -286,7 +286,7 @@ where
             };
 
             match request {
-                Request::Block(_) => match state_service
+                Request::Commit(_) => match state_service
                     .ready()
                     .await
                     .map_err(VerifyBlockError::Commit)?
@@ -302,7 +302,7 @@ where
                 },
 
                 #[cfg(feature = "getblocktemplate-rpcs")]
-                Request::BlockProposal(_) => match state_service
+                Request::CheckProposal(_) => match state_service
                     .ready()
                     .await
                     .map_err(VerifyBlockError::Validate)?

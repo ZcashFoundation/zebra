@@ -2,7 +2,7 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{cmp::max, collections::HashSet, pin::Pin, sync::Arc, task::Poll, time::Duration};
+use std::{cmp::max, collections::HashSet, pin::Pin, task::Poll, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -15,7 +15,7 @@ use tower::{
 };
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Height},
     chain_tip::ChainTip,
     parameters::genesis_hash,
 };
@@ -300,7 +300,7 @@ where
         + Clone
         + 'static,
     ZS::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
         + Send
         + Sync
         + Clone
@@ -381,7 +381,7 @@ where
         + Clone
         + 'static,
     ZS::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
         + Send
         + Sync
         + Clone

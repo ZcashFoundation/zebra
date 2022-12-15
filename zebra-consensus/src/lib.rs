@@ -49,7 +49,7 @@ pub mod error;
 pub use block::{
     subsidy::funding_streams::funding_stream_address,
     subsidy::funding_streams::funding_stream_values, subsidy::funding_streams::new_coinbase_script,
-    subsidy::general::miner_subsidy, VerifyBlockError, MAX_BLOCK_SIGOPS,
+    subsidy::general::miner_subsidy, Request, VerifyBlockError, MAX_BLOCK_SIGOPS,
 };
 pub use chain::VerifyChainError;
 pub use checkpoint::{

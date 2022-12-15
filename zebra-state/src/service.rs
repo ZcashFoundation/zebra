@@ -810,7 +810,7 @@ impl ReadStateService {
     #[tracing::instrument(level = "debug", skip_all)]
     fn check_best_chain_contextual_validity(
         &self,
-        prepared: PreparedBlock,
+        prepared: &PreparedBlock,
     ) -> Result<(), crate::ValidateContextError> {
         let latest_non_finalized_state = self.latest_non_finalized_state();
 
@@ -826,22 +826,22 @@ impl ReadStateService {
             self.network,
             &self.db,
             &latest_non_finalized_state,
-            &prepared,
+            prepared,
         )?;
 
         // Reads from disk
         let sprout_final_treestates =
-            check::anchors::block_fetch_sprout_final_treestates(&self.db, best_chain, &prepared);
+            check::anchors::block_fetch_sprout_final_treestates(&self.db, best_chain, prepared);
 
         let spent_utxos = check::utxo::transparent_spend(
-            &prepared,
+            prepared,
             &best_chain.unspent_utxos(),
             &best_chain.spent_utxos,
             &self.db,
         )?;
 
         check::anchors::block_sapling_orchard_anchors_refer_to_final_treestates(
-            &self.db, best_chain, &prepared,
+            &self.db, best_chain, prepared,
         )?;
 
         let contextual = crate::request::ContextuallyValidBlock::with_block_and_spent_utxos(
@@ -1801,7 +1801,7 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        state.check_best_chain_contextual_validity(prepared)?;
+                        state.check_best_chain_contextual_validity(&prepared)?;
                         // The work is done in the future.
                         timer.finish(
                             module_path!(),
@@ -1809,7 +1809,7 @@ impl Service<ReadRequest> for ReadStateService {
                             "ReadRequest::CheckContextualValidity",
                         );
 
-                        Ok(ReadResponse::Validated)
+                        Ok(ReadResponse::ValidBlock(prepared.hash))
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::ChainInfo"))
