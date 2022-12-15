@@ -803,6 +803,91 @@ impl ReadStateService {
     fn latest_non_finalized_state(&self) -> NonFinalizedState {
         self.non_finalized_state_receiver.cloned_watch_data()
     }
+
+    /// Check the contextual validity of a block in the best chain
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    #[allow(clippy::unwrap_in_result)]
+    #[tracing::instrument(level = "debug", skip_all)]
+    fn check_best_chain_contextual_validity(
+        &self,
+        prepared: PreparedBlock,
+    ) -> Result<(), crate::ValidateContextError> {
+        let latest_non_finalized_state = self.latest_non_finalized_state();
+
+        let Some(best_chain) = latest_non_finalized_state.best_chain() else {
+            Err(crate::ValidateContextError::NotReadyToBeValidated)?        
+        };
+
+        if best_chain.non_finalized_tip_hash() != prepared.block.header.previous_block_hash {
+            Err(crate::ValidateContextError::NotReadyToBeValidated)?
+        }
+
+        check::initial_contextual_validity(
+            self.network,
+            &self.db,
+            &latest_non_finalized_state,
+            &prepared,
+        )?;
+
+        // Reads from disk
+        let sprout_final_treestates =
+            check::anchors::block_fetch_sprout_final_treestates(&self.db, best_chain, &prepared);
+
+        let spent_utxos = check::utxo::transparent_spend(
+            &prepared,
+            &best_chain.unspent_utxos(),
+            &best_chain.spent_utxos,
+            &self.db,
+        )?;
+
+        check::anchors::block_sapling_orchard_anchors_refer_to_final_treestates(
+            &self.db, best_chain, &prepared,
+        )?;
+
+        let contextual = crate::request::ContextuallyValidBlock::with_block_and_spent_utxos(
+            prepared.clone(),
+            spent_utxos.clone(),
+        )
+        .map_err(|value_balance_error| {
+            crate::ValidateContextError::CalculateBlockChainValueChange {
+                value_balance_error,
+                height: prepared.height,
+                block_hash: prepared.hash,
+                transaction_count: prepared.block.transactions.len(),
+                spent_utxo_count: spent_utxos.len(),
+            }
+        })?;
+        let mut block_commitment_result = None;
+        let mut sprout_anchor_result = None;
+
+        rayon::in_place_scope_fifo(|scope| {
+            // Clone function arguments for different threads
+            let block = Arc::clone(&contextual.block);
+
+            scope.spawn_fifo(|_scope| {
+                block_commitment_result =
+                    Some(check::anchors::block_sprout_anchors_refer_to_treestates(
+                        sprout_final_treestates,
+                        block,
+                        contextual.transaction_hashes,
+                        contextual.height,
+                    ));
+            });
+
+            scope.spawn_fifo(|_scope| {
+                sprout_anchor_result = Some(check::block_commitment_is_valid_for_chain_history(
+                    contextual.block,
+                    self.network,
+                    &best_chain.history_tree,
+                ));
+            });
+        });
+
+        block_commitment_result.expect("scope has finished")?;
+        sprout_anchor_result.expect("scope has finished")?;
+
+        Ok(())
+    }
 }
 
 impl Service<Request> for StateService {
@@ -1032,6 +1117,24 @@ impl Service<Request> for StateService {
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. }
             | Request::CheckBestChainTipNullifiersAndAnchors(_) => {
+                // Redirect the request to the concurrent ReadStateService
+                let read_service = self.read_service.clone();
+
+                async move {
+                    let req = req
+                        .try_into()
+                        .expect("ReadRequest conversion should not fail");
+
+                    let rsp = read_service.oneshot(req).await?;
+                    let rsp = rsp.try_into().expect("Response conversion should not fail");
+
+                    Ok(rsp)
+                }
+                .boxed()
+            }
+
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            Request::CheckBlockValidity(_) => {
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
@@ -1679,6 +1782,34 @@ impl Service<ReadRequest> for ReadStateService {
                         timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");
 
                         Ok(ReadResponse::SolutionRate(solution_rate))
+                    })
+                })
+                .map(|join_result| join_result.expect("panic in ReadRequest::ChainInfo"))
+                .boxed()
+            }
+
+            // Used by getmininginfo, getnetworksolps, and getnetworkhashps RPCs.
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadRequest::CheckBlockValidity(prepared) => {
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                // # Performance
+                //
+                // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        state.check_best_chain_contextual_validity(prepared)?;
+                        // The work is done in the future.
+                        timer.finish(
+                            module_path!(),
+                            line!(),
+                            "ReadRequest::CheckContextualValidity",
+                        );
+
+                        Ok(ReadResponse::Validated)
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::ChainInfo"))
