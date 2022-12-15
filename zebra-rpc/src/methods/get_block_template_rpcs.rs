@@ -435,7 +435,7 @@ where
 
                 // Wait for the maximum block time to elapse. This can change the block header
                 // on testnet. (On mainnet it can happen due to a network disconnection, or a
-                // rapid dropp in hash rate.)
+                // rapid drop in hash rate.)
                 //
                 // This duration might be slightly lower than the actual maximum,
                 // if cur_time was clamped to min_time. In that case the wait is very long,
