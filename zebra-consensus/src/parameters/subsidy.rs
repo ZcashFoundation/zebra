@@ -48,8 +48,13 @@ pub const FIRST_HALVING_TESTNET: Height = Height(1_116_000);
 /// The funding stream receiver categories.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum FundingStreamReceiver {
+    /// The Electric Coin Company (Boostrap Foundation) funding stream.
     Ecc,
+
+    /// The Zcash Foundation funding stream.
     ZcashFoundation,
+
+    /// The Major Grants (Zcash Community Grants) funding stream.
     MajorGrants,
 }
 
