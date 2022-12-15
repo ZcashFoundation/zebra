@@ -27,7 +27,7 @@ pub mod parameters;
 
 pub use parameters::*;
 
-/// A serialized `getblocktemplate` RPC response.
+/// A serialized `getblocktemplate` RPC response in template mode.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetBlockTemplate {
     /// The getblocktemplate RPC capabilities supported by Zebra.
@@ -232,5 +232,62 @@ impl GetBlockTemplate {
 
             submit_old,
         }
+    }
+}
+
+/// Error response to a `getblocktemplate` RPC request in proposal mode.
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProposalRejectReason {
+    /// Block rejected as invalid
+    Rejected,
+}
+
+/// Response to a `getblocktemplate` RPC request in proposal mode.
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged, rename_all = "kebab-case")]
+pub enum ProposalResponse {
+    /// Block was not successfully submitted, return error
+    ErrorResponse {
+        /// Reason the proposal was invalid as-is
+        reject_reason: ProposalRejectReason,
+
+        /// The getblocktemplate RPC capabilities supported by Zebra.
+        capabilities: Vec<String>,
+    },
+
+    /// Block successfully proposed, returns null
+    Valid,
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+/// A `getblocktemplate` RPC response.
+pub enum Response {
+    /// `getblocktemplate` RPC request in template mode.
+    TemplateMode(Box<GetBlockTemplate>),
+
+    /// `getblocktemplate` RPC request in proposal mode.
+    ProposalMode(ProposalResponse),
+}
+
+impl From<ProposalRejectReason> for ProposalResponse {
+    fn from(reject_reason: ProposalRejectReason) -> Self {
+        // Convert default values
+        let capabilities: Vec<String> = GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+
+        Self::ErrorResponse {
+            reject_reason,
+            capabilities,
+        }
+    }
+}
+
+impl From<ProposalRejectReason> for Response {
+    fn from(error_response: ProposalRejectReason) -> Self {
+        Self::ProposalMode(ProposalResponse::from(error_response))
     }
 }

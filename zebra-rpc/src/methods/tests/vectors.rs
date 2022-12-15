@@ -996,7 +996,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         .await
         .respond(mempool::Response::FullTransactions(vec![]));
 
-    let get_block_template = get_block_template
+    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
         .await
         .unwrap_or_else(|error| match error.try_into_panic() {
             Ok(panic_object) => panic::resume_unwind(panic_object),
@@ -1004,7 +1004,9 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
                 panic!("getblocktemplate task was unexpectedly cancelled: {cancelled_error:?}")
             }
         })
-        .expect("unexpected error in getblocktemplate RPC call");
+        .expect("unexpected error in getblocktemplate RPC call") else {
+            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+        };
 
     assert_eq!(
         get_block_template.capabilities,

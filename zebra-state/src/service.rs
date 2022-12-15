@@ -815,7 +815,7 @@ impl ReadStateService {
         let latest_non_finalized_state = self.latest_non_finalized_state();
 
         let Some(best_chain) = latest_non_finalized_state.best_chain() else {
-            Err(crate::ValidateContextError::NotReadyToBeValidated)?        
+            Err(crate::ValidateContextError::NotReadyToBeValidated)?
         };
 
         if best_chain.non_finalized_tip_hash() != prepared.block.header.previous_block_hash {

@@ -11,7 +11,6 @@ pub enum GetBlockTemplateRequestMode {
     Template,
 
     /// Indicates a request to validate block data.
-    /// Currently unsupported and will return an error.
     Proposal,
 }
 
@@ -68,14 +67,14 @@ pub struct JsonParameters {
     /// Defines whether the RPC method should generate a block template or attempt to
     /// validate block data, checking against all of the server's usual acceptance rules
     /// (excluding the check for a valid proof-of-work).
-    // TODO: Support `proposal` mode.
     #[serde(default)]
     pub mode: GetBlockTemplateRequestMode,
 
-    /// Must be omitted as "proposal" mode is currently unsupported.
+    /// Must be omitted when `getblocktemplate` RPC is called in "template" mode (or when `mode` is omitted).
+    /// Must be provided when `getblocktemplate` RPC is called in "proposal" mode.
     ///
     /// Hex-encoded block data to be validated and checked against the server's usual acceptance rules
-    /// (excluding the check for a valid proof-of-work) when `mode` is set to `proposal`.
+    /// (excluding the check for a valid proof-of-work).
     pub data: Option<HexData>,
 
     /// A list of client-side supported capability features

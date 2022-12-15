@@ -28,21 +28,70 @@ use crate::methods::get_block_template_rpcs::{
 
 pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
 
+use super::types::hex_data::HexData;
+
 // - Parameter checks
 
-/// Returns an error if the get block template RPC `parameters` are invalid.
-pub fn check_block_template_parameters(
-    parameters: &get_block_template::JsonParameters,
-) -> Result<()> {
-    if parameters.data.is_some() || parameters.mode == GetBlockTemplateRequestMode::Proposal {
-        return Err(Error {
-            code: ErrorCode::InvalidParams,
-            message: "\"proposal\" mode is currently unsupported by Zebra".to_string(),
-            data: None,
-        });
+impl JsonParameters {
+    /// Checks that `data` is omitted in `Template` mode or provided in `Proposal` mode,
+    ///
+    /// Returns an error if there's a mismatch between the mode and whether `data` is provided.
+    /// Returns Ok(Some(data)) with the block proposal hexdata if in `Proposal` mode.
+    /// Returns Ok(None) if in `Template` mode.
+    pub fn block_proposal(parameters: Option<Self>) -> Result<Option<HexData>> {
+        let Some(parameters) = parameters else {
+            return Ok(None)
+        };
+
+        match parameters {
+            Self {
+                mode: GetBlockTemplateRequestMode::Template,
+                data: None,
+                ..
+            } => Ok(None),
+
+            Self {
+                mode: GetBlockTemplateRequestMode::Proposal,
+                data: data @ Some(_),
+                ..
+            } => Ok(data),
+
+            Self {
+                mode: GetBlockTemplateRequestMode::Proposal,
+                data: None,
+                ..
+            } => Err(Error {
+                code: ErrorCode::InvalidParams,
+                message: "\"data\" parameter must be \
+                          provided in \"proposal\" mode"
+                    .to_string(),
+                data: None,
+            }),
+
+            Self {
+                mode: GetBlockTemplateRequestMode::Template,
+                data: Some(_),
+                ..
+            } => Err(Error {
+                code: ErrorCode::InvalidParams,
+                message: "\"data\" parameter must be \
+                          omitted in \"template\" mode"
+                    .to_string(),
+                data: None,
+            }),
+        }
     }
 
-    Ok(())
+    /// Checks if `mode` parameters is `Proposal`.
+    pub fn is_proposal_mode(parameters: &Option<Self>) -> bool {
+        matches!(
+            parameters,
+            Some(get_block_template::JsonParameters {
+                mode: GetBlockTemplateRequestMode::Proposal,
+                ..
+            })
+        )
+    }
 }
 
 /// Returns the miner address, or an error if it is invalid.

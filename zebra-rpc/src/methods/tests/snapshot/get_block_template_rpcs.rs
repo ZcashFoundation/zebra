@@ -195,10 +195,12 @@ pub async fn test_responses<State, ReadState>(
         .await
         .respond(mempool::Response::FullTransactions(vec![]));
 
-    let get_block_template = get_block_template
+    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
         .await
         .expect("unexpected panic in getblocktemplate RPC task")
-        .expect("unexpected error in getblocktemplate RPC call");
+        .expect("unexpected error in getblocktemplate RPC call") else {
+            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+        };
 
     let coinbase_tx: Transaction = get_block_template
         .coinbase_txn
@@ -250,10 +252,12 @@ pub async fn test_responses<State, ReadState>(
         .await
         .respond(mempool::Response::FullTransactions(vec![]));
 
-    let get_block_template = get_block_template
+    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
         .await
         .expect("unexpected panic in getblocktemplate RPC task")
-        .expect("unexpected error in getblocktemplate RPC call");
+        .expect("unexpected error in getblocktemplate RPC call") else {
+            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+        };
 
     let coinbase_tx: Transaction = get_block_template
         .coinbase_txn
@@ -287,7 +291,7 @@ fn snapshot_rpc_getblockhash(block_hash: GetBlockHash, settings: &insta::Setting
 /// Snapshot `getblocktemplate` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblocktemplate(
     variant: &'static str,
-    block_template: GetBlockTemplate,
+    block_template: Box<GetBlockTemplate>,
     coinbase_tx: Transaction,
     settings: &insta::Settings,
 ) {
