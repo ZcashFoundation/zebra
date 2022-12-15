@@ -81,6 +81,32 @@ impl LongPollInput {
             mempool_transaction_mined_ids,
         }
     }
+
+    /// Returns the [`LongPollId`] for this [`LongPollInput`].
+    /// Performs lossy conversion on some fields.
+    pub fn generate_id(&self) -> LongPollId {
+        let mut tip_hash_checksum = 0;
+        update_checksum(&mut tip_hash_checksum, self.tip_hash.0);
+
+        let mut mempool_transaction_content_checksum: u32 = 0;
+        for tx_mined_id in self.mempool_transaction_mined_ids.iter() {
+            update_checksum(&mut mempool_transaction_content_checksum, tx_mined_id.0);
+        }
+
+        LongPollId {
+            tip_height: self.tip_height.0,
+
+            tip_hash_checksum,
+
+            max_timestamp: self.max_time.timestamp(),
+
+            // It's ok to do wrapping conversions here,
+            // because long polling checks are probabilistic.
+            mempool_transaction_count: self.mempool_transaction_mined_ids.len() as u32,
+
+            mempool_transaction_content_checksum,
+        }
+    }
 }
 
 /// The encoded long poll ID, generated from the [`LongPollInput`].
@@ -159,33 +185,6 @@ pub struct LongPollId {
     /// If an attacker could also keep the number of transactions constant,
     /// a new template will be generated when the tip hash changes, or the max time is reached.
     pub mempool_transaction_content_checksum: u32,
-}
-
-impl From<LongPollInput> for LongPollId {
-    /// Lossy conversion from LongPollInput to LongPollId.
-    fn from(input: LongPollInput) -> Self {
-        let mut tip_hash_checksum = 0;
-        update_checksum(&mut tip_hash_checksum, input.tip_hash.0);
-
-        let mut mempool_transaction_content_checksum: u32 = 0;
-        for tx_mined_id in input.mempool_transaction_mined_ids.iter() {
-            update_checksum(&mut mempool_transaction_content_checksum, tx_mined_id.0);
-        }
-
-        Self {
-            tip_height: input.tip_height.0,
-
-            tip_hash_checksum,
-
-            max_timestamp: input.max_time.timestamp(),
-
-            // It's ok to do wrapping conversions here,
-            // because long polling checks are probabilistic.
-            mempool_transaction_count: input.mempool_transaction_mined_ids.len() as u32,
-
-            mempool_transaction_content_checksum,
-        }
-    }
 }
 
 /// Update `checksum` from `item`, so changes in `item` are likely to also change `checksum`.

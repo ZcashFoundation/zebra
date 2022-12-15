@@ -150,7 +150,7 @@ pub struct GetBlockTemplateChainInfo {
     pub tip_hash: block::Hash,
 
     /// The current state tip height.
-    /// The block template OAfor the candidate block is the next block after this block.
+    /// The block template for the candidate block is the next block after this block.
     /// Depends on the `tip_hash`.
     pub tip_height: block::Height,
 
