@@ -7,7 +7,7 @@ edition = "2021"
 
 [features]
 default = []
-getblocktemplate-rpcs = []
+getblocktemplate-rpcs = ["zebra-state/getblocktemplate-rpcs"]
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
 
 [dependencies]
