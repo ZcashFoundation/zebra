@@ -3,11 +3,19 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use futures::{future, FutureExt, TryFutureExt};
 use tokio::sync::watch;
 
-use crate::{block, chain_tip::ChainTip, parameters::Network, transaction};
+use crate::{
+    block,
+    chain_tip::{BestTipChanged, ChainTip},
+    parameters::Network,
+    transaction,
+};
 
 /// A sender to sets the values read by a [`MockChainTip`].
+//
+// Update `best_tip_changed()` for each new field that is added to MockChainTipSender.
 pub struct MockChainTipSender {
     /// A sender that sets the `best_tip_height` of a [`MockChainTip`].
     best_tip_height: watch::Sender<Option<block::Height>>,
@@ -111,6 +119,40 @@ impl ChainTip for MockChainTip {
                 self.best_tip_height()
                     .map(|tip_height| (estimated_distance, tip_height))
             })
+    }
+
+    /// Returns when any sender channel changes.
+    /// Returns an error if any sender was dropped.
+    ///
+    /// Marks the changed channel as seen when the returned future completes.
+    //
+    // Update this method when each new mock field is added.
+    fn best_tip_changed(&mut self) -> BestTipChanged {
+        // A future that returns when the first watch channel has changed
+        let select_changed = future::select_all([
+            // Erase the differing future types for each channel, and map their error types
+            BestTipChanged::new(self.best_tip_height.changed().err_into()),
+            BestTipChanged::new(self.best_tip_hash.changed().err_into()),
+            BestTipChanged::new(self.best_tip_block_time.changed().err_into()),
+            BestTipChanged::new(
+                self.estimated_distance_to_network_chain_tip
+                    .changed()
+                    .err_into(),
+            ),
+        ])
+        // Map the select result to the expected type, dropping the unused channels
+        .map(|(changed_result, _changed_index, _remaining_futures)| changed_result);
+
+        BestTipChanged::new(select_changed)
+    }
+
+    /// Marks all sender channels as seen.
+    fn mark_best_tip_seen(&mut self) {
+        self.best_tip_height.borrow_and_update();
+        self.best_tip_hash.borrow_and_update();
+        self.best_tip_block_time.borrow_and_update();
+        self.estimated_distance_to_network_chain_tip
+            .borrow_and_update();
     }
 }
 

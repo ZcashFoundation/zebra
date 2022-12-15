@@ -1,0 +1,44 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+expression: block_template
+---
+{
+  "capabilities": [],
+  "version": 4,
+  "previousblockhash": "0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8",
+  "blockcommitmentshash": "fe03d8236b0835c758f59d279230ebaee2128754413103b9edb17c07451c2c82",
+  "lightclientroothash": "fe03d8236b0835c758f59d279230ebaee2128754413103b9edb17c07451c2c82",
+  "finalsaplingroothash": "fe03d8236b0835c758f59d279230ebaee2128754413103b9edb17c07451c2c82",
+  "defaultroots": {
+    "merkleroot": "6b370584714ab567c9c014ce72d325ab6c5927e181ac891acb35e6d4b6cc19a1",
+    "chainhistoryroot": "94470fa66ebd1a5fdb109a5aa3f3204f14de3a42135e71aa7f4c44055847e0b5",
+    "authdataroot": "0dbb78de9fdcd494307971e36dd049fc82d0ee9ee53aec8fd2a54dc0e426289b",
+    "blockcommitmentshash": "fe03d8236b0835c758f59d279230ebaee2128754413103b9edb17c07451c2c82"
+  },
+  "transactions": [],
+  "coinbasetxn": {
+    "data": "050000800a27a726b4d0d6c20000000041be1900010000000000000000000000000000000000000000000000000000000000000000ffffffff040341be190000000004286bee000000000017a914d45cb1adffb5215a42720532a076f02c7c778c908738c94d010000000017a91469a9f95a98fe581b6eb52841ef4806dc4402eb908740787d010000000017a914931fec54c1fea86e574462cc32013f5400b891298780b2e60e0000000017a914adadadadadadadadadadadadadadadadadadadad87000000",
+    "hash": "6b370584714ab567c9c014ce72d325ab6c5927e181ac891acb35e6d4b6cc19a1",
+    "authdigest": "0dbb78de9fdcd494307971e36dd049fc82d0ee9ee53aec8fd2a54dc0e426289b",
+    "depends": [],
+    "fee": 0,
+    "sigops": 0,
+    "required": true
+  },
+  "longpollid": "00016871043eab7f731654008728000000000000000000",
+  "target": "0000000000000000000000000000000000000000000000000000000000000001",
+  "mintime": 1654008606,
+  "mutable": [
+    "time",
+    "transactions",
+    "prevblock"
+  ],
+  "noncerange": "00000000ffffffff",
+  "sigoplimit": 20000,
+  "sizelimit": 2000000,
+  "curtime": 1654008617,
+  "bits": "01010000",
+  "height": 1687105,
+  "maxtime": 1654008728,
+  "submitold": false
+}

@@ -22,7 +22,9 @@ use zebra_state::{ReadRequest, ReadResponse};
 use crate::methods::{
     best_chain_tip_height,
     get_block_template_rpcs::{
-        constants::DEFAULT_SOLUTION_RATE_WINDOW_SIZE,
+        constants::{
+            DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
+        },
         get_block_template::{
             check_block_template_parameters, check_miner_address, check_synced_to_tip,
             fetch_mempool_transactions, fetch_state_tip_and_local_time,
@@ -321,7 +323,7 @@ where
 
         // Clone Services
         let mempool = self.mempool.clone();
-        let latest_chain_tip = self.latest_chain_tip.clone();
+        let mut latest_chain_tip = self.latest_chain_tip.clone();
         let sync_status = self.sync_status.clone();
         let state = self.state.clone();
 
@@ -347,14 +349,18 @@ where
 
             // The loop returns the server long poll ID,
             // which should be different to the client long poll ID.
-            let (server_long_poll_id, chain_tip_and_local_time, mempool_txs) = loop {
+            let (server_long_poll_id, chain_tip_and_local_time, mempool_txs, submit_old) = loop {
                 // Check if we are synced to the tip.
                 // The result of this check can change during long polling.
                 //
-                // TODO:
-                // - add `async changed()` methods to ChainTip and ChainSyncStatus
-                //   (using `changed() -> Changed` and `impl Future<()> for Changed`)
+                // Optional TODO:
+                // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
                 check_synced_to_tip(network, latest_chain_tip.clone(), sync_status.clone())?;
+
+                // We're just about to fetch state data, then maybe wait for any changes.
+                // Mark all the changes before the fetch as seen.
+                // Changes are also ignored in any clones made after the mark.
+                latest_chain_tip.mark_best_tip_seen();
 
                 // Fetch the state data and local time for the block template:
                 // - if the tip block hash changes, we must return from long polling,
@@ -362,18 +368,19 @@ where
                 //
                 // We always return after 90 minutes on mainnet, even if we have the same response,
                 // because the max time has been reached.
-                //
-                // TODO: timeout and exit the loop when max time is reached
                 let chain_tip_and_local_time =
                     fetch_state_tip_and_local_time(state.clone()).await?;
 
                 // Fetch the mempool data for the block template:
                 // - if the mempool transactions change, we might return from long polling.
                 //
-                // TODO:
-                // - add a `MempoolChange` type with an `async changed()` method.
-                // - if we are long polling, pause between state and mempool,
-                //   to allow transactions to re-verify (only works after PR #5841)
+                // If the chain fork has just changed, miners want to get the new block as fast
+                // as possible, rather than wait for transactions to re-verify. This increases
+                // miner profits (and any delays can cause chain forks). So we don't wait between
+                // the chain tip changing and getting mempool transactions.
+                //
+                // Optional TODO:
+                // - add a `MempoolChange` type with an `async changed()` method (like `ChainTip`)
                 let mempool_txs = fetch_mempool_transactions(mempool.clone()).await?;
 
                 // - Long poll ID calculation
@@ -390,14 +397,53 @@ where
                 // - the server long poll ID is different to the client long poll ID, or
                 // - the previous loop iteration waited until the max time.
                 if Some(&server_long_poll_id) != client_long_poll_id.as_ref() || max_time_reached {
-                    break (server_long_poll_id, chain_tip_and_local_time, mempool_txs);
+                    let mut submit_old = client_long_poll_id
+                        .as_ref()
+                        .map(|old_long_poll_id| server_long_poll_id.submit_old(old_long_poll_id));
+
+                    // On testnet, the max time changes the block difficulty, so old shares are
+                    // invalid. On mainnet, this means there has been 90 minutes without a new
+                    // block or mempool transaction, which is very unlikely. So the miner should
+                    // probably reset anyway.
+                    if max_time_reached {
+                        submit_old = Some(false);
+                    }
+
+                    break (
+                        server_long_poll_id,
+                        chain_tip_and_local_time,
+                        mempool_txs,
+                        submit_old,
+                    );
                 }
 
-                // This duration can be slightly lower than needed, if cur_time was clamped
-                // to min_time. In that case the wait is very long, and it's ok to return early.
+                // - Polling wait conditions
                 //
-                // It can also be zero if cur_time was clamped to max_time.
-                // In that case, we want to wait for another change, and ignore this timeout.
+                // TODO: when we're happy with this code, split it into a function.
+                //
+                // Periodically check the mempool for changes.
+                //
+                // Optional TODO:
+                // Remove this polling wait if we switch to using futures to detect sync status
+                // and mempool changes.
+                let wait_for_mempool_request = tokio::time::sleep(Duration::from_secs(
+                    GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
+                ));
+
+                // Return immediately if the chain tip has changed.
+                let wait_for_best_tip_change = latest_chain_tip.best_tip_changed();
+
+                // Wait for the maximum block time to elapse. This can change the block header
+                // on testnet. (On mainnet it can happen due to a network disconnection, or a
+                // rapid drop in hash rate.)
+                //
+                // This duration might be slightly lower than the actual maximum,
+                // if cur_time was clamped to min_time. In that case the wait is very long,
+                // and it's ok to return early.
+                //
+                // It can also be zero if cur_time was clamped to max_time. In that case,
+                // we want to wait for another change, and ignore this timeout. So we use an
+                // `OptionFuture::None`.
                 let duration_until_max_time = chain_tip_and_local_time
                     .max_time
                     .saturating_duration_since(chain_tip_and_local_time.cur_time);
@@ -408,16 +454,70 @@ where
                 }
                 .into();
 
-                // TODO: remove this polling wait after we've switched to
-                //       using futures to detect state tip, sync status, and mempool changes
-                let temp_wait_before_requests = tokio::time::sleep(Duration::from_secs(5));
+                // Optional TODO:
+                // `zcashd` generates the next coinbase transaction while waiting for changes.
+                // When Zebra supports shielded coinbase, we might want to do this in parallel.
+                // But the coinbase value depends on the selected transactions, so this needs
+                // further analysis to check if it actually saves us any time.
 
+                // TODO: change logging to debug after testing
                 tokio::select! {
-                    // Poll the futures in the same order as they are listed here.
+                    // Poll the futures in the listed order, for efficiency.
+                    // We put the most frequent conditions first.
                     biased;
 
-                    // TODO: change logging to debug after testing
+                    // This timer elapses every few seconds
+                    _elapsed = wait_for_mempool_request => {
+                        tracing::info!(
+                            max_time = ?chain_tip_and_local_time.max_time,
+                            cur_time = ?chain_tip_and_local_time.cur_time,
+                            ?server_long_poll_id,
+                            ?client_long_poll_id,
+                            GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
+                            "checking for a new mempool change after waiting a few seconds"
+                        );
+                    }
+
+                    // The state changes after around a target block interval (75s)
+                    tip_changed_result = wait_for_best_tip_change => {
+                        match tip_changed_result {
+                            Ok(()) => {
+                                tracing::info!(
+                                    max_time = ?chain_tip_and_local_time.max_time,
+                                    cur_time = ?chain_tip_and_local_time.cur_time,
+                                    ?server_long_poll_id,
+                                    ?client_long_poll_id,
+                                    "returning from long poll because state has changed"
+                                );
+                            }
+
+                            Err(recv_error) => {
+                                // This log should stay at info when the others go to debug,
+                                // it will help with debugging.
+                                tracing::info!(
+                                    ?recv_error,
+                                    max_time = ?chain_tip_and_local_time.max_time,
+                                    cur_time = ?chain_tip_and_local_time.cur_time,
+                                    ?server_long_poll_id,
+                                    ?client_long_poll_id,
+                                    "returning from long poll due to a state error.\
+                                     Is Zebra shutting down?"
+                                );
+
+                                return Err(Error {
+                                    code: ErrorCode::ServerError(0),
+                                    message: recv_error.to_string(),
+                                    data: None,
+                                });
+                            }
+                        }
+                    }
+
+                    // The max time does not elapse during normal operation on mainnet,
+                    // and it rarely elapses on testnet.
                     Some(_elapsed) = wait_for_max_time => {
+                        // This log should stay at info when the others go to debug,
+                        // it's very rare.
                         tracing::info!(
                             max_time = ?chain_tip_and_local_time.max_time,
                             cur_time = ?chain_tip_and_local_time.cur_time,
@@ -427,16 +527,6 @@ where
                         );
 
                         max_time_reached = true;
-                    }
-
-                    _elapsed = temp_wait_before_requests => {
-                        tracing::info!(
-                            max_time = ?chain_tip_and_local_time.max_time,
-                            cur_time = ?chain_tip_and_local_time.cur_time,
-                            ?server_long_poll_id,
-                            ?client_long_poll_id,
-                            "checking long poll inputs again after waiting 5 seconds"
-                        );
                     }
                 }
             };
@@ -482,6 +572,7 @@ where
                 coinbase_txn,
                 &mempool_txs,
                 default_roots,
+                submit_old,
             );
 
             Ok(response)

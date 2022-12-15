@@ -8,17 +8,13 @@
 use std::{fmt, sync::Arc};
 
 use chrono::{DateTime, Utc};
+use futures::TryFutureExt;
 use tokio::sync::watch;
 use tracing::{field, instrument};
 
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
-
-#[cfg(any(test, feature = "proptest-impl"))]
-use zebra_chain::serialization::arbitrary::datetime_full;
 use zebra_chain::{
     block,
-    chain_tip::ChainTip,
+    chain_tip::{BestTipChanged, ChainTip},
     parameters::{Network, NetworkUpgrade},
     transaction::{self, Transaction},
 };
@@ -28,6 +24,12 @@ use crate::{
 };
 
 use TipAction::*;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use zebra_chain::serialization::arbitrary::datetime_full;
 
 #[cfg(test)]
 mod tests;
@@ -314,6 +316,8 @@ impl LatestChainTip {
     /// A single read lock is acquired to clone `T`, and then released after the clone.
     /// See the performance note on [`WatchReceiver::with_watch_data`].
     ///
+    /// Does not mark the watched data as seen.
+    ///
     /// # Correctness
     ///
     /// To avoid deadlocks, see the correctness note on [`WatchReceiver::with_watch_data`].
@@ -386,6 +390,19 @@ impl ChainTip for LatestChainTip {
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
         self.with_chain_tip_block(|block| block.transaction_hashes.clone())
             .unwrap_or_else(|| Arc::new([]))
+    }
+
+    /// Returns when the state tip changes.
+    ///
+    /// Marks the state tip as seen when the returned future completes.
+    #[instrument(skip(self))]
+    fn best_tip_changed(&mut self) -> BestTipChanged {
+        BestTipChanged::new(self.receiver.changed().err_into())
+    }
+
+    /// Mark the current best state tip as seen.
+    fn mark_best_tip_seen(&mut self) {
+        self.receiver.mark_as_seen();
     }
 }
 
