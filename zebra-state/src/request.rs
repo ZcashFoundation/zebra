@@ -564,7 +564,7 @@ pub enum Request {
     ///
     /// It is the caller's responsibility to perform semantic validation.
     ///
-    /// Returns [`Response::Validated`] when successful, or an error if
+    /// Returns [`Response::ValidBlock`] with the hash of the block when successful, or an error if
     /// the block fails contextual validation.
     CheckBlockValidity(PreparedBlock),
 }
@@ -807,7 +807,7 @@ pub enum ReadRequest {
     ///
     /// It is the caller's responsibility to perform semantic validation.
     ///
-    /// Returns [`Response::Validated`] when successful, or an error if
+    /// Returns [`Response::ValidBlock`] with the hash of the block when successful, or an error if
     /// the block fails contextual validation.
     CheckBlockValidity(PreparedBlock),
 }

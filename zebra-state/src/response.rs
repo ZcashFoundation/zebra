@@ -62,7 +62,7 @@ pub enum Response {
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`Request::CheckBlockValidity`](crate::Request::CheckBlockValidity)
-    Validated,
+    ValidBlock(block::Hash),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -144,7 +144,7 @@ pub enum ReadResponse {
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::CheckBlockValidity`](crate::ReadRequest::CheckBlockValidity)
-    Validated,
+    ValidBlock(block::Hash),
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -224,7 +224,7 @@ impl TryFrom<ReadResponse> for Response {
             }
 
             #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadResponse::Validated => Ok(Response::Validated),
+            ReadResponse::ValidBlock(block_hash) => Ok(Response::ValidBlock(block_hash)),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::BlockHash(_) => {
