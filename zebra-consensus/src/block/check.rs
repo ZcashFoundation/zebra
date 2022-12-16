@@ -58,18 +58,17 @@ pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>,
     Ok(first.clone())
 }
 
-/// Returns `Ok(())` if `hash` passes:
+/// Returns `Ok(ExpandedDifficulty)` if `difficulty_threshold` of `header` passes:
 ///   - the target difficulty limit for `network` (PoWLimit), and
 ///   - the difficulty filter,
-/// based on the fields in `header`.
 ///
-/// If the block is invalid, returns an error containing `height` and `hash`.
-pub fn difficulty_is_valid(
+/// If the header is invalid, returns an error containing `height` and `hash`.
+pub fn difficulty_threshold_is_valid(
     header: &Header,
     network: Network,
     height: &Height,
     hash: &Hash,
-) -> Result<(), BlockError> {
+) -> Result<ExpandedDifficulty, BlockError> {
     let difficulty_threshold = header
         .difficulty_threshold
         .to_expanded()
@@ -89,6 +88,23 @@ pub fn difficulty_is_valid(
             ExpandedDifficulty::target_difficulty_limit(network),
         ))?;
     }
+
+    Ok(difficulty_threshold)
+}
+
+/// Returns `Ok(())` if `hash` passes:
+///   - the target difficulty limit for `network` (PoWLimit), and
+///   - the difficulty filter,
+/// based on the fields in `header`.
+///
+/// If the block is invalid, returns an error containing `height` and `hash`.
+pub fn difficulty_is_valid(
+    header: &Header,
+    network: Network,
+    height: &Height,
+    hash: &Hash,
+) -> Result<(), BlockError> {
+    let difficulty_threshold = difficulty_threshold_is_valid(header, network, height, hash)?;
 
     // # Consensus
     //

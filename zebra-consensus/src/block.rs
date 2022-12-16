@@ -70,9 +70,9 @@ pub enum VerifyBlockError {
     // TODO: make this into a concrete type, and add it to is_duplicate_request() (#2908)
     Commit(#[source] BoxError),
 
-    #[error("unable to validate block after semantic verification")]
-    // TODO: make this into a concrete type
-    Validate(#[source] BoxError),
+    #[error("unable to validate block proposal: failed semantic verification (proof of work is not checked for proposals)")]
+    // TODO: make this into a concrete type (see #5732)
+    ValidateProposal(#[source] BoxError),
 
     #[error("invalid transaction")]
     Transaction(#[from] TransactionError),
@@ -174,11 +174,15 @@ where
                 Err(BlockError::MaxHeight(height, hash, block::Height::MAX))?;
             }
 
-            // Do the difficulty checks first, to raise the threshold for
-            // attacks that use any other fields.
-            check::difficulty_is_valid(&block.header, network, &height, &hash)?;
-
-            if !request.is_proposal() {
+            // > The block data MUST be validated and checked against the server's usual
+            // > acceptance rules (excluding the check for a valid proof-of-work).
+            // <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
+            if request.is_proposal() {
+                check::difficulty_threshold_is_valid(&block.header, network, &height, &hash)?;
+            } else {
+                // Do the difficulty checks first, to raise the threshold for
+                // attacks that use any other fields.
+                check::difficulty_is_valid(&block.header, network, &height, &hash)?;
                 check::equihash_solution_is_valid(&block.header)?;
             }
 
@@ -285,8 +289,20 @@ where
                 transaction_hashes,
             };
 
-            match request {
-                Request::Commit(_) => match state_service
+            if request.is_proposal() {
+                match state_service
+                    .ready()
+                    .await
+                    .map_err(VerifyBlockError::ValidateProposal)?
+                    .call(zs::Request::CheckBlockProposalValidity(prepared_block))
+                    .await
+                    .map_err(VerifyBlockError::ValidateProposal)?
+                {
+                    zs::Response::ValidBlockProposal => Ok(hash),
+                    _ => unreachable!("wrong response for CheckBlockProposalValidity"),
+                }
+            } else {
+                match state_service
                     .ready()
                     .await
                     .map_err(VerifyBlockError::Commit)?
@@ -299,23 +315,7 @@ where
                         Ok(hash)
                     }
                     _ => unreachable!("wrong response for CommitBlock"),
-                },
-
-                #[cfg(feature = "getblocktemplate-rpcs")]
-                Request::CheckProposal(_) => match state_service
-                    .ready()
-                    .await
-                    .map_err(VerifyBlockError::Validate)?
-                    .call(zs::Request::CheckBlockValidity(prepared_block))
-                    .await
-                    .map_err(VerifyBlockError::Validate)?
-                {
-                    zs::Response::Committed(committed_hash) => {
-                        assert_eq!(committed_hash, hash, "state must validate correct hash");
-                        Ok(hash)
-                    }
-                    _ => unreachable!("wrong response for CheckBlockValidity"),
-                },
+                }
             }
         }
         .instrument(span)

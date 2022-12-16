@@ -61,8 +61,8 @@ pub enum Response {
     ValidBestChainTipNullifiersAndAnchors,
 
     #[cfg(feature = "getblocktemplate-rpcs")]
-    /// Response to [`Request::CheckBlockValidity`](crate::Request::CheckBlockValidity)
-    ValidBlock(block::Hash),
+    /// Response to [`Request::CheckBlockProposalValidity`](crate::Request::CheckBlockProposalValidity)
+    ValidBlockProposal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -143,8 +143,8 @@ pub enum ReadResponse {
     SolutionRate(Option<u128>),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
-    /// Response to [`ReadRequest::CheckBlockValidity`](crate::ReadRequest::CheckBlockValidity)
-    ValidBlock(block::Hash),
+    /// Response to [`ReadRequest::CheckBlockProposalValidity`](crate::ReadRequest::CheckBlockProposalValidity)
+    ValidBlockProposal,
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -224,7 +224,7 @@ impl TryFrom<ReadResponse> for Response {
             }
 
             #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadResponse::ValidBlock(block_hash) => Ok(Response::ValidBlock(block_hash)),
+            ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::BlockHash(_) => {

@@ -55,11 +55,6 @@ pub enum ValidateContextError {
     #[non_exhaustive]
     NotReadyToBeCommitted,
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
-    #[error("block parent not found in non-finalized best chain")]
-    #[non_exhaustive]
-    NotReadyToBeValidated,
-
     #[error("block height {candidate_height:?} is lower than the current finalized height {finalized_tip_height:?}")]
     #[non_exhaustive]
     OrphanedBlock {

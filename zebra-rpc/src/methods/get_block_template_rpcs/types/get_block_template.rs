@@ -244,6 +244,8 @@ pub enum ProposalRejectReason {
 }
 
 /// Response to a `getblocktemplate` RPC request in proposal mode.
+///
+/// See <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged, rename_all = "kebab-case")]
 pub enum ProposalResponse {
@@ -289,5 +291,17 @@ impl From<ProposalRejectReason> for ProposalResponse {
 impl From<ProposalRejectReason> for Response {
     fn from(error_response: ProposalRejectReason) -> Self {
         Self::ProposalMode(ProposalResponse::from(error_response))
+    }
+}
+
+impl From<ProposalResponse> for Response {
+    fn from(proposal_response: ProposalResponse) -> Self {
+        Self::ProposalMode(proposal_response)
+    }
+}
+
+impl From<GetBlockTemplate> for Response {
+    fn from(template: GetBlockTemplate) -> Self {
+        Self::TemplateMode(Box::new(template))
     }
 }

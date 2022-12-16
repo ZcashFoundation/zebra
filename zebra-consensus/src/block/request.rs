@@ -7,12 +7,13 @@ use zebra_chain::block::Block;
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// A request to the chain or block verifier
 pub enum Request {
-    /// Performs semantic validation then calls state with CommitBlock request
+    /// Performs semantic validation, then asks the state to perform contextual validation and commit the block
     Commit(Arc<Block>),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
-    /// Performs semantic validation but skips checking the solution,
-    /// then calls the state with CheckBlockValid request
+    /// Performs semantic validation but skips checking proof of work,
+    /// then asks the state to perform contextual validation.
+    /// Does not commit the block to the state.
     CheckProposal(Arc<Block>),
 }
 
@@ -27,7 +28,7 @@ impl Request {
         })
     }
 
-    /// Checks if request is a proposal
+    /// Returns `true` if the request is a proposal
     pub fn is_proposal(&self) -> bool {
         match self {
             Request::Commit(_) => false,

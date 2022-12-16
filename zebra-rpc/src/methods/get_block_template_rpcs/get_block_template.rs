@@ -23,74 +23,56 @@ use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::methods::get_block_template_rpcs::{
     constants::{MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE},
-    types::{default_roots::DefaultRoots, get_block_template, transaction::TransactionTemplate},
+    types::{default_roots::DefaultRoots, transaction::TransactionTemplate},
 };
 
 pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
 
-use super::types::hex_data::HexData;
-
 // - Parameter checks
 
-impl JsonParameters {
-    /// Checks that `data` is omitted in `Template` mode or provided in `Proposal` mode,
-    ///
-    /// Returns an error if there's a mismatch between the mode and whether `data` is provided.
-    /// Returns Ok(Some(data)) with the block proposal hexdata if in `Proposal` mode.
-    /// Returns Ok(None) if in `Template` mode.
-    pub fn block_proposal(parameters: Option<Self>) -> Result<Option<HexData>> {
-        let Some(parameters) = parameters else {
-            return Ok(None)
+/// Checks that `data` is omitted in `Template` mode or provided in `Proposal` mode,
+///
+/// Returns an error if there's a mismatch between the mode and whether `data` is provided.
+pub fn check_get_block_template_parameters(parameters: &Option<JsonParameters>) -> Result<()> {
+    let Some(parameters) = parameters else {
+            return Ok(())
         };
 
-        match parameters {
-            Self {
-                mode: GetBlockTemplateRequestMode::Template,
-                data: None,
-                ..
-            } => Ok(None),
-
-            Self {
-                mode: GetBlockTemplateRequestMode::Proposal,
-                data: data @ Some(_),
-                ..
-            } => Ok(data),
-
-            Self {
-                mode: GetBlockTemplateRequestMode::Proposal,
-                data: None,
-                ..
-            } => Err(Error {
-                code: ErrorCode::InvalidParams,
-                message: "\"data\" parameter must be \
-                          provided in \"proposal\" mode"
-                    .to_string(),
-                data: None,
-            }),
-
-            Self {
-                mode: GetBlockTemplateRequestMode::Template,
-                data: Some(_),
-                ..
-            } => Err(Error {
-                code: ErrorCode::InvalidParams,
-                message: "\"data\" parameter must be \
-                          omitted in \"template\" mode"
-                    .to_string(),
-                data: None,
-            }),
+    match parameters {
+        JsonParameters {
+            mode: GetBlockTemplateRequestMode::Template,
+            data: None,
+            ..
         }
-    }
+        | JsonParameters {
+            mode: GetBlockTemplateRequestMode::Proposal,
+            data: Some(_),
+            ..
+        } => Ok(()),
 
-    /// Checks if `mode` parameters is `Proposal`.
-    pub fn is_proposal_mode(parameters: &Option<Self>) -> bool {
-        matches!(
-            parameters,
-            Some(get_block_template::JsonParameters {
-                mode: GetBlockTemplateRequestMode::Proposal,
-                ..
-            })
-        )
+        JsonParameters {
+            mode: GetBlockTemplateRequestMode::Proposal,
+            data: None,
+            ..
+        } => Err(Error {
+            code: ErrorCode::InvalidParams,
+            message: "\"data\" parameter must be \
+                          provided in \"proposal\" mode"
+                .to_string(),
+            data: None,
+        }),
+
+        JsonParameters {
+            mode: GetBlockTemplateRequestMode::Template,
+            data: Some(_),
+            ..
+        } => Err(Error {
+            code: ErrorCode::InvalidParams,
+            message: "\"data\" parameter must be \
+                          omitted in \"template\" mode"
+                .to_string(),
+            data: None,
+        }),
     }
 }
 
