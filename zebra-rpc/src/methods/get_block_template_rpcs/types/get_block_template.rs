@@ -162,6 +162,14 @@ pub struct GetBlockTemplate {
 }
 
 impl GetBlockTemplate {
+    /// Returns a `Vec` of capabilities supported by the `getblocktemplate` RPC
+    pub fn capabilities() -> Vec<String> {
+        GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+
     /// Returns a new [`GetBlockTemplate`] struct, based on the supplied arguments and defaults.
     ///
     /// The result of this method only depends on the supplied arguments and constants.
@@ -184,10 +192,7 @@ impl GetBlockTemplate {
             .expect("state always returns a valid difficulty value");
 
         // Convert default values
-        let capabilities: Vec<String> = GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD
-            .iter()
-            .map(ToString::to_string)
-            .collect();
+        let capabilities: Vec<String> = Self::capabilities();
         let mutable: Vec<String> = GET_BLOCK_TEMPLATE_MUTABLE_FIELD
             .iter()
             .map(ToString::to_string)
@@ -275,15 +280,9 @@ pub enum Response {
 
 impl From<ProposalRejectReason> for ProposalResponse {
     fn from(reject_reason: ProposalRejectReason) -> Self {
-        // Convert default values
-        let capabilities: Vec<String> = GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD
-            .iter()
-            .map(ToString::to_string)
-            .collect();
-
         Self::ErrorResponse {
             reject_reason,
-            capabilities,
+            capabilities: GetBlockTemplate::capabilities(),
         }
     }
 }
