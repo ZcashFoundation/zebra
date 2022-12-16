@@ -1716,6 +1716,9 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
+
+                        tracing::info!("attempting to validate and commit block proposal onto a cloned non-finalized state");
+
                         // This clone of the non-finalized state is dropped when this closure returns.
                         // The non-finalized state that's used in the rest of the state (including finalizing
                         // blocks into the db) is not mutated here.
