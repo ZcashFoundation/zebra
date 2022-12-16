@@ -24,7 +24,7 @@ use tracing::Instrument;
 use zebra_chain::{amount::Amount, block, parameters::Network, transparent, work::equihash};
 use zebra_state as zs;
 
-use crate::{error::*, transaction as tx, BoxError};
+use crate::{error::*, parameters::SLOW_START_INTERVAL, transaction as tx, BoxError};
 
 pub mod check;
 pub mod request;
@@ -203,7 +203,10 @@ where
             check::time_is_valid_at(&block.header, now, &height, &hash)
                 .map_err(VerifyBlockError::Time)?;
             let coinbase_tx = check::coinbase_is_first(&block)?;
-            check::subsidy_is_valid(&block, network)?;
+
+            if !request.is_proposal() || height > SLOW_START_INTERVAL {
+                check::subsidy_is_valid(&block, network)?;
+            }
 
             // Now do the slower checks
 

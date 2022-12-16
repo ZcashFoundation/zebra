@@ -169,7 +169,7 @@ where
         let block = request.block();
 
         match block.coinbase_height() {
-            Some(height) if height <= self.max_checkpoint_height => {
+            Some(height) if height <= self.max_checkpoint_height && !request.is_proposal() => {
                 self.checkpoint.call(block).map_err(Into::into).boxed()
             }
             // This also covers blocks with no height, which the block verifier
