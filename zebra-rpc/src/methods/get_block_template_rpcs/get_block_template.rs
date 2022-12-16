@@ -14,7 +14,6 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::Network,
-    serialization::ZcashSerialize,
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
@@ -302,12 +301,8 @@ fn combine_coinbase_outputs(
     // The HashMap returns funding streams in an arbitrary order,
     // but Zebra's snapshot tests expect the same order every time.
     if like_zcashd {
-        // zcashd sorts outputs in serialized data order
-        coinbase_outputs.sort_by_key(|(_amount, script)| {
-            script
-                .zcash_serialize_to_vec()
-                .expect("serialization to Vec never fails")
-        });
+        // zcashd sorts outputs in serialized data order, excluding the length field
+        coinbase_outputs.sort_by_key(|(_amount, script)| script.clone());
     } else {
         // Zebra sorts by amount then script.
         //

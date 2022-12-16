@@ -185,10 +185,15 @@ impl GetBlockTemplate {
         let mut mempool_txs: Vec<TransactionTemplate<amount::NonNegative>> =
             mempool_txs.iter().map(Into::into).collect();
 
-        // Sort in lexicographic data order, like `zcashd` does.
-        // (This is not required, but it simplifies testing by comparing with `zcashd`.)
+        // Transaction selection returns transactions in an arbitrary order,
+        // but Zebra's snapshot tests expect the same order every time.
         if like_zcashd {
+            // Sort in serialized data order, excluding the length byte, like `zcashd` does.
+            // (This is not required, but it simplifies testing by comparing with `zcashd`.)
             mempool_txs.sort_by_key(|tx| tx.data.clone());
+        } else {
+            // Sort by hash, this is faster.
+            mempool_txs.sort_by_key(|tx| tx.hash.bytes_in_display_order());
         }
 
         // Convert difficulty
