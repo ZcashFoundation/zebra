@@ -1,0 +1,8 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+expression: block_template
+---
+{
+  "reject_reason": "rejected",
+  "capabilities": []
+}

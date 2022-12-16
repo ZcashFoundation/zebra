@@ -1100,7 +1100,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
             ..Default::default()
         }))
         .await
-        .expect_err("needs an error when using unsupported mode");
+        .expect_err("needs an error when called in proposal mode without data");
 
     assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
 
@@ -1110,7 +1110,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
             ..Default::default()
         }))
         .await
-        .expect_err("needs an error when passing in block data");
+        .expect_err("needs an error when passing in block data in template mode");
 
     assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
 
