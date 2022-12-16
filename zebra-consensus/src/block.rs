@@ -289,32 +289,37 @@ where
                 transaction_hashes,
             };
 
-            if request.is_proposal() {
-                match state_service
-                    .ready()
-                    .await
-                    .map_err(VerifyBlockError::ValidateProposal)?
-                    .call(zs::Request::CheckBlockProposalValidity(prepared_block))
-                    .await
-                    .map_err(VerifyBlockError::ValidateProposal)?
-                {
-                    zs::Response::ValidBlockProposal => Ok(hash),
-                    _ => unreachable!("wrong response for CheckBlockProposalValidity"),
-                }
-            } else {
-                match state_service
-                    .ready()
-                    .await
-                    .map_err(VerifyBlockError::Commit)?
-                    .call(zs::Request::CommitBlock(prepared_block))
-                    .await
-                    .map_err(VerifyBlockError::Commit)?
-                {
-                    zs::Response::Committed(committed_hash) => {
-                        assert_eq!(committed_hash, hash, "state must commit correct hash");
-                        Ok(hash)
+            match request {
+                Request::Commit(_) => {
+                    match state_service
+                        .ready()
+                        .await
+                        .map_err(VerifyBlockError::Commit)?
+                        .call(zs::Request::CommitBlock(prepared_block))
+                        .await
+                        .map_err(VerifyBlockError::Commit)?
+                    {
+                        zs::Response::Committed(committed_hash) => {
+                            assert_eq!(committed_hash, hash, "state must commit correct hash");
+                            Ok(hash)
+                        }
+                        _ => unreachable!("wrong response for CommitBlock"),
                     }
-                    _ => unreachable!("wrong response for CommitBlock"),
+                }
+
+                #[cfg(feature = "getblocktemplate-rpcs")]
+                Request::CheckProposal(_) => {
+                    match state_service
+                        .ready()
+                        .await
+                        .map_err(VerifyBlockError::ValidateProposal)?
+                        .call(zs::Request::CheckBlockProposalValidity(prepared_block))
+                        .await
+                        .map_err(VerifyBlockError::ValidateProposal)?
+                    {
+                        zs::Response::ValidBlockProposal => Ok(hash),
+                        _ => unreachable!("wrong response for CheckBlockProposalValidity"),
+                    }
                 }
             }
         }
