@@ -188,8 +188,8 @@ impl GetBlockTemplate {
         // Transaction selection returns transactions in an arbitrary order,
         // but Zebra's snapshot tests expect the same order every time.
         if like_zcashd {
-            // Sort in serialized data order, excluding the length byte, like `zcashd` does.
-            // (This is not required, but it simplifies testing by comparing with `zcashd`.)
+            // Sort in serialized data order, excluding the length byte.
+            // `zcashd` sometimes seems to do this, but other times the order is arbitrary.
             mempool_txs.sort_by_key(|tx| tx.data.clone());
         } else {
             // Sort by hash, this is faster.
