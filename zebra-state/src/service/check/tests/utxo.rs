@@ -194,8 +194,11 @@ proptest! {
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block1.clone());
+                finalized_state.network(),
+                &finalized_state.db,
+                &mut non_finalized_state,
+                block1.clone()
+            );
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
@@ -279,8 +282,11 @@ proptest! {
         } else {
             let block2 = Arc::new(block2).prepare();
             let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block2.clone());
+                finalized_state.network(),
+                &finalized_state.db,
+                &mut non_finalized_state,
+                block2.clone()
+            );
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
@@ -357,8 +363,11 @@ proptest! {
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block1);
+            finalized_state.network(),
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block1
+        );
 
         // the block was rejected
         prop_assert_eq!(
@@ -419,8 +428,11 @@ proptest! {
 
         let block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block2);
+            finalized_state.network(),
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block2
+        );
 
         // the block was rejected
         prop_assert_eq!(
@@ -503,8 +515,11 @@ proptest! {
 
         let block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block2);
+            finalized_state.network(),
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block2
+        );
 
         // the block was rejected
         prop_assert_eq!(
@@ -615,8 +630,11 @@ proptest! {
         } else {
             let block2 = block2.clone().prepare();
             let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block2.clone());
+                finalized_state.network(),
+                &finalized_state.db,
+                &mut non_finalized_state,
+                block2.clone()
+            );
 
             // the block was committed
             prop_assert_eq!(commit_result, Ok(()));
@@ -651,8 +669,11 @@ proptest! {
 
         let block3 = Arc::new(block3).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block3);
+            finalized_state.network(),
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block3
+        );
 
         // the block was rejected
         if use_finalized_state_spend {
@@ -725,8 +746,11 @@ proptest! {
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block1);
+            finalized_state.network(),
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block1
+        );
 
         // the block was rejected
         prop_assert_eq!(
@@ -790,8 +814,11 @@ proptest! {
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block1);
+            finalized_state.network(),
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block1
+        );
 
         // the block was rejected
         prop_assert_eq!(
@@ -885,7 +912,8 @@ fn new_state_with_mainnet_transparent_data(
     } else {
         let block1 = block1.clone().prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
+            finalized_state.network(),
+            &finalized_state.db,
             &mut non_finalized_state,
             block1.clone(),
         );

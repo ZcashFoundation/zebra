@@ -102,7 +102,8 @@ proptest! {
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-                &finalized_state,
+                finalized_state.network(),
+                &finalized_state.db,
                 &mut non_finalized_state,
                 block1.clone()
             );
@@ -156,7 +157,8 @@ proptest! {
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
+            finalized_state.network(),
+            &finalized_state.db,
             &mut non_finalized_state,
             block1
         );
@@ -217,7 +219,8 @@ proptest! {
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
+            finalized_state.network(),
+            &finalized_state.db,
             &mut non_finalized_state,
             block1
         );
@@ -278,8 +281,11 @@ proptest! {
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block1);
+            finalized_state.network(),
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block1
+        );
 
         prop_assert_eq!(
             commit_result,
@@ -364,7 +370,8 @@ proptest! {
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-                &finalized_state,
+                finalized_state.network(),
+                &finalized_state.db,
                 &mut non_finalized_state,
                 block1.clone()
             );
@@ -383,7 +390,8 @@ proptest! {
 
         let block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
+            finalized_state.network(),
+            &finalized_state.db,
             &mut non_finalized_state,
             block2
         );
@@ -459,8 +467,11 @@ proptest! {
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block1.clone());
+                finalized_state.network(),
+                &finalized_state.db,
+                &mut non_finalized_state,
+                block1.clone()
+            );
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -506,8 +517,11 @@ proptest! {
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block1);
+            finalized_state.network(),
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block1
+        );
 
         prop_assert_eq!(
             commit_result,
@@ -560,7 +574,8 @@ proptest! {
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
+            finalized_state.network(),
+            &finalized_state.db,
             &mut non_finalized_state,
             block1
         );
@@ -639,8 +654,11 @@ proptest! {
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block1.clone());
+                finalized_state.network(),
+                &finalized_state.db,
+                &mut non_finalized_state,
+                block1.clone()
+            );
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -655,8 +673,11 @@ proptest! {
 
         let block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block2);
+            finalized_state.network(),
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block2
+        );
 
         prop_assert_eq!(
             commit_result,
@@ -731,8 +752,11 @@ proptest! {
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block1.clone());
+                finalized_state.network(),
+                &finalized_state.db,
+                &mut non_finalized_state,
+                block1.clone()
+            );
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -779,8 +803,11 @@ proptest! {
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block1);
+            finalized_state.network(),
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block1
+        );
 
         prop_assert_eq!(
             commit_result,
@@ -837,8 +864,11 @@ proptest! {
 
         let block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block1);
+            finalized_state.network(),
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block1
+        );
 
         prop_assert_eq!(
             commit_result,
@@ -918,8 +948,11 @@ proptest! {
         } else {
             let block1 = Arc::new(block1).prepare();
             let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block1.clone());
+                finalized_state.network(),
+                &finalized_state.db,
+                &mut non_finalized_state,
+                block1.clone()
+            );
 
             prop_assert_eq!(commit_result, Ok(()));
             prop_assert_eq!(Some((Height(1), block1.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -933,8 +966,11 @@ proptest! {
 
         let block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
-            &finalized_state,
-            &mut non_finalized_state,  block2);
+            finalized_state.network(),
+            &finalized_state.db,
+            &mut non_finalized_state,
+            block2
+        );
 
         prop_assert_eq!(
             commit_result,
