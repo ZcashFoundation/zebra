@@ -47,6 +47,12 @@ pub struct NonFinalizedState {
     //
     // Note: this field is currently unused, but it's useful for debugging.
     pub network: Network,
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Configures the non-finalized state to count metrics.
+    ///
+    /// Used for testing block proposals on a cloned non-finalized state.
+    pub should_count_metrics: bool,
 }
 
 impl NonFinalizedState {
@@ -55,6 +61,8 @@ impl NonFinalizedState {
         NonFinalizedState {
             chain_set: Default::default(),
             network,
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            should_count_metrics: true,
         }
     }
 
@@ -494,6 +502,11 @@ impl NonFinalizedState {
 
     /// Update the metrics after `block` is committed
     fn update_metrics_for_committed_block(&self, height: block::Height, hash: block::Hash) {
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        if !self.should_count_metrics {
+            return;
+        }
+
         metrics::counter!("state.memory.committed.block.count", 1);
         metrics::gauge!("state.memory.committed.block.height", height.0 as f64);
 
@@ -517,6 +530,11 @@ impl NonFinalizedState {
 
     /// Update the metrics after `self.chain_set` is modified
     fn update_metrics_for_chains(&self) {
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        if !self.should_count_metrics {
+            return;
+        }
+
         metrics::gauge!("state.memory.chain.count", self.chain_set.len() as f64);
         metrics::gauge!(
             "state.memory.best.chain.length",

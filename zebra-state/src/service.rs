@@ -1718,14 +1718,15 @@ impl Service<ReadRequest> for ReadStateService {
                     span.in_scope(move || {
 
                         tracing::info!("attempting to validate and commit block proposal onto a cloned non-finalized state");
-
+                        let mut latest_non_finalized_state = state.latest_non_finalized_state();
+                        latest_non_finalized_state.should_count_metrics = false;
                         // This clone of the non-finalized state is dropped when this closure returns.
                         // The non-finalized state that's used in the rest of the state (including finalizing
                         // blocks into the db) is not mutated here.
                         write::validate_and_commit_non_finalized(
                             state.network,
                             &state.db,
-                            &mut state.latest_non_finalized_state(),
+                            &mut latest_non_finalized_state,
                             prepared,
                         )?;
 
