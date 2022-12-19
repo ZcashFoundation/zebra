@@ -2,6 +2,8 @@
 //!
 //! [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
+use std::{collections::HashMap, str::FromStr};
+
 use zebra_chain::{
     amount::{Amount, Error, NonNegative},
     block::Height,
@@ -11,8 +13,6 @@ use zebra_chain::{
 };
 
 use crate::{block::subsidy::general::block_subsidy, parameters::subsidy::*};
-
-use std::{collections::HashMap, str::FromStr};
 
 #[cfg(test)]
 mod tests;

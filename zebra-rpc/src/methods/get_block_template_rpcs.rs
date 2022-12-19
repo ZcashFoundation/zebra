@@ -317,6 +317,11 @@ where
         &self,
         parameters: Option<get_block_template::JsonParameters>,
     ) -> BoxFuture<Result<GetBlockTemplate>> {
+        // Should we generate coinbase transactions that are exactly like zcashd's?
+        //
+        // This is useful for testing, but either way Zebra should obey the consensus rules.
+        const COINBASE_LIKE_ZCASHD: bool = true;
+
         // Clone Config
         let network = self.network;
         let miner_address = self.miner_address;
@@ -549,6 +554,7 @@ where
                 next_block_height,
                 miner_address,
                 mempool_txs,
+                COINBASE_LIKE_ZCASHD,
             )
             .await;
 
@@ -563,16 +569,17 @@ where
                 miner_address,
                 &mempool_txs,
                 chain_tip_and_local_time.history_tree.clone(),
+                COINBASE_LIKE_ZCASHD,
             );
 
             let response = GetBlockTemplate::new(
-                next_block_height,
                 &chain_tip_and_local_time,
                 server_long_poll_id,
                 coinbase_txn,
                 &mempool_txs,
                 default_roots,
                 submit_old,
+                COINBASE_LIKE_ZCASHD,
             );
 
             Ok(response)

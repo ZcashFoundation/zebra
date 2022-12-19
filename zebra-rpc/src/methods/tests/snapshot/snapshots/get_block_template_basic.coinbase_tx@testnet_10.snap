@@ -2,15 +2,14 @@
 source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
 expression: coinbase_tx
 ---
-V5(
-  network_upgrade: Nu5,
-  lock_time: Height(Height(0)),
-  expiry_height: Height(1842421),
+V4(
   inputs: [
     Coinbase(
       height: Height(1842421),
-      data: CoinbaseData([]),
-      sequence: 0,
+      data: CoinbaseData([
+        0,
+      ]),
+      sequence: 4294967295,
     ),
   ],
   outputs: [
@@ -31,6 +30,8 @@ V5(
       lock_script: Script("a914adadadadadadadadadadadadadadadadadadadad87"),
     ),
   ],
+  lock_time: Height(Height(0)),
+  expiry_height: Height(1842421),
+  joinsplit_data: None,
   sapling_shielded_data: None,
-  orchard_shielded_data: None,
 )
