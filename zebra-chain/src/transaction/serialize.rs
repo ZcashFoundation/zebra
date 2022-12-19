@@ -990,7 +990,9 @@ impl TrustedPreallocate for transparent::Output {
 /// A serialized transaction.
 ///
 /// Stores bytes that are guaranteed to be deserializable into a [`Transaction`].
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+///
+/// Sorts in lexicographic order of the transaction's serialized data.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct SerializedTransaction {
     bytes: Vec<u8>,
 }
