@@ -1,3 +1,4 @@
+# TODO: rename this action name and filename to Delete infra resources
 name: Delete GCP resources
 
 on:
