@@ -61,6 +61,13 @@ impl Solution {
     }
 }
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+impl Default for Solution {
+    fn default() -> Self {
+        Self([0; SOLUTION_SIZE])
+    }
+}
+
 impl PartialEq<Solution> for Solution {
     fn eq(&self, other: &Solution) -> bool {
         self.0.as_ref() == other.0.as_ref()

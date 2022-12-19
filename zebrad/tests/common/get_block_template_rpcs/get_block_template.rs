@@ -5,11 +5,23 @@
 //!
 //! After finishing the sync, it will call getblocktemplate.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
+use chrono::Utc;
 use color_eyre::eyre::{eyre, Context, Result};
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{
+    block::{self, Block, Height},
+    parameters::Network,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
+    work::equihash::Solution,
+};
+use zebra_rpc::methods::{
+    get_block_template_rpcs::{
+        get_block_template::GetBlockTemplate, types::default_roots::DefaultRoots,
+    },
+    GetBlockHash,
+};
 
 use crate::common::{
     launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
@@ -90,9 +102,9 @@ pub(crate) async fn run() -> Result<()> {
         "calling getblocktemplate RPC method at {rpc_address}, \
          with a mempool that likely has transactions...",
     );
-    let getblocktemplate_response = RPCRequestClient::new(rpc_address)
-        .call("getblocktemplate", "[]".to_string())
-        .await?;
+
+    let client = RPCRequestClient::new(rpc_address);
+    let getblocktemplate_response = client.call("getblocktemplate", "[]".to_string()).await?;
 
     let is_response_success = getblocktemplate_response.status().is_success();
     let response_text = getblocktemplate_response.text().await?;
@@ -103,6 +115,28 @@ pub(crate) async fn run() -> Result<()> {
     );
 
     assert!(is_response_success);
+
+    // Propose a new block with an empty solution and nonce field
+
+    let raw_block_proposal = hex::encode(
+        proposal_block_from_template(serde_json::from_str(&response_text)?)?
+            .zcash_serialize_to_vec()?,
+    );
+
+    let getblocktemplate_proposal_response = client
+        .call(
+            "getblocktemplate",
+            format!(r#"["{{"mode":"proposal","data":"{raw_block_proposal}"}}"])"#),
+        )
+        .await?;
+
+    let is_response_success = getblocktemplate_proposal_response.status().is_success();
+    let response_text = getblocktemplate_proposal_response.text().await?;
+
+    tracing::info!(response_text, "got getblocktemplate proposal response");
+
+    assert!(is_response_success);
+    assert!(response_text.contains(r#""result":null"#));
 
     zebrad.kill(false)?;
 
@@ -115,4 +149,47 @@ pub(crate) async fn run() -> Result<()> {
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
     Ok(())
+}
+
+/// Make a block proposal from [`GetBlockTemplate`]
+fn proposal_block_from_template(
+    GetBlockTemplate {
+        version,
+        height,
+        previous_block_hash: GetBlockHash(previous_block_hash),
+        default_roots:
+            DefaultRoots {
+                merkle_root,
+                block_commitments_hash,
+                ..
+            },
+        target,
+        coinbase_txn,
+        transactions: tx_templates,
+        ..
+    }: GetBlockTemplate,
+) -> Result<Block> {
+    if Height(height) > Height::MAX {
+        Err(eyre!("height field must be lower than Height::MAX"))?;
+    };
+
+    let mut transactions = vec![coinbase_txn.data.as_ref().zcash_deserialize_into()?];
+
+    for tx_template in tx_templates {
+        transactions.push(tx_template.data.as_ref().zcash_deserialize_into()?);
+    }
+
+    Ok(Block {
+        header: Arc::new(block::Header {
+            version,
+            previous_block_hash,
+            merkle_root,
+            commitment_bytes: block_commitments_hash.into(),
+            time: Utc::now(),
+            difficulty_threshold: target.to_compact(),
+            nonce: [0; 32],
+            solution: Solution::default(),
+        }),
+        transactions,
+    })
 }
