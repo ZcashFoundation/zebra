@@ -47,9 +47,11 @@ pub mod chain;
 pub mod error;
 
 pub use block::{
-    subsidy::funding_streams::funding_stream_address,
-    subsidy::funding_streams::funding_stream_values, subsidy::funding_streams::new_coinbase_script,
-    subsidy::general::miner_subsidy, Request, VerifyBlockError, MAX_BLOCK_SIGOPS,
+    subsidy::{
+        funding_streams::{funding_stream_address, funding_stream_values, new_coinbase_script},
+        general::miner_subsidy,
+    },
+    VerifyBlockError, MAX_BLOCK_SIGOPS,
 };
 pub use chain::VerifyChainError;
 pub use checkpoint::{
@@ -57,6 +59,7 @@ pub use checkpoint::{
 };
 pub use config::Config;
 pub use error::BlockError;
+pub use parameters::FundingStreamReceiver;
 pub use primitives::{ed25519, groth16, halo2, redjubjub, redpallas};
 
 /// A boxed [`std::error::Error`].
