@@ -99,6 +99,10 @@ jobs:
     if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
 
     steps:
+      - uses: actions/checkout@v3.2.0
+        with:
+          persist-credentials: false
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
@@ -189,6 +193,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
 
     steps:
+      - uses: actions/checkout@v3.2.0
+        with:
+          persist-credentials: false
+
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
         with:
