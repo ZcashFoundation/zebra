@@ -118,15 +118,17 @@ pub(crate) async fn run() -> Result<()> {
 
     // Propose a new block with an empty solution and nonce field
 
+    let response_json: jsonrpc_core::Success = serde_json::from_str(&response_text)?;
+
     let raw_block_proposal = hex::encode(
-        proposal_block_from_template(serde_json::from_str(&response_text)?)?
+        proposal_block_from_template(serde_json::from_value(response_json.result)?)?
             .zcash_serialize_to_vec()?,
     );
 
     let getblocktemplate_proposal_response = client
         .call(
             "getblocktemplate",
-            format!(r#"["{{"mode":"proposal","data":"{raw_block_proposal}"}}"])"#),
+            format!(r#"[{{"mode":"proposal","data":"{raw_block_proposal}"}}]"#),
         )
         .await?;
 
@@ -163,7 +165,7 @@ fn proposal_block_from_template(
                 block_commitments_hash,
                 ..
             },
-        target,
+        bits: difficulty_threshold,
         coinbase_txn,
         transactions: tx_templates,
         ..
@@ -186,7 +188,7 @@ fn proposal_block_from_template(
             merkle_root,
             commitment_bytes: block_commitments_hash.into(),
             time: Utc::now(),
-            difficulty_threshold: target.to_compact(),
+            difficulty_threshold,
             nonce: [0; 32],
             solution: Solution::default(),
         }),
