@@ -4,5 +4,7 @@ expression: block_template
 ---
 {
   "reject_reason": "rejected",
-  "capabilities": []
+  "capabilities": [
+    "proposal"
+  ]
 }
