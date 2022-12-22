@@ -18,7 +18,8 @@ use zebra_chain::{
 };
 use zebra_rpc::methods::{
     get_block_template_rpcs::{
-        get_block_template::GetBlockTemplate, types::default_roots::DefaultRoots,
+        get_block_template::{GetBlockTemplate, ProposalResponse},
+        types::default_roots::DefaultRoots,
     },
     GetBlockHash,
 };
@@ -113,12 +114,11 @@ pub(crate) async fn run() -> Result<()> {
              with a mempool that likely has transactions...",
         );
 
-        if try_validate_block_template(&client).await.is_ok() {
-            break;
-        } else {
-            assert!(num_remaining_retries > 0);
-            num_remaining_retries -= 1;
-        }
+        match try_validate_block_template(&client).await {
+            Ok(()) => break,
+            Err(_) if num_remaining_retries > 0 => num_remaining_retries -= 1,
+            err => return err,
+        };
     }
 
     zebrad.kill(false)?;
@@ -155,12 +155,13 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
 
     assert!(is_response_success);
 
-    response_text
-        .contains(r#""result":null"#)
-        .then_some(())
-        .ok_or_else(|| {
-            eyre!("response result must be null to indicate successful block proposal validation")
-        })
+    let proposal_response: jsonrpc_core::Success = serde_json::from_str(&response_text)?;
+    match serde_json::from_value(proposal_response.result)? {
+        ProposalResponse::Valid => Ok(()),
+        ProposalResponse::ErrorResponse { reject_reason, .. } => Err(eyre!(
+            "unsuccessful block proposal validation, reason: {reject_reason:?}"
+        )),
+    }
 }
 
 async fn propose_block_from_response_text(
