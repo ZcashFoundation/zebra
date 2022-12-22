@@ -1100,7 +1100,7 @@ impl Service<ReadRequest> for ReadStateService {
         Poll::Ready(Ok(()))
     }
 
-    #[instrument(name = "read_state", skip(self))]
+    #[instrument(name = "read_state", skip(self, req))]
     fn call(&mut self, req: ReadRequest) -> Self::Future {
         req.count_metric();
 
