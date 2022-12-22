@@ -35,6 +35,11 @@ use crate::common::{
 /// We've seen it take anywhere from 1-45 seconds for the mempool to have some transactions in it.
 pub const EXPECTED_MEMPOOL_TRANSACTION_TIME: Duration = Duration::from_secs(45);
 
+/// Number of times to retry a block proposal request with the template returned by the getblocktemplate RPC.
+///
+/// We've seen spurious rejections of block proposals.
+const NUM_BLOCK_PROPOSAL_RETRIES: usize = 5;
+
 /// Launch Zebra, wait for it to sync, and check the getblocktemplate RPC returns without errors.
 pub(crate) async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -70,11 +75,13 @@ pub(crate) async fn run() -> Result<()> {
         true,
     )?;
 
+    let client = RPCRequestClient::new(rpc_address);
+
     tracing::info!(
         "calling getblocktemplate RPC method at {rpc_address}, \
          with a mempool that is likely empty...",
     );
-    let getblocktemplate_response = RPCRequestClient::new(rpc_address)
+    let getblocktemplate_response = client
         .call(
             "getblocktemplate",
             // test that unknown capabilities are parsed as valid input
@@ -96,14 +103,36 @@ pub(crate) async fn run() -> Result<()> {
         "waiting {EXPECTED_MEMPOOL_TRANSACTION_TIME:?} for the mempool \
          to download and verify some transactions...",
     );
-    tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
 
-    tracing::info!(
-        "calling getblocktemplate RPC method at {rpc_address}, \
-         with a mempool that likely has transactions...",
-    );
+    let mut num_remaining_retries = NUM_BLOCK_PROPOSAL_RETRIES;
+    loop {
+        tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
 
-    let client = RPCRequestClient::new(rpc_address);
+        tracing::info!(
+            "calling getblocktemplate RPC method at {rpc_address}, \
+             with a mempool that likely has transactions...",
+        );
+
+        if try_validate_block_template(&client).await.is_ok() {
+            break;
+        } else {
+            assert!(num_remaining_retries > 0);
+            num_remaining_retries -= 1;
+        }
+    }
+
+    zebrad.kill(false)?;
+
+    let output = zebrad.wait_with_output()?;
+    let output = output.assert_failure()?;
+
+    // [Note on port conflict](#Note on port conflict)
+    output
+        .assert_was_killed()
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")
+}
+
+async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
     let getblocktemplate_response = client.call("getblocktemplate", "[]".to_string()).await?;
 
     let is_response_success = getblocktemplate_response.status().is_success();
@@ -117,40 +146,45 @@ pub(crate) async fn run() -> Result<()> {
     assert!(is_response_success);
 
     // Propose a new block with an empty solution and nonce field
+    tracing::info!("calling getblocktemplate with a block proposal...",);
 
-    let response_json: jsonrpc_core::Success = serde_json::from_str(&response_text)?;
-
-    let raw_block_proposal = hex::encode(
-        proposal_block_from_template(serde_json::from_value(response_json.result)?)?
-            .zcash_serialize_to_vec()?,
-    );
-
-    let getblocktemplate_proposal_response = client
-        .call(
-            "getblocktemplate",
-            format!(r#"[{{"mode":"proposal","data":"{raw_block_proposal}"}}]"#),
-        )
-        .await?;
-
-    let is_response_success = getblocktemplate_proposal_response.status().is_success();
-    let response_text = getblocktemplate_proposal_response.text().await?;
+    let (is_response_success, response_text) =
+        propose_block_from_response_text(client, response_text).await?;
 
     tracing::info!(response_text, "got getblocktemplate proposal response");
 
     assert!(is_response_success);
-    assert!(response_text.contains(r#""result":null"#));
 
-    zebrad.kill(false)?;
+    response_text
+        .contains(r#""result":null"#)
+        .then_some(())
+        .ok_or_else(|| {
+            eyre!("response result must be null to indicate successful block proposal validation")
+        })
+}
 
-    let output = zebrad.wait_with_output()?;
-    let output = output.assert_failure()?;
+async fn propose_block_from_response_text(
+    client: &RPCRequestClient,
+    template_response_text: String,
+) -> Result<(bool, String)> {
+    let template_response: jsonrpc_core::Success = serde_json::from_str(&template_response_text)?;
 
-    // [Note on port conflict](#Note on port conflict)
-    output
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+    let raw_proposal_block = hex::encode(
+        proposal_block_from_template(serde_json::from_value(template_response.result)?)?
+            .zcash_serialize_to_vec()?,
+    );
 
-    Ok(())
+    let proposal_response = client
+        .call(
+            "getblocktemplate",
+            format!(r#"[{{"mode":"proposal","data":"{raw_proposal_block}"}}]"#),
+        )
+        .await?;
+
+    Ok((
+        proposal_response.status().is_success(),
+        proposal_response.text().await?,
+    ))
 }
 
 /// Make a block proposal from [`GetBlockTemplate`]
