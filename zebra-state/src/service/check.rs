@@ -365,7 +365,6 @@ where
 ///
 /// Additional contextual validity checks are performed by the non-finalized [`Chain`].
 pub(crate) fn initial_contextual_validity(
-    network: Network,
     finalized_state: &ZebraDb,
     non_finalized_state: &NonFinalizedState,
     prepared: &PreparedBlock,
@@ -379,7 +378,7 @@ pub(crate) fn initial_contextual_validity(
     // Security: check proof of work before any other checks
     check::block_is_valid_for_recent_chain(
         prepared,
-        network,
+        non_finalized_state.network,
         finalized_state.finalized_tip_height(),
         relevant_chain,
     )?;

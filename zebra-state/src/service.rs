@@ -1724,7 +1724,6 @@ impl Service<ReadRequest> for ReadStateService {
                         // The non-finalized state that's used in the rest of the state (including finalizing
                         // blocks into the db) is not mutated here.
                         write::validate_and_commit_non_finalized(
-                            state.network,
                             &state.db,
                             &mut latest_non_finalized_state,
                             prepared,

@@ -6,10 +6,7 @@ use tokio::sync::{
     watch,
 };
 
-use zebra_chain::{
-    block::{self, Height},
-    parameters::Network,
-};
+use zebra_chain::block::{self, Height};
 
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
@@ -41,12 +38,11 @@ const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
 /// non-finalized state if it is contextually valid.
 #[tracing::instrument(level = "debug", skip(prepared), fields(height = ?prepared.height, hash = %prepared.hash))]
 pub(crate) fn validate_and_commit_non_finalized(
-    network: Network,
     finalized_state: &ZebraDb,
     non_finalized_state: &mut NonFinalizedState,
     prepared: PreparedBlock,
 ) -> Result<(), CommitBlockError> {
-    check::initial_contextual_validity(network, finalized_state, non_finalized_state, &prepared)?;
+    check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
     let parent_hash = prepared.block.header.previous_block_hash;
 
     if finalized_state.finalized_tip_hash() == parent_hash {
@@ -211,7 +207,6 @@ pub fn write_blocks_from_channels(
         } else {
             tracing::trace!(?child_hash, "validating queued child");
             result = validate_and_commit_non_finalized(
-                finalized_state.network(),
                 &finalized_state.db,
                 &mut non_finalized_state,
                 queued_child,
