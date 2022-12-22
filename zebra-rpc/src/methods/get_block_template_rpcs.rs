@@ -26,9 +26,8 @@ use crate::methods::{
             DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
         },
         get_block_template::{
-            check_get_block_template_parameters, check_miner_address, check_synced_to_tip,
-            fetch_mempool_transactions, fetch_state_tip_and_local_time,
-            generate_coinbase_and_roots,
+            check_miner_address, check_synced_to_tip, fetch_mempool_transactions,
+            fetch_state_tip_and_local_time, generate_coinbase_and_roots, validate_block_proposal,
         },
         types::{
             get_block_template::GetBlockTemplate, get_mining_info, hex_data::HexData,
@@ -331,42 +330,22 @@ where
         let mut latest_chain_tip = self.latest_chain_tip.clone();
         let sync_status = self.sync_status.clone();
         let state = self.state.clone();
-        let mut chain_verifier = self.chain_verifier.clone();
+        let chain_verifier = self.chain_verifier.clone();
 
         // To implement long polling correctly, we split this RPC into multiple phases.
         async move {
-            check_get_block_template_parameters(&parameters)?;
-
-            let client_long_poll_id = parameters
-                .as_mut()
-                .and_then(|params| params.long_poll_id.take());
+            get_block_template::check_parameters(&parameters)?;
 
             if let Some(HexData(block_proposal_bytes)) = parameters
                 .as_mut()
                 .and_then(get_block_template::JsonParameters::block_proposal_data)
             {
-                let block: Block = match block_proposal_bytes.zcash_deserialize_into() {
-                    Ok(block_bytes) => block_bytes,
-                    Err(_) => return Ok(get_block_template::ProposalRejectReason::Rejected.into()),
-                };
-
-                let chain_verifier_response = chain_verifier
-                    .ready()
-                    .await
-                    .map_err(|error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    })?
-                    .call(zebra_consensus::Request::CheckProposal(Arc::new(block)))
-                    .await;
-
-                let response = chain_verifier_response
-                    .map(|_| get_block_template::ProposalResponse::Valid)
-                    .unwrap_or_else(|_| get_block_template::ProposalRejectReason::Rejected.into());
-
-                return Ok(response.into());
+                return validate_block_proposal(chain_verifier, block_proposal_bytes).await;
             }
+
+            let client_long_poll_id = parameters
+                .as_mut()
+                .and_then(|params| params.long_poll_id.take());
 
             // - One-off checks
 

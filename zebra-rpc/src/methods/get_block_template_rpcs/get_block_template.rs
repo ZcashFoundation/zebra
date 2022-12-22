@@ -8,12 +8,14 @@ use tower::{Service, ServiceExt};
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{
+        self,
         merkle::{self, AuthDataRoot},
         ChainHistoryBlockTxAuthCommitmentHash, Height,
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::Network,
+    serialization::ZcashDeserializeInto,
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
@@ -35,7 +37,7 @@ pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
 /// Checks that `data` is omitted in `Template` mode or provided in `Proposal` mode,
 ///
 /// Returns an error if there's a mismatch between the mode and whether `data` is provided.
-pub fn check_get_block_template_parameters(parameters: &Option<JsonParameters>) -> Result<()> {
+pub fn check_parameters(parameters: &Option<JsonParameters>) -> Result<()> {
     let Some(parameters) = parameters else {
             return Ok(())
         };
@@ -89,6 +91,42 @@ pub fn check_miner_address(
             .to_string(),
         data: None,
     })
+}
+
+/// Attempts to validate block proposal against all of the server's
+/// usual acceptance rules (except proof-of-work).
+///
+/// Returns a `getblocktemplate` [`Response`].
+pub async fn validate_block_proposal<ChainVerifier>(
+    mut chain_verifier: ChainVerifier,
+    block_proposal_bytes: Vec<u8>,
+) -> Result<Response>
+where
+    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    let Ok(block) = block_proposal_bytes.zcash_deserialize_into() else {
+         return Ok(ProposalRejectReason::Rejected.into())
+    };
+
+    let chain_verifier_response = chain_verifier
+        .ready()
+        .await
+        .map_err(|error| Error {
+            code: ErrorCode::ServerError(0),
+            message: error.to_string(),
+            data: None,
+        })?
+        .call(zebra_consensus::Request::CheckProposal(Arc::new(block)))
+        .await;
+
+    Ok(chain_verifier_response
+        .map(|_| ProposalResponse::Valid)
+        .unwrap_or_else(|_| ProposalRejectReason::Rejected.into())
+        .into())
 }
 
 // - State and syncer checks
