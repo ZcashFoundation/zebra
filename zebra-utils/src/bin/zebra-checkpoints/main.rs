@@ -66,9 +66,14 @@ fn main() -> Result<()> {
 
     // get the current block count
     let mut cmd = passthrough_cmd();
-    cmd.arg("getblockcount");
+    cmd.arg("getblockchaininfo");
+
+    let output = cmd_output(&mut cmd)?;
+    let get_block_chain_info: Value = serde_json::from_str(&output)?;
+
     // calculate the maximum height
-    let height_limit: block::Height = cmd_output(&mut cmd)?.trim().parse()?;
+    let height_limit = block::Height(get_block_chain_info["blocks"].as_u64().unwrap() as u32);
+
     assert!(height_limit <= block::Height::MAX);
     // Checkpoints must be on the main chain, so we skip blocks that are within the
     // Zcash reorg limit.
@@ -102,8 +107,9 @@ fn main() -> Result<()> {
         let mut cmd = passthrough_cmd();
 
         // get block data
-        cmd.args(["getblock", &x.to_string()]);
+        cmd.args(["getblock", &x.to_string(), "1"]);
         let output = cmd_output(&mut cmd)?;
+
         // parse json
         let v: Value = serde_json::from_str(&output)?;
 

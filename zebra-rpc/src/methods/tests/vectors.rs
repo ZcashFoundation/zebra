@@ -113,7 +113,10 @@ async fn rpc_getblock() {
                     .transactions
                     .iter()
                     .map(|tx| tx.hash().encode_hex())
-                    .collect()
+                    .collect(),
+                height: block.coinbase_height().unwrap(),
+                hash: block.hash(),
+                size: SerializedBlock::from(block.clone()).as_ref().len(),
             }
         );
     }
