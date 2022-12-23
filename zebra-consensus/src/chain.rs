@@ -170,8 +170,11 @@ where
 
         match block.coinbase_height() {
             #[cfg(feature = "getblocktemplate-rpcs")]
+            // There's currently no known use case for block proposals below the checkpoint height,
+            // so it's okay to immediately return an error here.
             Some(height) if height <= self.max_checkpoint_height && request.is_proposal() => {
                 async {
+                    // TODO: Add a `ValidateProposalError` enum with a `BelowCheckpoint` variant?
                     Err(VerifyBlockError::ValidateProposal(
                         "block proposals must be above checkpoint height".into(),
                     ))?

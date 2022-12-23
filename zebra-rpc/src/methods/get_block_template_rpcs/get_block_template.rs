@@ -124,7 +124,7 @@ where
         .await;
 
     Ok(chain_verifier_response
-        .map(|_| ProposalResponse::Valid)
+        .map(|_hash| ProposalResponse::Valid)
         .unwrap_or_else(|_| ProposalRejectReason::Rejected.into())
         .into())
 }

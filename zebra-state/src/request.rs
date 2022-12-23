@@ -562,6 +562,7 @@ pub enum Request {
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
+    /// Returns [`Response::ValidBlockProposal`] when successful.
     /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
     CheckBlockProposalValidity(PreparedBlock),
 }
@@ -805,7 +806,7 @@ pub enum ReadRequest {
     /// It is the caller's responsibility to perform semantic validation.
     /// (The caller does not need to check proof of work for block proposals.)
     ///
-    /// Returns [`Response::ValidBlockProposal`] with the hash of the block when successful, or an error if
+    /// Returns [`ReadResponse::ValidBlockProposal`] when successful, or an error if
     /// the block fails contextual validation.
     CheckBlockProposalValidity(PreparedBlock),
 }

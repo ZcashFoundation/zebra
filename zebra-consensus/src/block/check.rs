@@ -58,9 +58,8 @@ pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>,
     Ok(first.clone())
 }
 
-/// Returns `Ok(ExpandedDifficulty)` if `difficulty_threshold` of `header` passes:
-///   - the target difficulty limit for `network` (PoWLimit), and
-///   - the difficulty filter,
+/// Returns `Ok(ExpandedDifficulty)` if `difficulty_threshold` of `header` passes
+/// the target difficulty limit for `network` (PoWLimit)
 ///
 /// If the header is invalid, returns an error containing `height` and `hash`.
 pub fn difficulty_threshold_is_valid(
@@ -74,7 +73,7 @@ pub fn difficulty_threshold_is_valid(
         .to_expanded()
         .ok_or(BlockError::InvalidDifficulty(*height, *hash))?;
 
-    // Note: the comparisons in this function are u256 integer comparisons, like
+    // Note: the comparison in this function is a u256 integer comparison, like
     // zcashd and bitcoin. Greater values represent *less* work.
 
     // The PowLimit check is part of `Threshold()` in the spec, but it doesn't
@@ -105,6 +104,9 @@ pub fn difficulty_is_valid(
     hash: &Hash,
 ) -> Result<(), BlockError> {
     let difficulty_threshold = difficulty_threshold_is_valid(header, network, height, hash)?;
+
+    // Note: the comparison in this function is a u256 integer comparison, like
+    // zcashd and bitcoin. Greater values represent *less* work.
 
     // # Consensus
     //

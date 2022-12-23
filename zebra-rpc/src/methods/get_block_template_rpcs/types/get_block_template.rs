@@ -263,7 +263,7 @@ impl GetBlockTemplate {
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProposalRejectReason {
-    /// Block rejected as invalid
+    /// Block proposal rejected as invalid.
     Rejected,
 }
 
@@ -273,16 +273,16 @@ pub enum ProposalRejectReason {
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged, rename_all = "kebab-case")]
 pub enum ProposalResponse {
-    /// Block was not successfully submitted, return error
+    /// Block proposal was rejected as invalid, returns `reject-reason` and server `capabilities`.
     ErrorResponse {
-        /// Reason the proposal was invalid as-is
+        /// Reason the proposal was invalid as-is.
         reject_reason: ProposalRejectReason,
 
         /// The getblocktemplate RPC capabilities supported by Zebra.
         capabilities: Vec<String>,
     },
 
-    /// Block successfully proposed, returns null
+    /// Block proposal was successfully validated, returns null.
     Valid,
 }
 

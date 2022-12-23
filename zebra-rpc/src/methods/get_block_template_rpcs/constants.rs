@@ -26,7 +26,6 @@ pub const GET_BLOCK_TEMPLATE_MUTABLE_FIELD: &[&str] = &[
 ];
 
 /// A hardcoded list of Zebra's getblocktemplate RPC capabilities.
-/// Currently empty.
 pub const GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD: &[&str] = &["proposal"];
 
 /// The max estimated distance to the chain tip for the getblocktemplate method.

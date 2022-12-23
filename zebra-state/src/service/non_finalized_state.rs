@@ -44,14 +44,13 @@ pub struct NonFinalizedState {
     pub chain_set: BTreeSet<Arc<Chain>>,
 
     /// The configured Zcash network.
-    //
-    // Note: this field is currently unused, but it's useful for debugging.
     pub network: Network,
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Configures the non-finalized state to count metrics.
     ///
-    /// Used for testing block proposals on a cloned non-finalized state.
+    /// Used for skipping metrics counting when testing block proposals
+    /// with a commit to a cloned non-finalized state.
     pub should_count_metrics: bool,
 }
 

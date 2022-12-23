@@ -330,18 +330,18 @@ where
         let mut latest_chain_tip = self.latest_chain_tip.clone();
         let sync_status = self.sync_status.clone();
         let state = self.state.clone();
-        let chain_verifier = self.chain_verifier.clone();
+
+        if let Some(HexData(block_proposal_bytes)) = parameters
+            .as_mut()
+            .and_then(get_block_template::JsonParameters::block_proposal_data)
+        {
+            return validate_block_proposal(self.chain_verifier.clone(), block_proposal_bytes)
+                .boxed();
+        }
 
         // To implement long polling correctly, we split this RPC into multiple phases.
         async move {
             get_block_template::check_parameters(&parameters)?;
-
-            if let Some(HexData(block_proposal_bytes)) = parameters
-                .as_mut()
-                .and_then(get_block_template::JsonParameters::block_proposal_data)
-            {
-                return validate_block_proposal(chain_verifier, block_proposal_bytes).await;
-            }
 
             let client_long_poll_id = parameters
                 .as_mut()

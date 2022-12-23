@@ -290,38 +290,35 @@ where
                 transaction_hashes,
             };
 
-            match request {
-                Request::Commit(_) => {
-                    match state_service
-                        .ready()
-                        .await
-                        .map_err(VerifyBlockError::Commit)?
-                        .call(zs::Request::CommitBlock(prepared_block))
-                        .await
-                        .map_err(VerifyBlockError::Commit)?
-                    {
-                        zs::Response::Committed(committed_hash) => {
-                            assert_eq!(committed_hash, hash, "state must commit correct hash");
-                            Ok(hash)
-                        }
-                        _ => unreachable!("wrong response for CommitBlock"),
-                    }
-                }
+            // Return early for proposal requests when getblocktemplate-rpcs feature is enabled
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            if request.is_proposal() {
+                return match state_service
+                    .ready()
+                    .await
+                    .map_err(VerifyBlockError::ValidateProposal)?
+                    .call(zs::Request::CheckBlockProposalValidity(prepared_block))
+                    .await
+                    .map_err(VerifyBlockError::ValidateProposal)?
+                {
+                    zs::Response::ValidBlockProposal => Ok(hash),
+                    _ => unreachable!("wrong response for CheckBlockProposalValidity"),
+                };
+            }
 
-                #[cfg(feature = "getblocktemplate-rpcs")]
-                Request::CheckProposal(_) => {
-                    match state_service
-                        .ready()
-                        .await
-                        .map_err(VerifyBlockError::ValidateProposal)?
-                        .call(zs::Request::CheckBlockProposalValidity(prepared_block))
-                        .await
-                        .map_err(VerifyBlockError::ValidateProposal)?
-                    {
-                        zs::Response::ValidBlockProposal => Ok(hash),
-                        _ => unreachable!("wrong response for CheckBlockProposalValidity"),
-                    }
+            match state_service
+                .ready()
+                .await
+                .map_err(VerifyBlockError::Commit)?
+                .call(zs::Request::CommitBlock(prepared_block))
+                .await
+                .map_err(VerifyBlockError::Commit)?
+            {
+                zs::Response::Committed(committed_hash) => {
+                    assert_eq!(committed_hash, hash, "state must commit correct hash");
+                    Ok(hash)
                 }
+                _ => unreachable!("wrong response for CommitBlock"),
             }
         }
         .instrument(span)

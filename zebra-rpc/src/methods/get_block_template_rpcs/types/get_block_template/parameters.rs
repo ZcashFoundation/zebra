@@ -103,9 +103,9 @@ impl JsonParameters {
 
             Self {
                 mode: GetBlockTemplateRequestMode::Proposal,
-                data: block_proposal_data @ Some(_),
+                data,
                 ..
-            } => block_proposal_data.take(),
+            } => data.take(),
         }
     }
 }
