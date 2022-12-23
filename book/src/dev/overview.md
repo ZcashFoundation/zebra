@@ -1,6 +1,6 @@
 # Design Overview
 
-This document sketches the future design for Zebra.
+This document sketches the design for Zebra.
 
 ## Desiderata
 
@@ -33,6 +33,15 @@ The following are general desiderata for Zebra:
 * Zebra keeps a copy of the chain state, so it isn't intended for
   lightweight applications like light wallets. Those applications
   should use a light client protocol.
+
+## Notable Blog Posts
+- [A New Network Stack For Zcash](https://www.zfnd.org/blog/a-new-network-stack-for-zcash)
+- [Composable Futures-based Batch Verification](https://www.zfnd.org/blog/futures-batch-verification)
+- [Decoding Bitcoin Messages with Tokio Codecs](https://www.zfnd.org/blog/decoding-bitcoin-messages-with-tokio-codecs)
+
+## Service Dependencies
+
+![Service Dependencies](diagrams/service-dependencies.svg)
 
 ## Architecture
 
@@ -278,7 +287,6 @@ verify blocks or transactions, and add them to the relevant state.
 #### Internal Dependencies
 
 - `zebra-chain` for data structure definitions
-- `zebra-network` possibly? for definitions of network messages?
 
 #### Responsible for
 

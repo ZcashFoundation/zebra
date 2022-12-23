@@ -1,0 +1,10 @@
+img[src = "diagrams/service-dependencies.svg"] {
+    display: block;
+    margin: 0px auto;
+}
+
+html.navy img[src = "diagrams/service-dependencies.svg"], 
+html.ayu img[src = "diagrams/service-dependencies.svg"], 
+html.coal img[src = "diagrams/service-dependencies.svg"] {
+    filter: invert(1);
+}
