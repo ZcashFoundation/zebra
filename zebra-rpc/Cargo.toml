@@ -53,7 +53,7 @@ tracing = "0.1.37"
 tracing-futures = "0.2.5"
 
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.151", features = ["serde_derive"] }
+serde = { version = "1.0.152", features = ["serde_derive"] }
 
 # Experimental feature getblocktemplate-rpcs
 rand = { version = "0.8.5", package = "rand", optional = true }
