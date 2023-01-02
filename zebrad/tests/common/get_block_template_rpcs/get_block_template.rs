@@ -110,12 +110,21 @@ pub(crate) async fn run() -> Result<()> {
     loop {
         tracing::info!(
             "calling getblocktemplate RPC method at {rpc_address}, \
-             with a mempool that likely has transactions...",
+             with a mempool that likely has transactions and attempting \
+             to validate response result as a block proposal",
         );
 
         match try_validate_block_template(&client).await {
             Ok(()) => break,
-            Err(_) if num_remaining_retries > 0 => num_remaining_retries -= 1,
+            Err(error) if num_remaining_retries > 0 => {
+                num_remaining_retries -= 1;
+
+                tracing::info!(
+                    ?error,
+                    num_remaining_retries,
+                    "block proposal validation failed"
+                );
+            }
             err => return err,
         };
     }
