@@ -104,11 +104,10 @@ pub(crate) async fn run() -> Result<()> {
         "waiting {EXPECTED_MEMPOOL_TRANSACTION_TIME:?} for the mempool \
          to download and verify some transactions...",
     );
+    tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
 
     let mut num_remaining_retries = NUM_BLOCK_PROPOSAL_RETRIES;
     loop {
-        tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
-
         tracing::info!(
             "calling getblocktemplate RPC method at {rpc_address}, \
              with a mempool that likely has transactions...",
