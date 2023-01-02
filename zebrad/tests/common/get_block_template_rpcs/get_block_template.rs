@@ -132,60 +132,52 @@ pub(crate) async fn run() -> Result<()> {
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")
 }
 
+/// Accepts an [`RPCRequestClient`], calls getblocktemplate in template mode,
+/// deserializes and transforms the block template in the response into block proposal data,
+/// then calls getblocktemplate RPC in proposal mode with the serialized and hex-encoded data.
+///
+/// Returns an error if it fails to transform template to block proposal or serialize the block proposal
+/// Returns `Ok(())` if the block proposal is valid or an error with the reject-reason if the result is
+/// an `ErrorResponse`.
+///
+/// ## Panics
+///
+/// If an RPC call returns a failure
+/// If the response result cannot be deserialized to `GetBlockTemplate` in 'template' mode
+/// or `ProposalResponse` in 'proposal' mode.
 async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
-    let getblocktemplate_response = client.call("getblocktemplate", "[]".to_string()).await?;
-
-    let is_response_success = getblocktemplate_response.status().is_success();
-    let response_text = getblocktemplate_response.text().await?;
+    let response_json_result = client
+        .json_result_from_call("getblocktemplate", "[]".to_string())
+        .await
+        .expect("response should be success output with with a serialized `GetBlockTemplate`");
 
     tracing::info!(
-        response_text,
+        ?response_json_result,
         "got getblocktemplate response, hopefully with transactions"
     );
-
-    assert!(is_response_success);
 
     // Propose a new block with an empty solution and nonce field
     tracing::info!("calling getblocktemplate with a block proposal...",);
 
-    let (is_response_success, response_text) =
-        propose_block_from_response_text(client, response_text).await?;
+    let raw_proposal_block =
+        hex::encode(proposal_block_from_template(response_json_result)?.zcash_serialize_to_vec()?);
 
-    tracing::info!(response_text, "got getblocktemplate proposal response");
+    let json_result = client
+        .json_result_from_call(
+            "getblocktemplate",
+            format!(r#"[{{"mode":"proposal","data":"{raw_proposal_block}"}}]"#),
+        )
+        .await
+        .expect("response should be success output with with a serialized `ProposalResponse`");
 
-    assert!(is_response_success);
+    tracing::info!(?json_result, "got getblocktemplate proposal response");
 
-    let proposal_response: jsonrpc_core::Success = serde_json::from_str(&response_text)?;
-    match serde_json::from_value(proposal_response.result)? {
+    match json_result {
         ProposalResponse::Valid => Ok(()),
         ProposalResponse::ErrorResponse { reject_reason, .. } => Err(eyre!(
             "unsuccessful block proposal validation, reason: {reject_reason:?}"
         )),
     }
-}
-
-async fn propose_block_from_response_text(
-    client: &RPCRequestClient,
-    template_response_text: String,
-) -> Result<(bool, String)> {
-    let template_response: jsonrpc_core::Success = serde_json::from_str(&template_response_text)?;
-
-    let raw_proposal_block = hex::encode(
-        proposal_block_from_template(serde_json::from_value(template_response.result)?)?
-            .zcash_serialize_to_vec()?,
-    );
-
-    let proposal_response = client
-        .call(
-            "getblocktemplate",
-            format!(r#"[{{"mode":"proposal","data":"{raw_proposal_block}"}}]"#),
-        )
-        .await?;
-
-    Ok((
-        proposal_response.status().is_success(),
-        proposal_response.text().await?,
-    ))
 }
 
 /// Make a block proposal from [`GetBlockTemplate`]
