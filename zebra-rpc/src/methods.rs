@@ -24,7 +24,7 @@ use zebra_chain::{
     orchard,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     sapling,
-    serialization::{SerializationError, ZcashDeserialize},
+    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
 };
@@ -620,7 +620,7 @@ where
                             height: block
                                 .coinbase_height()
                                 .expect("all blocks should have a coinbase height"),
-                            size: SerializedBlock::from(block).as_ref().len(),
+                            size: block.zcash_serialized_size(),
                             tx: tx_ids,
                         })
                     }
