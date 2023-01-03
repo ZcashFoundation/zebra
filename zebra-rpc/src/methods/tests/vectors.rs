@@ -971,23 +971,19 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     );
 
     // Fake the ChainInfo response
-    let mock_read_state_request_handler = {
-        async move {
-            read_state
-                .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
-                .await
-                .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                    expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(
-                        U256::one(),
-                    )),
-                    tip_height: fake_tip_height,
-                    tip_hash: fake_tip_hash,
-                    cur_time: fake_cur_time,
-                    min_time: fake_min_time,
-                    max_time: fake_max_time,
-                    history_tree: fake_history_tree(Mainnet),
-                }));
-        }
+    let mock_read_state_request_handler = async move {
+        read_state
+            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .await
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                tip_height: fake_tip_height,
+                tip_hash: fake_tip_hash,
+                cur_time: fake_cur_time,
+                min_time: fake_min_time,
+                max_time: fake_max_time,
+                history_tree: fake_history_tree(Mainnet),
+            }));
     };
 
     let mock_mempool_request_handler = {
