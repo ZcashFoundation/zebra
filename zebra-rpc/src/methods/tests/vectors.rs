@@ -113,7 +113,12 @@ async fn rpc_getblock() {
                     .transactions
                     .iter()
                     .map(|tx| tx.hash().encode_hex())
-                    .collect()
+                    .collect(),
+                height: block
+                    .coinbase_height()
+                    .expect("test block should have coinbase height"),
+                hash: block.hash(),
+                size: block.zcash_serialized_size(),
             }
         );
     }

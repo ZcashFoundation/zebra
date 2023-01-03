@@ -15,7 +15,7 @@ Binaries are easier to use if they are located in your system execution path.
 
 This command generates a list of zebra checkpoints, and writes them to standard output. Each checkpoint consists of a block height and hash.
 
-To create checkpoints, you need a synchronized instance of `zcashd`, and the `zcash-cli` RPC client.
+To create checkpoints, you need a synchronized instance of `zebrad` or `zcashd`, and the `zcash-cli` RPC client.
 
 `zebra-checkpoints` is a standalone rust binary, you can compile it using:
 
