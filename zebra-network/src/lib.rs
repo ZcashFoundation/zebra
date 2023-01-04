@@ -150,6 +150,7 @@ pub mod constants;
 mod isolated;
 mod meta_addr;
 mod peer;
+pub mod peer_observer;
 mod peer_set;
 mod policies;
 mod protocol;
@@ -175,6 +176,7 @@ pub use crate::{
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::PeerAddrState,
     peer::{Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, SharedPeerError},
+    peer_observer::PeerObserver,
     peer_set::init,
     policies::RetryLimit,
     protocol::{

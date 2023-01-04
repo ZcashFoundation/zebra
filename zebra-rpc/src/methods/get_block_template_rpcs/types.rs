@@ -5,5 +5,6 @@ pub mod get_block_template;
 pub mod get_mining_info;
 pub mod hex_data;
 pub mod long_poll;
+pub mod peer_info;
 pub mod submit_block;
 pub mod transaction;
