@@ -175,6 +175,29 @@ pub struct GetBlockTemplateChainInfo {
     /// The maximum time the miner can use in this block.
     /// Depends on the `tip_hash`, and the local clock on testnet.
     pub max_time: DateTime32,
+
+    // Raw data derived from the state tip, recent blocks, and local clock.
+    //
+    // TODO: remove these fields after we have finished testing
+    //
+    /// The expected difficulty of the candidate block,
+    /// with no testnet minimum difficulty adjutment.
+    /// Depends on the `tip_hash` only.
+    pub raw_expected_difficulty: CompactDifficulty,
+
+    /// The current system time, with no clamping or testnet minimum difficulty adjutment.
+    /// Depends on the local clock only.
+    pub raw_cur_time: DateTime32,
+
+    /// The mininimum time the miner can use in this block,
+    /// with no testnet minimum difficulty adjutment.
+    /// Depends on the `tip_hash` only.
+    pub raw_min_time: DateTime32,
+
+    /// The maximum time the miner can use in this block,
+    /// with no testnet minimum difficulty adjutment.
+    /// Depends on the `tip_hash` only.
+    pub raw_max_time: DateTime32,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.

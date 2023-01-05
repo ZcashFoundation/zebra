@@ -186,6 +186,10 @@ pub async fn test_responses<State, ReadState>(
                 min_time: fake_min_time,
                 max_time: fake_max_time,
                 history_tree: fake_history_tree(network),
+                raw_expected_difficulty: fake_difficulty,
+                raw_cur_time: fake_cur_time,
+                raw_min_time: fake_min_time,
+                raw_max_time: fake_max_time,
             }));
     });
 
@@ -233,6 +237,10 @@ pub async fn test_responses<State, ReadState>(
                 min_time: fake_min_time,
                 max_time: fake_max_time,
                 history_tree: fake_history_tree(network),
+                raw_expected_difficulty: fake_difficulty,
+                raw_cur_time: fake_cur_time,
+                raw_min_time: fake_min_time,
+                raw_max_time: fake_max_time,
             }));
     });
 

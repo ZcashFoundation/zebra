@@ -187,6 +187,7 @@ fn difficulty_time_and_history_tree(
         .collect();
 
     let cur_time = DateTime32::now();
+    let raw_cur_time = cur_time;
 
     // Get the median-time-past, which doesn't depend on the time or the previous block height.
     // `context` will always have the correct length, because this function takes an array.
@@ -237,6 +238,10 @@ fn difficulty_time_and_history_tree(
         cur_time,
         min_time,
         max_time,
+        raw_expected_difficulty: expected_difficulty,
+        raw_cur_time,
+        raw_min_time: min_time,
+        raw_max_time: max_time,
     };
 
     adjust_difficulty_and_time_for_testnet(&mut result, network, tip_height, relevant_data);

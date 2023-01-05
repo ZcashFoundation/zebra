@@ -984,6 +984,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
                 min_time: fake_min_time,
                 max_time: fake_max_time,
                 history_tree: fake_history_tree(Mainnet),
+                raw_expected_difficulty: fake_difficulty,
+                raw_cur_time: fake_cur_time,
+                raw_min_time: fake_min_time,
+                raw_max_time: fake_max_time,
             }));
     };
 

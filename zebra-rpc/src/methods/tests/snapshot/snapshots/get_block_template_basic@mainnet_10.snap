@@ -39,5 +39,10 @@ expression: block_template
   "curtime": 1654008617,
   "bits": "01010000",
   "height": 1687105,
-  "maxtime": 1654008728
+  "maxtime": 1654008728,
+  "raw_target": "0000000000000000000000000000000000000000000000000000000000000001",
+  "raw_bits": "01010000",
+  "raw_curtime": 1654008617,
+  "raw_mintime": 1654008606,
+  "raw_maxtime": 1654008728
 }

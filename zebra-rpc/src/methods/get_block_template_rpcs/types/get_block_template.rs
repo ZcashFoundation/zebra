@@ -159,6 +159,30 @@ pub struct GetBlockTemplate {
     #[serde(default)]
     #[serde(rename = "submitold")]
     pub submit_old: Option<bool>,
+
+    /// The expected difficulty for the new block displayed in expanded form,
+    /// with no testnet minimum difficulty adjutment.
+    #[serde(with = "hex")]
+    pub raw_target: ExpandedDifficulty,
+
+    /// The expected difficulty for the new block displayed in compact form,
+    /// with no testnet minimum difficulty adjutment.
+    #[serde(with = "hex")]
+    pub raw_bits: CompactDifficulty,
+
+    /// The current system time, with no clamping or testnet minimum difficulty adjutment.
+    #[serde(rename = "raw_curtime")]
+    pub raw_cur_time: DateTime32,
+
+    /// The minimum time the miner can use in the block,
+    /// with no testnet minimum difficulty adjutment.
+    #[serde(rename = "raw_mintime")]
+    pub raw_min_time: DateTime32,
+
+    /// The maximum time the miner can use in the block,
+    /// with no testnet minimum difficulty adjutment.
+    #[serde(rename = "raw_maxtime")]
+    pub raw_max_time: DateTime32,
 }
 
 impl GetBlockTemplate {
@@ -250,6 +274,17 @@ impl GetBlockTemplate {
             max_time: chain_tip_and_local_time.max_time,
 
             submit_old,
+
+            // TODO: remove these fields after we have finished testing
+            raw_target: chain_tip_and_local_time
+                .raw_expected_difficulty
+                .to_expanded()
+                .expect("state always returns a valid difficulty value"),
+
+            raw_bits: chain_tip_and_local_time.raw_expected_difficulty,
+            raw_cur_time: chain_tip_and_local_time.raw_cur_time,
+            raw_min_time: chain_tip_and_local_time.raw_min_time,
+            raw_max_time: chain_tip_and_local_time.raw_max_time,
         }
     }
 }
