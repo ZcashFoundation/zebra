@@ -135,8 +135,7 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
         .collect();
 
     // Convert response to a `HashSet`, because the order of the response doesn't matter.
-    let all_rejected_ids: HashSet<UnminedTxId> =
-        storage.rejected_transactions(all_ids).into_iter().collect();
+    let all_rejected_ids: HashSet<UnminedTxId> = storage.rejected_transactions(all_ids).collect();
 
     let some_rejected_ids = some_rejected_transactions
         .iter()
