@@ -309,7 +309,7 @@ pub fn check_sync_logs_until(
     mempool_behavior: MempoolBehavior,
     check_legacy_chain: bool,
 ) -> Result<TestChild<TempDir>> {
-    zebrad.expect_stdout_line_matches(&format!("network: {network},"))?;
+    zebrad.expect_stdout_line_matches(format!("network: {network},"))?;
 
     if check_legacy_chain {
         zebrad.expect_stdout_line_matches("starting legacy chain check")?;
@@ -417,7 +417,7 @@ pub fn create_cached_database_height(
         .bypass_test_capture(true);
 
     let network = format!("network: {network},");
-    child.expect_stdout_line_matches(&network)?;
+    child.expect_stdout_line_matches(network)?;
 
     child.expect_stdout_line_matches("starting legacy chain check")?;
     child.expect_stdout_line_matches("no legacy chain found")?;
