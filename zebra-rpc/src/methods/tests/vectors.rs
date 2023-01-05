@@ -953,6 +953,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     let fake_cur_time = DateTime32::from(1654008617);
     // nu5 block time + 123
     let fake_max_time = DateTime32::from(1654008728);
+    let fake_difficulty = CompactDifficulty::from(ExpandedDifficulty::from(U256::one()));
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
@@ -976,7 +977,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
             .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                expected_difficulty: fake_difficulty,
                 tip_height: fake_tip_height,
                 tip_hash: fake_tip_hash,
                 cur_time: fake_cur_time,
