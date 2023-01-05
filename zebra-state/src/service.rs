@@ -1703,7 +1703,6 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
-            // Used by getmininginfo, getnetworksolps, and getnetworkhashps RPCs.
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::CheckBlockProposalValidity(prepared) => {
                 let timer = CodeTimer::start();
