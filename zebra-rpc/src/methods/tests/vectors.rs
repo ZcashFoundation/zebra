@@ -901,8 +901,6 @@ async fn rpc_getblocktemplate() {
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
-    use std::panic;
-
     use zebra_chain::{
         amount::NonNegative,
         block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
@@ -931,7 +929,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
-    let read_state = MockService::build().for_unit_tests();
+    let mut read_state = MockService::build().for_unit_tests();
     let chain_verifier = MockService::build().for_unit_tests();
 
     let mut mock_sync_status = MockSyncStatus::default();
@@ -973,9 +971,8 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     );
 
     // Fake the ChainInfo response
-    tokio::spawn(async move {
+    let mock_read_state_request_handler = async move {
         read_state
-            .clone()
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
             .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
@@ -987,23 +984,26 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
                 max_time: fake_max_time,
                 history_tree: fake_history_tree(Mainnet),
             }));
-    });
+    };
 
-    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template(None));
+    let mock_mempool_request_handler = {
+        let mut mempool = mempool.clone();
+        async move {
+            mempool
+                .expect_request(mempool::Request::FullTransactions)
+                .await
+                .respond(mempool::Response::FullTransactions(vec![]));
+        }
+    };
 
-    mempool
-        .expect_request(mempool::Request::FullTransactions)
-        .await
-        .respond(mempool::Response::FullTransactions(vec![]));
+    let get_block_template_fut = get_block_template_rpc.get_block_template(None);
+    let (get_block_template, ..) = tokio::join!(
+        get_block_template_fut,
+        mock_mempool_request_handler,
+        mock_read_state_request_handler,
+    );
 
     let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
-        .await
-        .unwrap_or_else(|error| match error.try_into_panic() {
-            Ok(panic_object) => panic::resume_unwind(panic_object),
-            Err(cancelled_error) => {
-                panic!("getblocktemplate task was unexpectedly cancelled: {cancelled_error:?}")
-            }
-        })
         .expect("unexpected error in getblocktemplate RPC call") else {
             panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
         };

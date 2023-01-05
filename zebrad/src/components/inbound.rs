@@ -232,7 +232,7 @@ impl Service<zn::Request> for Inbound {
 
                     let block_downloads = Box::pin(BlockDownloads::new(
                         full_verify_concurrency_limit,
-                        Timeout::new(block_download_peer_set.clone(), BLOCK_DOWNLOAD_TIMEOUT),
+                        Timeout::new(block_download_peer_set, BLOCK_DOWNLOAD_TIMEOUT),
                         Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
                         state.clone(),
                         latest_chain_tip,

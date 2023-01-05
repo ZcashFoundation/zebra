@@ -1638,7 +1638,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
             ?zebra_rpc_address,
             "waiting for zebrad to open its RPC port..."
         );
-        zebrad.expect_stdout_line_matches(&format!(
+        zebrad.expect_stdout_line_matches(format!(
             "Opened RPC endpoint at {}",
             zebra_rpc_address.expect("lightwalletd test must have RPC port")
         ))?;
@@ -2052,7 +2052,7 @@ async fn fully_synced_rpc_test() -> Result<()> {
 
     let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
 
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
+    zebrad.expect_stdout_line_matches(format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
 
     let client = RPCRequestClient::new(zebra_rpc_address);
 

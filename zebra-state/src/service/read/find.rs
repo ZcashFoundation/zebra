@@ -327,7 +327,7 @@ where
     // TODO: implement Step for Height, when Step stabilises
     //       https://github.com/rust-lang/rust/issues/42168
     let height_range = start_height.0..=final_height.0;
-    let response_len = height_range.clone().into_iter().count();
+    let response_len = height_range.clone().count();
 
     tracing::debug!(
         ?start_height,

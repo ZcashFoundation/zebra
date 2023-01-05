@@ -90,7 +90,7 @@ pub fn conventional_fee_weight_ratio(
     // the minimum transparent output size, but future transaction versions could change this.
     assert!(
         MIN_BLOCK_PRODUCTION_SUBSTITUTE_FEE as f32 / MAX_BLOCK_BYTES as f32 > 0.0,
-        "invalid block production constants: the minumum fee ratio must not be zero"
+        "invalid block production constants: the minimum fee ratio must not be zero"
     );
 
     let miner_fee = max(miner_fee.into(), MIN_BLOCK_PRODUCTION_SUBSTITUTE_FEE) as f32;

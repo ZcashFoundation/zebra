@@ -260,7 +260,7 @@ impl ChainTipSender {
 
         span.record(
             "old_use_non_finalized_tip",
-            &field::debug(self.use_non_finalized_tip),
+            field::debug(self.use_non_finalized_tip),
         );
     }
 
@@ -271,8 +271,8 @@ impl ChainTipSender {
         let height = tip.as_ref().map(|block| block.height);
         let hash = tip.as_ref().map(|block| block.hash);
 
-        span.record(format!("{prefix}_height").as_str(), &field::debug(height));
-        span.record(format!("{prefix}_hash").as_str(), &field::debug(hash));
+        span.record(format!("{prefix}_height").as_str(), field::debug(height));
+        span.record(format!("{prefix}_hash").as_str(), field::debug(hash));
     }
 }
 
@@ -330,23 +330,23 @@ impl LatestChainTip {
         let register_span_fields = |chain_tip_block: Option<&ChainTipBlock>| {
             span.record(
                 "height",
-                &tracing::field::debug(chain_tip_block.map(|block| block.height)),
+                tracing::field::debug(chain_tip_block.map(|block| block.height)),
             );
             span.record(
                 "hash",
-                &tracing::field::debug(chain_tip_block.map(|block| block.hash)),
+                tracing::field::debug(chain_tip_block.map(|block| block.hash)),
             );
             span.record(
                 "time",
-                &tracing::field::debug(chain_tip_block.map(|block| block.time)),
+                tracing::field::debug(chain_tip_block.map(|block| block.time)),
             );
             span.record(
                 "previous_hash",
-                &tracing::field::debug(chain_tip_block.map(|block| block.previous_block_hash)),
+                tracing::field::debug(chain_tip_block.map(|block| block.previous_block_hash)),
             );
             span.record(
                 "transaction_count",
-                &tracing::field::debug(chain_tip_block.map(|block| block.transaction_hashes.len())),
+                tracing::field::debug(chain_tip_block.map(|block| block.transaction_hashes.len())),
             );
         };
 
