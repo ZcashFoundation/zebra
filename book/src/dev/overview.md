@@ -289,6 +289,8 @@ verify blocks or transactions, and add them to the relevant state.
 #### Internal Dependencies
 
 - `zebra-chain` for data structure definitions
+- `zebra-node-services` for shared request type definitions
+- `zebra-utils` for developer and power user tools
 
 #### Responsible for
 

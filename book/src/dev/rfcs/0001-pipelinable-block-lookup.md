@@ -2,6 +2,7 @@
 - Start Date: 2020-07-02
 - Design PR: [ZcashFoundation/zebra#583](https://github.com/ZcashFoundation/zebra/pull/583)
 - Zebra Issue: [ZcashFoundation/zebra#504](https://github.com/ZcashFoundation/zebra/issues/504)
+
 # Summary
 [summary]: #summary
 
