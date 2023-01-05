@@ -41,6 +41,8 @@ The following are general desiderata for Zebra:
 
 ## Service Dependencies
 
+Note: dotted lines are for "getblocktemplate-rpcs" feature
+
 ![Service Dependencies](diagrams/service-dependencies.svg)
 
 ## Architecture
