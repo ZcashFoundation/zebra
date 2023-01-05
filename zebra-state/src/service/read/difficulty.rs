@@ -227,12 +227,13 @@ fn difficulty_time_and_history_tree(
         network,
         relevant_data.iter().cloned(),
     );
+    let expected_difficulty = difficulty_adjustment.expected_difficulty_threshold();
 
     let mut result = GetBlockTemplateChainInfo {
         tip_hash,
         tip_height,
         history_tree,
-        expected_difficulty: difficulty_adjustment.expected_difficulty_threshold(),
+        expected_difficulty,
         cur_time,
         min_time,
         max_time,
