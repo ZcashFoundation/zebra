@@ -95,7 +95,7 @@ proptest-derive = { version = "0.3.0", optional = true }
 rand = { version = "0.8.5", optional = true, package = "rand" }
 rand_chacha = { version = "0.3.1", optional = true }
 
-tokio = { version = "1.23.1", features = ["tracing"], optional = true }
+tokio = { version = "1.24.1", features = ["tracing"], optional = true }
 
 zebra-test = { path = "../zebra-test/", optional = true }
 
@@ -118,7 +118,7 @@ proptest-derive = "0.3.0"
 rand = { version = "0.8.5", package = "rand" }
 rand_chacha = "0.3.1"
 
-tokio = { version = "1.23.1", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.24.1", features = ["full", "tracing", "test-util"] }
 
 zebra-test = { path = "../zebra-test/" }
 
