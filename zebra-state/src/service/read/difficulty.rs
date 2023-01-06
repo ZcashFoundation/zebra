@@ -1,6 +1,9 @@
 //! Get context and calculate difficulty for the next block.
 
-use std::sync::Arc;
+use std::{
+    cmp::{max, min},
+    sync::Arc,
+};
 
 use chrono::{DateTime, Utc};
 
@@ -117,7 +120,9 @@ pub fn solution_rate(
 }
 
 /// Do a consistency check by checking the finalized tip before and after all other database queries.
-/// Returns and error if the tip obtained before and after is not the same.
+///
+/// Returns the state tip, recent blocks in reverse order from the tip, and the tip history tree.
+/// Returns an error if the tip obtained before and after is not the same.
 ///
 /// # Panics
 ///
@@ -172,6 +177,8 @@ fn relevant_chain_and_history_tree(
 }
 
 /// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
+///
+/// The `relevant_chain` has recent blocks in reverse order from the tip.
 ///
 /// See [`get_block_template_chain_info()`] for details.
 fn difficulty_time_and_history_tree(
@@ -245,6 +252,8 @@ fn difficulty_time_and_history_tree(
 }
 
 /// Adjust the difficulty and time for the testnet minimum difficulty rule.
+///
+/// The `relevant_data` has recent block difficulties and times in reverse order from the tip.
 fn adjust_difficulty_and_time_for_testnet(
     result: &mut GetBlockTemplateChainInfo,
     network: Network,
@@ -276,7 +285,8 @@ fn adjust_difficulty_and_time_for_testnet(
     // There is still a small chance that miners will produce an invalid block, if they are
     // just below the max time, and don't check it.
 
-    let previous_block_time = relevant_data.last().expect("has at least one block").1;
+    // The tip is the first relevant data block, because they are in reverse order.
+    let previous_block_time = relevant_data.first().expect("has at least one block").1;
     let previous_block_time: DateTime32 = previous_block_time
         .try_into()
         .expect("valid blocks have in-range times");
@@ -309,16 +319,28 @@ fn adjust_difficulty_and_time_for_testnet(
         .expect("a valid block time minus a small constant is in-range");
 
     if result.cur_time <= local_std_difficulty_limit {
-        // Standard difficulty: the max time needs to exclude min difficulty blocks
-        result.max_time = std_difficulty_max_time;
-    } else {
-        // Minimum difficulty: the min and cur time need to exclude min difficulty blocks
-        result.min_time = min_difficulty_min_time;
-        if result.cur_time < min_difficulty_min_time {
-            result.cur_time = min_difficulty_min_time;
-        }
+        // Standard difficulty: the cur and max time need to exclude min difficulty blocks
 
-        // And then the difficulty needs to be updated for cur_time
+        // The maximum time can only be decreased, and only as far as min_time.
+        // The old minimum is still required by other consensus rules.
+        result.max_time = min(std_difficulty_max_time, result.max_time);
+        result.max_time = max(result.min_time, result.max_time);
+
+        // The current time only needs to be decreased if the max_time decreased past it.
+        // Decreasing the current time can't change the difficulty.
+        result.cur_time = result.cur_time.clamp(result.min_time, result.max_time);
+    } else {
+        // Minimum difficulty: the min and cur time need to exclude std difficulty blocks
+
+        // The minimum time can only be increased, and only as far as max_time.
+        // The old maximum is still required by other consensus rules.
+        result.min_time = max(min_difficulty_min_time, result.min_time);
+        result.min_time = min(result.max_time, result.min_time);
+
+        // The current time only needs to be increased if the min_time increased past it.
+        result.cur_time = result.cur_time.clamp(result.min_time, result.max_time);
+
+        // And then the difficulty needs to be updated for cur_time.
         result.expected_difficulty = AdjustedDifficulty::new_from_header_time(
             result.cur_time.into(),
             previous_block_height,
