@@ -735,6 +735,73 @@ async fn rpc_getblockcount_empty_state() {
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 #[tokio::test(flavor = "multi_thread")]
+async fn rpc_getpeerinfo() {
+    use zebra_chain::chain_sync_status::MockSyncStatus;
+    use zebra_network::peer_observer::MockPeerObserver;
+
+    let _init_guard = zebra_test::init();
+    let network = Mainnet;
+
+    // Get a mempool handle
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create an empty state
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init_test_services(Mainnet);
+
+    let (
+        chain_verifier,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::chain::init(
+        zebra_consensus::Config::default(),
+        network,
+        state.clone(),
+        true,
+    )
+    .await;
+
+    let mock_peer_address =
+        zebra_network::types::MetaAddr::new_initial_peer(std::net::SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+            network.default_port(),
+        ))
+        .into_new_meta_addr()
+        .unwrap();
+
+    let mock_address_book = MockPeerObserver::new(vec![mock_peer_address]);
+
+    // Init RPC
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        network,
+        Default::default(),
+        Buffer::new(mempool.clone(), 1),
+        read_state,
+        latest_chain_tip.clone(),
+        chain_verifier,
+        MockSyncStatus::default(),
+        mock_address_book,
+    );
+
+    // Call `get_peer_info`
+    let get_peer_info = get_block_template_rpc
+        .get_peer_info()
+        .await
+        .expect("We should have an array of addresses");
+
+    assert_eq!(
+        get_peer_info
+            .into_iter()
+            .next()
+            .expect("there should be a mock peer address"),
+        mock_peer_address.into()
+    );
+
+    mempool.expect_no_requests().await;
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockhash() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
     use zebra_network::peer_observer::MockPeerObserver;

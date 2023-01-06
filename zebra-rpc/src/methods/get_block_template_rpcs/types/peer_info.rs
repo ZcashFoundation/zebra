@@ -6,7 +6,7 @@ use zebra_network::types::MetaAddr;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PeerInfo {
     /// The IP address and port of the peer
-    addr: String,
+    pub addr: String,
 }
 
 impl From<MetaAddr> for PeerInfo {
