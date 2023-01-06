@@ -1,10 +1,15 @@
-img[src = "diagrams/service-dependencies.svg"] {
+#service-dep-diagram {
     display: block;
     margin: 0px auto;
 }
 
-html.navy img[src = "diagrams/service-dependencies.svg"], 
-html.ayu img[src = "diagrams/service-dependencies.svg"], 
-html.coal img[src = "diagrams/service-dependencies.svg"] {
+#service-dep-diagram a:hover {
+    text-decoration: none;
+    filter: drop-shadow(0 0 4px #000);
+}
+
+html.navy #service-dep-diagram, 
+html.ayu #service-dep-diagram, 
+html.coal #service-dep-diagram {
     filter: invert(1);
 }
