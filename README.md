@@ -243,15 +243,15 @@ So Zebra's state should always be valid, unless your OS or disk hardware is corr
 
 There are a few bugs in Zebra that we're still working on fixing:
 
+- If Zebra fails downloading the Zcash parameters, use [the Zcash parameters download script](https://github.com/zcash/zcash/blob/master/zcutil/fetch-params.sh) instead.
+
 - Zebra falsely estimates that it's close to the tip when the network connection goes down [#4649](https://github.com/ZcashFoundation/zebra/issues/4649).
 
-- If Zebra fails downloading the Zcash parameters, use [the Zcash parameters download script](https://github.com/zcash/zcash/blob/master/zcutil/fetch-params.sh) instead. This script might be needed on macOS, even with Rust stable.
-
-- No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801). We used to test with Windows Server 2019, but not anymore; see the issue for details.
+- No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801). We used to test with Windows Server 2019, but not any more; see the issue for details.
 
 - Experimental Tor support is disabled until [`arti-client` upgrades to `x25519-dalek` 2.0.0 or later](https://github.com/ZcashFoundation/zebra/issues/5492). This happens due to a Rust dependency conflict, which can only be resolved by upgrading to a version of `x25519-dalek` with the dependency fix.
 
-- Output of `help`, `--help` flag, and usage of invalid commands or options are inconsistent. Reports of these issues can be found [here](https://github.com/ZcashFoundation/zebra/issues/5502) and are planned to be fixed in the context of [upgrading Abscissa](https://github.com/ZcashFoundation/zebra/issues/5502).
+- Output of `help`, `--help` flag, and usage of invalid commands or options are inconsistent [#5502](https://github.com/ZcashFoundation/zebra/issues/5502). See the issue for details.
 
 ## Future Work
 
