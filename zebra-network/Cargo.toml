@@ -26,7 +26,7 @@ ordered-map = "0.4.2"
 pin-project = "1.0.12"
 rand = { version = "0.8.5", package = "rand" }
 rayon = "1.6.1"
-regex = "1.7.0"
+regex = "1.7.1"
 serde = { version = "1.0.152", features = ["serde_derive"] }
 thiserror = "1.0.38"
 
