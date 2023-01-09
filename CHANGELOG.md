@@ -29,6 +29,7 @@ As part of this release, we upgraded `tokio` to fix potential hangs and performa
 - Try to match `zcashd`'s `getblocktemplate` exactly ([#5867](https://github.com/ZcashFoundation/zebra/pull/5867))
 - Accept a hash or a height as the first parameter of the `getblock` RPC ([#5861](https://github.com/ZcashFoundation/zebra/pull/5861))
 - Wait for 3 minutes to check Zebra is synced to the tip, rather than 2 ([#5840](https://github.com/ZcashFoundation/zebra/pull/5840))
+- Update mainnet and testnet checkpoints ([#5928](https://github.com/ZcashFoundation/zebra/pull/5928))
 
 ### Fixed
 
