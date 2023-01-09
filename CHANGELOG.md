@@ -10,6 +10,11 @@ This release continues our work on mining pool RPCs, and brings Zebra up to date
 
 As part of this release, we upgraded `tokio` to fix potential hangs and performance issues. We encourage all users to upgrade to the latest Zebra version to benefit from these fixes.
 
+### Breaking Changes
+
+- Zebra now requires at least Rust 1.65, because we have started using new language features.
+  Any Zebra release can increase the required Rust version: only the latest stable Rust version is supported.
+
 ### Security
 
 - Upgrade tokio from 1.22.0 to 1.23.0 to fix potential hangs and performance issues ([#5802](https://github.com/ZcashFoundation/zebra/pull/5802))
