@@ -42,9 +42,9 @@ jobs:
           persist-credentials: false
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1
+        uses: arduino/setup-protoc@v1.1.2
         with:
-          version: '3.x'
+          version: '3.21.12'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install latest beta
