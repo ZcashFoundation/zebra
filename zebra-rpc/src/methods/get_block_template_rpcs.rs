@@ -314,7 +314,7 @@ where
     // TODO: use a generic error constructor (#5548)
     fn get_block_template(
         &self,
-        mut parameters: Option<get_block_template::JsonParameters>,
+        parameters: Option<get_block_template::JsonParameters>,
     ) -> BoxFuture<Result<get_block_template::Response>> {
         // Should we generate coinbase transactions that are exactly like zcashd's?
         //

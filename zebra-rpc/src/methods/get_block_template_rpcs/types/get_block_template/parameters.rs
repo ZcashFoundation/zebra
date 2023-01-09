@@ -93,7 +93,7 @@ pub struct JsonParameters {
 
 impl JsonParameters {
     /// Returns Some(data) with the block proposal hexdata if in `Proposal` mode and `data` is provided.
-    pub fn block_proposal_data(&mut self) -> Option<HexData> {
+    pub fn block_proposal_data(&self) -> Option<HexData> {
         match self {
             Self { data: None, .. }
             | Self {
@@ -105,7 +105,7 @@ impl JsonParameters {
                 mode: GetBlockTemplateRequestMode::Proposal,
                 data,
                 ..
-            } => data.take(),
+            } => data.clone(),
         }
     }
 }

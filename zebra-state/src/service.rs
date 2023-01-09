@@ -1715,16 +1715,21 @@ impl Service<ReadRequest> for ReadStateService {
                 let span = Span::current();
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-
                         tracing::info!("attempting to validate and commit block proposal onto a cloned non-finalized state");
                         let mut latest_non_finalized_state = state.latest_non_finalized_state();
-                        latest_non_finalized_state.should_count_metrics = false;
+
+                        // Check that the previous block hash is the best chain tip if there are blocks in the 
+                        // non-finalized state. The previous block of a valid proposal must be on the best chain tip.
+                        if let Some(true) = latest_non_finalized_state.best_tip().map(|(_, tip_hash)| tip_hash != prepared.hash) {
+                            return Err("previous block hash is not the best chain tip".into())
+                        }
 
                         // This clone of the non-finalized state is dropped when this closure returns.
                         // The non-finalized state that's used in the rest of the state (including finalizing
                         // blocks into the db) is not mutated here.
                         //
                         // TODO: Convert `CommitBlockError` to a new `ValidateProposalError`?
+                        latest_non_finalized_state.should_count_metrics = false;
                         write::validate_and_commit_non_finalized(
                             &state.db,
                             &mut latest_non_finalized_state,
