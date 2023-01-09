@@ -76,7 +76,7 @@ You can run Zebra using our Docker image.
 This command will run our latest release, and sync it to the tip:
 
 ```sh
-docker run zfnd/zebra:1.0.0-rc.2
+docker run zfnd/zebra:1.0.0-rc.3
 ```
 
 For more information, read our [Docker documentation](book/src/user/docker.md).
@@ -102,7 +102,7 @@ for your platform:
    - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages
      (these packages will have different names depending on your package manager)
    - **clang** or another C++ compiler: `g++` (all platforms) or `Xcode` (macOS)
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.2 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.3 zebrad`
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 For more detailed instructions, refer to the [documentation](https://zebra.zfnd.org/user/install.html).
