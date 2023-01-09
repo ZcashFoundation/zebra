@@ -225,7 +225,7 @@ jobs:
           --container-stdin \
           --container-tty \
           --container-image ${{ env.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --create-disk=name=auto-delete=yes,size=300GB,type=pd-ssd \
+          --create-disk=auto-delete=yes,size=300GB,type=pd-ssd \
           --container-mount-disk=mount-path='/zebrad-cache' \
           --machine-type ${{ env.MACHINE_TYPE }} \
           --zone ${{ env.ZONE }} \
