@@ -97,7 +97,7 @@ for your platform:
    - Zebra is tested with the latest `stable` Rust version.
      Earlier versions are not supported or tested.
      Any Zebra release can remove support for older Rust versions, without any notice.
-     (Rust 1.59 and earlier are definitely not supported, due to missing features.)
+     (Zebra currently requires at least Rust 1.65.)
 2. Install Zebra's build dependencies:
    - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages
      (these packages will have different names depending on your package manager)
