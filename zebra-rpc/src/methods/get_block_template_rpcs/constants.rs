@@ -18,6 +18,8 @@ pub const GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL: u64 = 5;
 pub const GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD: &str = "00000000ffffffff";
 
 /// A hardcoded list of fields that the miner can change from the block template.
+///
+/// <https://en.bitcoin.it/wiki/BIP_0023#Mutations>
 pub const GET_BLOCK_TEMPLATE_MUTABLE_FIELD: &[&str] = &[
     // Standard mutations, copied from zcashd
     "time",
@@ -26,6 +28,8 @@ pub const GET_BLOCK_TEMPLATE_MUTABLE_FIELD: &[&str] = &[
 ];
 
 /// A hardcoded list of Zebra's getblocktemplate RPC capabilities.
+///
+/// <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
 pub const GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD: &[&str] = &["proposal"];
 
 /// The max estimated distance to the chain tip for the getblocktemplate method.
@@ -34,6 +38,8 @@ pub const GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD: &[&str] = &["proposal"];
 /// > A full validator MUST NOT accept blocks with nTime more than two hours in the future
 /// > according to its clock. This is not strictly a consensus rule because it is nondeterministic,
 /// > and clock time varies between nodes.
+/// >
+/// > <https://zips.z.cash/protocol/protocol.pdf#blockheader>
 pub const MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP: i32 = 100;
 
 /// The RPC error code used by `zcashd` for when it's still downloading initial blocks.

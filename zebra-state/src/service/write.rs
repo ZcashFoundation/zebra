@@ -12,7 +12,7 @@ use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
     service::{
         check,
-        finalized_state::FinalizedState,
+        finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedFinalized, QueuedNonFinalized},
         BoxError, ChainTipBlock, ChainTipSender, CloneError,
@@ -26,8 +26,6 @@ use crate::service::{
     chain_tip::{ChainTipChange, LatestChainTip},
     non_finalized_state::Chain,
 };
-
-use super::finalized_state::ZebraDb;
 
 /// The maximum size of the parent error map.
 ///

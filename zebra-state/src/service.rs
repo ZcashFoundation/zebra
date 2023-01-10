@@ -1718,14 +1718,14 @@ impl Service<ReadRequest> for ReadStateService {
                         tracing::info!("attempting to validate and commit block proposal onto a cloned non-finalized state");
                         let mut latest_non_finalized_state = state.latest_non_finalized_state();
 
-                       // The previous block of a valid proposal must be on the best chain tip.
-                       let Some((_best_tip_height, best_tip_hash) = read::best_tip(&latest_non_finalized_state, &state.db) {
-                           if prepared.block.header.previous_block_hash !=  best_tip_hash {
-                               return Err("proposal is not based on the current best chain tip: previous block hash must be the best chain tip".into());
-                           }
-                       } else {
-                           return Err("state is empty: wait for Zebra to sync before submitting a proposal".into());
-                       }
+                        // The previous block of a valid proposal must be on the best chain tip.
+                        let Some((_best_tip_height, best_tip_hash)) = read::best_tip(&latest_non_finalized_state, &state.db) else {
+                            return Err("state is empty: wait for Zebra to sync before submitting a proposal".into());
+                        };
+
+                        if prepared.block.header.previous_block_hash != best_tip_hash {
+                            return Err("proposal is not based on the current best chain tip: previous block hash must be the best chain tip".into());
+                        }
 
                         // This clone of the non-finalized state is dropped when this closure returns.
                         // The non-finalized state that's used in the rest of the state (including finalizing

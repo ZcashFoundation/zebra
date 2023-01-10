@@ -14,13 +14,13 @@ use zebra_chain::{
 use crate::{
     service::{
         block_iter::any_ancestor_blocks, check::difficulty::POW_ADJUSTMENT_BLOCK_SPAN,
-        non_finalized_state::NonFinalizedState,
+        finalized_state::ZebraDb, non_finalized_state::NonFinalizedState,
     },
     BoxError, PreparedBlock, ValidateContextError,
 };
 
 // use self as check
-use super::{check, finalized_state::ZebraDb};
+use super::check;
 
 // These types are used in doc links
 #[allow(unused_imports)]
