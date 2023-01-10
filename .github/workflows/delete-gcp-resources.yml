@@ -212,4 +212,4 @@ jobs:
             -repo=us-docker.pkg.dev/zealous-zebra/zebra/zebrad-test
             -repo=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd
             -grace=${{ env.DELETE_IMAGE_HOURS }}
-            -keep=2
+            -keep=${{ env.KEEP_LATEST_IMAGE_COUNT }}
