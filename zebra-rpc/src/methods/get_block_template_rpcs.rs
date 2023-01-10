@@ -332,7 +332,7 @@ where
         let state = self.state.clone();
 
         if let Some(HexData(block_proposal_bytes)) = parameters
-            .as_mut()
+            .as_ref()
             .and_then(get_block_template::JsonParameters::block_proposal_data)
         {
             return validate_block_proposal(self.chain_verifier.clone(), block_proposal_bytes)
@@ -344,8 +344,8 @@ where
             get_block_template::check_parameters(&parameters)?;
 
             let client_long_poll_id = parameters
-                .as_mut()
-                .and_then(|params| params.long_poll_id.take());
+                .as_ref()
+                .and_then(|params| params.long_poll_id.clone());
 
             // - One-off checks
 
