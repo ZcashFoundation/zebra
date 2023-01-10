@@ -72,7 +72,7 @@ Update the README to:
 - [ ] Remove any "Known Issues" that have been fixed
 - [ ] Update the "Build and Run Instructions" with any new dependencies.
       Check for changes in the `Dockerfile` since the last tag: `git diff <previous-release-tag> docker/Dockerfile`.
-- [ ] If Zebra has started using newer Rust language features or standard library APIs, update the known good Rust version in the README, book, and `Cargo.toml`s
+- [ ] If Zebra has started using newer Rust language features or standard library APIs, update the known working Rust version in the README, book, and `Cargo.toml`s
 
 You can use a command like:
 ```sh
