@@ -1,7 +1,7 @@
 - Feature Name: Pipelinable Block Syncing and Lookup
 - Start Date: 2020-07-02
-- Design PR: [rust-lang/rfcs#0000](https://github.com/rust-lang/rfcs/pull/0000)
-- Rust Issue: [rust-lang/rust#0000](https://github.com/rust-lang/rust/issues/0000)
+- Design PR: [ZcashFoundation/zebra#583](https://github.com/ZcashFoundation/zebra/pull/583)
+- Zebra Issue: [ZcashFoundation/zebra#504](https://github.com/ZcashFoundation/zebra/issues/504)
 
 # Summary
 [summary]: #summary
