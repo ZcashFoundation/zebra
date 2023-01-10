@@ -3,7 +3,7 @@
 # Flags that apply to all Zebra crates and configurations
 [target.'cfg(all())']
 rustflags = [
-    # Zebra standard lints for Rust 1.58+
+    # Zebra standard lints for Rust 1.65+
 
     # High-risk code
     "-Dunsafe_code",
