@@ -58,10 +58,10 @@ pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>,
     Ok(first.clone())
 }
 
-/// Returns `Ok(ExpandedDifficulty)` if `difficulty_threshold` of `header` passes
+/// Returns `Ok(ExpandedDifficulty)` if the`difficulty_threshold` of `header` is at least as difficult as
 /// the target difficulty limit for `network` (PoWLimit)
 ///
-/// If the header is invalid, returns an error containing `height` and `hash`.
+/// If the header difficulty threshold is invalid, returns an error containing `height` and `hash`.
 pub fn difficulty_threshold_is_valid(
     header: &Header,
     network: Network,
