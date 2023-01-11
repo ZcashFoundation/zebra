@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Gets a block template from a Zcash node instance,
+# turns it into a block proposal,
+# and sends it to one or more Zcash node instances (which can include the same node).
+#
+# If there are multiple proposal ports, displays a diff of the responses.
+#
+# Uses `zcash-cli` with the RPC ports supplied on the command-line.
+
+function usage()
+{
+    echo "Usage:"
+    echo "$0 block-template-rpc-port proposal-rpc-port [extra-proposal-rpc-port...] -- [extra-block-template-rpc-json-fields] [extra-proposal-rpc-fields]"
+}
+
+# Override the commands used by this script using these environmental variables:
+ZCASH_CLI="${ZCASH_CLI:-zcash-cli}"
+DIFF="${DIFF:-diff --unified --color=always}"
+JQ="${JQ:-jq}"
+
+# Process arguments
+
+if [ $# -lt 2 ]; then
+    usage
+    exit 1
+fi
+
+TEMPLATE_RPC_PORT=$1
+shift
+
+PROPOSAL_RPC_PORTS=""
+while [ -n "${1:-}" ] && [ "${1-}" != "--" ]; do
+    PROPOSAL_RPC_PORTS="$PROPOSAL_RPC_PORTS $1"
+    shift
+done
+
+if [ "${1-}" == "--" ]; then
+    shift
+fi
+
+TEMPLATE_ARG=""
+if [ $# -ge 1 ]; then
+    TEMPLATE_ARG="${1:-}"
+    shift
+fi
+TEMPLATE_ARG_FULL="{ \"mode\": \"template\" ${TEMPLATE_ARG:+, $TEMPLATE_ARG} }"
+
+PROPOSAL_ARG=""
+if [ $# -ge 1 ]; then
+    PROPOSAL_ARG="${1:-}"
+    shift
+fi
+PROPOSAL_ARG_NO_DATA="{ \"mode\": \"proposal\", \"data\": \"...\" ${PROPOSAL_ARG:+, $PROPOSAL_ARG} }"
+
+if [ $# -ge 1 ]; then
+    usage
+    exit 1
+fi
+
+# Use an easily identified temp directory name,
+# but fall back to the default temp name if `mktemp` does not understand `--suffix`.
+ZCASH_RPC_TMP_DIR=$(mktemp --suffix=.block-template-proposal -d 2>/dev/null || mktemp -d)
+
+TEMPLATE_NODE_RELEASE_INFO="$ZCASH_RPC_TMP_DIR/template-check-getinfo.json"
+PROPOSAL_NODES_RELEASE_INFO_BASE="$ZCASH_RPC_TMP_DIR/proposal-check-getinfo"
+
+echo "Checking getblocktemplate node release info..."
+$ZCASH_CLI -rpcport="$TEMPLATE_RPC_PORT" getinfo > "$TEMPLATE_NODE_RELEASE_INFO"
+
+TEMPLATE_NODE=$(cat "$TEMPLATE_NODE_RELEASE_INFO" | grep '"subversion"' | \
+                    cut -d: -f2 | cut -d/ -f2 | \
+                    tr 'A-Z' 'a-z' | sed 's/magicbean/zcashd/ ; s/zebra$/zebrad/')
+
+echo "Connected to $TEMPLATE_NODE (port $TEMPLATE_RPC_PORT) for getblocktemplate $TEMPLATE_ARG_FULL"
+
+echo
+
+echo "Checking proposal nodes release info..."
+
+for PORT in $PROPOSAL_RPC_PORTS; do
+    PROPOSAL_NODE_RELEASE_INFO=$PROPOSAL_NODES_RELEASE_INFO_BASE.$PORT.json
+
+    $ZCASH_CLI -rpcport="$PORT" getinfo > "$PROPOSAL_NODE_RELEASE_INFO"
+
+    PROPOSAL_NODE=$(cat "$PROPOSAL_NODE_RELEASE_INFO" | grep '"subversion"' | \
+                        cut -d: -f2 | cut -d/ -f2 | \
+                        tr 'A-Z' 'a-z' | sed 's/magicbean/zcashd/ ; s/zebra$/zebrad/')
+
+    echo "Connected to $PROPOSAL_NODE (port $PORT) for getblocktemplate $PROPOSAL_ARG_NO_DATA"
+done
+
+echo
+
+TEMPLATE_NODE_BLOCKCHAIN_INFO="$ZCASH_RPC_TMP_DIR/template-check-getblockchaininfo.json"
+PROPOSAL_NODES_BLOCKCHAIN_INFO_BASE="$ZCASH_RPC_TMP_DIR/proposal-check-getblockchaininfo"
+
+echo "Checking $TEMPLATE_NODE template network and tip height..."
+$ZCASH_CLI -rpcport="$TEMPLATE_RPC_PORT" getblockchaininfo > "$TEMPLATE_NODE_BLOCKCHAIN_INFO"
+
+TEMPLATE_NET=$(cat "$TEMPLATE_NODE_BLOCKCHAIN_INFO" | grep '"chain"' | cut -d: -f2 | tr -d ' ,"')
+TEMPLATE_HEIGHT=$(cat "$TEMPLATE_NODE_BLOCKCHAIN_INFO" | grep '"blocks"' | cut -d: -f2 | tr -d ' ,"')
+
+echo "Checking proposal nodes network and tip height..."
+
+for PORT in $PROPOSAL_RPC_PORTS; do
+    PROPOSAL_NODE_BLOCKCHAIN_INFO=$PROPOSAL_NODES_BLOCKCHAIN_INFO_BASE.$PORT.json
+
+    $ZCASH_CLI -rpcport="$PORT" getblockchaininfo > "$PROPOSAL_NODE_BLOCKCHAIN_INFO"
+
+    PROPOSAL_NET=$(cat "$PROPOSAL_NODE_BLOCKCHAIN_INFO" | grep '"chain"' | cut -d: -f2 | tr -d ' ,"')
+    PROPOSAL_HEIGHT=$(cat "$PROPOSAL_NODE_BLOCKCHAIN_INFO" | grep '"blocks"' | cut -d: -f2 | tr -d ' ,"')
+
+    if [ "$PROPOSAL_NET" != "$TEMPLATE_NET" ]; then
+        echo "WARNING: sending block templates between different networks:"
+        echo "$TEMPLATE_NODE (RPC port $TEMPLATE_RPC_PORT) template is on: $TEMPLATE_NET"
+        echo "RPC port $PORT proposal is on: $PROPOSAL_NET"
+        echo
+    fi
+
+    if [ "$PROPOSAL_HEIGHT" -ne "$TEMPLATE_HEIGHT" ]; then
+        echo "WARNING: proposing block templates at different heights:"
+        echo "$TEMPLATE_NODE (RPC port $TEMPLATE_RPC_PORT) template is on: $TEMPLATE_HEIGHT"
+        echo "RPC port $PORT proposal is on: $PROPOSAL_HEIGHT"
+        echo
+    fi
+done
+
+echo
+
+TEMPLATE_NODE_TEMPLATE_RESPONSE="$ZCASH_RPC_TMP_DIR/template-getblocktemplate-template.json"
+
+echo "getblocktemplate template request ($TEMPLATE_NODE port $TEMPLATE_RPC_PORT):"
+echo "getblocktemplate $TEMPLATE_ARG_FULL"
+echo
+
+echo "Querying $TEMPLATE_NODE $TEMPLATE_NET chain at height >=$TEMPLATE_HEIGHT..."
+time $ZCASH_CLI -rpcport="$TEMPLATE_RPC_PORT" getblocktemplate "$TEMPLATE_ARG_FULL" > "$TEMPLATE_NODE_TEMPLATE_RESPONSE"
+echo
+
+cat "$TEMPLATE_NODE_TEMPLATE_RESPONSE"
+echo "Turning the template into block proposal data using $JQ..."
+# TODO: build a header, transaction count, and transaction list
+PROPOSAL_ARG_FULL=$PROPOSAL_ARG_NO_DATA
+
+echo "getblocktemplate proposal submissions:"
+echo "getblocktemplate $PROPOSAL_ARG_NO_DATA"
+echo
+
+PROPOSAL_NODES_PROPOSAL_RESPONSE_BASE="$ZCASH_RPC_TMP_DIR/proposal-check-getblocktemplate-proposal"
+PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST=""
+
+for PORT in $PROPOSAL_RPC_PORTS; do
+    PROPOSAL_NODE_PROPOSAL_RESPONSE=$PROPOSAL_NODES_PROPOSAL_RESPONSE_BASE.$PORT.json
+    PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST="$PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST $PROPOSAL_NODE_PROPOSAL_RESPONSE"
+
+    time $ZCASH_CLI -rpcport="$PORT" getblocktemplate "$PROPOSAL_ARG_FULL" > "$PROPOSAL_NODE_PROPOSAL_RESPONSE"
+done
+
+echo
+
+echo "Proposal response diffs between ports $PROPOSAL_RPC_PORTS:"
+
+$DIFF $PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST \
+    && ( \
+        echo "getblocktemplate proposal responses were identical"; \
+        echo ; \
+        echo "Final response from $PROPOSAL_NODE_PROPOSAL_RESPONSE:"; \
+        cat "$PROPOSAL_NODE_PROPOSAL_RESPONSE"; \
+        )
+
+EXIT_STATUS=$?
