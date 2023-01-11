@@ -788,15 +788,14 @@ dependencies = [
 
 [[package]]
 name = "console"
-version = "0.15.2"
+version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c050367d967ced717c04b65d8c619d863ef9292ce0c5760028655a2fb298718c"
+checksum = "c9b6515d269224923b26b5febea2ed42b2d5f2ce37284a4dd670fedd6cb8347a"
 dependencies = [
  "encode_unicode",
  "lazy_static",
  "libc",
- "terminal_size",
- "winapi",
+ "windows-sys 0.42.0",
 ]
 
 [[package]]
@@ -1223,18 +1222,18 @@ dependencies = [
 
 [[package]]
 name = "enum-iterator"
-version = "1.1.3"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45a0ac4aeb3a18f92eaf09c6bb9b3ac30ff61ca95514fc58cbead1c9a6bf5401"
+checksum = "91a4ec26efacf4aeff80887a175a419493cb6f8b5480d26387eb0bd038976187"
 dependencies = [
  "enum-iterator-derive",
 ]
 
 [[package]]
 name = "enum-iterator-derive"
-version = "1.0.2"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b13f1e69590421890f90448c3cd5f554746a31adc6dc0dac406ec6901db8dc25"
+checksum = "828de45d0ca18782232dfb8f3ea9cc428e8ced380eb26a520baaacfc70de39ce"
 dependencies = [
  "proc-macro2 1.0.47",
  "quote 1.0.20",
@@ -1998,9 +1997,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.24.1"
+version = "1.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb5686bd8e9239eabe90bb30a0c341bffd6fdc177fb556708f2cb792bf00352d"
+checksum = "f6f0f08b46e4379744de2ab67aa8f7de3ffd1da3e275adc41fcc82053ede46ff"
 dependencies = [
  "console",
  "lazy_static",
@@ -3103,9 +3102,9 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.11.5"
+version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c01db6702aa05baa3f57dec92b8eeeeb4cb19e894e73996b32a4093289e54592"
+checksum = "21dc42e00223fc37204bd4aa177e69420c604ca4a183209a8f9de30c6d934698"
 dependencies = [
  "bytes",
  "prost-derive",
@@ -3133,9 +3132,9 @@ dependencies = [
 
 [[package]]
 name = "prost-derive"
-version = "0.11.5"
+version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8842bad1a5419bca14eac663ba798f6bc19c413c2fdceb5f3ba3b0932d96720"
+checksum = "8bda8c0881ea9f722eb9629376db3d0b903b462477c1aafcb0566610ac28ac5d"
 dependencies = [
  "anyhow",
  "itertools",
@@ -3397,9 +3396,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.7.0"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e076559ef8e241f2ae3479e36f97bd5741c0330689e217ad51ce2c76808b868a"
+checksum = "48aaa5748ba571fb95cd2c85c09f629215d3a6ece942baa100950af03a34f733"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -4147,16 +4146,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "terminal_size"
-version = "0.1.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "633c1a546cee861a1a6d0dc69ebeca693bf4296661ba7852b9d21d159e0506df"
-dependencies = [
- "libc",
- "winapi",
-]
-
-[[package]]
 name = "textwrap"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4250,9 +4239,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.23.0"
+version = "1.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eab6d665857cc6ca78d6e80303a02cea7a7851e85dfbd77cbdc09bd129f1ef46"
+checksum = "1d9f76183f91ecfb55e1d7d5602bd1d979e38a3a522fe900241cf195624d67ae"
 dependencies = [
  "autocfg",
  "bytes",
@@ -4441,7 +4430,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -4465,7 +4454,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "futures-core",
  "pin-project 0.4.30",
@@ -4821,9 +4810,9 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "vergen"
-version = "7.4.4"
+version = "7.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efadd36bc6fde40c6048443897d69511a19161c0756cb704ed403f8dfd2b7d1c"
+checksum = "571b69f690c855821462709b6f41d42ceccc316fbd17b60bd06d06928cfe6a99"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.0",
@@ -5372,7 +5361,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.18"
+version = "1.0.0-beta.19"
 dependencies = [
  "aes",
  "bech32 0.9.1",
@@ -5435,7 +5424,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.18"
+version = "1.0.0-beta.19"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -5478,7 +5467,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.18"
+version = "1.0.0-beta.19"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -5514,14 +5503,14 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0-beta.18"
+version = "1.0.0-beta.19"
 dependencies = [
  "zebra-chain",
 ]
 
 [[package]]
 name = "zebra-rpc"
-version = "1.0.0-beta.18"
+version = "1.0.0-beta.19"
 dependencies = [
  "chrono",
  "futures",
@@ -5554,7 +5543,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.18"
+version = "1.0.0-beta.19"
 dependencies = [
  "displaydoc",
  "hex",
@@ -5567,7 +5556,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.18"
+version = "1.0.0-beta.19"
 dependencies = [
  "bincode",
  "chrono",
@@ -5605,7 +5594,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.18"
+version = "1.0.0-beta.19"
 dependencies = [
  "color-eyre",
  "futures",
@@ -5632,7 +5621,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.18"
+version = "1.0.0-beta.19"
 dependencies = [
  "color-eyre",
  "hex",
@@ -5648,7 +5637,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "abscissa_core",
  "atty",

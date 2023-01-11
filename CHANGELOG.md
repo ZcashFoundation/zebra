@@ -4,6 +4,48 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-rc.3](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.3) - 2023-01-10
+
+This release continues our work on mining pool RPCs, and brings Zebra up to date with the latest [ZIP-317](https://zips.z.cash/zip-0317) changes. It also fixes a minor network protocol compatibility bug.
+
+As part of this release, we upgraded `tokio` to fix potential hangs and performance issues. We encourage all users to upgrade to the latest Zebra version to benefit from these fixes.
+
+### Breaking Changes
+
+- Zebra now requires at least Rust 1.65, because we have started using new language features.
+  Any Zebra release can increase the required Rust version: only the latest stable Rust version is supported.
+
+### Security
+
+- Upgrade tokio from 1.22.0 to 1.23.0 to fix potential hangs and performance issues ([#5802](https://github.com/ZcashFoundation/zebra/pull/5802))
+- Refactor block subsidy to handle Height::MAX without panicking ([#5787](https://github.com/ZcashFoundation/zebra/pull/5787))
+- Update ZIP-317 transaction selection algorithm in the `getblocktemplate` RPC ([#5776](https://github.com/ZcashFoundation/zebra/pull/5776))
+
+### Added
+
+- Add the `getmininginfo`, `getnetworksolps` and `getnetworkhashps` RPC methods ([#5808](https://github.com/ZcashFoundation/zebra/pull/5808))
+- Add long polling support to the `getblocktemplate` RPC ([#5772](https://github.com/ZcashFoundation/zebra/pull/5772), [#5796](https://github.com/ZcashFoundation/zebra/pull/5796), [#5837](https://github.com/ZcashFoundation/zebra/pull/5837), [#5843](https://github.com/ZcashFoundation/zebra/pull/5843), [#5862](https://github.com/ZcashFoundation/zebra/pull/5862))
+- Populate `blockcommitmenthash` and `defaultroot` fields in the getblocktemplate RPC ([#5751](https://github.com/ZcashFoundation/zebra/pull/5751))
+- Support transparent p2pkh miner addresses in the `getblocktemplate` RPC ([#5827](https://github.com/ZcashFoundation/zebra/pull/5827))
+
+### Changed
+
+- Automatically re-verify mempool transactions after a chain fork, rather than re-downloading them all ([#5841](https://github.com/ZcashFoundation/zebra/pull/5841))
+- Try to match `zcashd`'s `getblocktemplate` exactly ([#5867](https://github.com/ZcashFoundation/zebra/pull/5867))
+- Accept a hash or a height as the first parameter of the `getblock` RPC ([#5861](https://github.com/ZcashFoundation/zebra/pull/5861))
+- Wait for 3 minutes to check Zebra is synced to the tip, rather than 2 ([#5840](https://github.com/ZcashFoundation/zebra/pull/5840))
+- Update mainnet and testnet checkpoints ([#5928](https://github.com/ZcashFoundation/zebra/pull/5928))
+
+### Fixed
+
+- Allow peers to omit the `relay` flag in `version` messages ([#5835](https://github.com/ZcashFoundation/zebra/pull/5835))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @dconnolly, @dependabot[bot], @oxarbitrage and @teor2345
+
+
 ## [Zebra 1.0.0-rc.2](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.2) - 2022-12-06
 
 Zebra's latest release continues work on mining pool RPCs, fixes a rare RPC crash that could lead to memory corruption, and uses the ZIP-317 conventional fee for mempool size limits.

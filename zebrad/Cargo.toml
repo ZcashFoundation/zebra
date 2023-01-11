@@ -1,13 +1,20 @@
 [package]
+# Crate metadata
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-rc.2"
-edition = "2021"
-# Zebra is only supported on the latest stable Rust version. Some earlier versions might work.
-# Zebra uses features introduced in Rust 1.58.
-rust-version = "1.58"
+version = "1.0.0-rc.3"
 repository = "https://github.com/ZcashFoundation/zebra"
+
+# Settings that impact compilation
+edition = "2021"
+
+# Zebra is only supported on the latest stable Rust version. Some earlier versions might work.
+# Zebra's code uses features introduced in Rust 1.65, or any later stable release.
+rust-version = "1.65"
+
+# Settings that impact runtime behaviour
+
 # make `cargo run` use `zebrad` by default
 # when run in the workspace directory
 default-run = "zebrad"
@@ -103,7 +110,7 @@ toml = "0.5.10"
 
 futures = "0.3.25"
 rayon = "1.6.1"
-tokio = { version = "1.23.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { version = "1.24.1", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.0.12"
 
@@ -159,7 +166,7 @@ proptest-derive = { version = "0.3.0", optional = true }
 console-subscriber = { version = "0.1.8", optional = true }
 
 [build-dependencies]
-vergen = { version = "7.4.4", default-features = false, features = ["cargo", "git"] }
+vergen = { version = "7.5.0", default-features = false, features = ["cargo", "git"] }
 
 # test feature lightwalletd-grpc-tests
 tonic-build = { version = "0.8.0", optional = true }
@@ -168,7 +175,7 @@ tonic-build = { version = "0.8.0", optional = true }
 abscissa_core = { version = "0.5", features = ["testing"] }
 hex = "0.4.3"
 once_cell = "1.17.0"
-regex = "1.7.0"
+regex = "1.7.1"
 semver = "1.0.16"
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
@@ -178,11 +185,11 @@ tempfile = "3.3.0"
 hyper = { version = "0.14.23", features = ["http1", "http2", "server"]}
 reqwest = "0.11.13"
 
-tokio = { version = "1.23.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.24.1", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.11"
 
 # test feature lightwalletd-grpc-tests
-prost = "0.11.5"
+prost = "0.11.6"
 tonic = "0.8.0"
 
 proptest = "0.10.1"

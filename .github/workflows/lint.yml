@@ -37,7 +37,7 @@ jobs:
 
       - name: Rust files
         id: changed-files-rust
-        uses: tj-actions/changed-files@v35.2.1
+        uses: tj-actions/changed-files@v35.4.0
         with:
           files: |
             **/*.rs
@@ -49,7 +49,7 @@ jobs:
 
       - name: Workflow files
         id: changed-files-workflows
-        uses: tj-actions/changed-files@v35.2.1
+        uses: tj-actions/changed-files@v35.4.0
         with:
           files: |
             .github/workflows/*.yml
@@ -67,9 +67,10 @@ jobs:
           persist-credentials: false
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1
+        uses: arduino/setup-protoc@v1.1.2
         with:
-          version: '3.x'
+          # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
+          version: '3.20.1'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check workflow permissions
@@ -117,9 +118,10 @@ jobs:
           persist-credentials: false
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1
+        uses: arduino/setup-protoc@v1.1.2
         with:
-          version: '3.x'
+          # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
+          version: '3.20.1'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions-rs/toolchain@v1.0.6
@@ -157,9 +159,10 @@ jobs:
           persist-credentials: false
 
       - name: Install last version of Protoc
-        uses: arduino/setup-protoc@v1
+        uses: arduino/setup-protoc@v1.1.2
         with:
-          version: '3.x'
+          # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
+          version: '3.20.1'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions-rs/toolchain@v1.0.6

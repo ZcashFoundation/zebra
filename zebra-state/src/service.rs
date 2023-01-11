@@ -1591,7 +1591,11 @@ impl Service<ReadRequest> for ReadStateService {
                     span.in_scope(move || {
                         let hash = state.non_finalized_state_receiver.with_watch_data(
                             |non_finalized_state| {
-                                read::hash(non_finalized_state.best_chain(), &state.db, height)
+                                read::hash_by_height(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    height,
+                                )
                             },
                         );
 
