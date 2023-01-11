@@ -32,8 +32,10 @@ TEMPLATE_RPC_PORT=$1
 shift
 
 PROPOSAL_RPC_PORTS=""
+PROPOSAL_RPC_PORT_COUNT=0
 while [ -n "${1:-}" ] && [ "${1-}" != "--" ]; do
     PROPOSAL_RPC_PORTS="$PROPOSAL_RPC_PORTS $1"
+    PROPOSAL_RPC_PORT_COUNT=$((PROPOSAL_RPC_PORT_COUNT + 1))
     shift
 done
 
@@ -138,12 +140,41 @@ echo
 
 echo "Querying $TEMPLATE_NODE $TEMPLATE_NET chain at height >=$TEMPLATE_HEIGHT..."
 time $ZCASH_CLI -rpcport="$TEMPLATE_RPC_PORT" getblocktemplate "$TEMPLATE_ARG_FULL" > "$TEMPLATE_NODE_TEMPLATE_RESPONSE"
+
+echo "Block template data is in $TEMPLATE_NODE_TEMPLATE_RESPONSE"
+#cat "$TEMPLATE_NODE_TEMPLATE_RESPONSE"
+
 echo
 
-cat "$TEMPLATE_NODE_TEMPLATE_RESPONSE"
+PROPOSAL_DATA="$ZCASH_RPC_TMP_DIR/proposal-data.json"
+
 echo "Turning the template into block proposal data using $JQ..."
-# TODO: build a header, transaction count, and transaction list
-PROPOSAL_ARG_FULL=$PROPOSAL_ARG_NO_DATA
+
+# Block header
+# See https://zips.z.cash/protocol/protocol.pdf#blockheader for details
+cat "$TEMPLATE_NODE_TEMPLATE_RESPONSE" | \
+    $JQ -r '. | "printf 0\(.version)000000\(.previousblockhash)\(.defaultroots.merkleroot)\(.defaultroots.blockcommitmentshash)%x\(.bits)%064xfd4005%02688x \(.curtime) 0 0"' | \
+    sh \
+    > "$PROPOSAL_DATA"
+
+# Transaction list
+# See https://developer.bitcoin.org/reference/block_chain.html#serialized-blocks for details
+# This encoding only works up to 252 transactions, because it only implements 1 byte compact size
+# https://developer.bitcoin.org/reference/transactions.html#compactsize-unsigned-integers
+cat "$TEMPLATE_NODE_TEMPLATE_RESPONSE" | \
+    $JQ -r '. | "printf %02x\(.coinbasetxn.data)\(.transactions | .[]? | {data} | join("")) \(.transactions | length + 1)"' | \
+    sh \
+    >> "$PROPOSAL_DATA"
+
+# TODO: put this in a file if it exceeds the bash variable size limit
+PROPOSAL_ARG_FULL="{ \"mode\": \"proposal\", \"data\": \"$(cat $PROPOSAL_DATA)\" ${PROPOSAL_ARG:+, $PROPOSAL_ARG} }"
+
+echo "Block proposal data is in $PROPOSAL_DATA"
+# TODO: disable verbose block data
+cat "$PROPOSAL_DATA"
+
+echo
+echo
 
 echo "getblocktemplate proposal submissions:"
 echo "getblocktemplate $PROPOSAL_ARG_NO_DATA"
@@ -156,19 +187,26 @@ for PORT in $PROPOSAL_RPC_PORTS; do
     PROPOSAL_NODE_PROPOSAL_RESPONSE=$PROPOSAL_NODES_PROPOSAL_RESPONSE_BASE.$PORT.json
     PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST="$PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST $PROPOSAL_NODE_PROPOSAL_RESPONSE"
 
+    # TODO: try modifying $PROPOSAL_DATA to contain the whole jsonrequestobject,
+    # and then call:
+    # xargs --max-chars=2000200 --arg-file="$PROPOSAL_DATA" time $ZCASH_CLI -rpcport="$PORT" getblocktemplate
     time $ZCASH_CLI -rpcport="$PORT" getblocktemplate "$PROPOSAL_ARG_FULL" > "$PROPOSAL_NODE_PROPOSAL_RESPONSE"
 done
 
 echo
 
-echo "Proposal response diffs between ports $PROPOSAL_RPC_PORTS:"
+if [ "$PROPOSAL_RPC_PORT_COUNT" -gt 1 ]; then
+    echo "Proposal response diffs between ports $PROPOSAL_RPC_PORTS:"
 
-$DIFF $PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST \
-    && ( \
-        echo "getblocktemplate proposal responses were identical"; \
-        echo ; \
-        echo "Final response from $PROPOSAL_NODE_PROPOSAL_RESPONSE:"; \
-        cat "$PROPOSAL_NODE_PROPOSAL_RESPONSE"; \
-        )
+    $DIFF $PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST \
+        && ( \
+            echo "getblocktemplate proposal responses were identical"; \
+            echo ; \
+            echo "Final response from $PROPOSAL_NODE_PROPOSAL_RESPONSE:"; \
+            cat "$PROPOSAL_NODE_PROPOSAL_RESPONSE"; \
+            )
+else
+    echo "Proposal response from port $PROPOSAL_RPC_PORTS:"
 
-EXIT_STATUS=$?
+    cat $PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST
+fi
