@@ -59,6 +59,10 @@ pub enum Response {
     ///
     /// Does not check transparent UTXO inputs
     ValidBestChainTipNullifiersAndAnchors,
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Response to [`Request::CheckBlockProposalValidity`](crate::Request::CheckBlockProposalValidity)
+    ValidBlockProposal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,6 +141,10 @@ pub enum ReadResponse {
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::SolutionRate`](crate::ReadRequest::SolutionRate)
     SolutionRate(Option<u128>),
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Response to [`ReadRequest::CheckBlockProposalValidity`](crate::ReadRequest::CheckBlockProposalValidity)
+    ValidBlockProposal,
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -214,6 +222,9 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressUtxos(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
+
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::BlockHash(_) => {

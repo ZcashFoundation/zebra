@@ -558,6 +558,13 @@ pub enum Request {
     ///
     /// Returns [`Response::ValidBestChainTipNullifiersAndAnchors`]
     CheckBestChainTipNullifiersAndAnchors(UnminedTx),
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Performs contextual validation of the given block, but does not commit it to the state.
+    ///
+    /// Returns [`Response::ValidBlockProposal`] when successful.
+    /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
+    CheckBlockProposalValidity(PreparedBlock),
 }
 
 impl Request {
@@ -577,6 +584,8 @@ impl Request {
             Request::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"
             }
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
         }
     }
 
@@ -790,6 +799,16 @@ pub enum ReadRequest {
         /// Optionally estimate the network speed at the time when a certain block was found
         height: Option<block::Height>,
     },
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Performs contextual validation of the given block, but does not commit it to the state.
+    ///
+    /// It is the caller's responsibility to perform semantic validation.
+    /// (The caller does not need to check proof of work for block proposals.)
+    ///
+    /// Returns [`ReadResponse::ValidBlockProposal`] when successful, or an error if
+    /// the block fails contextual validation.
+    CheckBlockProposalValidity(PreparedBlock),
 }
 
 impl ReadRequest {
@@ -819,6 +838,8 @@ impl ReadRequest {
             ReadRequest::ChainInfo => "chain_info",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::SolutionRate { .. } => "solution_rate",
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
         }
     }
 
@@ -864,6 +885,11 @@ impl TryFrom<Request> for ReadRequest {
 
             Request::CommitBlock(_) | Request::CommitFinalizedBlock(_) => {
                 Err("ReadService does not write blocks")
+            }
+
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            Request::CheckBlockProposalValidity(prepared) => {
+                Ok(ReadRequest::CheckBlockProposalValidity(prepared))
             }
 
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \

@@ -4,7 +4,6 @@ use std::{
     collections::HashMap,
     convert::TryFrom,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -18,10 +17,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::{
-    block::{self, Block},
-    chain_tip::ChainTip,
-};
+use zebra_chain::{block, chain_tip::ChainTip};
 use zebra_network as zn;
 use zebra_state as zs;
 
@@ -77,7 +73,10 @@ pub struct Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
@@ -117,7 +116,10 @@ impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
@@ -160,7 +162,10 @@ impl<ZN, ZV, ZS> Downloads<ZN, ZV, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError> + Send + Clone + 'static,
+    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
     ZV::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
@@ -338,7 +343,7 @@ where
             }
 
             verifier
-                .oneshot(block)
+                .oneshot(zebra_consensus::Request::Commit(block))
                 .await
                 .map(|hash| (hash, block_height))
         }

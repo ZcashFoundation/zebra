@@ -8,12 +8,14 @@ use tower::{Service, ServiceExt};
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{
+        self,
         merkle::{self, AuthDataRoot},
         ChainHistoryBlockTxAuthCommitmentHash, Height,
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::Network,
+    serialization::ZcashDeserializeInto,
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
@@ -25,26 +27,57 @@ use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::methods::get_block_template_rpcs::{
     constants::{MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE},
-    types::{default_roots::DefaultRoots, get_block_template, transaction::TransactionTemplate},
+    types::{default_roots::DefaultRoots, transaction::TransactionTemplate},
 };
 
 pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
 
 // - Parameter checks
 
-/// Returns an error if the get block template RPC `parameters` are invalid.
-pub fn check_block_template_parameters(
-    parameters: &get_block_template::JsonParameters,
-) -> Result<()> {
-    if parameters.data.is_some() || parameters.mode == GetBlockTemplateRequestMode::Proposal {
-        return Err(Error {
-            code: ErrorCode::InvalidParams,
-            message: "\"proposal\" mode is currently unsupported by Zebra".to_string(),
-            data: None,
-        });
-    }
+/// Checks that `data` is omitted in `Template` mode or provided in `Proposal` mode,
+///
+/// Returns an error if there's a mismatch between the mode and whether `data` is provided.
+pub fn check_parameters(parameters: &Option<JsonParameters>) -> Result<()> {
+    let Some(parameters) = parameters else {
+            return Ok(())
+        };
 
-    Ok(())
+    match parameters {
+        JsonParameters {
+            mode: GetBlockTemplateRequestMode::Template,
+            data: None,
+            ..
+        }
+        | JsonParameters {
+            mode: GetBlockTemplateRequestMode::Proposal,
+            data: Some(_),
+            ..
+        } => Ok(()),
+
+        JsonParameters {
+            mode: GetBlockTemplateRequestMode::Proposal,
+            data: None,
+            ..
+        } => Err(Error {
+            code: ErrorCode::InvalidParams,
+            message: "\"data\" parameter must be \
+                          provided in \"proposal\" mode"
+                .to_string(),
+            data: None,
+        }),
+
+        JsonParameters {
+            mode: GetBlockTemplateRequestMode::Template,
+            data: Some(_),
+            ..
+        } => Err(Error {
+            code: ErrorCode::InvalidParams,
+            message: "\"data\" parameter must be \
+                          omitted in \"template\" mode"
+                .to_string(),
+            data: None,
+        }),
+    }
 }
 
 /// Returns the miner address, or an error if it is invalid.
@@ -58,6 +91,42 @@ pub fn check_miner_address(
             .to_string(),
         data: None,
     })
+}
+
+/// Attempts to validate block proposal against all of the server's
+/// usual acceptance rules (except proof-of-work).
+///
+/// Returns a `getblocktemplate` [`Response`].
+pub async fn validate_block_proposal<ChainVerifier>(
+    mut chain_verifier: ChainVerifier,
+    block_proposal_bytes: Vec<u8>,
+) -> Result<Response>
+where
+    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    let Ok(block) = block_proposal_bytes.zcash_deserialize_into() else {
+         return Ok(ProposalRejectReason::Rejected.into())
+    };
+
+    let chain_verifier_response = chain_verifier
+        .ready()
+        .await
+        .map_err(|error| Error {
+            code: ErrorCode::ServerError(0),
+            message: error.to_string(),
+            data: None,
+        })?
+        .call(zebra_consensus::Request::CheckProposal(Arc::new(block)))
+        .await;
+
+    Ok(chain_verifier_response
+        .map(|_hash| ProposalResponse::Valid)
+        .unwrap_or_else(|_| ProposalRejectReason::Rejected.into())
+        .into())
 }
 
 // - State and syncer checks

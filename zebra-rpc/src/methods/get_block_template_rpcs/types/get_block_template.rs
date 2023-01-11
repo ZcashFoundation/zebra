@@ -27,7 +27,7 @@ pub mod parameters;
 
 pub use parameters::*;
 
-/// A serialized `getblocktemplate` RPC response.
+/// A serialized `getblocktemplate` RPC response in template mode.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetBlockTemplate {
     /// The getblocktemplate RPC capabilities supported by Zebra.
@@ -162,6 +162,14 @@ pub struct GetBlockTemplate {
 }
 
 impl GetBlockTemplate {
+    /// Returns a `Vec` of capabilities supported by the `getblocktemplate` RPC
+    pub fn capabilities() -> Vec<String> {
+        GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+
     /// Returns a new [`GetBlockTemplate`] struct, based on the supplied arguments and defaults.
     ///
     /// The result of this method only depends on the supplied arguments and constants.
@@ -203,10 +211,7 @@ impl GetBlockTemplate {
             .expect("state always returns a valid difficulty value");
 
         // Convert default values
-        let capabilities: Vec<String> = GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD
-            .iter()
-            .map(ToString::to_string)
-            .collect();
+        let capabilities: Vec<String> = Self::capabilities();
         let mutable: Vec<String> = GET_BLOCK_TEMPLATE_MUTABLE_FIELD
             .iter()
             .map(ToString::to_string)
@@ -251,5 +256,70 @@ impl GetBlockTemplate {
 
             submit_old,
         }
+    }
+}
+
+/// Error response to a `getblocktemplate` RPC request in proposal mode.
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProposalRejectReason {
+    /// Block proposal rejected as invalid.
+    Rejected,
+}
+
+/// Response to a `getblocktemplate` RPC request in proposal mode.
+///
+/// See <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged, rename_all = "kebab-case")]
+pub enum ProposalResponse {
+    /// Block proposal was rejected as invalid, returns `reject-reason` and server `capabilities`.
+    ErrorResponse {
+        /// Reason the proposal was invalid as-is.
+        reject_reason: ProposalRejectReason,
+
+        /// The getblocktemplate RPC capabilities supported by Zebra.
+        capabilities: Vec<String>,
+    },
+
+    /// Block proposal was successfully validated, returns null.
+    Valid,
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+/// A `getblocktemplate` RPC response.
+pub enum Response {
+    /// `getblocktemplate` RPC request in template mode.
+    TemplateMode(Box<GetBlockTemplate>),
+
+    /// `getblocktemplate` RPC request in proposal mode.
+    ProposalMode(ProposalResponse),
+}
+
+impl From<ProposalRejectReason> for ProposalResponse {
+    fn from(reject_reason: ProposalRejectReason) -> Self {
+        Self::ErrorResponse {
+            reject_reason,
+            capabilities: GetBlockTemplate::capabilities(),
+        }
+    }
+}
+
+impl From<ProposalRejectReason> for Response {
+    fn from(error_response: ProposalRejectReason) -> Self {
+        Self::ProposalMode(ProposalResponse::from(error_response))
+    }
+}
+
+impl From<ProposalResponse> for Response {
+    fn from(proposal_response: ProposalResponse) -> Self {
+        Self::ProposalMode(proposal_response)
+    }
+}
+
+impl From<GetBlockTemplate> for Response {
+    fn from(template: GetBlockTemplate) -> Self {
+        Self::TemplateMode(Box::new(template))
     }
 }

@@ -24,7 +24,7 @@ use tower::{hedge, Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Height},
     chain_tip::ChainTip,
 };
 use zebra_network as zn;
@@ -163,7 +163,7 @@ pub struct Downloads<ZN, ZV, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
         + Send
         + Sync
         + Clone
@@ -217,7 +217,7 @@ impl<ZN, ZV, ZSTip> Stream for Downloads<ZN, ZV, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
         + Send
         + Sync
         + Clone
@@ -264,7 +264,7 @@ impl<ZN, ZV, ZSTip> Downloads<ZN, ZV, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
     ZN::Future: Send,
-    ZV: Service<Arc<Block>, Response = block::Hash, Error = BoxError>
+    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
         + Send
         + Sync
         + Clone
@@ -516,7 +516,7 @@ where
                 // Verify the block.
                 let mut rsp = verifier
                     .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?
-                    .call(block).boxed();
+                    .call(zebra_consensus::Request::Commit(block)).boxed();
 
                 // Add a shorter timeout to workaround a known bug (#5125)
                 let short_timeout_max = (max_checkpoint_height + FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT).expect("checkpoint block height is in valid range");

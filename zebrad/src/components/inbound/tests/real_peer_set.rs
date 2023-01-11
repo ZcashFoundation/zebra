@@ -1,6 +1,6 @@
 //! Inbound service tests with a real peer set.
 
-use std::{iter, net::SocketAddr, sync::Arc};
+use std::{iter, net::SocketAddr};
 
 use futures::FutureExt;
 use indexmap::IndexSet;
@@ -13,7 +13,7 @@ use tower::{
 };
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Height},
     parameters::Network,
     serialization::ZcashDeserializeInto,
     transaction::{AuthDigest, Hash as TxHash, Transaction, UnminedTx, UnminedTxId, WtxId},
@@ -603,7 +603,7 @@ async fn setup(
     Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
     Buffer<BoxService<zebra_state::Request, zebra_state::Response, BoxError>, zebra_state::Request>,
     // mocked services
-    MockService<Arc<Block>, block::Hash, PanicAssertion, VerifyChainError>,
+    MockService<zebra_consensus::Request, block::Hash, PanicAssertion, VerifyChainError>,
     MockService<transaction::Request, transaction::Response, PanicAssertion, TransactionError>,
     // real tasks
     JoinHandle<Result<(), BlockGossipError>>,

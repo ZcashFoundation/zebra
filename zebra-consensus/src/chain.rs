@@ -15,7 +15,6 @@
 use std::{
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -27,15 +26,14 @@ use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Span};
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Height},
     parameters::Network,
 };
 
 use zebra_state as zs;
 
 use crate::{
-    block::BlockVerifier,
-    block::VerifyBlockError,
+    block::{BlockVerifier, Request, VerifyBlockError},
     checkpoint::{CheckpointList, CheckpointVerifier, VerifyCheckpointError},
     error::TransactionError,
     transaction, BoxError, Config,
@@ -129,7 +127,7 @@ impl VerifyChainError {
     }
 }
 
-impl<S, V> Service<Arc<Block>> for ChainVerifier<S, V>
+impl<S, V> Service<Request> for ChainVerifier<S, V>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
@@ -167,14 +165,29 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, block: Arc<Block>) -> Self::Future {
+    fn call(&mut self, request: Request) -> Self::Future {
+        let block = request.block();
+
         match block.coinbase_height() {
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            // There's currently no known use case for block proposals below the checkpoint height,
+            // so it's okay to immediately return an error here.
+            Some(height) if height <= self.max_checkpoint_height && request.is_proposal() => {
+                async {
+                    // TODO: Add a `ValidateProposalError` enum with a `BelowCheckpoint` variant?
+                    Err(VerifyBlockError::ValidateProposal(
+                        "block proposals must be above checkpoint height".into(),
+                    ))?
+                }
+                .boxed()
+            }
+
             Some(height) if height <= self.max_checkpoint_height => {
                 self.checkpoint.call(block).map_err(Into::into).boxed()
             }
             // This also covers blocks with no height, which the block verifier
             // will reject immediately.
-            _ => self.block.call(block).map_err(Into::into).boxed(),
+            _ => self.block.call(request).map_err(Into::into).boxed(),
         }
     }
 }
@@ -219,7 +232,7 @@ pub async fn init<S>(
     mut state_service: S,
     debug_skip_parameter_preload: bool,
 ) -> (
-    Buffer<BoxService<Arc<Block>, block::Hash, VerifyChainError>, Arc<Block>>,
+    Buffer<BoxService<Request, block::Hash, VerifyChainError>, Request>,
     Buffer<
         BoxService<transaction::Request, transaction::Response, TransactionError>,
         transaction::Request,
