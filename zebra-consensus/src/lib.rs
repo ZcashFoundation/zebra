@@ -51,7 +51,7 @@ pub use block::{
         funding_streams::{funding_stream_address, funding_stream_values, new_coinbase_script},
         general::miner_subsidy,
     },
-    VerifyBlockError, MAX_BLOCK_SIGOPS,
+    Request, VerifyBlockError, MAX_BLOCK_SIGOPS,
 };
 pub use chain::VerifyChainError;
 pub use checkpoint::{

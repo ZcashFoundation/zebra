@@ -1047,6 +1047,24 @@ impl Service<Request> for StateService {
                 }
                 .boxed()
             }
+
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            Request::CheckBlockProposalValidity(_) => {
+                // Redirect the request to the concurrent ReadStateService
+                let read_service = self.read_service.clone();
+
+                async move {
+                    let req = req
+                        .try_into()
+                        .expect("ReadRequest conversion should not fail");
+
+                    let rsp = read_service.oneshot(req).await?;
+                    let rsp = rsp.try_into().expect("Response conversion should not fail");
+
+                    Ok(rsp)
+                }
+                .boxed()
+            }
         }
     }
 }
@@ -1082,7 +1100,7 @@ impl Service<ReadRequest> for ReadStateService {
         Poll::Ready(Ok(()))
     }
 
-    #[instrument(name = "read_state", skip(self))]
+    #[instrument(name = "read_state", skip(self, req))]
     fn call(&mut self, req: ReadRequest) -> Self::Future {
         req.count_metric();
 
@@ -1686,6 +1704,58 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::ChainInfo"))
+                .boxed()
+            }
+
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadRequest::CheckBlockProposalValidity(prepared) => {
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                // # Performance
+                //
+                // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        tracing::info!("attempting to validate and commit block proposal onto a cloned non-finalized state");
+                        let mut latest_non_finalized_state = state.latest_non_finalized_state();
+
+                        // The previous block of a valid proposal must be on the best chain tip.
+                        let Some((_best_tip_height, best_tip_hash)) = read::best_tip(&latest_non_finalized_state, &state.db) else {
+                            return Err("state is empty: wait for Zebra to sync before submitting a proposal".into());
+                        };
+
+                        if prepared.block.header.previous_block_hash != best_tip_hash {
+                            return Err("proposal is not based on the current best chain tip: previous block hash must be the best chain tip".into());
+                        }
+
+                        // This clone of the non-finalized state is dropped when this closure returns.
+                        // The non-finalized state that's used in the rest of the state (including finalizing
+                        // blocks into the db) is not mutated here.
+                        //
+                        // TODO: Convert `CommitBlockError` to a new `ValidateProposalError`?
+                        latest_non_finalized_state.should_count_metrics = false;
+                        write::validate_and_commit_non_finalized(
+                            &state.db,
+                            &mut latest_non_finalized_state,
+                            prepared,
+                        )?;
+
+                        // The work is done in the future.
+                        timer.finish(
+                            module_path!(),
+                            line!(),
+                            "ReadRequest::CheckBlockProposalValidity",
+                        );
+
+                        Ok(ReadResponse::ValidBlockProposal)
+                    })
+                })
+                .map(|join_result| {
+                    join_result.expect("panic in ReadRequest::CheckBlockProposalValidity")
+                })
                 .boxed()
             }
         }

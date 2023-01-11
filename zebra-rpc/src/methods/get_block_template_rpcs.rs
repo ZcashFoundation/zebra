@@ -26,9 +26,8 @@ use crate::methods::{
             DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
         },
         get_block_template::{
-            check_block_template_parameters, check_miner_address, check_synced_to_tip,
-            fetch_mempool_transactions, fetch_state_tip_and_local_time,
-            generate_coinbase_and_roots,
+            check_miner_address, check_synced_to_tip, fetch_mempool_transactions,
+            fetch_state_tip_and_local_time, generate_coinbase_and_roots, validate_block_proposal,
         },
         types::{
             get_block_template::GetBlockTemplate, get_mining_info, hex_data::HexData,
@@ -101,7 +100,7 @@ pub trait GetBlockTemplateRpc {
     fn get_block_template(
         &self,
         parameters: Option<get_block_template::JsonParameters>,
-    ) -> BoxFuture<Result<GetBlockTemplate>>;
+    ) -> BoxFuture<Result<get_block_template::Response>>;
 
     /// Submits block to the node to be validated and committed.
     /// Returns the [`submit_block::Response`] for the operation, as a JSON string.
@@ -165,7 +164,7 @@ where
         Response = zebra_state::ReadResponse,
         Error = zebra_state::BoxError,
     >,
-    ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
@@ -217,7 +216,7 @@ where
         + Sync
         + 'static,
     Tip: ChainTip + Clone + Send + Sync + 'static,
-    ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
@@ -265,12 +264,12 @@ where
         + 'static,
     <State as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
-    ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <ChainVerifier as Service<Arc<Block>>>::Future: Send,
+    <ChainVerifier as Service<zebra_consensus::Request>>::Future: Send,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     fn get_block_count(&self) -> Result<u32> {
@@ -312,11 +311,11 @@ where
         .boxed()
     }
 
-    // TODO: use HexData to handle block proposal data, and a generic error constructor (#5548)
+    // TODO: use a generic error constructor (#5548)
     fn get_block_template(
         &self,
         parameters: Option<get_block_template::JsonParameters>,
-    ) -> BoxFuture<Result<GetBlockTemplate>> {
+    ) -> BoxFuture<Result<get_block_template::Response>> {
         // Should we generate coinbase transactions that are exactly like zcashd's?
         //
         // This is useful for testing, but either way Zebra should obey the consensus rules.
@@ -332,20 +331,27 @@ where
         let sync_status = self.sync_status.clone();
         let state = self.state.clone();
 
+        if let Some(HexData(block_proposal_bytes)) = parameters
+            .as_ref()
+            .and_then(get_block_template::JsonParameters::block_proposal_data)
+        {
+            return validate_block_proposal(self.chain_verifier.clone(), block_proposal_bytes)
+                .boxed();
+        }
+
         // To implement long polling correctly, we split this RPC into multiple phases.
         async move {
+            get_block_template::check_parameters(&parameters)?;
+
+            let client_long_poll_id = parameters
+                .as_ref()
+                .and_then(|params| params.long_poll_id.clone());
+
             // - One-off checks
 
             // Check config and parameters.
             // These checks always have the same result during long polling.
             let miner_address = check_miner_address(miner_address)?;
-
-            let mut client_long_poll_id = None;
-            if let Some(parameters) = parameters {
-                check_block_template_parameters(&parameters)?;
-
-                client_long_poll_id = parameters.long_poll_id;
-            }
 
             // - Checks and fetches that can change during long polling
             //
@@ -506,7 +512,7 @@ where
                                     ?server_long_poll_id,
                                     ?client_long_poll_id,
                                     "returning from long poll due to a state error.\
-                                     Is Zebra shutting down?"
+                                    Is Zebra shutting down?"
                                 );
 
                                 return Err(Error {
@@ -582,7 +588,7 @@ where
                 COINBASE_LIKE_ZCASHD,
             );
 
-            Ok(response)
+            Ok(response.into())
         }
         .boxed()
     }
@@ -608,7 +614,7 @@ where
                     message: error.to_string(),
                     data: None,
                 })?
-                .call(Arc::new(block))
+                .call(zebra_consensus::Request::Commit(Arc::new(block)))
                 .await;
 
             let chain_error = match chain_verifier_response {
