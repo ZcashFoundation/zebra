@@ -62,8 +62,8 @@ fn cmd_output(cmd: &mut std::process::Command) -> Result<String> {
 
 #[allow(clippy::print_stdout)]
 fn main() -> Result<()> {
+    // initialise
     init_tracing();
-
     color_eyre::install()?;
 
     // get the current block count
