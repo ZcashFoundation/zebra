@@ -1,11 +1,15 @@
 //! DateTime types with specific serialization invariants.
 
-use std::{fmt, num::TryFromIntError};
+use std::{
+    fmt,
+    num::{ParseIntError, TryFromIntError},
+    str::FromStr,
+};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
 
-use super::{SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 /// A date and time, represented by a 32-bit number of seconds since the UNIX epoch.
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -344,6 +348,26 @@ impl TryFrom<&std::time::Duration> for Duration32 {
     /// Conversion fails if the number of seconds in the duration is outside the `u32` range.
     fn try_from(value: &std::time::Duration) -> Result<Self, Self::Error> {
         (*value).try_into()
+    }
+}
+
+impl FromStr for DateTime32 {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(DateTime32 {
+            timestamp: s.parse()?,
+        })
+    }
+}
+
+impl FromStr for Duration32 {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Duration32 {
+            seconds: s.parse()?,
+        })
     }
 }
 
