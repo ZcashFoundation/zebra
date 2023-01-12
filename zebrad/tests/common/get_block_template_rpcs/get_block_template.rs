@@ -7,7 +7,6 @@
 
 use std::{sync::Arc, time::Duration};
 
-use chrono::Utc;
 use color_eyre::eyre::{eyre, Context, Result};
 
 use zebra_chain::{
@@ -168,25 +167,33 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
     // Propose a new block with an empty solution and nonce field
     tracing::info!("calling getblocktemplate with a block proposal...",);
 
-    let raw_proposal_block =
-        hex::encode(proposal_block_from_template(response_json_result)?.zcash_serialize_to_vec()?);
+    for proposal_block in proposal_block_from_template(response_json_result)? {
+        let raw_proposal_block = hex::encode(proposal_block.zcash_serialize_to_vec()?);
 
-    let json_result = client
-        .json_result_from_call(
-            "getblocktemplate",
-            format!(r#"[{{"mode":"proposal","data":"{raw_proposal_block}"}}]"#),
-        )
-        .await
-        .expect("response should be success output with with a serialized `ProposalResponse`");
+        let json_result = client
+            .json_result_from_call(
+                "getblocktemplate",
+                format!(r#"[{{"mode":"proposal","data":"{raw_proposal_block}"}}]"#),
+            )
+            .await
+            .expect("response should be success output with with a serialized `ProposalResponse`");
 
-    tracing::info!(?json_result, "got getblocktemplate proposal response");
+        tracing::info!(
+            ?json_result,
+            ?proposal_block.header.time,
+            "got getblocktemplate proposal response"
+        );
 
-    match json_result {
-        ProposalResponse::Valid => Ok(()),
-        ProposalResponse::ErrorResponse { reject_reason, .. } => Err(eyre!(
-            "unsuccessful block proposal validation, reason: {reject_reason:?}"
-        )),
+        if let ProposalResponse::ErrorResponse { reject_reason, .. } = json_result {
+            Err(eyre!(
+                "unsuccessful block proposal validation, reason: {reject_reason:?}"
+            ))?;
+        } else {
+            assert_eq!(ProposalResponse::Valid, json_result);
+        }
     }
+
+    Ok(())
 }
 
 /// Make a block proposal from [`GetBlockTemplate`]
@@ -204,9 +211,12 @@ fn proposal_block_from_template(
         bits: difficulty_threshold,
         coinbase_txn,
         transactions: tx_templates,
+        cur_time,
+        min_time,
+        max_time,
         ..
     }: GetBlockTemplate,
-) -> Result<Block> {
+) -> Result<[Block; 3]> {
     if Height(height) > Height::MAX {
         Err(eyre!("height field must be lower than Height::MAX"))?;
     };
@@ -217,17 +227,17 @@ fn proposal_block_from_template(
         transactions.push(tx_template.data.as_ref().zcash_deserialize_into()?);
     }
 
-    Ok(Block {
+    Ok([cur_time, min_time, max_time].map(|time| Block {
         header: Arc::new(block::Header {
             version,
             previous_block_hash,
             merkle_root,
             commitment_bytes: block_commitments_hash.into(),
-            time: Utc::now(),
+            time: time.into(),
             difficulty_threshold,
             nonce: [0; 32],
-            solution: Solution::default(),
+            solution: Solution::for_proposal(),
         }),
-        transactions,
-    })
+        transactions: transactions.clone(),
+    }))
 }
