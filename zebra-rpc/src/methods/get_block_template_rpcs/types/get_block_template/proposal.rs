@@ -1,11 +1,25 @@
+//! getblocktemplate proposal mode implementation.
+//!
 //! `ProposalResponse` is the output of the `getblocktemplate` RPC method in 'proposal' mode.
 
-use super::{GetBlockTemplate, Response};
+use std::{num::ParseIntError, str::FromStr, sync::Arc};
+
+use chrono::Utc;
+use zebra_chain::{
+    block::{self, Block, Height},
+    serialization::{DateTime32, SerializationError, ZcashDeserializeInto},
+    work::equihash::Solution,
+};
+
+use crate::methods::{
+    get_block_template_rpcs::types::{
+        default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
+    },
+    GetBlockHash,
+};
 
 /// Error response to a `getblocktemplate` RPC request in proposal mode.
-///
-/// See <https://en.bitcoin.it/wiki/BIP_0022#Appendix:_Example_Rejection_Reasons>
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProposalRejectReason {
     /// Block proposal rejected as invalid.
@@ -15,7 +29,7 @@ pub enum ProposalRejectReason {
 /// Response to a `getblocktemplate` RPC request in proposal mode.
 ///
 /// See <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged, rename_all = "kebab-case")]
 pub enum ProposalResponse {
     /// Block proposal was rejected as invalid, returns `reject-reason` and server `capabilities`.
@@ -40,15 +54,44 @@ impl From<ProposalRejectReason> for ProposalResponse {
     }
 }
 
-impl From<ProposalRejectReason> for Response {
-    fn from(error_response: ProposalRejectReason) -> Self {
-        Self::ProposalMode(ProposalResponse::from(error_response))
-    }
+/// The source of the time in the block proposal header.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum TimeSource {
+    /// The `curtime` field in the template.
+    CurTime,
+
+    /// The `mintime` field in the template.
+    MinTime,
+
+    /// The `maxtime` field in the template.
+    MaxTime,
+
+    /// The supplied time, clamped within the template's `[mintime, maxtime]`.
+    Clamped(DateTime32),
+
+    /// The raw supplied time, ignoring the `mintime` and `maxtime` in the template.
+    ///
+    /// Warning: this can create an invalid block proposal.
+    Raw(DateTime32),
 }
 
-impl From<ProposalResponse> for Response {
-    fn from(proposal_response: ProposalResponse) -> Self {
-        Self::ProposalMode(proposal_response)
+impl FromStr for TimeSource {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use TimeSource::*;
+
+        match s.to_lowercase().as_str() {
+            "curtime" => Ok(CurTime),
+            "mintime" => Ok(MinTime),
+            "maxtime" => Ok(MaxTime),
+            // "raw"u32
+            s if s.strip_prefix("raw").is_some() => {
+                Ok(Raw(s.strip_prefix("raw").unwrap().parse()?))
+            }
+            // "clamped"u32 or just u32
+            _ => Ok(Clamped(s.strip_prefix("clamped").unwrap_or(s).parse()?)),
+        }
     }
 }
 

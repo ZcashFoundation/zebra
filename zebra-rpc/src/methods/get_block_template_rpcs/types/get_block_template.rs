@@ -1,22 +1,12 @@
 //! The `GetBlockTempate` type is the output of the `getblocktemplate` RPC method in the
 //! default 'template' mode. See [`ProposalResponse`] for the output in 'proposal' mode.
 
-use std::sync::Arc;
-
-use chrono::Utc;
-
 use zebra_chain::{
     amount,
-    block::{
-        self, Block, ChainHistoryBlockTxAuthCommitmentHash, Height, MAX_BLOCK_BYTES,
-        ZCASH_BLOCK_VERSION,
-    },
-    serialization::{DateTime32, SerializationError, ZcashDeserializeInto},
+    block::{ChainHistoryBlockTxAuthCommitmentHash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
+    serialization::DateTime32,
     transaction::VerifiedUnminedTx,
-    work::{
-        difficulty::{CompactDifficulty, ExpandedDifficulty},
-        equihash::Solution,
-    },
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_state::GetBlockTemplateChainInfo;
@@ -38,8 +28,8 @@ use crate::methods::{
 pub mod parameters;
 pub mod proposal;
 
-pub use parameters::*;
-pub use proposal::*;
+pub use parameters::{GetBlockTemplateCapability, GetBlockTemplateRequestMode, JsonParameters};
+pub use proposal::{proposal_block_from_template, ProposalRejectReason, ProposalResponse};
 
 /// A serialized `getblocktemplate` RPC response in template mode.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -294,7 +284,7 @@ impl GetBlockTemplate {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 /// A `getblocktemplate` RPC response.
 pub enum Response {
@@ -303,10 +293,4 @@ pub enum Response {
 
     /// `getblocktemplate` RPC request in proposal mode.
     ProposalMode(ProposalResponse),
-}
-
-impl From<GetBlockTemplate> for Response {
-    fn from(template: GetBlockTemplate) -> Self {
-        Self::TemplateMode(Box::new(template))
-    }
 }
