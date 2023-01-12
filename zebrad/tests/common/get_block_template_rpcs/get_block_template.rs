@@ -196,7 +196,10 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
     Ok(())
 }
 
-/// Make a block proposal from [`GetBlockTemplate`]
+/// Make block proposals from [`GetBlockTemplate`]
+///
+/// Returns an array of 3 block proposals using `curtime`, `mintime`, and `maxtime`
+/// for their `block.header.time` fields.
 fn proposal_block_from_template(
     GetBlockTemplate {
         version,
