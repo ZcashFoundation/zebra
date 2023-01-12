@@ -76,7 +76,7 @@ You can run Zebra using our Docker image.
 This command will run our latest release, and sync it to the tip:
 
 ```sh
-docker run zfnd/zebra:1.0.0-rc.2
+docker run zfnd/zebra:1.0.0-rc.3
 ```
 
 For more information, read our [Docker documentation](book/src/user/docker.md).
@@ -94,15 +94,13 @@ To run `zebrad`, follow the instructions to compile `zebrad`
 for your platform:
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
-   - Zebra is tested with the latest `stable` Rust version.
-     Earlier versions are not supported or tested.
-     Any Zebra release can remove support for older Rust versions, without any notice.
-     (Rust 1.59 and earlier are definitely not supported, due to missing features.)
+   - Zebra is tested with the latest `stable` Rust version. Earlier versions are not supported or tested.
+     (Zebra's code uses features introduced in Rust 1.65, or any later stable release.)
 2. Install Zebra's build dependencies:
    - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages
      (these packages will have different names depending on your package manager)
    - **clang** or another C++ compiler: `g++` (all platforms) or `Xcode` (macOS)
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.2 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.3 zebrad`
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 For more detailed instructions, refer to the [documentation](https://zebra.zfnd.org/user/install.html).
@@ -243,15 +241,17 @@ So Zebra's state should always be valid, unless your OS or disk hardware is corr
 
 There are a few bugs in Zebra that we're still working on fixing:
 
+- If Zebra fails downloading the Zcash parameters, use [the Zcash parameters download script](https://github.com/zcash/zcash/blob/master/zcutil/fetch-params.sh) instead.
+
 - Zebra falsely estimates that it's close to the tip when the network connection goes down [#4649](https://github.com/ZcashFoundation/zebra/issues/4649).
 
-- If Zebra fails downloading the Zcash parameters, use [the Zcash parameters download script](https://github.com/zcash/zcash/blob/master/zcutil/fetch-params.sh) instead. This script might be needed on macOS, even with Rust stable.
+- Block download and verification sometimes times out during Zebra's initial sync [#5709](https://github.com/ZcashFoundation/zebra/issues/5709). The full sync still finishes reasonably quickly.
 
-- No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801). We used to test with Windows Server 2019, but not anymore; see the issue for details.
+- No Windows support [#3801](https://github.com/ZcashFoundation/zebra/issues/3801). We used to test with Windows Server 2019, but not any more; see the issue for details.
 
 - Experimental Tor support is disabled until [`arti-client` upgrades to `x25519-dalek` 2.0.0 or later](https://github.com/ZcashFoundation/zebra/issues/5492). This happens due to a Rust dependency conflict, which can only be resolved by upgrading to a version of `x25519-dalek` with the dependency fix.
 
-- Output of `help`, `--help` flag, and usage of invalid commands or options are inconsistent. Reports of these issues can be found [here](https://github.com/ZcashFoundation/zebra/issues/5502) and are planned to be fixed in the context of [upgrading Abscissa](https://github.com/ZcashFoundation/zebra/issues/5502).
+- Output of `help`, `--help` flag, and usage of invalid commands or options are inconsistent [#5502](https://github.com/ZcashFoundation/zebra/issues/5502). See the issue for details.
 
 ## Future Work
 

@@ -1,6 +1,6 @@
 # Design Overview
 
-This document sketches the future design for Zebra.
+This document sketches the design for Zebra.
 
 ## Desiderata
 
@@ -33,6 +33,46 @@ The following are general desiderata for Zebra:
 * Zebra keeps a copy of the chain state, so it isn't intended for
   lightweight applications like light wallets. Those applications
   should use a light client protocol.
+
+## Notable Blog Posts
+- [A New Network Stack For Zcash](https://www.zfnd.org/blog/a-new-network-stack-for-zcash)
+- [Composable Futures-based Batch Verification](https://www.zfnd.org/blog/futures-batch-verification)
+- [Decoding Bitcoin Messages with Tokio Codecs](https://www.zfnd.org/blog/decoding-bitcoin-messages-with-tokio-codecs)
+
+## Service Dependencies
+
+Note: dotted lines are for "getblocktemplate-rpcs" feature
+
+<div id="service-dep-diagram">
+{{#include diagrams/service-dependencies.svg}}
+</div>
+
+<!-- 
+Service dependencies diagram source:
+
+digraph services {
+    transaction_verifier -> state
+    mempool -> state
+    inbound -> state
+    rpc_server -> state
+    mempool -> transaction_verifier
+    chain_verifier -> checkpoint_verifier
+    inbound -> mempool
+    rpc_server -> mempool
+    inbound -> chain_verifier
+    syncer -> chain_verifier
+    rpc_server -> chain_verifier [style=dotted]
+    syncer -> peer_set
+    mempool -> peer_set
+    block_verifier -> state
+    checkpoint_verifier -> state
+    block_verifier -> transaction_verifier
+    chain_verifier -> block_verifier
+    rpc_server -> inbound [style=invis] // for layout of the diagram
+}
+
+Render here: https://dreampuf.github.io/GraphvizOnline
+ -->
 
 ## Architecture
 
@@ -278,7 +318,8 @@ verify blocks or transactions, and add them to the relevant state.
 #### Internal Dependencies
 
 - `zebra-chain` for data structure definitions
-- `zebra-network` possibly? for definitions of network messages?
+- `zebra-node-services` for shared request type definitions
+- `zebra-utils` for developer and power user tools
 
 #### Responsible for
 

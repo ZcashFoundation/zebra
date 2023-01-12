@@ -1,0 +1,15 @@
+#service-dep-diagram {
+    display: block;
+    margin: 0px auto;
+}
+
+#service-dep-diagram a:hover {
+    text-decoration: none;
+    opacity: 0.65;
+}
+
+html.navy #service-dep-diagram, 
+html.ayu #service-dep-diagram, 
+html.coal #service-dep-diagram {
+    filter: invert(1);
+}
