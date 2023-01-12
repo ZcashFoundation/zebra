@@ -7,10 +7,17 @@ edition = "2021"
 
 [features]
 default = []
+
+# Production features that activate extra dependencies, or extra features in dependencies
+
+# Experimental mining RPC support
 getblocktemplate-rpcs = [
-     "zebra-state/getblocktemplate-rpcs", 
-     "zebra-chain/getblocktemplate-rpcs", 
+     "zebra-state/getblocktemplate-rpcs",
+     "zebra-node-services/getblocktemplate-rpcs",
+     "zebra-chain/getblocktemplate-rpcs",
 ]
+
+# Test-only features
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
 
 [dependencies]
@@ -45,10 +52,12 @@ zcash_proofs = { version = "0.9.0", features = ["local-prover", "multicore", "do
 tower-fallback = { path = "../tower-fallback/" }
 tower-batch = { path = "../tower-batch/" }
 
-zebra-chain = { path = "../zebra-chain" }
-zebra-state = { path = "../zebra-state" }
 zebra-script = { path = "../zebra-script" }
+zebra-state = { path = "../zebra-state" }
+zebra-node-services = { path = "../zebra-node-services" }
+zebra-chain = { path = "../zebra-chain" }
 
+# Test-only dependencies
 proptest = { version = "0.10.1", optional = true }
 proptest-derive = { version = "0.3.0", optional = true }
 
@@ -67,6 +76,6 @@ tokio = { version = "1.24.1", features = ["full", "tracing", "test-util"] }
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.16"
 
-zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }

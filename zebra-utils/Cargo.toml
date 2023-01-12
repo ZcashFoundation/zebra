@@ -19,6 +19,5 @@ serde_json = "1.0.91"
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.16"
 
+zebra-node-services = { path = "../zebra-node-services" }
 zebra-chain = { path = "../zebra-chain" }
-zebra-consensus = { path = "../zebra-consensus" }
-zebra-state = { path = "../zebra-state" }
