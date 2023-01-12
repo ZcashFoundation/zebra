@@ -1,14 +1,22 @@
 //! The `GetBlockTempate` type is the output of the `getblocktemplate` RPC method in the
 //! default 'template' mode. See [`ProposalResponse`] for the output in 'proposal' mode.
 
+use std::sync::Arc;
+
+use chrono::Utc;
+
 use zebra_chain::{
     amount,
-    block::{ChainHistoryBlockTxAuthCommitmentHash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
-    parameters::Network,
-    serialization::DateTime32,
+    block::{
+        self, Block, ChainHistoryBlockTxAuthCommitmentHash, Height, MAX_BLOCK_BYTES,
+        ZCASH_BLOCK_VERSION,
+    },
+    serialization::{DateTime32, SerializationError, ZcashDeserializeInto},
     transaction::VerifiedUnminedTx,
-    transparent,
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+    work::{
+        difficulty::{CompactDifficulty, ExpandedDifficulty},
+        equihash::Solution,
+    },
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_state::GetBlockTemplateChainInfo;
@@ -295,4 +303,10 @@ pub enum Response {
 
     /// `getblocktemplate` RPC request in proposal mode.
     ProposalMode(ProposalResponse),
+}
+
+impl From<GetBlockTemplate> for Response {
+    fn from(template: GetBlockTemplate) -> Self {
+        Self::TemplateMode(Box::new(template))
+    }
 }

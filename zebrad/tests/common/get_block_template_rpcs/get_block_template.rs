@@ -5,22 +5,14 @@
 //!
 //! After finishing the sync, it will call getblocktemplate.
 
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use color_eyre::eyre::{eyre, Context, Result};
 
-use zebra_chain::{
-    block::{self, Block, Height},
-    parameters::Network,
-    serialization::{ZcashDeserializeInto, ZcashSerialize},
-    work::equihash::Solution,
-};
-use zebra_rpc::methods::{
-    get_block_template_rpcs::{
-        get_block_template::{GetBlockTemplate, ProposalResponse},
-        types::default_roots::DefaultRoots,
-    },
-    GetBlockHash,
+use zebra_chain::{parameters::Network, serialization::ZcashSerialize};
+use zebra_rpc::methods::get_block_template_rpcs::{
+    get_block_template::{proposal::TimeSource, ProposalResponse},
+    types::get_block_template::proposal_block_from_template,
 };
 
 use crate::common::{
@@ -180,54 +172,4 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Make block proposals from [`GetBlockTemplate`]
-///
-/// Returns an array of 3 block proposals using `curtime`, `mintime`, and `maxtime`
-/// for their `block.header.time` fields.
-#[allow(dead_code)]
-fn proposal_block_from_template(
-    GetBlockTemplate {
-        version,
-        height,
-        previous_block_hash: GetBlockHash(previous_block_hash),
-        default_roots:
-            DefaultRoots {
-                merkle_root,
-                block_commitments_hash,
-                ..
-            },
-        bits: difficulty_threshold,
-        coinbase_txn,
-        transactions: tx_templates,
-        cur_time,
-        min_time,
-        max_time,
-        ..
-    }: GetBlockTemplate,
-) -> Result<[Block; 3]> {
-    if Height(height) > Height::MAX {
-        Err(eyre!("height field must be lower than Height::MAX"))?;
-    };
-
-    let mut transactions = vec![coinbase_txn.data.as_ref().zcash_deserialize_into()?];
-
-    for tx_template in tx_templates {
-        transactions.push(tx_template.data.as_ref().zcash_deserialize_into()?);
-    }
-
-    Ok([cur_time, min_time, max_time].map(|time| Block {
-        header: Arc::new(block::Header {
-            version,
-            previous_block_hash,
-            merkle_root,
-            commitment_bytes: block_commitments_hash.into(),
-            time: time.into(),
-            difficulty_threshold,
-            nonce: [0; 32],
-            solution: Solution::for_proposal(),
-        }),
-        transactions: transactions.clone(),
-    }))
 }
