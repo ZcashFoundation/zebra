@@ -5633,6 +5633,7 @@ dependencies = [
  "tracing-subscriber 0.3.16",
  "zebra-chain",
  "zebra-node-services",
+ "zebra-rpc",
 ]
 
 [[package]]
