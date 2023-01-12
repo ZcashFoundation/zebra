@@ -4,7 +4,6 @@
 
 use std::{num::ParseIntError, str::FromStr, sync::Arc};
 
-use chrono::Utc;
 use zebra_chain::{
     block::{self, Block, Height},
     serialization::{DateTime32, SerializationError, ZcashDeserializeInto},
@@ -58,6 +57,7 @@ impl From<ProposalRejectReason> for ProposalResponse {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum TimeSource {
     /// The `curtime` field in the template.
+    /// This is the default time source.
     CurTime,
 
     /// The `mintime` field in the template.
@@ -69,10 +69,41 @@ pub enum TimeSource {
     /// The supplied time, clamped within the template's `[mintime, maxtime]`.
     Clamped(DateTime32),
 
+    /// The current local clock time, clamped within the template's `[mintime, maxtime]`.
+    ClampedNow,
+
     /// The raw supplied time, ignoring the `mintime` and `maxtime` in the template.
     ///
     /// Warning: this can create an invalid block proposal.
     Raw(DateTime32),
+
+    /// The raw current local time, ignoring the `mintime` and `maxtime` in the template.
+    ///
+    /// Warning: this can create an invalid block proposal.
+    RawNow,
+}
+
+impl TimeSource {
+    /// Returns the time from `template` using this time source.
+    pub fn time_from_template(&self, template: &GetBlockTemplate) -> DateTime32 {
+        use TimeSource::*;
+
+        match self {
+            CurTime => template.cur_time,
+            MinTime => template.min_time,
+            MaxTime => template.max_time,
+            Clamped(time) => (*time).clamp(template.min_time, template.max_time),
+            ClampedNow => DateTime32::now().clamp(template.min_time, template.max_time),
+            Raw(time) => *time,
+            RawNow => DateTime32::now(),
+        }
+    }
+}
+
+impl Default for TimeSource {
+    fn default() -> Self {
+        TimeSource::CurTime
+    }
 }
 
 impl FromStr for TimeSource {
@@ -85,6 +116,8 @@ impl FromStr for TimeSource {
             "curtime" => Ok(CurTime),
             "mintime" => Ok(MinTime),
             "maxtime" => Ok(MaxTime),
+            "clampednow" => Ok(ClampedNow),
+            "rawnow" => Ok(RawNow),
             // "raw"u32
             s if s.strip_prefix("raw").is_some() => {
                 Ok(Raw(s.strip_prefix("raw").unwrap().parse()?))
@@ -96,8 +129,13 @@ impl FromStr for TimeSource {
 }
 
 /// Returns a block proposal generated from a [`GetBlockTemplate`] RPC response.
+///
+/// If `time_source` is not supplied, uses the current time from the template.
 pub fn proposal_block_from_template(
-    GetBlockTemplate {
+    template: GetBlockTemplate,
+    time_source: impl Into<Option<TimeSource>>,
+) -> Result<Block, SerializationError> {
+    let GetBlockTemplate {
         version,
         height,
         previous_block_hash: GetBlockHash(previous_block_hash),
@@ -108,16 +146,21 @@ pub fn proposal_block_from_template(
                 ..
             },
         bits: difficulty_threshold,
-        coinbase_txn,
-        transactions: tx_templates,
+        ref coinbase_txn,
+        transactions: ref tx_templates,
         ..
-    }: GetBlockTemplate,
-) -> Result<Block, SerializationError> {
+    } = template;
+
     if Height(height) > Height::MAX {
         Err(SerializationError::Parse(
             "height field must be lower than Height::MAX",
         ))?;
     };
+
+    let time = time_source
+        .into()
+        .unwrap_or_default()
+        .time_from_template(&template);
 
     let mut transactions = vec![coinbase_txn.data.as_ref().zcash_deserialize_into()?];
 
@@ -131,7 +174,7 @@ pub fn proposal_block_from_template(
             previous_block_hash,
             merkle_root,
             commitment_bytes: block_commitments_hash.into(),
-            time: Utc::now(),
+            time: time.into(),
             difficulty_threshold,
             nonce: [0; 32],
             solution: Solution::default(),

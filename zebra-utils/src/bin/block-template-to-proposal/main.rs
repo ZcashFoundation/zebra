@@ -51,7 +51,7 @@ fn main() -> Result<()> {
     eprintln!("{template:?}");
 
     // generate proposal according to arguments
-    let proposal = proposal_block_from_template(template)?;
+    let proposal = proposal_block_from_template(template, time_source)?;
     eprintln!("{proposal:?}");
 
     let proposal = proposal
