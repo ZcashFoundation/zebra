@@ -28,6 +28,7 @@ fn disable_non_reproducible(_config: &mut Config) {
      */
 }
 
+/// Process entry point for `zebrad`'s build script
 #[allow(clippy::print_stderr)]
 fn main() {
     let mut config = Config::default();

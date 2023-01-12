@@ -2,7 +2,7 @@
 
 use zebrad::application::APPLICATION;
 
-/// Boot Zebrad
+/// Process entry point for `zebrad`
 fn main() {
     abscissa_core::boot(&APPLICATION);
 }
