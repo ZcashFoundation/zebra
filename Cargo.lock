@@ -2427,9 +2427,9 @@ dependencies = [
 
 [[package]]
 name = "mset"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05d1cf737c48148e9956a9ea00710258dcf2a7afdedc34a2c672a44866f618dc"
+checksum = "26c4d16a3d2b0e89ec6e7d509cf791545fcb48cbc8fc2fb2e96a492defda9140"
 
 [[package]]
 name = "multimap"
