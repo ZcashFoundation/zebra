@@ -142,11 +142,16 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
         "got getblocktemplate response, hopefully with transactions"
     );
 
-    // Propose a new block with an empty solution and nonce field
-    tracing::info!("calling getblocktemplate with a block proposal...",);
+    for time_source in TimeSource::valid_sources() {
+        // Propose a new block with an empty solution and nonce field
+        tracing::info!(
+            "calling getblocktemplate with a block proposal and time source {time_source:?}...",
+        );
 
-    for proposal_block in proposal_block_from_template(response_json_result)? {
-        let raw_proposal_block = hex::encode(proposal_block.zcash_serialize_to_vec()?);
+        let raw_proposal_block = hex::encode(
+            proposal_block_from_template(&response_json_result, time_source)?
+                .zcash_serialize_to_vec()?,
+        );
 
         let json_result = client
             .json_result_from_call(
@@ -158,7 +163,7 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
 
         tracing::info!(
             ?json_result,
-            ?proposal_block.header.time,
+            ?time_source,
             "got getblocktemplate proposal response"
         );
 

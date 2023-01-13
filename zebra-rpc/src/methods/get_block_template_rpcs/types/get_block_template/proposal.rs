@@ -131,6 +131,13 @@ impl TimeSource {
             Raw(_) | RawNow => false,
         }
     }
+
+    /// Returns an iterator of time sources that are valid according to the consensus rules.
+    pub fn valid_sources() -> impl IntoIterator<Item = TimeSource> {
+        use TimeSource::*;
+
+        [CurTime, MinTime, MaxTime, ClampedNow].into_iter()
+    }
 }
 
 impl FromStr for TimeSource {
@@ -160,7 +167,7 @@ impl FromStr for TimeSource {
 ///
 /// If `time_source` is not supplied, uses the current time from the template.
 pub fn proposal_block_from_template(
-    template: GetBlockTemplate,
+    template: &GetBlockTemplate,
     time_source: impl Into<Option<TimeSource>>,
 ) -> Result<Block, SerializationError> {
     let GetBlockTemplate {
@@ -177,7 +184,7 @@ pub fn proposal_block_from_template(
         ref coinbase_txn,
         transactions: ref tx_templates,
         ..
-    } = template;
+    } = *template;
 
     if Height(height) > Height::MAX {
         Err(SerializationError::Parse(
@@ -188,7 +195,7 @@ pub fn proposal_block_from_template(
     let time = time_source
         .into()
         .unwrap_or_default()
-        .time_from_template(&template);
+        .time_from_template(template);
 
     let mut transactions = vec![coinbase_txn.data.as_ref().zcash_deserialize_into()?];
 
