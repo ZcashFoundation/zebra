@@ -84,7 +84,8 @@ impl RpcServer {
         chain_verifier: ChainVerifier,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         sync_status: SyncStatus,
-        #[cfg(feature = "getblocktemplate-rpcs")] address_book: AddressBook,
+        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
+        address_book: AddressBook,
         latest_chain_tip: Tip,
         network: Network,
     ) -> (JoinHandle<()>, JoinHandle<()>, Option<Self>)
