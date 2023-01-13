@@ -125,7 +125,14 @@ where
 
     Ok(chain_verifier_response
         .map(|_hash| ProposalResponse::Valid)
-        .unwrap_or_else(|_| ProposalRejectReason::Rejected.into())
+        .unwrap_or_else(|verify_chain_error| {
+            tracing::info!(
+                verify_chain_error,
+                "Got error response from chain_verifier CheckProposal request"
+            );
+
+            ProposalRejectReason::Rejected.into()
+        })
         .into())
 }
 
