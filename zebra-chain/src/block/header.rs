@@ -6,6 +6,7 @@ use chrono::{DateTime, Duration, Utc};
 use thiserror::Error;
 
 use crate::{
+    fmt::HexDebug,
     serialization::{TrustedPreallocate, MAX_PROTOCOL_MESSAGE_LEN},
     work::{difficulty::CompactDifficulty, equihash::Solution},
 };
@@ -58,7 +59,7 @@ pub struct Header {
     /// this field cannot be parsed without the network and height. Use
     /// [`Block::commitment`](super::Block::commitment) to get the parsed
     /// [`Commitment`](super::Commitment).
-    pub commitment_bytes: [u8; 32],
+    pub commitment_bytes: HexDebug<[u8; 32]>,
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
     /// started hashing the header (according to the miner).
@@ -77,7 +78,7 @@ pub struct Header {
     /// An arbitrary field that miners can change to modify the header
     /// hash in order to produce a hash less than or equal to the
     /// target threshold.
-    pub nonce: [u8; 32],
+    pub nonce: HexDebug<[u8; 32]>,
 
     /// The Equihash solution.
     pub solution: Solution,
