@@ -67,7 +67,7 @@ static INVALID_HEADER_SOLUTION_TRANSCRIPT: Lazy<
         Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..]).unwrap();
 
     // Change nonce to something invalid
-    Arc::make_mut(&mut block.header).nonce = [0; 32];
+    Arc::make_mut(&mut block.header).nonce = [0; 32].into();
 
     vec![(
         Request::Commit(Arc::new(block)),
