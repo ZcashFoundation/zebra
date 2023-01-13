@@ -112,12 +112,6 @@ where
          return Ok(ProposalRejectReason::Rejected.into())
     };
 
-    tracing::info!(
-        ?block.header,
-        num_transactions = block.transactions.len(),
-        "Deserialized block proposal data, calling chain_verifier with CheckProposal request"
-    );
-
     let chain_verifier_response = chain_verifier
         .ready()
         .await
