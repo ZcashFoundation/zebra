@@ -108,9 +108,15 @@ where
         + Sync
         + 'static,
 {
-    let Ok(block) = block_proposal_bytes.zcash_deserialize_into() else {
+    let Ok(block) = block_proposal_bytes.zcash_deserialize_into::<block::Block>() else {
          return Ok(ProposalRejectReason::Rejected.into())
     };
+
+    tracing::info!(
+        ?block.header,
+        num_transactions = block.transactions.len(),
+        "Deserialized block proposal data, calling chain_verifier with CheckProposal request"
+    );
 
     let chain_verifier_response = chain_verifier
         .ready()

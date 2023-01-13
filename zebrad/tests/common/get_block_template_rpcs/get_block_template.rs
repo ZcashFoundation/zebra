@@ -35,11 +35,6 @@ use crate::common::{
 /// We've seen it take anywhere from 1-45 seconds for the mempool to have some transactions in it.
 pub const EXPECTED_MEMPOOL_TRANSACTION_TIME: Duration = Duration::from_secs(45);
 
-/// Number of times to retry a block proposal request with the template returned by the getblocktemplate RPC.
-///
-/// We've seen spurious rejections of block proposals.
-const NUM_BLOCK_PROPOSAL_RETRIES: usize = 5;
-
 /// Launch Zebra, wait for it to sync, and check the getblocktemplate RPC returns without errors.
 pub(crate) async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -104,30 +99,17 @@ pub(crate) async fn run() -> Result<()> {
          to download and verify some transactions...",
     );
 
-    let mut num_remaining_retries = NUM_BLOCK_PROPOSAL_RETRIES;
-    loop {
-        tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
+    tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
 
-        tracing::info!(
-            "calling getblocktemplate RPC method at {rpc_address}, \
+    tracing::info!(
+        "calling getblocktemplate RPC method at {rpc_address}, \
              with a mempool that likely has transactions and attempting \
              to validate response result as a block proposal",
-        );
+    );
 
-        match try_validate_block_template(&client).await {
-            Ok(()) => break,
-            Err(error) if num_remaining_retries > 0 => {
-                num_remaining_retries -= 1;
-
-                tracing::info!(
-                    ?error,
-                    num_remaining_retries,
-                    "block proposal validation failed"
-                );
-            }
-            err => return err,
-        };
-    }
+    try_validate_block_template(&client)
+        .await
+        .expect("block proposal validation failed");
 
     zebrad.kill(false)?;
 
