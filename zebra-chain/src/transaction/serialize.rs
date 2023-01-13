@@ -992,9 +992,23 @@ impl TrustedPreallocate for transparent::Output {
 /// Stores bytes that are guaranteed to be deserializable into a [`Transaction`].
 ///
 /// Sorts in lexicographic order of the transaction's serialized data.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct SerializedTransaction {
     bytes: Vec<u8>,
+}
+
+impl fmt::Display for SerializedTransaction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&hex::encode(&self.bytes))
+    }
+}
+
+impl fmt::Debug for SerializedTransaction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("SerializedTransaction")
+            .field(&hex::encode(&self.bytes))
+            .finish()
+    }
 }
 
 /// Build a [`SerializedTransaction`] by serializing a block.

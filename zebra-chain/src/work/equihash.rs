@@ -55,7 +55,7 @@ impl Solution {
 
         let input = &input[0..Solution::INPUT_LENGTH];
 
-        equihash::is_valid_solution(n, k, input, nonce, solution)?;
+        equihash::is_valid_solution(n, k, input, nonce.as_ref(), solution)?;
 
         Ok(())
     }

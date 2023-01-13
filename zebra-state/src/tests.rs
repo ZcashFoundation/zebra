@@ -58,7 +58,7 @@ impl FakeChainHelper for Arc<Block> {
 
     fn set_block_commitment(mut self, block_commitment: [u8; 32]) -> Arc<Block> {
         let block = Arc::make_mut(&mut self);
-        Arc::make_mut(&mut block.header).commitment_bytes = block_commitment;
+        Arc::make_mut(&mut block.header).commitment_bytes = block_commitment.into();
         self
     }
 }
