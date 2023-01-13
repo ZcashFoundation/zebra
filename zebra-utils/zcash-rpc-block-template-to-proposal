@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # Gets a block template from a Zcash node instance,
-# turns it into a block proposal,
+# turns it into a block proposal using `block-template-to-proposal`,
 # and sends it to one or more Zcash node instances (which can include the same node).
 #
 # If there are multiple proposal ports, displays a diff of the responses.
@@ -19,7 +19,7 @@ function usage()
 # Override the commands used by this script using these environmental variables:
 ZCASH_CLI="${ZCASH_CLI:-zcash-cli}"
 DIFF="${DIFF:-diff --unified --color=always}"
-JQ="${JQ:-jq}"
+BLOCK_TEMPLATE_TO_PROPOSAL="${BLOCK_TEMPLATE_TO_PROPOSAL:-block-template-to-proposal}"
 
 # Process arguments
 
@@ -148,23 +148,12 @@ echo
 
 PROPOSAL_DATA="$ZCASH_RPC_TMP_DIR/proposal-data.json"
 
-echo "Turning the template into block proposal data using $JQ..."
+echo "Turning the template into block proposal data using $BLOCK_TEMPLATE_TO_PROPOSAL..."
 
-# Block header
-# See https://zips.z.cash/protocol/protocol.pdf#blockheader for details
+# TODO: check the proposals for every valid time source: CurTime MinTime MaxTime ClampedNow
 cat "$TEMPLATE_NODE_TEMPLATE_RESPONSE" | \
-    $JQ -r '. | "printf 0\(.version)000000\(.previousblockhash)\(.defaultroots.merkleroot)\(.defaultroots.blockcommitmentshash)%x\(.bits)%064xfd4005%02688x \(.curtime) 0 0"' | \
-    sh \
-    > "$PROPOSAL_DATA"
-
-# Transaction list
-# See https://developer.bitcoin.org/reference/block_chain.html#serialized-blocks for details
-# This encoding only works up to 252 transactions, because it only implements 1 byte compact size
-# https://developer.bitcoin.org/reference/transactions.html#compactsize-unsigned-integers
-cat "$TEMPLATE_NODE_TEMPLATE_RESPONSE" | \
-    $JQ -r '. | "printf %02x\(.coinbasetxn.data)\(.transactions | .[]? | {data} | join("")) \(.transactions | length + 1)"' | \
-    sh \
-    >> "$PROPOSAL_DATA"
+    $BLOCK_TEMPLATE_TO_PROPOSAL \
+        > "$PROPOSAL_DATA"
 
 # TODO: put this in a file if it exceeds the bash variable size limit
 PROPOSAL_ARG_FULL="{ \"mode\": \"proposal\", \"data\": \"$(cat $PROPOSAL_DATA)\" ${PROPOSAL_ARG:+, $PROPOSAL_ARG} }"
