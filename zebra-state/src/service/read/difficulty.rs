@@ -1,9 +1,6 @@
 //! Get context and calculate difficulty for the next block.
 
-use std::{
-    cmp::{max, min},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
