@@ -323,8 +323,7 @@ fn adjust_difficulty_and_time_for_testnet(
 
         // The maximum time can only be decreased, and only as far as min_time.
         // The old minimum is still required by other consensus rules.
-        result.max_time = min(std_difficulty_max_time, result.max_time);
-        result.max_time = max(result.min_time, result.max_time);
+        result.max_time = std_difficulty_max_time.clamp(result.min_time, result.max_time);
 
         // The current time only needs to be decreased if the max_time decreased past it.
         // Decreasing the current time can't change the difficulty.
@@ -334,8 +333,7 @@ fn adjust_difficulty_and_time_for_testnet(
 
         // The minimum time can only be increased, and only as far as max_time.
         // The old maximum is still required by other consensus rules.
-        result.min_time = max(min_difficulty_min_time, result.min_time);
-        result.min_time = min(result.max_time, result.min_time);
+        result.min_time = min_difficulty_min_time.clamp(result.min_time, result.max_time);
 
         // The current time only needs to be increased if the min_time increased past it.
         result.cur_time = result.cur_time.clamp(result.min_time, result.max_time);
