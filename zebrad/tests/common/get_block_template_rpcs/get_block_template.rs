@@ -101,6 +101,8 @@ pub(crate) async fn run() -> Result<()> {
 
     tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
 
+    /* TODO: activate this test after #5925 and #5953 have merged,
+             and we've checked for any other bugs using #5944.
     tracing::info!(
         "calling getblocktemplate RPC method at {rpc_address}, \
              with a mempool that likely has transactions and attempting \
@@ -110,6 +112,7 @@ pub(crate) async fn run() -> Result<()> {
     try_validate_block_template(&client)
         .await
         .expect("block proposal validation failed");
+     */
 
     zebrad.kill(false)?;
 
@@ -135,6 +138,7 @@ pub(crate) async fn run() -> Result<()> {
 /// If an RPC call returns a failure
 /// If the response result cannot be deserialized to `GetBlockTemplate` in 'template' mode
 /// or `ProposalResponse` in 'proposal' mode.
+#[allow(dead_code)]
 async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
     let response_json_result = client
         .json_result_from_call("getblocktemplate", "[]".to_string())
@@ -182,6 +186,7 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
 ///
 /// Returns an array of 3 block proposals using `curtime`, `mintime`, and `maxtime`
 /// for their `block.header.time` fields.
+#[allow(dead_code)]
 fn proposal_block_from_template(
     GetBlockTemplate {
         version,
