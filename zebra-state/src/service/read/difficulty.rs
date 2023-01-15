@@ -26,6 +26,11 @@ use crate::{
     BoxError, GetBlockTemplateChainInfo,
 };
 
+/// The amount of extra time we allow for a miner to mine a standard difficulty block on testnet.
+///
+/// This is a Zebra-specific standard rule.
+pub const EXTRA_TIME_TO_MINE_A_BLOCK: u32 = POST_BLOSSOM_POW_TARGET_SPACING * 2;
+
 /// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
 ///
 /// # Panics
@@ -304,15 +309,17 @@ fn adjust_difficulty_and_time_for_testnet(
         .expect("a valid block time plus a small constant is in-range");
 
     // If a miner is likely to find a block with the cur_time and standard difficulty
+    // within a target block interval or two, keep the original difficulty.
+    // Otherwise, try to use the minimum difficulty.
+    //
+    // This is a Zebra-specific standard rule.
     //
     // We don't need to undo the clamping here:
     // - if cur_time is clamped to min_time, then we're more likely to have a minimum
     //    difficulty block, which makes mining easier;
-    // - if cur_time gets clamped to max_time, this is already a minimum difficulty block.
+    // - if cur_time gets clamped to max_time, this is almost always a minimum difficulty block.
     let local_std_difficulty_limit = std_difficulty_max_time
-        .checked_sub(Duration32::from_seconds(
-            POST_BLOSSOM_POW_TARGET_SPACING * 2,
-        ))
+        .checked_sub(Duration32::from_seconds(EXTRA_TIME_TO_MINE_A_BLOCK))
         .expect("a valid block time minus a small constant is in-range");
 
     if result.cur_time <= local_std_difficulty_limit {
