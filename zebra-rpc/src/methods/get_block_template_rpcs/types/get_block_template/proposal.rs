@@ -196,7 +196,7 @@ pub fn proposal_block_from_template(
             time: time.into(),
             difficulty_threshold,
             nonce: [0; 32].into(),
-            solution: Solution::default(),
+            solution: Solution::for_proposal(),
         }),
         transactions,
     })
