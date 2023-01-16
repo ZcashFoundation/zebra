@@ -19,6 +19,8 @@ use crate::methods::{
 };
 
 /// Error response to a `getblocktemplate` RPC request in proposal mode.
+///
+/// See <https://en.bitcoin.it/wiki/BIP_0022#Appendix:_Example_Rejection_Reasons>
 #[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProposalRejectReason {
