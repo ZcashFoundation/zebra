@@ -12,7 +12,8 @@ use zebra_chain::{
 
 use crate::methods::{
     get_block_template_rpcs::types::{
-        default_roots::DefaultRoots, get_block_template::GetBlockTemplate,
+        default_roots::DefaultRoots,
+        get_block_template::{GetBlockTemplate, Response},
     },
     GetBlockHash,
 };
@@ -50,6 +51,24 @@ impl From<ProposalRejectReason> for ProposalResponse {
             reject_reason,
             capabilities: GetBlockTemplate::capabilities(),
         }
+    }
+}
+
+impl From<ProposalRejectReason> for Response {
+    fn from(error_response: ProposalRejectReason) -> Self {
+        Self::ProposalMode(ProposalResponse::from(error_response))
+    }
+}
+
+impl From<ProposalResponse> for Response {
+    fn from(proposal_response: ProposalResponse) -> Self {
+        Self::ProposalMode(proposal_response)
+    }
+}
+
+impl From<GetBlockTemplate> for Response {
+    fn from(template: GetBlockTemplate) -> Self {
+        Self::TemplateMode(Box::new(template))
     }
 }
 
