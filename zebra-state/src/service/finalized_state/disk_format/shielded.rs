@@ -15,7 +15,7 @@ impl IntoDisk for sprout::Nullifier {
     type Bytes = [u8; 32];
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.0
+        *self.0
     }
 }
 
@@ -23,7 +23,7 @@ impl IntoDisk for sapling::Nullifier {
     type Bytes = [u8; 32];
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.0
+        *self.0
     }
 }
 
