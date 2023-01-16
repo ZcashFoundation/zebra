@@ -6,14 +6,13 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
 
 use crate::{
+    block::{header::ZCASH_BLOCK_VERSION, merkle, Block, CountedHeader, Hash, Header},
     serialization::{
         CompactSizeMessage, ReadZcashExt, SerializationError, ZcashDeserialize,
         ZcashDeserializeInto, ZcashSerialize,
     },
     work::{difficulty::CompactDifficulty, equihash},
 };
-
-use super::{header::ZCASH_BLOCK_VERSION, merkle, Block, CountedHeader, Hash, Header};
 
 /// The maximum size of a Zcash block, in bytes.
 ///
@@ -85,7 +84,7 @@ impl ZcashDeserialize for Header {
             version,
             previous_block_hash: Hash::zcash_deserialize(&mut reader)?,
             merkle_root: merkle::Root(reader.read_32_bytes()?),
-            commitment_bytes: reader.read_32_bytes()?,
+            commitment_bytes: reader.read_32_bytes()?.into(),
             // This can't panic, because all u32 values are valid `Utc.timestamp`s
             time: Utc
                 .timestamp_opt(reader.read_u32::<LittleEndian>()?.into(), 0)
@@ -94,7 +93,7 @@ impl ZcashDeserialize for Header {
                     "out-of-range number of seconds and/or invalid nanosecond",
                 ))?,
             difficulty_threshold: CompactDifficulty(reader.read_u32::<LittleEndian>()?),
-            nonce: reader.read_32_bytes()?,
+            nonce: reader.read_32_bytes()?.into(),
             solution: equihash::Solution::zcash_deserialize(reader)?,
         })
     }

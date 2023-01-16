@@ -229,7 +229,7 @@ impl Verifier {
 
             let s = {
                 // XXX-pallas: should not use CtOption here
-                let maybe_scalar = pallas::Scalar::from_repr(s_bytes);
+                let maybe_scalar = pallas::Scalar::from_repr(*s_bytes);
                 if maybe_scalar.is_some().into() {
                     maybe_scalar.unwrap()
                 } else {
@@ -258,10 +258,10 @@ impl Verifier {
                     //
                     // This validates the `rk` element, whose type is
                     // SpendAuthSig^{Orchard}.Public, i.e. ℙ.
-                    VerificationKey::<SpendAuth>::try_from(vk_bytes.bytes)?.point
+                    VerificationKey::<SpendAuth>::try_from(*vk_bytes.bytes)?.point
                 }
                 Inner::Binding { vk_bytes, .. } => {
-                    VerificationKey::<Binding>::try_from(vk_bytes.bytes)?.point
+                    VerificationKey::<Binding>::try_from(*vk_bytes.bytes)?.point
                 }
             };
 
