@@ -91,7 +91,7 @@ case "$1" in
         #
         # TODO: test that the following 3 cases actually work, or remove them
         else
-            exec cargo "$@"
+            exec "$@"
         fi
         ;;
     -*)
