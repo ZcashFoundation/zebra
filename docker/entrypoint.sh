@@ -95,5 +95,4 @@ case "$1" in
         else
             exec "$@"
         fi
-        ;;
 esac
