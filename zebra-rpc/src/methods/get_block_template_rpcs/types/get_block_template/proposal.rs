@@ -134,12 +134,13 @@ impl FromStr for TimeSource {
             "maxtime" => Ok(MaxTime),
             "clampednow" => Ok(ClampedNow),
             "rawnow" => Ok(RawNow),
-            // "raw"u32
-            s if s.strip_prefix("raw").is_some() => {
-                Ok(Raw(s.strip_prefix("raw").unwrap().parse()?))
-            }
-            // "clamped"u32 or just u32
-            _ => Ok(Clamped(s.strip_prefix("clamped").unwrap_or(s).parse()?)),
+            s => match s.strip_prefix("raw") {
+                // "raw"u32
+                Some(raw_value) => Ok(Raw(raw_value.parse()?)),
+                // "clamped"u32 or just u32
+                // this is the default if the argument is just a number
+                None => Ok(Clamped(s.strip_prefix("clamped").unwrap_or(s).parse()?)),
+            },
         }
     }
 }
