@@ -78,3 +78,7 @@ panic = "abort"
 #     - add "-flto=thin" to all C/C++ code builds
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
+
+[patch.crates-io]
+zcash_primitives = { git = 'https://github.com/zcash/librustzcash', branch='sapling-api-changes' }
+zcash_proofs = { git = 'https://github.com/zcash/librustzcash', branch='sapling-api-changes' }

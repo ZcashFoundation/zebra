@@ -1274,6 +1274,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "equihash"
+version = "0.2.0"
+source = "git+https://github.com/zcash/librustzcash?branch=sapling-api-changes#8eae5806a82ee2438be11da21072dfbb3b008cea"
+dependencies = [
+ "blake2b_simd",
+ "byteorder",
+]
+
+[[package]]
 name = "eyre"
 version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1288,6 +1297,14 @@ name = "f4jumble"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0a83e8d7fd0c526af4aad893b7c9fe41e2699ed8a776a6c74aecdeafe05afc75"
+dependencies = [
+ "blake2b_simd",
+]
+
+[[package]]
+name = "f4jumble"
+version = "0.1.0"
+source = "git+https://github.com/zcash/librustzcash?branch=sapling-api-changes#8eae5806a82ee2438be11da21072dfbb3b008cea"
 dependencies = [
  "blake2b_simd",
 ]
@@ -2643,7 +2660,7 @@ dependencies = [
  "serde",
  "subtle",
  "tracing",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -5205,8 +5222,19 @@ checksum = "804268e702b664fc09d3e2ce82786d0addf4ae57ba6976469be63e09066bf9f7"
 dependencies = [
  "bech32 0.8.1",
  "bs58",
- "f4jumble",
- "zcash_encoding",
+ "f4jumble 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_encoding 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "zcash_address"
+version = "0.2.0"
+source = "git+https://github.com/zcash/librustzcash?branch=sapling-api-changes#8eae5806a82ee2438be11da21072dfbb3b008cea"
+dependencies = [
+ "bech32 0.8.1",
+ "bs58",
+ "f4jumble 0.1.0 (git+https://github.com/zcash/librustzcash?branch=sapling-api-changes)",
+ "zcash_encoding 0.2.0 (git+https://github.com/zcash/librustzcash?branch=sapling-api-changes)",
 ]
 
 [[package]]
@@ -5214,6 +5242,15 @@ name = "zcash_encoding"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f03391b81727875efa6ac0661a20883022b6fba92365dc121c48fa9b00c5aac0"
+dependencies = [
+ "byteorder",
+ "nonempty",
+]
+
+[[package]]
+name = "zcash_encoding"
+version = "0.2.0"
+source = "git+https://github.com/zcash/librustzcash?branch=sapling-api-changes#8eae5806a82ee2438be11da21072dfbb3b008cea"
 dependencies = [
  "byteorder",
  "nonempty",
@@ -5244,6 +5281,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_note_encryption"
+version = "0.2.0"
+source = "git+https://github.com/zcash/librustzcash?branch=sapling-api-changes#8eae5806a82ee2438be11da21072dfbb3b008cea"
+dependencies = [
+ "chacha20",
+ "chacha20poly1305",
+ "cipher 0.4.3",
+ "rand_core 0.6.4",
+ "subtle",
+]
+
+[[package]]
 name = "zcash_primitives"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5258,7 +5307,7 @@ dependencies = [
  "bs58",
  "byteorder",
  "chacha20poly1305",
- "equihash",
+ "equihash 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ff",
  "fpe",
  "group",
@@ -5276,16 +5325,15 @@ dependencies = [
  "secp256k1",
  "sha2",
  "subtle",
- "zcash_address",
- "zcash_encoding",
- "zcash_note_encryption",
+ "zcash_address 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_encoding 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_note_encryption 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "zcash_primitives"
 version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f9a45953c4ddd81d68f45920955707f45c8926800671f354dd13b97507edf28"
+source = "git+https://github.com/zcash/librustzcash?branch=sapling-api-changes#8eae5806a82ee2438be11da21072dfbb3b008cea"
 dependencies = [
  "aes",
  "bip0039",
@@ -5294,7 +5342,7 @@ dependencies = [
  "blake2s_simd",
  "bls12_381",
  "byteorder",
- "equihash",
+ "equihash 0.2.0 (git+https://github.com/zcash/librustzcash?branch=sapling-api-changes)",
  "ff",
  "fpe",
  "group",
@@ -5312,16 +5360,15 @@ dependencies = [
  "secp256k1",
  "sha2",
  "subtle",
- "zcash_address",
- "zcash_encoding",
- "zcash_note_encryption",
+ "zcash_address 0.2.0 (git+https://github.com/zcash/librustzcash?branch=sapling-api-changes)",
+ "zcash_encoding 0.2.0 (git+https://github.com/zcash/librustzcash?branch=sapling-api-changes)",
+ "zcash_note_encryption 0.2.0 (git+https://github.com/zcash/librustzcash?branch=sapling-api-changes)",
 ]
 
 [[package]]
 name = "zcash_proofs"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77381adc72286874e563ee36ba99953946abcbd195ada45440a2754ca823d407"
+source = "git+https://github.com/zcash/librustzcash?branch=sapling-api-changes#8eae5806a82ee2438be11da21072dfbb3b008cea"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -5354,8 +5401,8 @@ dependencies = [
  "rand_core 0.6.4",
  "syn 1.0.104",
  "tracing",
- "zcash_encoding",
- "zcash_note_encryption",
+ "zcash_encoding 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_note_encryption 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zcash_primitives 0.8.1",
 ]
 
@@ -5377,7 +5424,7 @@ dependencies = [
  "criterion",
  "displaydoc",
  "ed25519-zebra",
- "equihash",
+ "equihash 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures",
  "group",
  "halo2_proofs",
@@ -5411,9 +5458,9 @@ dependencies = [
  "tracing",
  "uint",
  "x25519-dalek",
- "zcash_encoding",
+ "zcash_encoding 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zcash_history",
- "zcash_note_encryption",
+ "zcash_note_encryption 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zcash_primitives 0.9.1",
  "zebra-test",
 ]
