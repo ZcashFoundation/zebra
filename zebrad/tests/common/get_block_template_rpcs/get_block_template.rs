@@ -145,12 +145,7 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
     // Propose a new block with an empty solution and nonce field
     tracing::info!("calling getblocktemplate with a block proposal...",);
 
-    // TODO: update this to use all valid time sources in the next PR
-    #[allow(clippy::single_element_loop)]
-    for proposal_block in [proposal_block_from_template(
-        response_json_result,
-        TimeSource::CurTime,
-    )?] {
+    for proposal_block in proposal_block_from_template(response_json_result)? {
         let raw_proposal_block = hex::encode(proposal_block.zcash_serialize_to_vec()?);
 
         let json_result = client
