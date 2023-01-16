@@ -299,6 +299,32 @@ jobs:
         env:
           ZEBRA_TEST_LIGHTWALLETD: '1'
 
+  # Test that Zebra works using the default config with the latest Zebra version
+  #
+  # Also check that $ZEBRA_CONF_PATH works
+  test-configuration-file:
+    name: Test Zebra configuration file
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    steps:
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Run tests using the default config
+        run: |
+          docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run --rm --name default-conf-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} | grep --max-count=1 'estimated progress to chain tip.*BeforeOverwinter'
+
+      - name: Run tests using the $ZEBRA_CONF_PATH
+        run: |
+          docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
+          docker run -e ZEBRA_CONF_PATH --rm --name variable-conf-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} | grep --max-count=1 'v1.0.0-rc.2.toml'
+        env:
+          ZEBRA_CONF_PATH: 'zebra/zebrad/tests/common/configs/v1.0.0-rc.2.toml'
+
   # zebrad cached checkpoint state tests
 
   # Regenerate mandatory checkpoint Zebra cached state disks.
