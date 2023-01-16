@@ -1,3 +1,5 @@
+//! Groth16 proofs for Zebra.
+
 use std::{fmt, io};
 
 use serde::{Deserialize, Serialize};
