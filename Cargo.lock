@@ -6452,6 +6452,7 @@ dependencies = [
  "tracing-subscriber 0.3.15",
  "zcash_proofs",
  "zebra-chain",
+ "zebra-node-services",
  "zebra-script",
  "zebra-state",
  "zebra-test",
@@ -6622,8 +6623,7 @@ dependencies = [
  "tracing-error",
  "tracing-subscriber 0.3.15",
  "zebra-chain",
- "zebra-consensus",
- "zebra-state",
+ "zebra-node-services",
 ]
 
 [[package]]
