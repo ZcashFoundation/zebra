@@ -4,8 +4,10 @@
 use zebra_chain::{
     amount,
     block::{ChainHistoryBlockTxAuthCommitmentHash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
+    parameters::Network,
     serialization::DateTime32,
     transaction::VerifiedUnminedTx,
+    transparent,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
