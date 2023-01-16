@@ -15,7 +15,13 @@ echo "ZEBRA_CACHED_STATE_DIR=$ZEBRA_CACHED_STATE_DIR"
 echo "LIGHTWALLETD_DATA_DIR=$LIGHTWALLETD_DATA_DIR"
 
 case "$1" in
-    -- | cargo)
+    -- | zebrad)
+        exec zebrad "$@"
+        ;;
+    -*)
+        exec zebrad "$@"
+        ;;
+    *)
         # For these tests, we activate the gRPC feature to avoid recompiling `zebrad`,
         # but we might not actually run any gRPC tests.
         if [[ "$RUN_ALL_TESTS" -eq "1" ]]; then
@@ -86,17 +92,8 @@ case "$1" in
             # Starting with a cached Zebra tip, test sending a block to Zebra's RPC port.
             ls -lh "$ZEBRA_CACHED_STATE_DIR"/*/* || (echo "No $ZEBRA_CACHED_STATE_DIR/*/*"; ls -lhR  "$ZEBRA_CACHED_STATE_DIR" | head -50 || echo "No $ZEBRA_CACHED_STATE_DIR directory")
             cargo test --locked --release --features getblocktemplate-rpcs --package zebrad --test acceptance -- --nocapture --include-ignored submit_block
-
-        # These command-lines are provided by the caller.
-        #
-        # TODO: test that the following 3 cases actually work, or remove them
         else
             exec "$@"
         fi
         ;;
-    -*)
-        exec zebrad "$@"
-        ;;
-    *)
-        exec "$@"
 esac
