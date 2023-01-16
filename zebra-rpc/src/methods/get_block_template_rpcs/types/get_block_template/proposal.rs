@@ -73,10 +73,11 @@ impl From<GetBlockTemplate> for Response {
 }
 
 /// The source of the time in the block proposal header.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum TimeSource {
     /// The `curtime` field in the template.
     /// This is the default time source.
+    #[default]
     CurTime,
 
     /// The `mintime` field in the template.
@@ -116,12 +117,6 @@ impl TimeSource {
             Raw(time) => *time,
             RawNow => DateTime32::now(),
         }
-    }
-}
-
-impl Default for TimeSource {
-    fn default() -> Self {
-        TimeSource::CurTime
     }
 }
 
