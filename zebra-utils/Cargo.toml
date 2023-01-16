@@ -12,6 +12,8 @@ publish = false
 
 [[bin]]
 name = "block-template-to-proposal"
+# this setting is required for Zebra's Docker build caches
+path = "src/bin/block-template-to-proposal/main.rs"
 required-features = ["getblocktemplate-rpcs"]
 
 [features]
