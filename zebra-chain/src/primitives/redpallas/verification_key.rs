@@ -1,7 +1,11 @@
+//! Redpallas verification keys for Zebra.
+
 use std::marker::PhantomData;
 
 use group::{cofactor::CofactorGroup, ff::PrimeField, GroupEncoding};
 use halo2::pasta::pallas;
+
+use crate::fmt::HexDebug;
 
 use super::*;
 
@@ -13,14 +17,14 @@ use super::*;
 /// used in signature verification.
 #[derive(Copy, Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct VerificationKeyBytes<T: SigType> {
-    pub(crate) bytes: [u8; 32],
+    pub(crate) bytes: HexDebug<[u8; 32]>,
     pub(crate) _marker: PhantomData<T>,
 }
 
 impl<T: SigType> From<[u8; 32]> for VerificationKeyBytes<T> {
     fn from(bytes: [u8; 32]) -> VerificationKeyBytes<T> {
         VerificationKeyBytes {
-            bytes,
+            bytes: bytes.into(),
             _marker: PhantomData,
         }
     }
@@ -28,7 +32,7 @@ impl<T: SigType> From<[u8; 32]> for VerificationKeyBytes<T> {
 
 impl<T: SigType> From<VerificationKeyBytes<T>> for [u8; 32] {
     fn from(refined: VerificationKeyBytes<T>) -> [u8; 32] {
-        refined.bytes
+        *refined.bytes
     }
 }
 
@@ -65,7 +69,7 @@ impl<T: SigType> From<VerificationKey<T>> for VerificationKeyBytes<T> {
 
 impl<T: SigType> From<VerificationKey<T>> for [u8; 32] {
     fn from(pk: VerificationKey<T>) -> [u8; 32] {
-        pk.bytes.bytes
+        *pk.bytes.bytes
     }
 }
 
@@ -107,7 +111,7 @@ impl VerificationKey<SpendAuth> {
         use super::private::Sealed;
         let point = self.point + (SpendAuth::basepoint() * randomizer);
         let bytes = VerificationKeyBytes {
-            bytes: point.to_bytes(),
+            bytes: point.to_bytes().into(),
             _marker: PhantomData,
         };
         VerificationKey { point, bytes }
@@ -118,7 +122,7 @@ impl<T: SigType> VerificationKey<T> {
     pub(crate) fn from_scalar(s: &pallas::Scalar) -> VerificationKey<T> {
         let point = T::basepoint() * s;
         let bytes = VerificationKeyBytes {
-            bytes: point.to_bytes(),
+            bytes: point.to_bytes().into(),
             _marker: PhantomData,
         };
         VerificationKey { point, bytes }
@@ -154,7 +158,7 @@ impl<T: SigType> VerificationKey<T> {
 
         let s = {
             // XXX-pasta_curves: should not use CtOption here
-            let maybe_scalar = pallas::Scalar::from_repr(signature.s_bytes);
+            let maybe_scalar = pallas::Scalar::from_repr(*signature.s_bytes);
             if maybe_scalar.is_some().into() {
                 maybe_scalar.unwrap()
             } else {
