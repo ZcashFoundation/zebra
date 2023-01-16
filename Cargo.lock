@@ -5653,6 +5653,7 @@ dependencies = [
  "hyper",
  "indexmap",
  "inferno",
+ "jsonrpc-core",
  "lazy_static",
  "log",
  "metrics",

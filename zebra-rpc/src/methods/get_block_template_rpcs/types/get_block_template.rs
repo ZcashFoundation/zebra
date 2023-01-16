@@ -1,4 +1,5 @@
-//! The `GetBlockTempate` type is the output of the `getblocktemplate` RPC method.
+//! The `GetBlockTempate` type is the output of the `getblocktemplate` RPC method in the
+//! default 'template' mode. See [`ProposalResponse`] for the output in 'proposal' mode.
 
 use zebra_chain::{
     amount,
@@ -27,8 +28,10 @@ use crate::methods::{
 };
 
 pub mod parameters;
+pub mod proposal;
 
 pub use parameters::*;
+pub use proposal::*;
 
 /// A serialized `getblocktemplate` RPC response in template mode.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -283,33 +286,6 @@ impl GetBlockTemplate {
     }
 }
 
-/// Error response to a `getblocktemplate` RPC request in proposal mode.
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProposalRejectReason {
-    /// Block proposal rejected as invalid.
-    Rejected,
-}
-
-/// Response to a `getblocktemplate` RPC request in proposal mode.
-///
-/// See <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(untagged, rename_all = "kebab-case")]
-pub enum ProposalResponse {
-    /// Block proposal was rejected as invalid, returns `reject-reason` and server `capabilities`.
-    ErrorResponse {
-        /// Reason the proposal was invalid as-is.
-        reject_reason: ProposalRejectReason,
-
-        /// The getblocktemplate RPC capabilities supported by Zebra.
-        capabilities: Vec<String>,
-    },
-
-    /// Block proposal was successfully validated, returns null.
-    Valid,
-}
-
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 /// A `getblocktemplate` RPC response.
@@ -319,31 +295,4 @@ pub enum Response {
 
     /// `getblocktemplate` RPC request in proposal mode.
     ProposalMode(ProposalResponse),
-}
-
-impl From<ProposalRejectReason> for ProposalResponse {
-    fn from(reject_reason: ProposalRejectReason) -> Self {
-        Self::ErrorResponse {
-            reject_reason,
-            capabilities: GetBlockTemplate::capabilities(),
-        }
-    }
-}
-
-impl From<ProposalRejectReason> for Response {
-    fn from(error_response: ProposalRejectReason) -> Self {
-        Self::ProposalMode(ProposalResponse::from(error_response))
-    }
-}
-
-impl From<ProposalResponse> for Response {
-    fn from(proposal_response: ProposalResponse) -> Self {
-        Self::ProposalMode(proposal_response)
-    }
-}
-
-impl From<GetBlockTemplate> for Response {
-    fn from(template: GetBlockTemplate) -> Self {
-        Self::TemplateMode(Box::new(template))
-    }
 }
