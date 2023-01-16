@@ -2,9 +2,10 @@
 
 use std::net::SocketAddr;
 
-use color_eyre::{eyre::eyre, Result};
-use jsonrpc_core::Output;
 use reqwest::Client;
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+use color_eyre::{eyre::eyre, Result};
 
 /// An http client for making Json-RPC requests
 pub struct RPCRequestClient {
@@ -67,6 +68,8 @@ impl RPCRequestClient {
     fn json_result_from_response_text<T: serde::de::DeserializeOwned>(
         response_text: &str,
     ) -> Result<T> {
+        use jsonrpc_core::Output;
+
         let output: Output = serde_json::from_str(response_text)?;
         match output {
             Output::Success(success) => Ok(serde_json::from_value(success.result)?),
