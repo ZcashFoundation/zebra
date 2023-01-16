@@ -27,7 +27,7 @@ use crate::methods::{
         },
         get_block_template::{
             check_miner_address, check_synced_to_tip, fetch_mempool_transactions,
-            fetch_state_tip_and_local_time, generate_coinbase_and_roots, validate_block_proposal,
+            fetch_state_tip_and_local_time, validate_block_proposal,
         },
         types::{
             get_block_template::GetBlockTemplate, get_mining_info, hex_data::HexData,
@@ -566,24 +566,12 @@ where
 
             // - After this point, the template only depends on the previously fetched data.
 
-            // Generate the coinbase transaction and default roots
-            //
-            // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
-            let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
-                network,
-                next_block_height,
-                miner_address,
-                &mempool_txs,
-                chain_tip_and_local_time.history_tree.clone(),
-                COINBASE_LIKE_ZCASHD,
-            );
-
             let response = GetBlockTemplate::new(
+                network,
+                miner_address,
                 &chain_tip_and_local_time,
                 server_long_poll_id,
-                coinbase_txn,
-                &mempool_txs,
-                default_roots,
+                mempool_txs,
                 submit_old,
                 COINBASE_LIKE_ZCASHD,
             );
