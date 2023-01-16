@@ -603,7 +603,7 @@ impl PeerObserver for AddressBook {
 impl PeerObserver for Arc<Mutex<AddressBook>> {
     fn recently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
         self.lock()
-            .expect("mutex should be unpoisoned")
+            .expect("panic in a previous thread that was holding the mutex")
             .recently_live_peers(now)
     }
 }
