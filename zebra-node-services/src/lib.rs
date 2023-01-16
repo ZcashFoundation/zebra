@@ -1,5 +1,6 @@
 //! The interfaces of some Zebra node services.
 
+pub mod constants;
 pub mod mempool;
 
 /// Error type alias to make working with tower traits easier.
