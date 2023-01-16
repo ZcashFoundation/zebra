@@ -2,13 +2,10 @@
 //!
 //! For usage please refer to the program help: `zebra-checkpoints --help`
 
-#![deny(missing_docs)]
-#![allow(clippy::try_err)]
-
 use structopt::StructOpt;
 
 /// zebra-checkpoints arguments
-#[derive(Debug, StructOpt)]
+#[derive(Clone, Debug, Eq, PartialEq, StructOpt)]
 pub struct Args {
     /// Path to zcash-cli command
     #[structopt(default_value = "zcash-cli", short, long)]
