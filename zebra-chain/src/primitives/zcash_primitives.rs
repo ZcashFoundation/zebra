@@ -13,6 +13,8 @@ use crate::{
     transparent::{self, Script},
 };
 
+// TODO: move copied and modified code to a separate module.
+//
 // Used by boilerplate code below.
 
 #[derive(Clone, Debug)]
@@ -87,10 +89,18 @@ impl
         zp_tx::components::sapling::Authorized,
     > for IdentityMap
 {
-    fn map_proof(
+    fn map_spend_proof(
         &self,
-        p: <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::Proof,
-    ) -> <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::Proof
+        p: <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::SpendProof,
+    ) -> <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::SpendProof
+    {
+        p
+    }
+
+    fn map_output_proof(
+        &self,
+        p: <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::OutputProof,
+    ) -> <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::OutputProof
     {
         p
     }
