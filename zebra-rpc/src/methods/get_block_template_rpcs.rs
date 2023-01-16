@@ -16,7 +16,7 @@ use zebra_chain::{
     transparent,
 };
 use zebra_consensus::VerifyChainError;
-use zebra_network::PeerObserver;
+use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{ReadRequest, ReadResponse};
 
@@ -177,7 +177,7 @@ where
         + Sync
         + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
-    AddressBook: PeerObserver,
+    AddressBook: AddressBookPeers,
 {
     // Configuration
     //
@@ -233,7 +233,7 @@ where
         + Sync
         + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
-    AddressBook: PeerObserver + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the handler for getblocktemplate RPCs.
     #[allow(clippy::too_many_arguments)]
@@ -286,7 +286,7 @@ where
         + 'static,
     <ChainVerifier as Service<zebra_consensus::Request>>::Future: Send,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
-    AddressBook: PeerObserver + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     fn get_block_count(&self) -> Result<u32> {
         best_chain_tip_height(&self.latest_chain_tip).map(|height| height.0)

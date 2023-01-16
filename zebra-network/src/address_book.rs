@@ -18,7 +18,7 @@ use zebra_chain::parameters::Network;
 
 use crate::{
     constants, meta_addr::MetaAddrChange, protocol::external::canonical_socket_addr,
-    types::MetaAddr, PeerAddrState, PeerObserver,
+    types::MetaAddr, AddressBookPeers, PeerAddrState,
 };
 #[cfg(test)]
 mod tests;
@@ -588,7 +588,7 @@ impl AddressBook {
     }
 }
 
-impl PeerObserver for AddressBook {
+impl AddressBookPeers for AddressBook {
     fn recently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
         let _guard = self.span.enter();
 
@@ -600,7 +600,7 @@ impl PeerObserver for AddressBook {
     }
 }
 
-impl PeerObserver for Arc<Mutex<AddressBook>> {
+impl AddressBookPeers for Arc<Mutex<AddressBook>> {
     fn recently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
         self.lock()
             .expect("panic in a previous thread that was holding the mutex")

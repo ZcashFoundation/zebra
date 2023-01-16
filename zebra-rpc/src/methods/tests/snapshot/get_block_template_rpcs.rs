@@ -21,7 +21,7 @@ use zebra_chain::{
     transparent,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
 };
-use zebra_network::{peer_observer::MockPeerObserver, types::MetaAddr};
+use zebra_network::{peer_observer::MockAddressBookPeers, types::MetaAddr};
 use zebra_node_services::mempool;
 
 use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
@@ -117,7 +117,7 @@ pub async fn test_responses<State, ReadState>(
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
     let mock_address_book =
-        MockPeerObserver::new(vec![MetaAddr::new_initial_peer(SocketAddr::new(
+        MockAddressBookPeers::new(vec![MetaAddr::new_initial_peer(SocketAddr::new(
             IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             network.default_port(),
         ))
@@ -188,7 +188,7 @@ pub async fn test_responses<State, ReadState>(
         mock_chain_tip.clone(),
         chain_verifier,
         mock_sync_status.clone(),
-        MockPeerObserver::default(),
+        MockAddressBookPeers::default(),
     );
 
     // Basic variant (default mode and no extra features)
@@ -328,7 +328,7 @@ pub async fn test_responses<State, ReadState>(
         mock_chain_tip,
         mock_chain_verifier.clone(),
         mock_sync_status,
-        MockPeerObserver::default(),
+        MockAddressBookPeers::default(),
     );
 
     let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template(Some(

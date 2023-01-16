@@ -19,7 +19,7 @@ use tracing::{Instrument, *};
 use zebra_chain::{
     block, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip, parameters::Network,
 };
-use zebra_network::PeerObserver;
+use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 
 use crate::{
@@ -117,7 +117,7 @@ impl RpcServer {
             + 'static,
         <ChainVerifier as Service<zebra_consensus::Request>>::Future: Send,
         SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
-        AddressBook: PeerObserver + Clone + Send + Sync + 'static,
+        AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);

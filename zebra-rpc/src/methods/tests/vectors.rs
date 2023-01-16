@@ -625,7 +625,7 @@ async fn rpc_getaddressutxos_response() {
 #[cfg(feature = "getblocktemplate-rpcs")]
 async fn rpc_getblockcount() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockPeerObserver;
+    use zebra_network::peer_observer::MockAddressBookPeers;
 
     let _init_guard = zebra_test::init();
 
@@ -668,7 +668,7 @@ async fn rpc_getblockcount() {
         latest_chain_tip.clone(),
         chain_verifier,
         MockSyncStatus::default(),
-        MockPeerObserver::default(),
+        MockAddressBookPeers::default(),
     );
 
     // Get the tip height using RPC method `get_block_count`
@@ -686,7 +686,7 @@ async fn rpc_getblockcount() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockcount_empty_state() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockPeerObserver;
+    use zebra_network::peer_observer::MockAddressBookPeers;
 
     let _init_guard = zebra_test::init();
 
@@ -718,7 +718,7 @@ async fn rpc_getblockcount_empty_state() {
         latest_chain_tip.clone(),
         chain_verifier,
         MockSyncStatus::default(),
-        MockPeerObserver::default(),
+        MockAddressBookPeers::default(),
     );
 
     // Get the tip height using RPC method `get_block_count
@@ -737,7 +737,7 @@ async fn rpc_getblockcount_empty_state() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getpeerinfo() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockPeerObserver;
+    use zebra_network::peer_observer::MockAddressBookPeers;
 
     let _init_guard = zebra_test::init();
     let network = Mainnet;
@@ -769,7 +769,7 @@ async fn rpc_getpeerinfo() {
         .into_new_meta_addr()
         .unwrap();
 
-    let mock_address_book = MockPeerObserver::new(vec![mock_peer_address]);
+    let mock_address_book = MockAddressBookPeers::new(vec![mock_peer_address]);
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
@@ -804,7 +804,7 @@ async fn rpc_getpeerinfo() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockhash() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockPeerObserver;
+    use zebra_network::peer_observer::MockAddressBookPeers;
 
     let _init_guard = zebra_test::init();
 
@@ -841,7 +841,7 @@ async fn rpc_getblockhash() {
         latest_chain_tip.clone(),
         tower::ServiceBuilder::new().service(chain_verifier),
         MockSyncStatus::default(),
-        MockPeerObserver::default(),
+        MockAddressBookPeers::default(),
     );
 
     // Query the hashes using positive indexes
@@ -874,7 +874,7 @@ async fn rpc_getblockhash() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getmininginfo() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockPeerObserver;
+    use zebra_network::peer_observer::MockAddressBookPeers;
 
     let _init_guard = zebra_test::init();
 
@@ -897,7 +897,7 @@ async fn rpc_getmininginfo() {
         latest_chain_tip.clone(),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
-        MockPeerObserver::default(),
+        MockAddressBookPeers::default(),
     );
 
     get_block_template_rpc
@@ -910,7 +910,7 @@ async fn rpc_getmininginfo() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getnetworksolps() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockPeerObserver;
+    use zebra_network::peer_observer::MockAddressBookPeers;
 
     let _init_guard = zebra_test::init();
 
@@ -933,7 +933,7 @@ async fn rpc_getnetworksolps() {
         latest_chain_tip.clone(),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
-        MockPeerObserver::default(),
+        MockAddressBookPeers::default(),
     );
 
     let get_network_sol_ps_inputs = [
@@ -987,7 +987,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
     };
     use zebra_consensus::MAX_BLOCK_SIGOPS;
-    use zebra_network::peer_observer::MockPeerObserver;
+    use zebra_network::peer_observer::MockAddressBookPeers;
     use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
 
     use crate::methods::{
@@ -1046,7 +1046,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         mock_chain_tip,
         chain_verifier,
         mock_sync_status.clone(),
-        MockPeerObserver::default(),
+        MockAddressBookPeers::default(),
     );
 
     // Fake the ChainInfo response
@@ -1218,7 +1218,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_submitblock_errors() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockPeerObserver;
+    use zebra_network::peer_observer::MockAddressBookPeers;
 
     use crate::methods::get_block_template_rpcs::types::{hex_data::HexData, submit_block};
 
@@ -1258,7 +1258,7 @@ async fn rpc_submitblock_errors() {
         latest_chain_tip.clone(),
         chain_verifier,
         MockSyncStatus::default(),
-        MockPeerObserver::default(),
+        MockAddressBookPeers::default(),
     );
 
     // Try to submit pre-populated blocks and assert that it responds with duplicate.
