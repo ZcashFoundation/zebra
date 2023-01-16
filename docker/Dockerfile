@@ -140,11 +140,14 @@ ARG CHECKPOINT_SYNC=true
 ARG NETWORK=Mainnet
 
 # Use a configurable dir and file for the zebrad configuration file
-ARG ZEBRA_CONF_PATH=/etc/zebra
-ENV ZEBRA_CONF_PATH ${ZEBRA_CONF_PATH}
+ARG ZEBRA_CONF_DIR=/etc/zebra
+ENV ZEBRA_CONF_DIR ${ZEBRA_CONF_DIR}
 
 ARG ZEBRA_CONF_FILE=zebrad.toml
 ENV ZEBRA_CONF_FILE ${ZEBRA_CONF_FILE}
+
+ARG ZEBRA_CONF_PATH=${ZEBRA_CONF_DIR}/${ZEBRA_CONF_FILE}
+ENV ZEBRA_CONF_PATH ${ZEBRA_CONF_PATH}
 
 # Build the `zebrad.toml` before starting the container, using the arguments from build
 # time, or using the default values set just above. And create the conf path and file if
@@ -160,8 +163,8 @@ ENV ZEBRA_CONF_FILE ${ZEBRA_CONF_FILE}
 #  - move this file creation to an entrypoint as we can use default values at runtime,
 #    and modify those as needed when starting the container (at runtime and not at build time)
 #  - make `cache_dir`, `rpc.listen_addr`, `metrics.endpoint_addr`, and `tracing.endpoint_addr` into Docker arguments
-RUN mkdir -p ${ZEBRA_CONF_PATH} \
-    && touch ${ZEBRA_CONF_PATH}/${ZEBRA_CONF_FILE}
+RUN mkdir -p ${ZEBRA_CONF_DIR} \
+    && touch ${ZEBRA_CONF_PATH}
 RUN set -ex; \
   { \
     echo "[network]"; \
@@ -177,7 +180,7 @@ RUN set -ex; \
     echo "#endpoint_addr = '127.0.0.1:9999'"; \
     echo "[tracing]"; \
     echo "#endpoint_addr = '127.0.0.1:3000'"; \
-  } > "${ZEBRA_CONF_PATH}/${ZEBRA_CONF_FILE}"
+  } > "${ZEBRA_CONF_PATH}"
 
 EXPOSE 8233 18233
 
@@ -188,4 +191,4 @@ ARG SENTRY_DSN
 ENV SENTRY_DSN ${SENTRY_DSN}
 
 # TODO: remove the specified config file location and use the default expected by zebrad
-CMD zebrad -c "${ZEBRA_CONF_PATH}/${ZEBRA_CONF_FILE}" start
+CMD zebrad -c "${ZEBRA_CONF_PATH}" start
