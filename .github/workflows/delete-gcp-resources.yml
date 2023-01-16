@@ -205,6 +205,7 @@ jobs:
 
       # Deletes all images older than $DELETE_IMAGE_HOURS days.
       - uses: 'docker://us-docker.pkg.dev/gcr-cleaner/gcr-cleaner/gcr-cleaner-cli'
+        continue-on-error: true # TODO: remove after fixig https://github.com/ZcashFoundation/zebra/issues/5933
         # Refer to the official documentation to understand available arguments:
         # https://github.com/GoogleCloudPlatform/gcr-cleaner
         with:
