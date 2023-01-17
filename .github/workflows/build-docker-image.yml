@@ -155,3 +155,8 @@ jobs:
             type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
             type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:main-cache
           cache-to: type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
+          # TODO: change after new buildkit version gets fixed
+          # https://github.com/moby/buildkit/issues/3347
+          # https://github.com/docker/build-push-action/issues/761
+          driver-opts: |
+            image=moby/buildkit:v0.10.6
