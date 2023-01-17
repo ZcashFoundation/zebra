@@ -152,11 +152,13 @@ echo "Turning the template into block proposal data using $BLOCK_TEMPLATE_TO_PRO
 
 for TIME_SOURCE in $TIME_SOURCES; do
     PROPOSAL_DATA="$PROPOSAL_DATA_BASE.$TIME_SOURCE.json"
+    PROPOSAL_DEBUG="$PROPOSAL_DATA_BASE.$TIME_SOURCE.debug"
 
     echo -n '{ "mode": "proposal", ' > "$PROPOSAL_DATA"
     echo -n '"data": "' >>  "$PROPOSAL_DATA"
     cat "$TEMPLATE_NODE_TEMPLATE_RESPONSE" | \
-        $BLOCK_TEMPLATE_TO_PROPOSAL | \
+        $BLOCK_TEMPLATE_TO_PROPOSAL \
+            2> "$PROPOSAL_DEBUG" | \
         (tr -d '\r\n' || true) \
             >> "$PROPOSAL_DATA"
     echo -n '"' >> "$PROPOSAL_DATA"
