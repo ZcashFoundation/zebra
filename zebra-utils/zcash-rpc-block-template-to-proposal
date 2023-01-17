@@ -18,6 +18,7 @@ function usage()
 
 # Override the commands and settings used by this script using these environmental variables:
 ZCASH_CLI="${ZCASH_CLI:-zcash-cli}"
+TIME="time"
 DIFF="${DIFF:-diff --unified --color=always}"
 BLOCK_TEMPLATE_TO_PROPOSAL="${BLOCK_TEMPLATE_TO_PROPOSAL:-block-template-to-proposal}"
 TIME_SOURCES="${TIME_SOURCES:-CurTime MinTime MaxTime ClampedNow}"
@@ -138,7 +139,7 @@ echo "getblocktemplate $TEMPLATE_ARG_FULL"
 echo
 
 echo "Querying $TEMPLATE_NODE $TEMPLATE_NET chain at height >=$TEMPLATE_HEIGHT..."
-time $ZCASH_CLI -rpcport="$TEMPLATE_RPC_PORT" getblocktemplate "$TEMPLATE_ARG_FULL" > "$TEMPLATE_NODE_TEMPLATE_RESPONSE"
+$TIME $ZCASH_CLI -rpcport="$TEMPLATE_RPC_PORT" getblocktemplate "$TEMPLATE_ARG_FULL" > "$TEMPLATE_NODE_TEMPLATE_RESPONSE"
 
 echo "Block template data is in $TEMPLATE_NODE_TEMPLATE_RESPONSE"
 #cat "$TEMPLATE_NODE_TEMPLATE_RESPONSE"
@@ -184,7 +185,7 @@ for TIME_SOURCE in $TIME_SOURCES; do
 
         # read the proposal data from a file, to avoid command-line length limits
         cat "$PROPOSAL_DATA" | \
-            time $ZCASH_CLI -rpcport="$PORT" -stdin getblocktemplate \
+            $TIME $ZCASH_CLI -rpcport="$PORT" -stdin getblocktemplate \
                  > "$PROPOSAL_NODE_PROPOSAL_RESPONSE" || \
             echo "$ZCASH_CLI -rpcport=$PORT exited with an error"
     done
