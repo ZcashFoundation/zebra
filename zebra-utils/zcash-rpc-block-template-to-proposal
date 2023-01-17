@@ -16,10 +16,11 @@ function usage()
     echo "$0 block-template-rpc-port proposal-rpc-port [extra-proposal-rpc-port...] -- [extra-block-template-rpc-json-fields] [extra-proposal-rpc-fields]"
 }
 
-# Override the commands used by this script using these environmental variables:
+# Override the commands and settings used by this script using these environmental variables:
 ZCASH_CLI="${ZCASH_CLI:-zcash-cli}"
 DIFF="${DIFF:-diff --unified --color=always}"
 BLOCK_TEMPLATE_TO_PROPOSAL="${BLOCK_TEMPLATE_TO_PROPOSAL:-block-template-to-proposal}"
+TIME_SOURCES="${TIME_SOURCES:-CurTime MinTime MaxTime ClampedNow}"
 
 # Process arguments
 
@@ -32,10 +33,8 @@ TEMPLATE_RPC_PORT=$1
 shift
 
 PROPOSAL_RPC_PORTS=""
-PROPOSAL_RPC_PORT_COUNT=0
 while [ -n "${1:-}" ] && [ "${1-}" != "--" ]; do
     PROPOSAL_RPC_PORTS="$PROPOSAL_RPC_PORTS $1"
-    PROPOSAL_RPC_PORT_COUNT=$((PROPOSAL_RPC_PORT_COUNT + 1))
     shift
 done
 
@@ -146,22 +145,25 @@ echo "Block template data is in $TEMPLATE_NODE_TEMPLATE_RESPONSE"
 
 echo
 
-PROPOSAL_DATA="$ZCASH_RPC_TMP_DIR/proposal-data.json"
+PROPOSAL_DATA_BASE="$ZCASH_RPC_TMP_DIR/proposal-data"
 
 echo "Turning the template into block proposal data using $BLOCK_TEMPLATE_TO_PROPOSAL..."
 
-echo -n '{ "mode": "proposal", ' > "$PROPOSAL_DATA"
-echo -n '"data": "' >>  "$PROPOSAL_DATA"
-# TODO: check the proposals for every valid time source: CurTime MinTime MaxTime ClampedNow
-cat "$TEMPLATE_NODE_TEMPLATE_RESPONSE" | \
-    $BLOCK_TEMPLATE_TO_PROPOSAL | \
-    (tr -d '\r\n' || true) \
-        >> "$PROPOSAL_DATA"
-echo -n '"' >> "$PROPOSAL_DATA"
-echo -n "${PROPOSAL_ARG:+, $PROPOSAL_ARG} }" >> "$PROPOSAL_DATA"
+for TIME_SOURCE in $TIME_SOURCES; do
+    PROPOSAL_DATA="$PROPOSAL_DATA_BASE.$TIME_SOURCE.json"
 
-echo "Block proposal data is in $PROPOSAL_DATA"
-#cat "$PROPOSAL_DATA"
+    echo -n '{ "mode": "proposal", ' > "$PROPOSAL_DATA"
+    echo -n '"data": "' >>  "$PROPOSAL_DATA"
+    cat "$TEMPLATE_NODE_TEMPLATE_RESPONSE" | \
+        $BLOCK_TEMPLATE_TO_PROPOSAL | \
+        (tr -d '\r\n' || true) \
+            >> "$PROPOSAL_DATA"
+    echo -n '"' >> "$PROPOSAL_DATA"
+    echo -n "${PROPOSAL_ARG:+, $PROPOSAL_ARG} }" >> "$PROPOSAL_DATA"
+done
+
+echo "Block proposal data is in $PROPOSAL_DATA_BASE*"
+#cat "$PROPOSAL_DATA_BASE"*
 
 echo
 echo
@@ -173,25 +175,27 @@ echo
 PROPOSAL_NODES_PROPOSAL_RESPONSE_BASE="$ZCASH_RPC_TMP_DIR/proposal-check-getblocktemplate-proposal"
 PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST=""
 
-for PORT in $PROPOSAL_RPC_PORTS; do
-    PROPOSAL_NODE_PROPOSAL_RESPONSE=$PROPOSAL_NODES_PROPOSAL_RESPONSE_BASE.$PORT.json
-    PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST="$PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST $PROPOSAL_NODE_PROPOSAL_RESPONSE"
+for TIME_SOURCE in $TIME_SOURCES; do
+    PROPOSAL_DATA="$PROPOSAL_DATA_BASE.$TIME_SOURCE.json"
 
-    # read the proposal data from a file, to avoid command-line length limits
-    cat "$PROPOSAL_DATA" | \
-        time $ZCASH_CLI -rpcport="$PORT" -stdin getblocktemplate \
-             > "$PROPOSAL_NODE_PROPOSAL_RESPONSE" || \
-        echo "$ZCASH_CLI -rpcport=$PORT exited with an error"
+    for PORT in $PROPOSAL_RPC_PORTS; do
+        PROPOSAL_NODE_PROPOSAL_RESPONSE=$PROPOSAL_NODES_PROPOSAL_RESPONSE_BASE.$TIME_SOURCE.$PORT.json
+        PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST="${PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST:+$PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST }$PROPOSAL_NODE_PROPOSAL_RESPONSE"
+
+        # read the proposal data from a file, to avoid command-line length limits
+        cat "$PROPOSAL_DATA" | \
+            time $ZCASH_CLI -rpcport="$PORT" -stdin getblocktemplate \
+                 > "$PROPOSAL_NODE_PROPOSAL_RESPONSE" || \
+            echo "$ZCASH_CLI -rpcport=$PORT exited with an error"
+    done
 done
 
 echo
 
-if [ "$PROPOSAL_RPC_PORT_COUNT" -gt 1 ]; then
-    echo "Proposal response diffs between ports $PROPOSAL_RPC_PORTS:"
+echo "Proposal response diffs between ports $PROPOSAL_RPC_PORTS and time sources $TIME_SOURCES:"
 
-    $DIFF $PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST && \
-        echo "getblocktemplate proposal responses were identical"
-fi
+$DIFF --from-file=$PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST && \
+    echo "getblocktemplate proposal responses were identical"
 
 echo
 
