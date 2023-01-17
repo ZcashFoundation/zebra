@@ -625,7 +625,7 @@ async fn rpc_getaddressutxos_response() {
 #[cfg(feature = "getblocktemplate-rpcs")]
 async fn rpc_getblockcount() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockAddressBookPeers;
+    use zebra_network::address_book_peers::MockAddressBookPeers;
 
     let _init_guard = zebra_test::init();
 
@@ -686,7 +686,7 @@ async fn rpc_getblockcount() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockcount_empty_state() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockAddressBookPeers;
+    use zebra_network::address_book_peers::MockAddressBookPeers;
 
     let _init_guard = zebra_test::init();
 
@@ -737,7 +737,7 @@ async fn rpc_getblockcount_empty_state() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getpeerinfo() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockAddressBookPeers;
+    use zebra_network::address_book_peers::MockAddressBookPeers;
 
     let _init_guard = zebra_test::init();
     let network = Mainnet;
@@ -804,7 +804,7 @@ async fn rpc_getpeerinfo() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockhash() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockAddressBookPeers;
+    use zebra_network::address_book_peers::MockAddressBookPeers;
 
     let _init_guard = zebra_test::init();
 
@@ -874,7 +874,7 @@ async fn rpc_getblockhash() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getmininginfo() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockAddressBookPeers;
+    use zebra_network::address_book_peers::MockAddressBookPeers;
 
     let _init_guard = zebra_test::init();
 
@@ -910,7 +910,7 @@ async fn rpc_getmininginfo() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getnetworksolps() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockAddressBookPeers;
+    use zebra_network::address_book_peers::MockAddressBookPeers;
 
     let _init_guard = zebra_test::init();
 
@@ -987,7 +987,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
     };
     use zebra_consensus::MAX_BLOCK_SIGOPS;
-    use zebra_network::peer_observer::MockAddressBookPeers;
+    use zebra_network::address_book_peers::MockAddressBookPeers;
     use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
 
     use crate::methods::{
@@ -1218,7 +1218,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_submitblock_errors() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::peer_observer::MockAddressBookPeers;
+    use zebra_network::address_book_peers::MockAddressBookPeers;
 
     use crate::methods::get_block_template_rpcs::types::{hex_data::HexData, submit_block};
 

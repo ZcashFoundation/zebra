@@ -11,7 +11,7 @@ use tower::buffer::Buffer;
 use zebra_chain::{
     chain_sync_status::MockSyncStatus, chain_tip::NoChainTip, parameters::Network::*,
 };
-use zebra_network::peer_observer::MockAddressBookPeers;
+use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::BoxError;
 
 use zebra_test::mock_service::MockService;

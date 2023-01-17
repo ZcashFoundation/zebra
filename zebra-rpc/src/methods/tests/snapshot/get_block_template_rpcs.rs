@@ -21,7 +21,7 @@ use zebra_chain::{
     transparent,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
 };
-use zebra_network::{peer_observer::MockAddressBookPeers, types::MetaAddr};
+use zebra_network::{address_book_peers::MockAddressBookPeers, types::MetaAddr};
 use zebra_node_services::mempool;
 
 use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};

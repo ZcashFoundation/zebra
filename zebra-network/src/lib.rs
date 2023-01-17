@@ -144,13 +144,13 @@ extern crate bitflags;
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 mod address_book;
+pub mod address_book_peers;
 mod address_book_updater;
 mod config;
 pub mod constants;
 mod isolated;
 mod meta_addr;
 mod peer;
-pub mod peer_observer;
 mod peer_set;
 mod policies;
 mod protocol;
@@ -172,11 +172,11 @@ pub use crate::isolated::{
 
 pub use crate::{
     address_book::AddressBook,
+    address_book_peers::AddressBookPeers,
     config::Config,
     isolated::{connect_isolated, connect_isolated_tcp_direct},
     meta_addr::PeerAddrState,
     peer::{Client, ConnectedAddr, ConnectionInfo, HandshakeError, PeerError, SharedPeerError},
-    peer_observer::AddressBookPeers,
     peer_set::init,
     policies::RetryLimit,
     protocol::{
