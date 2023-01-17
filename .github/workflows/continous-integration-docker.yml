@@ -320,6 +320,19 @@ jobs:
           docker logs --tail all --follow default-conf-tests | tee --output-error=exit /dev/stderr | grep --extended-regexp --max-count=1 -e 'estimated progress to chain tip.*BeforeOverwinter'
           docker stop default-conf-tests
 
+
+  # Test that Zebra works using the $ZEBRA_CONF_PATH config
+  test-zebra-conf-path:
+    name: Test Zebra configuration file
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    steps:
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
       - name: Run tests using the $ZEBRA_CONF_PATH
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
