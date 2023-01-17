@@ -12,7 +12,8 @@ use structopt::StructOpt;
 
 use zebra_chain::serialization::ZcashSerialize;
 use zebra_rpc::methods::get_block_template_rpcs::{
-    get_block_template::proposal_block_from_template, types::get_block_template::GetBlockTemplate,
+    get_block_template::proposal_block_from_template,
+    types::{get_block_template::GetBlockTemplate, long_poll::LONG_POLL_ID_LENGTH},
 };
 use zebra_utils::init_tracing;
 
@@ -54,13 +55,14 @@ fn main() -> Result<()> {
         serde_json::to_string_pretty(&template).expect("re-serialization never fails")
     );
 
-    // remove zcashd keys that are incompatible with Zebra
+    // replace zcashd keys that are incompatible with Zebra
     //
-    // the longpollid key is in a node-specific format
+    // the longpollid key is in a node-specific format, but this tool doesn't use it,
+    // so we can replace it with a dummy value
     template
         .as_object_mut()
-        .expect("template must be a JSON object")
-        .remove("longpollid");
+        .expect("template must be a JSON object")["longpollid"] =
+        "0".repeat(LONG_POLL_ID_LENGTH).into();
 
     // parse json to template type
     let template: GetBlockTemplate = serde_json::from_value(template)?;
