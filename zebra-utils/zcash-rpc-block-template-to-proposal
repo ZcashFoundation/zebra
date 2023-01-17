@@ -150,17 +150,18 @@ PROPOSAL_DATA="$ZCASH_RPC_TMP_DIR/proposal-data.json"
 
 echo "Turning the template into block proposal data using $BLOCK_TEMPLATE_TO_PROPOSAL..."
 
+echo -n '{ "mode": "proposal", ' > "$PROPOSAL_DATA"
+echo -n '"data": "' >>  "$PROPOSAL_DATA"
 # TODO: check the proposals for every valid time source: CurTime MinTime MaxTime ClampedNow
 cat "$TEMPLATE_NODE_TEMPLATE_RESPONSE" | \
-    $BLOCK_TEMPLATE_TO_PROPOSAL \
-        > "$PROPOSAL_DATA"
-
-# TODO: put this in a file if it exceeds the bash variable size limit
-PROPOSAL_ARG_FULL="{ \"mode\": \"proposal\", \"data\": \"$(cat $PROPOSAL_DATA)\" ${PROPOSAL_ARG:+, $PROPOSAL_ARG} }"
+    $BLOCK_TEMPLATE_TO_PROPOSAL | \
+    (tr -d '\r\n' || true) \
+        >> "$PROPOSAL_DATA"
+echo -n '"' >> "$PROPOSAL_DATA"
+echo -n "${PROPOSAL_ARG:+, $PROPOSAL_ARG} }" >> "$PROPOSAL_DATA"
 
 echo "Block proposal data is in $PROPOSAL_DATA"
-# TODO: disable verbose block data
-cat "$PROPOSAL_DATA"
+#cat "$PROPOSAL_DATA"
 
 echo
 echo
@@ -176,10 +177,10 @@ for PORT in $PROPOSAL_RPC_PORTS; do
     PROPOSAL_NODE_PROPOSAL_RESPONSE=$PROPOSAL_NODES_PROPOSAL_RESPONSE_BASE.$PORT.json
     PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST="$PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST $PROPOSAL_NODE_PROPOSAL_RESPONSE"
 
-    # TODO: try modifying $PROPOSAL_DATA to contain the whole jsonrequestobject,
-    # and then call:
-    # xargs --max-chars=2000200 --arg-file="$PROPOSAL_DATA" time $ZCASH_CLI -rpcport="$PORT" getblocktemplate
-    time $ZCASH_CLI -rpcport="$PORT" getblocktemplate "$PROPOSAL_ARG_FULL" > "$PROPOSAL_NODE_PROPOSAL_RESPONSE" || \
+    # read the proposal data from a file, to avoid command-line length limits
+    cat "$PROPOSAL_DATA" | \
+        time $ZCASH_CLI -rpcport="$PORT" -stdin getblocktemplate \
+             > "$PROPOSAL_NODE_PROPOSAL_RESPONSE" || \
         echo "$ZCASH_CLI -rpcport=$PORT exited with an error"
 done
 
