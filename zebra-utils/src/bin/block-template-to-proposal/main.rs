@@ -10,7 +10,7 @@ use color_eyre::eyre::Result;
 use serde_json::Value;
 use structopt::StructOpt;
 
-use zebra_chain::serialization::ZcashSerialize;
+use zebra_chain::serialization::{DateTime32, ZcashSerialize};
 use zebra_rpc::methods::get_block_template_rpcs::{
     get_block_template::proposal_block_from_template,
     types::{get_block_template::GetBlockTemplate, long_poll::LONG_POLL_ID_LENGTH},
@@ -60,13 +60,13 @@ fn main() -> Result<()> {
         .expect("template must be a JSON object");
 
     // replace zcashd keys that are incompatible with Zebra
-    //
+
     // the longpollid key is in a node-specific format, but this tool doesn't use it,
     // so we can replace it with a dummy value
     template_obj["longpollid"] = "0".repeat(LONG_POLL_ID_LENGTH).into();
 
     // provide dummy keys that Zebra requires but zcashd does not always have
-    //
+
     // the transaction.*.required keys are not used by this tool,
     // so we can use any value here
     template_obj["coinbasetxn"]["required"] = true.into();
@@ -76,6 +76,24 @@ fn main() -> Result<()> {
     {
         tx["required"] = false.into();
     }
+
+    // the maxtime field is used by this tool
+    // if it is missing, substitute a valid value
+    let current_time: DateTime32 = template_obj["curtime"]
+        .to_string()
+        .parse()
+        .expect("curtime is always a valid DateTime32");
+
+    template_obj.entry("maxtime").or_insert_with(|| {
+        if time_source.uses_max_time() {
+            eprintln!(
+                "maxtime field is missing, using curtime for maxtime: {:?}",
+                current_time,
+            );
+        }
+
+        current_time.timestamp().into()
+    });
 
     // parse the modified json to template type
     let template: GetBlockTemplate = serde_json::from_value(template)?;

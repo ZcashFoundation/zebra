@@ -120,6 +120,17 @@ impl TimeSource {
             RawNow => DateTime32::now(),
         }
     }
+
+    /// Returns true if this time source uses `max_time` in any way, including clamping.
+    pub fn uses_max_time(&self) -> bool {
+        use TimeSource::*;
+
+        match self {
+            CurTime | MinTime => false,
+            MaxTime | Clamped(_) | ClampedNow => true,
+            Raw(_) | RawNow => false,
+        }
+    }
 }
 
 impl FromStr for TimeSource {
