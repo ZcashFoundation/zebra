@@ -1,6 +1,8 @@
+//! Tests for the [`zebra_test::transcript`] module.
+
 use tower::{Service, ServiceExt};
-use zebra_test::transcript::ExpectedTranscriptError;
-use zebra_test::transcript::Transcript;
+
+use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
 const TRANSCRIPT_DATA: [(&str, Result<&str, ExpectedTranscriptError>); 4] = [
     ("req1", Ok("rsp1")),

@@ -1,4 +1,6 @@
-use std::{convert::From, fmt, str::FromStr};
+//! Consensus parameters for each Zcash network.
+
+use std::{fmt, str::FromStr};
 
 use thiserror::Error;
 
@@ -47,11 +49,13 @@ mod tests;
 const ZIP_212_GRACE_PERIOD_DURATION: i32 = 32_256;
 
 /// An enum describing the possible network choices.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum Network {
     /// The production mainnet.
+    #[default]
     Mainnet,
+
     /// The testnet.
     Testnet,
 }
@@ -111,12 +115,6 @@ impl Network {
             Network::Mainnet => "main".to_string(),
             Network::Testnet => "test".to_string(),
         }
-    }
-}
-
-impl Default for Network {
-    fn default() -> Self {
-        Network::Mainnet
     }
 }
 
