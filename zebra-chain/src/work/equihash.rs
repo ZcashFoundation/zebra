@@ -59,6 +59,12 @@ impl Solution {
 
         Ok(())
     }
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Returns a [`Solution`] of `[0; SOLUTION_SIZE]` to be used in block proposals.
+    pub fn for_proposal() -> Self {
+        Self([0; SOLUTION_SIZE])
+    }
 }
 
 impl PartialEq<Solution> for Solution {
