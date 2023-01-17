@@ -107,7 +107,7 @@ proptest! {
         let commitment = block.commitment(network);
         if let Ok(commitment) = commitment {
             let commitment_bytes = commitment.to_bytes();
-            prop_assert_eq![block.header.commitment_bytes, commitment_bytes];
+            prop_assert_eq![block.header.commitment_bytes.0, commitment_bytes];
         }
 
         // Check the block size limit

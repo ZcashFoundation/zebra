@@ -1,5 +1,11 @@
-use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
+//! Sprout message authentication codes.
+
 use std::io::{self, Read};
+
+use crate::{
+    fmt::HexDebug,
+    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+};
 
 /// A sequence of message authentication tags ...
 ///
@@ -10,17 +16,17 @@ use std::io::{self, Read};
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
 )]
-pub struct Mac([u8; 32]);
+pub struct Mac(HexDebug<[u8; 32]>);
 
 impl From<[u8; 32]> for Mac {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(bytes)
+        Self(bytes.into())
     }
 }
 
 impl From<Mac> for [u8; 32] {
     fn from(rt: Mac) -> [u8; 32] {
-        rt.0
+        *rt.0
     }
 }
 
@@ -34,7 +40,7 @@ impl ZcashDeserialize for Mac {
     fn zcash_deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
         let bytes = reader.read_32_bytes()?;
 
-        Ok(Self(bytes))
+        Ok(Self(bytes.into()))
     }
 }
 

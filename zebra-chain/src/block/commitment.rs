@@ -1,5 +1,7 @@
 //! The Commitment enum, used for the corresponding block header field.
 
+use std::fmt;
+
 use hex::{FromHex, ToHex};
 use thiserror::Error;
 
@@ -97,6 +99,8 @@ pub(crate) const CHAIN_HISTORY_ACTIVATION_RESERVED: [u8; 32] = [0; 32];
 
 impl Commitment {
     /// Returns `bytes` as the Commitment variant for `network` and `height`.
+    //
+    // TODO: rename as from_bytes_in_serialized_order()
     pub(super) fn from_bytes(
         bytes: [u8; 32],
         network: Network,
@@ -126,6 +130,8 @@ impl Commitment {
     }
 
     /// Returns the serialized bytes for this Commitment.
+    //
+    // TODO: refactor as bytes_in_serialized_order(&self)
     #[cfg(test)]
     pub(super) fn to_bytes(self) -> [u8; 32] {
         use Commitment::*;
@@ -145,8 +151,22 @@ impl Commitment {
 //    - add methods for maintaining the MMR peaks, and calculating the root
 //      hash from the current set of peaks
 //    - move to a separate file
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ChainHistoryMmrRootHash([u8; 32]);
+
+impl fmt::Display for ChainHistoryMmrRootHash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.encode_hex::<String>())
+    }
+}
+
+impl fmt::Debug for ChainHistoryMmrRootHash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("ChainHistoryMmrRootHash")
+            .field(&self.encode_hex::<String>())
+            .finish()
+    }
+}
 
 impl From<[u8; 32]> for ChainHistoryMmrRootHash {
     fn from(hash: [u8; 32]) -> Self {
@@ -182,6 +202,11 @@ impl ChainHistoryMmrRootHash {
         internal_byte_order.reverse();
 
         ChainHistoryMmrRootHash(internal_byte_order)
+    }
+
+    /// Returns the serialized bytes for this Commitment.
+    pub fn bytes_in_serialized_order(&self) -> [u8; 32] {
+        self.0
     }
 }
 
@@ -222,8 +247,22 @@ impl FromHex for ChainHistoryMmrRootHash {
 /// - the transaction authorising data in this block.
 ///
 /// Introduced in NU5.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ChainHistoryBlockTxAuthCommitmentHash([u8; 32]);
+
+impl fmt::Display for ChainHistoryBlockTxAuthCommitmentHash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.encode_hex::<String>())
+    }
+}
+
+impl fmt::Debug for ChainHistoryBlockTxAuthCommitmentHash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("ChainHistoryBlockTxAuthCommitmentHash")
+            .field(&self.encode_hex::<String>())
+            .finish()
+    }
+}
 
 impl From<[u8; 32]> for ChainHistoryBlockTxAuthCommitmentHash {
     fn from(hash: [u8; 32]) -> Self {
@@ -291,6 +330,11 @@ impl ChainHistoryBlockTxAuthCommitmentHash {
         internal_byte_order.reverse();
 
         ChainHistoryBlockTxAuthCommitmentHash(internal_byte_order)
+    }
+
+    /// Returns the serialized bytes for this Commitment.
+    pub fn bytes_in_serialized_order(&self) -> [u8; 32] {
+        self.0
     }
 }
 

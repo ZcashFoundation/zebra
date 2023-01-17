@@ -12,13 +12,16 @@ use std::{io, marker::PhantomData};
 
 use super::SigType;
 
-use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::{
+    fmt::HexDebug,
+    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+};
 
 /// A RedPallas signature.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Signature<T: SigType> {
-    pub(crate) r_bytes: [u8; 32],
-    pub(crate) s_bytes: [u8; 32],
+    pub(crate) r_bytes: HexDebug<[u8; 32]>,
+    pub(crate) s_bytes: HexDebug<[u8; 32]>,
     pub(crate) _marker: PhantomData<T>,
 }
 
@@ -29,8 +32,8 @@ impl<T: SigType> From<[u8; 64]> for Signature<T> {
         let mut s_bytes = [0; 32];
         s_bytes.copy_from_slice(&bytes[32..64]);
         Signature {
-            r_bytes,
-            s_bytes,
+            r_bytes: r_bytes.into(),
+            s_bytes: s_bytes.into(),
             _marker: PhantomData,
         }
     }
