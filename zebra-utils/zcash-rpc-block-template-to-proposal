@@ -179,7 +179,8 @@ for PORT in $PROPOSAL_RPC_PORTS; do
     # TODO: try modifying $PROPOSAL_DATA to contain the whole jsonrequestobject,
     # and then call:
     # xargs --max-chars=2000200 --arg-file="$PROPOSAL_DATA" time $ZCASH_CLI -rpcport="$PORT" getblocktemplate
-    time $ZCASH_CLI -rpcport="$PORT" getblocktemplate "$PROPOSAL_ARG_FULL" > "$PROPOSAL_NODE_PROPOSAL_RESPONSE"
+    time $ZCASH_CLI -rpcport="$PORT" getblocktemplate "$PROPOSAL_ARG_FULL" > "$PROPOSAL_NODE_PROPOSAL_RESPONSE" || \
+        echo "$ZCASH_CLI -rpcport=$PORT exited with an error"
 done
 
 echo
@@ -187,15 +188,17 @@ echo
 if [ "$PROPOSAL_RPC_PORT_COUNT" -gt 1 ]; then
     echo "Proposal response diffs between ports $PROPOSAL_RPC_PORTS:"
 
-    $DIFF $PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST \
-        && ( \
-            echo "getblocktemplate proposal responses were identical"; \
-            echo ; \
-            echo "Final response from $PROPOSAL_NODE_PROPOSAL_RESPONSE:"; \
-            cat "$PROPOSAL_NODE_PROPOSAL_RESPONSE"; \
-            )
-else
-    echo "Proposal response from port $PROPOSAL_RPC_PORTS:"
-
-    cat $PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST
+    $DIFF $PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST && \
+        echo "getblocktemplate proposal responses were identical"
 fi
+
+echo
+
+for RESPONSE in $PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST; do
+    if [ -s "$RESPONSE" ]; then
+        echo "Node said proposal was invalid, error response from $RESPONSE:"
+        cat "$RESPONSE"
+    else
+        echo "Node said proposal was valid, empty success response in $RESPONSE"
+    fi
+done
