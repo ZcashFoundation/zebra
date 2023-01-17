@@ -2174,6 +2174,15 @@ async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
     common::lightwalletd::wallet_grpc_test::run().await
 }
 
+/// Test successful getpeerinfo rpc call
+///
+/// See [`common::get_block_template_rpcs::get_peer_info`] for more information.
+#[tokio::test]
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn get_peer_info() -> Result<()> {
+    common::get_block_template_rpcs::get_peer_info::run().await
+}
+
 /// Test successful getblocktemplate rpc call
 ///
 /// See [`common::get_block_template_rpcs::get_block_template`] for more information.
