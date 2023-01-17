@@ -5,11 +5,23 @@
 //!
 //! After finishing the sync, it will call getblocktemplate.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use color_eyre::eyre::{eyre, Context, Result};
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{
+    block::{self, Block, Height},
+    parameters::Network,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
+    work::equihash::Solution,
+};
+use zebra_rpc::methods::{
+    get_block_template_rpcs::{
+        get_block_template::{GetBlockTemplate, ProposalResponse},
+        types::default_roots::DefaultRoots,
+    },
+    GetBlockHash,
+};
 
 use crate::common::{
     launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
@@ -58,11 +70,13 @@ pub(crate) async fn run() -> Result<()> {
         true,
     )?;
 
+    let client = RPCRequestClient::new(rpc_address);
+
     tracing::info!(
         "calling getblocktemplate RPC method at {rpc_address}, \
          with a mempool that is likely empty...",
     );
-    let getblocktemplate_response = RPCRequestClient::new(rpc_address)
+    let getblocktemplate_response = client
         .call(
             "getblocktemplate",
             // test that unknown capabilities are parsed as valid input
@@ -84,25 +98,21 @@ pub(crate) async fn run() -> Result<()> {
         "waiting {EXPECTED_MEMPOOL_TRANSACTION_TIME:?} for the mempool \
          to download and verify some transactions...",
     );
+
     tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
 
+    /* TODO: activate this test after #5925 and #5953 have merged,
+             and we've checked for any other bugs using #5944.
     tracing::info!(
         "calling getblocktemplate RPC method at {rpc_address}, \
-         with a mempool that likely has transactions...",
-    );
-    let getblocktemplate_response = RPCRequestClient::new(rpc_address)
-        .call("getblocktemplate", "[]".to_string())
-        .await?;
-
-    let is_response_success = getblocktemplate_response.status().is_success();
-    let response_text = getblocktemplate_response.text().await?;
-
-    tracing::info!(
-        response_text,
-        "got getblocktemplate response, hopefully with transactions"
+             with a mempool that likely has transactions and attempting \
+             to validate response result as a block proposal",
     );
 
-    assert!(is_response_success);
+    try_validate_block_template(&client)
+        .await
+        .expect("block proposal validation failed");
+     */
 
     zebrad.kill(false)?;
 
@@ -112,7 +122,112 @@ pub(crate) async fn run() -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     output
         .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+        .wrap_err("Possible port conflict. Are there other acceptance tests running?")
+}
+
+/// Accepts an [`RPCRequestClient`], calls getblocktemplate in template mode,
+/// deserializes and transforms the block template in the response into block proposal data,
+/// then calls getblocktemplate RPC in proposal mode with the serialized and hex-encoded data.
+///
+/// Returns an error if it fails to transform template to block proposal or serialize the block proposal
+/// Returns `Ok(())` if the block proposal is valid or an error with the reject-reason if the result is
+/// an `ErrorResponse`.
+///
+/// ## Panics
+///
+/// If an RPC call returns a failure
+/// If the response result cannot be deserialized to `GetBlockTemplate` in 'template' mode
+/// or `ProposalResponse` in 'proposal' mode.
+#[allow(dead_code)]
+async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
+    let response_json_result = client
+        .json_result_from_call("getblocktemplate", "[]".to_string())
+        .await
+        .expect("response should be success output with with a serialized `GetBlockTemplate`");
+
+    tracing::info!(
+        ?response_json_result,
+        "got getblocktemplate response, hopefully with transactions"
+    );
+
+    // Propose a new block with an empty solution and nonce field
+    tracing::info!("calling getblocktemplate with a block proposal...",);
+
+    for proposal_block in proposal_block_from_template(response_json_result)? {
+        let raw_proposal_block = hex::encode(proposal_block.zcash_serialize_to_vec()?);
+
+        let json_result = client
+            .json_result_from_call(
+                "getblocktemplate",
+                format!(r#"[{{"mode":"proposal","data":"{raw_proposal_block}"}}]"#),
+            )
+            .await
+            .expect("response should be success output with with a serialized `ProposalResponse`");
+
+        tracing::info!(
+            ?json_result,
+            ?proposal_block.header.time,
+            "got getblocktemplate proposal response"
+        );
+
+        if let ProposalResponse::ErrorResponse { reject_reason, .. } = json_result {
+            Err(eyre!(
+                "unsuccessful block proposal validation, reason: {reject_reason:?}"
+            ))?;
+        } else {
+            assert_eq!(ProposalResponse::Valid, json_result);
+        }
+    }
 
     Ok(())
+}
+
+/// Make block proposals from [`GetBlockTemplate`]
+///
+/// Returns an array of 3 block proposals using `curtime`, `mintime`, and `maxtime`
+/// for their `block.header.time` fields.
+#[allow(dead_code)]
+fn proposal_block_from_template(
+    GetBlockTemplate {
+        version,
+        height,
+        previous_block_hash: GetBlockHash(previous_block_hash),
+        default_roots:
+            DefaultRoots {
+                merkle_root,
+                block_commitments_hash,
+                ..
+            },
+        bits: difficulty_threshold,
+        coinbase_txn,
+        transactions: tx_templates,
+        cur_time,
+        min_time,
+        max_time,
+        ..
+    }: GetBlockTemplate,
+) -> Result<[Block; 3]> {
+    if Height(height) > Height::MAX {
+        Err(eyre!("height field must be lower than Height::MAX"))?;
+    };
+
+    let mut transactions = vec![coinbase_txn.data.as_ref().zcash_deserialize_into()?];
+
+    for tx_template in tx_templates {
+        transactions.push(tx_template.data.as_ref().zcash_deserialize_into()?);
+    }
+
+    Ok([cur_time, min_time, max_time].map(|time| Block {
+        header: Arc::new(block::Header {
+            version,
+            previous_block_hash,
+            merkle_root,
+            commitment_bytes: block_commitments_hash.into(),
+            time: time.into(),
+            difficulty_threshold,
+            nonce: [0; 32],
+            solution: Solution::for_proposal(),
+        }),
+        transactions: transactions.clone(),
+    }))
 }
