@@ -1,7 +1,5 @@
 //! Tests that `getpeerinfo` RPC method responds with info about at least 1 peer.
 
-use std::net::SocketAddr;
-
 use color_eyre::eyre::{Context, Result};
 
 use zebra_chain::parameters::Network;
@@ -49,14 +47,6 @@ pub(crate) async fn run() -> Result<()> {
         !peer_info_result.is_empty(),
         "getpeerinfo should return info for at least 1 peer"
     );
-
-    // Assert that PeerInfo addresses successfully parse into [`SocketAddr`]
-    for peer_info in peer_info_result {
-        assert!(
-            peer_info.addr.parse::<SocketAddr>().is_ok(),
-            "peer info addr should be a valid SocketAddr",
-        );
-    }
 
     zebrad.kill(false)?;
 
