@@ -202,11 +202,15 @@ $DIFF --from-file=$PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST && \
 
 echo
 
+EXIT_STATUS=0
 for RESPONSE in $PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST; do
     if [ -s "$RESPONSE" ]; then
         echo "Node said proposal was invalid, error response from $RESPONSE:"
         cat "$RESPONSE"
+        EXIT_STATUS=1
     else
         echo "Node said proposal was valid, empty success response in $RESPONSE"
     fi
 done
+
+exit $EXIT_STATUS
