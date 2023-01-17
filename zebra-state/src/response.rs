@@ -166,16 +166,14 @@ pub struct GetBlockTemplateChainInfo {
     /// Depends on the `tip_hash`.
     pub history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
 
-    // Data derived from the state tip and recent blocks.
-    //
-    /// The expected difficulty of the candidate block.
-    /// Depends on the `tip_hash`.
-    pub expected_difficulty: CompactDifficulty,
-
     // Data derived from the state tip and recent blocks, and the current local clock.
     //
+    /// The expected difficulty of the candidate block.
+    /// Depends on the `tip_hash`, and the local clock on testnet.
+    pub expected_difficulty: CompactDifficulty,
+
     /// The current system time, adjusted to fit within `min_time` and `max_time`.
-    /// Depends on the local clock and the `tip_hash`.
+    /// Always depends on the local clock and the `tip_hash`.
     pub cur_time: DateTime32,
 
     /// The mininimum time the miner can use in this block.
