@@ -55,16 +55,29 @@ fn main() -> Result<()> {
         serde_json::to_string_pretty(&template).expect("re-serialization never fails")
     );
 
+    let template_obj = template
+        .as_object_mut()
+        .expect("template must be a JSON object");
+
     // replace zcashd keys that are incompatible with Zebra
     //
     // the longpollid key is in a node-specific format, but this tool doesn't use it,
     // so we can replace it with a dummy value
-    template
-        .as_object_mut()
-        .expect("template must be a JSON object")["longpollid"] =
-        "0".repeat(LONG_POLL_ID_LENGTH).into();
+    template_obj["longpollid"] = "0".repeat(LONG_POLL_ID_LENGTH).into();
 
-    // parse json to template type
+    // provide dummy keys that Zebra requires but zcashd does not always have
+    //
+    // the transaction.*.required keys are not used by this tool,
+    // so we can use any value here
+    template_obj["coinbasetxn"]["required"] = true.into();
+    for tx in template_obj["transactions"]
+        .as_array_mut()
+        .expect("transactions must be a JSON array")
+    {
+        tx["required"] = false.into();
+    }
+
+    // parse the modified json to template type
     let template: GetBlockTemplate = serde_json::from_value(template)?;
 
     // generate proposal according to arguments
