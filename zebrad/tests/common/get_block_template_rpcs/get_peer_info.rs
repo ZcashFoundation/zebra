@@ -6,34 +6,37 @@ use color_eyre::eyre::{Context, Result};
 
 use zebra_chain::parameters::Network;
 use zebra_rpc::methods::get_block_template_rpcs::types::peer_info::PeerInfo;
-use zebra_test::args;
 
 use crate::common::{
-    config::{random_known_rpc_port_config, testdir},
-    launch::ZebradTestDirExt,
+    launch::{can_spawn_zebrad_for_rpc, spawn_zebrad_for_rpc},
     rpc_client::RPCRequestClient,
+    test_type::TestType,
 };
 
 pub(crate) async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
 
+    let test_type = TestType::LaunchWithEmptyState {
+        launches_lightwalletd: false,
+    };
+    let test_name = "get_peer_info_test";
     let network = Network::Mainnet;
 
-    if zebra_test::net::zebra_skip_network_tests() {
+    // Skip the test unless the user specifically asked for it and there is a zebrad_state_path
+    if !can_spawn_zebrad_for_rpc(test_name, test_type) {
         return Ok(());
     }
 
     tracing::info!(?network, "running getpeerinfo test using zebrad",);
 
-    let mut config = random_known_rpc_port_config(false)?;
-    let rpc_address = config.rpc.listen_addr.unwrap();
+    let (mut zebrad, zebra_rpc_address) =
+        spawn_zebrad_for_rpc(network, test_name, test_type, true)?
+            .expect("Already checked zebra state path with can_spawn_zebrad_for_rpc");
 
-    let mut child = testdir()?
-        .with_config(&mut config)?
-        .spawn_child(args!["start"])?;
+    let rpc_address = zebra_rpc_address.expect("getpeerinfo test must have RPC port");
 
     // Wait until port is open.
-    child.expect_stdout_line_matches(&format!("Opened RPC endpoint at {rpc_address}"))?;
+    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {rpc_address}"))?;
 
     tracing::info!(?rpc_address, "zebrad opened its RPC port",);
 
@@ -55,9 +58,9 @@ pub(crate) async fn run() -> Result<()> {
         );
     }
 
-    child.kill(false)?;
+    zebrad.kill(false)?;
 
-    let output = child.wait_with_output()?;
+    let output = zebrad.wait_with_output()?;
     let output = output.assert_failure()?;
 
     // [Note on port conflict](#Note on port conflict)
