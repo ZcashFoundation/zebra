@@ -1,3 +1,5 @@
+//! Tests for the [`zebra_test::command`] module.
+
 use std::{process::Command, time::Duration};
 
 use color_eyre::eyre::{eyre, Result};

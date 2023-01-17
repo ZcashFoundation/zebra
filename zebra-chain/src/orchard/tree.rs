@@ -10,8 +10,6 @@
 //!
 //! A root of a note commitment tree is associated with each treestate.
 
-#![allow(clippy::derive_hash_xor_eq)]
-
 use std::{
     fmt,
     hash::{Hash, Hasher},
@@ -99,7 +97,7 @@ lazy_static! {
 /// The root hash in LEBS2OSP256(rt) encoding of the Orchard note commitment
 /// tree corresponding to the final Orchard treestate of this block. A root of a
 /// note commitment tree is associated with each treestate.
-#[derive(Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Default, Eq, Serialize, Deserialize)]
 pub struct Root(#[serde(with = "serde_helpers::Base")] pub(crate) pallas::Base);
 
 impl fmt::Debug for Root {
@@ -125,6 +123,13 @@ impl From<&Root> for [u8; 32] {
 impl Hash for Root {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.to_repr().hash(state)
+    }
+}
+
+impl PartialEq for Root {
+    fn eq(&self, other: &Self) -> bool {
+        // TODO: should we compare canonical forms here using `.to_repr()`?
+        self.0 == other.0
     }
 }
 

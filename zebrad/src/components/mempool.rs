@@ -86,25 +86,25 @@ type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, St
 //
 // Zebra only has one mempool, so the enum variant size difference doesn't matter.
 #[allow(clippy::large_enum_variant)]
+#[derive(Default)]
 enum ActiveState {
     /// The Mempool is disabled.
+    #[default]
     Disabled,
+
     /// The Mempool is enabled.
     Enabled {
         /// The Mempool storage itself.
         ///
-        /// ##: Correctness: only components internal to the [`Mempool`] struct are allowed to
+        /// # Correctness
+        ///
+        /// Only components internal to the [`Mempool`] struct are allowed to
         /// inject transactions into `storage`, as transactions must be verified beforehand.
         storage: storage::Storage,
+
         /// The transaction download and verify stream.
         tx_downloads: Pin<Box<InboundTxDownloads>>,
     },
-}
-
-impl Default for ActiveState {
-    fn default() -> Self {
-        ActiveState::Disabled
-    }
 }
 
 impl ActiveState {
