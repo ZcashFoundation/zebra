@@ -1,7 +1,13 @@
 //! The `AddressBook` manages information about what peers exist, when they were
 //! seen, and what services they provide.
 
-use std::{cmp::Reverse, iter::Extend, net::SocketAddr, time::Instant};
+use std::{
+    cmp::Reverse,
+    iter::Extend,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 use chrono::Utc;
 use ordered_map::OrderedMap;
@@ -12,9 +18,8 @@ use zebra_chain::parameters::Network;
 
 use crate::{
     constants, meta_addr::MetaAddrChange, protocol::external::canonical_socket_addr,
-    types::MetaAddr, PeerAddrState,
+    types::MetaAddr, AddressBookPeers, PeerAddrState,
 };
-
 #[cfg(test)]
 mod tests;
 
@@ -288,7 +293,7 @@ impl AddressBook {
             ?updated,
             ?previous,
             total_peers = self.by_addr.len(),
-            recent_peers = self.recently_live_peers(chrono_now).count(),
+            recent_peers = self.recently_live_peers(chrono_now).len(),
             "calculated updated address book entry",
         );
 
@@ -317,7 +322,7 @@ impl AddressBook {
                 ?updated,
                 ?previous,
                 total_peers = self.by_addr.len(),
-                recent_peers = self.recently_live_peers(chrono_now).count(),
+                recent_peers = self.recently_live_peers(chrono_now).len(),
                 "updated address book entry",
             );
 
@@ -340,7 +345,7 @@ impl AddressBook {
                     surplus = ?surplus_peer,
                     ?updated,
                     total_peers = self.by_addr.len(),
-                    recent_peers = self.recently_live_peers(chrono_now).count(),
+                    recent_peers = self.recently_live_peers(chrono_now).len(),
                     "removed surplus address book entry",
                 );
             }
@@ -370,7 +375,7 @@ impl AddressBook {
         trace!(
             ?removed_addr,
             total_peers = self.by_addr.len(),
-            recent_peers = self.recently_live_peers(chrono_now).count(),
+            recent_peers = self.recently_live_peers(chrono_now).len(),
         );
 
         if let Some(entry) = self.by_addr.remove(&removed_addr) {
@@ -452,20 +457,6 @@ impl AddressBook {
             .cloned()
     }
 
-    /// Return an iterator over peers we've seen recently,
-    /// in reconnection attempt order.
-    pub fn recently_live_peers(
-        &'_ self,
-        now: chrono::DateTime<Utc>,
-    ) -> impl Iterator<Item = MetaAddr> + DoubleEndedIterator + '_ {
-        let _guard = self.span.enter();
-
-        self.by_addr
-            .descending_values()
-            .filter(move |peer| peer.was_recently_live(now))
-            .cloned()
-    }
-
     /// Returns the number of entries in this address book.
     pub fn len(&self) -> usize {
         self.by_addr.len()
@@ -501,7 +492,7 @@ impl AddressBook {
         let failed = self.state_peers(PeerAddrState::Failed).count();
         let attempt_pending = self.state_peers(PeerAddrState::AttemptPending).count();
 
-        let recently_live = self.recently_live_peers(now).count();
+        let recently_live = self.recently_live_peers(now).len();
         let recently_stopped_responding = responded
             .checked_sub(recently_live)
             .expect("all recently live peers must have responded");
@@ -594,6 +585,26 @@ impl AddressBook {
                 "no active peer connections: trying gossiped addresses"
             );
         }
+    }
+}
+
+impl AddressBookPeers for AddressBook {
+    fn recently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
+        let _guard = self.span.enter();
+
+        self.by_addr
+            .descending_values()
+            .filter(|peer| peer.was_recently_live(now))
+            .cloned()
+            .collect()
+    }
+}
+
+impl AddressBookPeers for Arc<Mutex<AddressBook>> {
+    fn recently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
+        self.lock()
+            .expect("panic in a previous thread that was holding the mutex")
+            .recently_live_peers(now)
     }
 }
 
