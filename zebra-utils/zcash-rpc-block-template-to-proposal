@@ -16,11 +16,16 @@ function usage()
     echo "$0 block-template-rpc-port proposal-rpc-port [extra-proposal-rpc-port...] -- [extra-block-template-rpc-json-fields] [extra-proposal-rpc-fields]"
 }
 
-# Override the commands and settings used by this script using these environmental variables:
+# Override the commands used by this script using these environmental variables:
 ZCASH_CLI="${ZCASH_CLI:-zcash-cli}"
-TIME="time"
 DIFF="${DIFF:-diff --unified --color=always}"
 BLOCK_TEMPLATE_TO_PROPOSAL="${BLOCK_TEMPLATE_TO_PROPOSAL:-block-template-to-proposal}"
+# time how long a command takes to run
+TIME="time"
+# display the current date and time
+DATE="date --rfc-3339=seconds"
+
+# Override the settings for this script using these environmental variables:
 TIME_SOURCES="${TIME_SOURCES:-CurTime MinTime MaxTime ClampedNow}"
 
 # Process arguments
@@ -61,6 +66,8 @@ if [ $# -ge 1 ]; then
     usage
     exit 1
 fi
+
+$DATE
 
 # Use an easily identified temp directory name,
 # but fall back to the default temp name if `mktemp` does not understand `--suffix`.
@@ -139,6 +146,7 @@ echo "getblocktemplate $TEMPLATE_ARG_FULL"
 echo
 
 echo "Querying $TEMPLATE_NODE $TEMPLATE_NET chain at height >=$TEMPLATE_HEIGHT..."
+$DATE
 $TIME $ZCASH_CLI -rpcport="$TEMPLATE_RPC_PORT" getblocktemplate "$TEMPLATE_ARG_FULL" > "$TEMPLATE_NODE_TEMPLATE_RESPONSE"
 
 echo "Block template data is in $TEMPLATE_NODE_TEMPLATE_RESPONSE"
@@ -173,6 +181,7 @@ echo
 
 echo "getblocktemplate proposal submissions:"
 echo "getblocktemplate $PROPOSAL_ARG_NO_DATA"
+$DATE
 echo
 
 PROPOSAL_NODES_PROPOSAL_RESPONSE_BASE="$ZCASH_RPC_TMP_DIR/proposal-check-getblocktemplate-proposal"
@@ -212,5 +221,7 @@ for RESPONSE in $PROPOSAL_NODES_PROPOSAL_RESPONSE_LIST; do
         echo "Node said proposal was valid, empty success response in $RESPONSE"
     fi
 done
+
+$DATE
 
 exit $EXIT_STATUS
