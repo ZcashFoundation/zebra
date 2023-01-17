@@ -49,7 +49,10 @@ fn main() -> Result<()> {
 
     // parse string to generic json
     let mut template: Value = serde_json::from_str(&template)?;
-    eprintln!("{}", template.to_string_pretty());
+    eprintln!(
+        "{}",
+        serde_json::to_string_pretty(&template).expect("re-serialization never fails")
+    );
 
     // remove zcashd keys that are incompatible with Zebra
     //
