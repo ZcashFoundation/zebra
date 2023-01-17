@@ -1,8 +1,11 @@
 //! Tests that `getpeerinfo` RPC method responds with info about at least 1 peer.
 
+use std::net::SocketAddr;
+
 use color_eyre::eyre::{Context, Result};
 
 use zebra_chain::parameters::Network;
+use zebra_rpc::methods::get_block_template_rpcs::types::peer_info::PeerInfo;
 use zebra_test::args;
 
 use crate::common::{
@@ -35,25 +38,27 @@ pub(crate) async fn run() -> Result<()> {
     tracing::info!(?rpc_address, "zebrad opened its RPC port",);
 
     // call `getpeerinfo` RPC method
-    let res = RPCRequestClient::new(rpc_address)
-        .call("getpeerinfo", "[]".to_string())
+    let peer_info_result: Vec<PeerInfo> = RPCRequestClient::new(rpc_address)
+        .json_result_from_call("getpeerinfo", "[]".to_string())
         .await?;
 
-    // Test rpc endpoint response
-    assert!(res.status().is_success());
+    assert!(
+        !peer_info_result.is_empty(),
+        "getpeerinfo should return info for at least 1 peer"
+    );
+
+    // Assert that PeerInfo addresses successfully parse into [`SocketAddr`]
+    for peer_info in peer_info_result {
+        assert!(
+            peer_info.addr.parse::<SocketAddr>().is_ok(),
+            "peer info addr should be a valid SocketAddr",
+        );
+    }
 
     child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
-
-    // Assert that PeerInfo addresses successfully parse into [`SocketAddr`]
-    // for peer_info in peer_info_result {
-    //     assert!(
-    //         peer_info.addr.parse::<SocketAddr>().is_ok(),
-    //         "peer info addr should be a valid SocketAddr",
-    //     );
-    // }
 
     // [Note on port conflict](#Note on port conflict)
     output
