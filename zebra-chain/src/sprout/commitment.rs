@@ -2,6 +2,8 @@
 
 use sha2::{Digest, Sha256};
 
+use crate::fmt::HexDebug;
+
 use super::note::Note;
 
 /// The randomness used in the Pedersen Hash for note commitment.
@@ -10,11 +12,11 @@ use super::note::Note;
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
 )]
-pub struct CommitmentRandomness(pub [u8; 32]);
+pub struct CommitmentRandomness(pub HexDebug<[u8; 32]>);
 
 impl AsRef<[u8]> for CommitmentRandomness {
     fn as_ref(&self) -> &[u8] {
-        &self.0
+        self.0.as_ref()
     }
 }
 
@@ -24,11 +26,11 @@ impl AsRef<[u8]> for CommitmentRandomness {
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
 )]
-pub struct NoteCommitment(pub(crate) [u8; 32]);
+pub struct NoteCommitment(pub(crate) HexDebug<[u8; 32]>);
 
 impl From<[u8; 32]> for NoteCommitment {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(bytes)
+        Self(bytes.into())
     }
 }
 
@@ -44,18 +46,20 @@ impl From<Note> for NoteCommitment {
         hasher.update(note.value.to_bytes());
         hasher.update(note.rho);
         hasher.update(note.rcm);
-        NoteCommitment(hasher.finalize().into())
+
+        let commitment: [u8; 32] = hasher.finalize().into();
+        NoteCommitment(commitment.into())
     }
 }
 
 impl From<NoteCommitment> for [u8; 32] {
     fn from(cm: NoteCommitment) -> [u8; 32] {
-        cm.0
+        *cm.0
     }
 }
 
 impl From<&NoteCommitment> for [u8; 32] {
     fn from(cm: &NoteCommitment) -> [u8; 32] {
-        cm.0
+        *cm.0
     }
 }
