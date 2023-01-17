@@ -15,10 +15,7 @@ echo "ZEBRA_CACHED_STATE_DIR=$ZEBRA_CACHED_STATE_DIR"
 echo "LIGHTWALLETD_DATA_DIR=$LIGHTWALLETD_DATA_DIR"
 
 case "$1" in
-    -- | zebrad)
-        exec zebrad "$@"
-        ;;
-    -*)
+    --* | -*)
         exec zebrad "$@"
         ;;
     *)

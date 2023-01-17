@@ -103,7 +103,7 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd
 RUN cargo chef cook --release --features sentry,lightwalletd-grpc-tests --workspace --recipe-path recipe.json
 
 COPY . .
-RUN cargo test --locked --release --features lightwalletd-grpc-tests --workspace --no-run
+RUN cargo test --locked --release --features lightwalletd-grpc-tests --workspace --no-run --bins
 
 COPY ./docker/entrypoint.sh /
 RUN chmod u+x /entrypoint.sh
