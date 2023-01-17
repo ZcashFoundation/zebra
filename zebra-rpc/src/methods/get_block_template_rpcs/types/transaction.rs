@@ -16,7 +16,7 @@ where
 {
     /// The hex-encoded serialized data for this transaction.
     #[serde(with = "hex")]
-    pub(crate) data: SerializedTransaction,
+    pub data: SerializedTransaction,
 
     /// The transaction ID of this transaction.
     #[serde(with = "hex")]
