@@ -11,6 +11,7 @@ use tower::buffer::Buffer;
 use zebra_chain::{
     chain_sync_status::MockSyncStatus, chain_tip::NoChainTip, parameters::Network::*,
 };
+use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::BoxError;
 
 use zebra_test::mock_service::MockService;
@@ -61,6 +62,7 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
             Buffer::new(state.clone(), 1),
             Buffer::new(chain_verifier.clone(), 1),
             MockSyncStatus::default(),
+            MockAddressBookPeers::default(),
             NoChainTip,
             Mainnet,
         );
@@ -146,6 +148,7 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool, do_shutdown: bo
             Buffer::new(state.clone(), 1),
             Buffer::new(chain_verifier.clone(), 1),
             MockSyncStatus::default(),
+            MockAddressBookPeers::default(),
             NoChainTip,
             Mainnet,
         );
@@ -225,6 +228,7 @@ fn rpc_server_spawn_port_conflict() {
                 Buffer::new(state.clone(), 1),
                 Buffer::new(chain_verifier.clone(), 1),
                 MockSyncStatus::default(),
+                MockAddressBookPeers::default(),
                 NoChainTip,
                 Mainnet,
             );
@@ -241,6 +245,7 @@ fn rpc_server_spawn_port_conflict() {
             Buffer::new(state.clone(), 1),
             Buffer::new(chain_verifier.clone(), 1),
             MockSyncStatus::default(),
+            MockAddressBookPeers::default(),
             NoChainTip,
             Mainnet,
         );
@@ -331,6 +336,7 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
                 Buffer::new(state.clone(), 1),
                 Buffer::new(chain_verifier.clone(), 1),
                 MockSyncStatus::default(),
+                MockAddressBookPeers::default(),
                 NoChainTip,
                 Mainnet,
             );
@@ -347,6 +353,7 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
             Buffer::new(state.clone(), 1),
             Buffer::new(chain_verifier.clone(), 1),
             MockSyncStatus::default(),
+            MockAddressBookPeers::default(),
             NoChainTip,
             Mainnet,
         );

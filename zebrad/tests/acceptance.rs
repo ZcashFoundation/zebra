@@ -1483,7 +1483,9 @@ fn non_blocking_logger() -> Result<()> {
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn lightwalletd_integration() -> Result<()> {
-    lightwalletd_integration_test(LaunchWithEmptyState)
+    lightwalletd_integration_test(LaunchWithEmptyState {
+        launches_lightwalletd: true,
+    })
 }
 
 /// Make sure `zebrad` can sync from peers, but don't actually launch `lightwalletd`.
@@ -1547,7 +1549,9 @@ fn lightwalletd_full_sync() -> Result<()> {
 #[ignore]
 #[cfg(not(target_os = "windows"))]
 async fn lightwalletd_test_suite() -> Result<()> {
-    lightwalletd_integration_test(LaunchWithEmptyState)?;
+    lightwalletd_integration_test(LaunchWithEmptyState {
+        launches_lightwalletd: true,
+    })?;
 
     // Only runs when ZEBRA_CACHED_STATE_DIR is set.
     lightwalletd_integration_test(UpdateZebraCachedStateNoRpc)?;
@@ -2172,6 +2176,15 @@ async fn sending_transactions_using_lightwalletd() -> Result<()> {
 #[cfg(not(target_os = "windows"))]
 async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
     common::lightwalletd::wallet_grpc_test::run().await
+}
+
+/// Test successful getpeerinfo rpc call
+///
+/// See [`common::get_block_template_rpcs::get_peer_info`] for more information.
+#[tokio::test]
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn get_peer_info() -> Result<()> {
+    common::get_block_template_rpcs::get_peer_info::run().await
 }
 
 /// Test successful getblocktemplate rpc call

@@ -5,6 +5,8 @@
 //! cargo insta test --review --features getblocktemplate-rpcs --delete-unreferenced-snapshots
 //! ```
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
 use hex::FromHex;
 use insta::Settings;
 use tower::{buffer::Buffer, Service};
@@ -19,6 +21,7 @@ use zebra_chain::{
     transparent,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
 };
+use zebra_network::{address_book_peers::MockAddressBookPeers, types::MetaAddr};
 use zebra_node_services::mempool;
 
 use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
@@ -36,6 +39,7 @@ use crate::methods::{
             get_mining_info,
             hex_data::HexData,
             long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
+            peer_info::PeerInfo,
             submit_block,
         },
     },
@@ -113,6 +117,14 @@ pub async fn test_responses<State, ReadState>(
     mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
+    let mock_address_book =
+        MockAddressBookPeers::new(vec![MetaAddr::new_initial_peer(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            network.default_port(),
+        ))
+        .into_new_meta_addr()
+        .unwrap()]);
+
     // get an rpc instance with continuous blockchain state
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         network,
@@ -122,6 +134,7 @@ pub async fn test_responses<State, ReadState>(
         mock_chain_tip.clone(),
         chain_verifier.clone(),
         mock_sync_status.clone(),
+        mock_address_book,
     );
 
     // `getblockcount`
@@ -144,6 +157,13 @@ pub async fn test_responses<State, ReadState>(
         .await
         .expect("We should have a success response");
     snapshot_rpc_getmininginfo(get_mining_info, &settings);
+
+    // `getpeerinfo`
+    let get_peer_info = get_block_template_rpc
+        .get_peer_info()
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getpeerinfo(get_peer_info, &settings);
 
     // `getnetworksolps` (and `getnetworkhashps`)
     let get_network_sol_ps = get_block_template_rpc
@@ -169,6 +189,7 @@ pub async fn test_responses<State, ReadState>(
         mock_chain_tip.clone(),
         chain_verifier,
         mock_sync_status.clone(),
+        MockAddressBookPeers::default(),
     );
 
     // Basic variant (default mode and no extra features)
@@ -308,6 +329,7 @@ pub async fn test_responses<State, ReadState>(
         mock_chain_tip,
         mock_chain_verifier.clone(),
         mock_sync_status,
+        MockAddressBookPeers::default(),
     );
 
     let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template(Some(
@@ -389,6 +411,11 @@ fn snapshot_rpc_getmininginfo(
     settings: &insta::Settings,
 ) {
     settings.bind(|| insta::assert_json_snapshot!("get_mining_info", get_mining_info));
+}
+
+/// Snapshot `getpeerinfo` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_peer_info", get_peer_info));
 }
 
 /// Snapshot `getnetworksolps` response, using `cargo insta` and JSON serialization.
