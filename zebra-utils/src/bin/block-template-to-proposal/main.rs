@@ -7,6 +7,7 @@
 use std::io::Read;
 
 use color_eyre::eyre::Result;
+use serde_json::Value;
 use structopt::StructOpt;
 
 use zebra_chain::serialization::ZcashSerialize;
@@ -46,13 +47,24 @@ fn main() -> Result<()> {
         template
     });
 
-    // parse json
-    let template: GetBlockTemplate = serde_json::from_str(&template)?;
-    eprintln!("{template:?}");
+    // parse string to generic json
+    let mut template: Value = serde_json::from_str(&template)?;
+    eprintln!("{}", template.to_string_pretty());
+
+    // remove zcashd keys that are incompatible with Zebra
+    //
+    // the longpollid key is in a node-specific format
+    template
+        .as_object_mut()
+        .expect("template must be a JSON object")
+        .remove("longpollid");
+
+    // parse json to template type
+    let template: GetBlockTemplate = serde_json::from_value(template)?;
 
     // generate proposal according to arguments
     let proposal = proposal_block_from_template(template, time_source)?;
-    eprintln!("{proposal:?}");
+    eprintln!("{proposal:#?}");
 
     let proposal = proposal
         .zcash_serialize_to_vec()
