@@ -60,6 +60,7 @@ fn cmd_output(cmd: &mut std::process::Command) -> Result<String> {
     Ok(s)
 }
 
+/// Process entry point for `zebra-checkpoints`
 #[allow(clippy::print_stdout)]
 fn main() -> Result<()> {
     // initialise
