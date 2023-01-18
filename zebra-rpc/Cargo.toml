@@ -27,6 +27,7 @@ proptest-impl = [
     "proptest-derive",
     "zebra-consensus/proptest-impl",
     "zebra-state/proptest-impl",
+    "zebra-network/proptest-impl",
     "zebra-chain/proptest-impl",
 ]
 
@@ -79,5 +80,8 @@ thiserror = "1.0.38"
 tokio = { version = "1.24.1", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
+zebra-consensus = { path = "../zebra-consensus", features = ["proptest-impl"] }
+zebra-network = { path = "../zebra-network", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
+
 zebra-test = { path = "../zebra-test" }
