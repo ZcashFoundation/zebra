@@ -1,8 +1,8 @@
 # Zebra zk-SNARK Parameters
 
-The privacy features provided by Zcash are backed by different [zk-snarks proving systems](https://z.cash/technology/zksnarks/) which are basically cryptographic primitives that allow a prover convince a verifier that a statement is true revealing no more information than the proof itself.
+The privacy features provided by Zcash are backed by different [zk-snarks proving systems](https://z.cash/technology/zksnarks/) which are basically cryptographic primitives that allow a prover to convince a verifier that a statement is true by revealing no more information than the proof itself.
 
-One of this proving systems is [Groth16](https://eprint.iacr.org/2016/260.pdf) and it is the one used by the Zcash transactions version 4 and greater. More specifically, in the sapling spend/output descriptions circuits and in the sprout joinsplits descriptions circuit.
+One of these proving systems is [Groth16](https://eprint.iacr.org/2016/260.pdf) and it is the one used by the Zcash transactions version 4 and greater. More specifically, in the sapling spend/output descriptions circuits and in the sprout joinsplits descriptions circuit.
 
 https://zips.z.cash/protocol/protocol.pdf#groth
 
@@ -14,7 +14,7 @@ These parameters are in the form of files, they are basically predefined keys th
 
 https://zips.z.cash/protocol/protocol.pdf#grothparameters
 
-In Zebra, this 3 public files are mapped into 2 structures:
+In Zebra, these 3 public files are mapped into 2 structures:
 
 ```rust
 /// Groth16 Zero-Knowledge Proof spend and output parameters for the Sapling circuit.
@@ -36,7 +36,7 @@ Zebra uses the [bellman crate groth16 implementation](https://github.com/zkcrypt
 
 Each time a transaction has any sprout joinsplit, sapling spend or sapling output these loaded parameters will be used for the verification process. Zebra verifies in parallel and by batches, these parameters are used on each verification done.
 
-There are 2 different zebrad commands to get this parameters from the internet and load them into zebra:
+There are 2 different zebrad commands to get these parameters from the internet and load them into zebra:
 
 ## zebrad download
 
@@ -46,7 +46,9 @@ When this command is executed Zebra will create a path for each parameter file. 
 - `/home/$USER/.zcash-params/sapling-spend.params`
 - `/home/$USER/.zcash-params/sprout-groth16.params`
 
-This files are available for [download](https://download.z.cash/downloads/) and their hash for verification are part of the Zcash protocol: 
+These are the same parameter paths used by `zcashd` and [fetch-params.sh](https://github.com/zcash/zcash/blob/master/zcutil/fetch-params.sh).
+
+These files are available for [download](https://download.z.cash/downloads/) and their hash for verification is part of the Zcash protocol: 
 
 https://zips.z.cash/protocol/protocol.pdf#grothparameters
 
@@ -70,7 +72,7 @@ The alternative way is to let zebra do the above process at startup.
 
 Before Zebra attempts to verify any of the 3 mentioned circuits it needs to have the parameters in place. For this reason zebra start will check for the parameters and download them if needed each time it is started.
 
-At zebra startup, when initializing the verifiers, a separate task is created to do the same as the `zebra download` command. This allows Zebra sync to make progress before having the parameters. Note that these parameters are needed after Sapling activation which happens at block `419_200` in the Mainnet and block `15` in the Testnet. Zebra will panic if the parameters are not there when verifying those blocks and above.
+At zebra startup, when initializing the verifiers, a separate task is created to do the same as the `zebra download` command. This allows Zebra sync to make progress before having the parameters. Note that these parameters are needed after Sapling activation which happens at block `419_200` in the Mainnet and block `15` in the Testnet. Zebra will wait for the parameters to download before verifying those blocks and above.
 
 If the parameters were already downloaded and they are already in place the same function `zcash_proofs::load_parameters()` will verify them against the consensus hashes. If they are not there or the hash is not the same then `zcash_proofs::load_parameters()` will download.
 
