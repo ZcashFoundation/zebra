@@ -55,9 +55,15 @@ impl Solution {
 
         let input = &input[0..Solution::INPUT_LENGTH];
 
-        equihash::is_valid_solution(n, k, input, nonce, solution)?;
+        equihash::is_valid_solution(n, k, input, nonce.as_ref(), solution)?;
 
         Ok(())
+    }
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Returns a [`Solution`] of `[0; SOLUTION_SIZE]` to be used in block proposals.
+    pub fn for_proposal() -> Self {
+        Self([0; SOLUTION_SIZE])
     }
 }
 

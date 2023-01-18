@@ -55,13 +55,13 @@ jobs:
       id-token: 'write'
 
     steps:
-      - uses: actions/checkout@v3.2.0
+      - uses: actions/checkout@v3.3.0
         with:
           repository: adityapk00/lightwalletd
           ref: 'master'
           persist-credentials: false
 
-      - uses: actions/checkout@v3.2.0
+      - uses: actions/checkout@v3.3.0
         with:
           path: zebra
           persist-credentials: false
@@ -74,7 +74,7 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v4.1.1
+        uses: docker/metadata-action@v4.3.0
         with:
           # list of Docker images to use as base name for tags
           images: |
@@ -126,7 +126,7 @@ jobs:
       # Build and push image to Google Artifact Registry
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v3.2.0
+        uses: docker/build-push-action@v3.3.0
         with:
           target: build
           context: .

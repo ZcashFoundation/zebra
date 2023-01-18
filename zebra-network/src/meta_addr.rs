@@ -2,12 +2,12 @@
 
 use std::{
     cmp::{Ord, Ordering},
-    convert::TryInto,
     net::SocketAddr,
     time::Instant,
 };
 
 use chrono::Utc;
+
 use zebra_chain::{parameters::Network, serialization::DateTime32};
 
 use crate::{
@@ -80,6 +80,7 @@ impl PeerAddrState {
 
 // non-test code should explicitly specify the peer address state
 #[cfg(test)]
+#[allow(clippy::derivable_impls)]
 impl Default for PeerAddrState {
     fn default() -> Self {
         NeverAttemptedGossiped

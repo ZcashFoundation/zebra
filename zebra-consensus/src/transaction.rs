@@ -737,7 +737,6 @@ where
             let upgrade = request.upgrade(network);
 
             let script_checks = (0..inputs.len())
-                .into_iter()
                 .map(move |input_index| {
                     let request = script::Request {
                         upgrade,

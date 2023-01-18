@@ -7,7 +7,7 @@
 //! See the full list of
 //! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
-use std::{fmt, panic, sync::Arc};
+use std::{fmt, panic};
 
 use jsonrpc_core::{Compatibility, MetaIoHandler};
 use jsonrpc_http_server::{CloseHandle, ServerBuilder};
@@ -17,11 +17,9 @@ use tower::{buffer::Buffer, Service};
 use tracing::{Instrument, *};
 
 use zebra_chain::{
-    block::{self, Block},
-    chain_sync_status::ChainSyncStatus,
-    chain_tip::ChainTip,
-    parameters::Network,
+    block, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip, parameters::Network,
 };
+use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 
 use crate::{
@@ -72,7 +70,7 @@ impl RpcServer {
     //
     // TODO: put some of the configs or services in their own struct?
     #[allow(clippy::too_many_arguments)]
-    pub fn spawn<Version, Mempool, State, Tip, ChainVerifier, SyncStatus>(
+    pub fn spawn<Version, Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>(
         config: Config,
         #[cfg(feature = "getblocktemplate-rpcs")]
         mining_config: get_block_template_rpcs::config::Config,
@@ -86,6 +84,8 @@ impl RpcServer {
         chain_verifier: ChainVerifier,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         sync_status: SyncStatus,
+        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
+        address_book: AddressBook,
         latest_chain_tip: Tip,
         network: Network,
     ) -> (JoinHandle<()>, JoinHandle<()>, Option<Self>)
@@ -107,13 +107,17 @@ impl RpcServer {
             + 'static,
         State::Future: Send,
         Tip: ChainTip + Clone + Send + Sync + 'static,
-        ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
-            + Clone
+        ChainVerifier: Service<
+                zebra_consensus::Request,
+                Response = block::Hash,
+                Error = zebra_consensus::BoxError,
+            > + Clone
             + Send
             + Sync
             + 'static,
-        <ChainVerifier as Service<Arc<Block>>>::Future: Send,
+        <ChainVerifier as Service<zebra_consensus::Request>>::Future: Send,
         SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
+        AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
@@ -144,6 +148,7 @@ impl RpcServer {
                     latest_chain_tip.clone(),
                     chain_verifier,
                     sync_status,
+                    address_book,
                 );
 
                 io.extend_with(get_block_template_rpc_impl.to_delegate());

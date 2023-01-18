@@ -24,8 +24,8 @@ Compilers:
 - **clang:** install both `libclang` and `clang` - they are usually different packages
 - **libclang:** check out the [clang-sys documentation](https://github.com/KyleMayes/clang-sys#dependencies)
 - **g++ or MSVC++:** try using clang or Xcode instead
-- **rustc:** use rustc 1.58 or later
-  - Zebra does not have a minimum supported Rust version (MSRV) policy yet
+- **rustc:** use rustc 1.65 or later
+  - Zebra does not have a minimum supported Rust version (MSRV) policy: any release can update the required Rust version.
 
 ### Dependencies
 

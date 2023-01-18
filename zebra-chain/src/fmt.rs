@@ -160,3 +160,38 @@ where
 
     type Strategy = BoxedStrategy<Self>;
 }
+
+/// Wrapper to override `Debug`, redirecting it to hex-encode the type.
+/// The type must be hex-encodable.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[serde(transparent)]
+pub struct HexDebug<T: AsRef<[u8]>>(pub T);
+
+impl<T: AsRef<[u8]>> fmt::Debug for HexDebug<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple(std::any::type_name::<T>())
+            .field(&hex::encode(self.as_ref()))
+            .finish()
+    }
+}
+
+impl<T: AsRef<[u8]>> ops::Deref for HexDebug<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T: AsRef<[u8]>> ops::DerefMut for HexDebug<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<T: AsRef<[u8]>> From<T> for HexDebug<T> {
+    fn from(t: T) -> Self {
+        Self(t)
+    }
+}

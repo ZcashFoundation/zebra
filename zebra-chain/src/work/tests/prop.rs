@@ -73,12 +73,12 @@ prop_compose! {
     fn randomized_nonce(real_header: block::Header)
         (fake_nonce in proptest::array::uniform32(any::<u8>())
             .prop_filter("nonce must not be the actual nonce", move |fake_nonce| {
-                fake_nonce != &real_header.nonce
+                fake_nonce != &real_header.nonce.0
             })
         ) -> Arc<block::Header> {
 
         let mut fake_header = real_header;
-        fake_header.nonce = fake_nonce;
+        fake_header.nonce = fake_nonce.into();
 
         Arc::new(fake_header)
     }

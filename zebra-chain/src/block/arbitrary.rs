@@ -1,16 +1,16 @@
 //! Randomised property testing for [`Block`]s.
 
+use std::{collections::HashMap, sync::Arc};
+
 use proptest::{
     arbitrary::{any, Arbitrary},
     prelude::*,
 };
 
-use std::{collections::HashMap, sync::Arc};
-
 use crate::{
     amount::NonNegative,
     block,
-    fmt::SummaryDebug,
+    fmt::{HexDebug, SummaryDebug},
     history_tree::HistoryTree,
     parameters::{
         Network,
@@ -482,13 +482,13 @@ impl Block {
                             // needs to be well-formed, i.e. smaller than 𝑞_J, so we
                             // arbitrarily set it to 1.
                             let block_header = Arc::make_mut(&mut block.header);
-                            block_header.commitment_bytes = [0u8; 32];
+                            block_header.commitment_bytes = [0u8; 32].into();
                             block_header.commitment_bytes[0] = 1;
                         }
                         std::cmp::Ordering::Equal => {
                             // The Heartwood activation block has a hardcoded all-zeroes commitment.
                             let block_header = Arc::make_mut(&mut block.header);
-                            block_header.commitment_bytes = [0u8; 32];
+                            block_header.commitment_bytes = [0u8; 32].into();
                         }
                         std::cmp::Ordering::Greater => {
                             // Set the correct commitment bytes according to the network upgrade.
@@ -505,10 +505,12 @@ impl Block {
                                         &auth_data_root,
                                     );
                                 let block_header = Arc::make_mut(&mut block.header);
-                                block_header.commitment_bytes = hash_block_commitments.into();
+                                block_header.commitment_bytes =
+                                    hash_block_commitments.bytes_in_serialized_order().into();
                             } else {
                                 let block_header = Arc::make_mut(&mut block.header);
-                                block_header.commitment_bytes = history_tree_root.into();
+                                block_header.commitment_bytes =
+                                    history_tree_root.bytes_in_serialized_order().into();
                             }
                         }
                     }
@@ -723,10 +725,10 @@ impl Arbitrary for Header {
             (4u32..(i32::MAX as u32)),
             any::<Hash>(),
             any::<merkle::Root>(),
-            any::<[u8; 32]>(),
+            any::<HexDebug<[u8; 32]>>(),
             serialization::arbitrary::datetime_u32(),
             any::<CompactDifficulty>(),
-            any::<[u8; 32]>(),
+            any::<HexDebug<[u8; 32]>>(),
             any::<equihash::Solution>(),
         )
             .prop_map(

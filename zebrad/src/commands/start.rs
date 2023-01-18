@@ -186,6 +186,7 @@ impl StartCmd {
             read_only_state_service,
             chain_verifier.clone(),
             sync_status.clone(),
+            address_book.clone(),
             latest_chain_tip.clone(),
             config.network.network,
         );

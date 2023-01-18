@@ -14,7 +14,7 @@ use zebra_chain::{
 use crate::{
     service::{
         block_iter::any_ancestor_blocks, check::difficulty::POW_ADJUSTMENT_BLOCK_SPAN,
-        finalized_state::FinalizedState, non_finalized_state::NonFinalizedState,
+        finalized_state::ZebraDb, non_finalized_state::NonFinalizedState,
     },
     BoxError, PreparedBlock, ValidateContextError,
 };
@@ -100,7 +100,7 @@ where
     });
     let difficulty_adjustment =
         AdjustedDifficulty::new_from_block(&prepared.block, network, relevant_data);
-    check::difficulty_threshold_is_valid(
+    check::difficulty_threshold_and_time_are_valid(
         prepared.block.header.difficulty_threshold,
         difficulty_adjustment,
     )?;
@@ -233,7 +233,7 @@ fn height_one_more_than_parent_height(
 ///
 /// These checks are performed together, because the time field is used to
 /// calculate the expected difficulty adjustment.
-fn difficulty_threshold_is_valid(
+fn difficulty_threshold_and_time_are_valid(
     difficulty_threshold: CompactDifficulty,
     difficulty_adjustment: AdjustedDifficulty,
 ) -> Result<(), ValidateContextError> {
@@ -365,25 +365,25 @@ where
 ///
 /// Additional contextual validity checks are performed by the non-finalized [`Chain`].
 pub(crate) fn initial_contextual_validity(
-    finalized_state: &FinalizedState,
+    finalized_state: &ZebraDb,
     non_finalized_state: &NonFinalizedState,
     prepared: &PreparedBlock,
 ) -> Result<(), ValidateContextError> {
     let relevant_chain = any_ancestor_blocks(
         non_finalized_state,
-        &finalized_state.db,
+        finalized_state,
         prepared.block.header.previous_block_hash,
     );
 
     // Security: check proof of work before any other checks
     check::block_is_valid_for_recent_chain(
         prepared,
-        finalized_state.network(),
-        finalized_state.db.finalized_tip_height(),
+        non_finalized_state.network,
+        finalized_state.finalized_tip_height(),
         relevant_chain,
     )?;
 
-    check::nullifier::no_duplicates_in_finalized_chain(prepared, &finalized_state.db)?;
+    check::nullifier::no_duplicates_in_finalized_chain(prepared, finalized_state)?;
 
     Ok(())
 }

@@ -5,6 +5,8 @@
 //! cargo insta test --review --features getblocktemplate-rpcs --delete-unreferenced-snapshots
 //! ```
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
 use hex::FromHex;
 use insta::Settings;
 use tower::{buffer::Buffer, Service};
@@ -19,20 +21,25 @@ use zebra_chain::{
     transparent,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
 };
+use zebra_network::{address_book_peers::MockAddressBookPeers, types::MetaAddr};
 use zebra_node_services::mempool;
 
 use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
 
-use zebra_test::mock_service::{MockService, PanicAssertion};
+use zebra_test::{
+    mock_service::{MockService, PanicAssertion},
+    vectors::BLOCK_MAINNET_1_BYTES,
+};
 
 use crate::methods::{
     get_block_template_rpcs::{
         self,
         types::{
-            get_block_template::{self, GetBlockTemplate},
+            get_block_template::{self, GetBlockTemplateRequestMode},
             get_mining_info,
             hex_data::HexData,
             long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
+            peer_info::PeerInfo,
             submit_block,
         },
     },
@@ -103,11 +110,20 @@ pub async fn test_responses<State, ReadState>(
     let fake_cur_time = DateTime32::from(1654008617);
     // nu5 block time + 123
     let fake_max_time = DateTime32::from(1654008728);
+    let fake_difficulty = CompactDifficulty::from(ExpandedDifficulty::from(U256::one()));
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
     mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+
+    let mock_address_book =
+        MockAddressBookPeers::new(vec![MetaAddr::new_initial_peer(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            network.default_port(),
+        ))
+        .into_new_meta_addr()
+        .unwrap()]);
 
     // get an rpc instance with continuous blockchain state
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
@@ -118,6 +134,7 @@ pub async fn test_responses<State, ReadState>(
         mock_chain_tip.clone(),
         chain_verifier.clone(),
         mock_sync_status.clone(),
+        mock_address_book,
     );
 
     // `getblockcount`
@@ -141,6 +158,13 @@ pub async fn test_responses<State, ReadState>(
         .expect("We should have a success response");
     snapshot_rpc_getmininginfo(get_mining_info, &settings);
 
+    // `getpeerinfo`
+    let get_peer_info = get_block_template_rpc
+        .get_peer_info()
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getpeerinfo(get_peer_info, &settings);
+
     // `getnetworksolps` (and `getnetworkhashps`)
     let get_network_sol_ps = get_block_template_rpc
         .get_network_sol_ps(None, None)
@@ -159,12 +183,13 @@ pub async fn test_responses<State, ReadState>(
     // create a new rpc instance with new state and mock
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         network,
-        mining_config,
+        mining_config.clone(),
         Buffer::new(mempool.clone(), 1),
         new_read_state.clone(),
-        mock_chain_tip,
+        mock_chain_tip.clone(),
         chain_verifier,
-        mock_sync_status,
+        mock_sync_status.clone(),
+        MockAddressBookPeers::default(),
     );
 
     // Basic variant (default mode and no extra features)
@@ -178,7 +203,7 @@ pub async fn test_responses<State, ReadState>(
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
             .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                expected_difficulty: fake_difficulty,
                 tip_height: fake_tip_height,
                 tip_hash: fake_tip_hash,
                 cur_time: fake_cur_time,
@@ -195,10 +220,12 @@ pub async fn test_responses<State, ReadState>(
         .await
         .respond(mempool::Response::FullTransactions(vec![]));
 
-    let get_block_template = get_block_template
+    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
         .await
         .expect("unexpected panic in getblocktemplate RPC task")
-        .expect("unexpected error in getblocktemplate RPC call");
+        .expect("unexpected error in getblocktemplate RPC call") else {
+            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+        };
 
     let coinbase_tx: Transaction = get_block_template
         .coinbase_txn
@@ -207,7 +234,12 @@ pub async fn test_responses<State, ReadState>(
         .zcash_deserialize_into()
         .expect("coinbase bytes are valid");
 
-    snapshot_rpc_getblocktemplate("basic", get_block_template, coinbase_tx, &settings);
+    snapshot_rpc_getblocktemplate(
+        "basic",
+        (*get_block_template).into(),
+        Some(coinbase_tx),
+        &settings,
+    );
 
     // long polling feature with submit old field
 
@@ -225,7 +257,7 @@ pub async fn test_responses<State, ReadState>(
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
             .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                expected_difficulty: fake_difficulty,
                 tip_height: fake_tip_height,
                 tip_hash: fake_tip_hash,
                 cur_time: fake_cur_time,
@@ -250,10 +282,12 @@ pub async fn test_responses<State, ReadState>(
         .await
         .respond(mempool::Response::FullTransactions(vec![]));
 
-    let get_block_template = get_block_template
+    let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
         .await
         .expect("unexpected panic in getblocktemplate RPC task")
-        .expect("unexpected error in getblocktemplate RPC call");
+        .expect("unexpected error in getblocktemplate RPC call") else {
+            panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+        };
 
     let coinbase_tx: Transaction = get_block_template
         .coinbase_txn
@@ -262,7 +296,63 @@ pub async fn test_responses<State, ReadState>(
         .zcash_deserialize_into()
         .expect("coinbase bytes are valid");
 
-    snapshot_rpc_getblocktemplate("long_poll", get_block_template, coinbase_tx, &settings);
+    snapshot_rpc_getblocktemplate(
+        "long_poll",
+        (*get_block_template).into(),
+        Some(coinbase_tx),
+        &settings,
+    );
+
+    // `getblocktemplate` proposal mode variant
+
+    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template(Some(
+        get_block_template::JsonParameters {
+            mode: GetBlockTemplateRequestMode::Proposal,
+            data: Some(HexData("".into())),
+            ..Default::default()
+        },
+    )));
+
+    let get_block_template = get_block_template
+        .await
+        .expect("unexpected panic in getblocktemplate RPC task")
+        .expect("unexpected error in getblocktemplate RPC call");
+
+    snapshot_rpc_getblocktemplate("invalid-proposal", get_block_template, None, &settings);
+
+    let mut mock_chain_verifier = MockService::build().for_unit_tests();
+    let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
+        network,
+        mining_config,
+        Buffer::new(mempool.clone(), 1),
+        new_read_state.clone(),
+        mock_chain_tip,
+        mock_chain_verifier.clone(),
+        mock_sync_status,
+        MockAddressBookPeers::default(),
+    );
+
+    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template(Some(
+        get_block_template::JsonParameters {
+            mode: GetBlockTemplateRequestMode::Proposal,
+            data: Some(HexData(BLOCK_MAINNET_1_BYTES.to_vec())),
+            ..Default::default()
+        },
+    )));
+
+    tokio::spawn(async move {
+        mock_chain_verifier
+            .expect_request_that(|req| matches!(req, zebra_consensus::Request::CheckProposal(_)))
+            .await
+            .respond(Hash::from([0; 32]));
+    });
+
+    let get_block_template = get_block_template
+        .await
+        .expect("unexpected panic in getblocktemplate RPC task")
+        .expect("unexpected error in getblocktemplate RPC call");
+
+    snapshot_rpc_getblocktemplate("proposal", get_block_template, None, &settings);
 
     // `submitblock`
 
@@ -287,19 +377,22 @@ fn snapshot_rpc_getblockhash(block_hash: GetBlockHash, settings: &insta::Setting
 /// Snapshot `getblocktemplate` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblocktemplate(
     variant: &'static str,
-    block_template: GetBlockTemplate,
-    coinbase_tx: Transaction,
+    block_template: get_block_template::Response,
+    coinbase_tx: Option<Transaction>,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
         insta::assert_json_snapshot!(format!("get_block_template_{variant}"), block_template)
     });
-    settings.bind(|| {
-        insta::assert_ron_snapshot!(
-            format!("get_block_template_{variant}.coinbase_tx"),
-            coinbase_tx
-        )
-    });
+
+    if let Some(coinbase_tx) = coinbase_tx {
+        settings.bind(|| {
+            insta::assert_ron_snapshot!(
+                format!("get_block_template_{variant}.coinbase_tx"),
+                coinbase_tx
+            )
+        });
+    };
 }
 
 /// Snapshot `submitblock` response, using `cargo insta` and JSON serialization.
@@ -318,6 +411,11 @@ fn snapshot_rpc_getmininginfo(
     settings: &insta::Settings,
 ) {
     settings.bind(|| insta::assert_json_snapshot!("get_mining_info", get_mining_info));
+}
+
+/// Snapshot `getpeerinfo` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_peer_info", get_peer_info));
 }
 
 /// Snapshot `getnetworksolps` response, using `cargo insta` and JSON serialization.

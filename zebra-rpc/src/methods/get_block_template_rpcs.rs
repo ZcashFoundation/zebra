@@ -16,6 +16,7 @@ use zebra_chain::{
     transparent,
 };
 use zebra_consensus::VerifyChainError;
+use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{ReadRequest, ReadResponse};
 
@@ -26,13 +27,12 @@ use crate::methods::{
             DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
         },
         get_block_template::{
-            check_block_template_parameters, check_miner_address, check_synced_to_tip,
-            fetch_mempool_transactions, fetch_state_tip_and_local_time,
-            generate_coinbase_and_roots,
+            check_miner_address, check_synced_to_tip, fetch_mempool_transactions,
+            fetch_state_tip_and_local_time, validate_block_proposal,
         },
         types::{
             get_block_template::GetBlockTemplate, get_mining_info, hex_data::HexData,
-            long_poll::LongPollInput, submit_block,
+            long_poll::LongPollInput, peer_info::PeerInfo, submit_block,
         },
     },
     height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
@@ -101,7 +101,7 @@ pub trait GetBlockTemplateRpc {
     fn get_block_template(
         &self,
         parameters: Option<get_block_template::JsonParameters>,
-    ) -> BoxFuture<Result<GetBlockTemplate>>;
+    ) -> BoxFuture<Result<get_block_template::Response>>;
 
     /// Submits block to the node to be validated and committed.
     /// Returns the [`submit_block::Response`] for the operation, as a JSON string.
@@ -150,10 +150,16 @@ pub trait GetBlockTemplateRpc {
     ) -> BoxFuture<Result<u64>> {
         self.get_network_sol_ps(num_blocks, height)
     }
+
+    /// Returns data about each connected network node.
+    ///
+    /// zcashd reference: [`getpeerinfo`](https://zcash.github.io/rpc/getpeerinfo.html)
+    #[rpc(name = "getpeerinfo")]
+    fn get_peer_info(&self) -> BoxFuture<Result<Vec<PeerInfo>>>;
 }
 
 /// RPC method implementations.
-pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus>
+pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>
 where
     Mempool: Service<
         mempool::Request,
@@ -165,12 +171,13 @@ where
         Response = zebra_state::ReadResponse,
         Error = zebra_state::BoxError,
     >,
-    ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers,
 {
     // Configuration
     //
@@ -198,10 +205,13 @@ where
 
     /// The chain sync status, used for checking if Zebra is likely close to the network chain tip.
     sync_status: SyncStatus,
+
+    /// Address book of peers, used for `getpeerinfo`.
+    address_book: AddressBook,
 }
 
-impl<Mempool, State, Tip, ChainVerifier, SyncStatus>
-    GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus>
+impl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>
+    GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -217,14 +227,16 @@ where
         + Sync
         + 'static,
     Tip: ChainTip + Clone + Send + Sync + 'static,
-    ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the handler for getblocktemplate RPCs.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         network: Network,
         mining_config: config::Config,
@@ -233,6 +245,7 @@ where
         latest_chain_tip: Tip,
         chain_verifier: ChainVerifier,
         sync_status: SyncStatus,
+        address_book: AddressBook,
     ) -> Self {
         Self {
             network,
@@ -242,12 +255,13 @@ where
             latest_chain_tip,
             chain_verifier,
             sync_status,
+            address_book,
         }
     }
 }
 
-impl<Mempool, State, Tip, ChainVerifier, SyncStatus> GetBlockTemplateRpc
-    for GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus>
+impl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook> GetBlockTemplateRpc
+    for GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -265,13 +279,14 @@ where
         + 'static,
     <State as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
-    ChainVerifier: Service<Arc<Block>, Response = block::Hash, Error = zebra_consensus::BoxError>
+    ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <ChainVerifier as Service<Arc<Block>>>::Future: Send,
+    <ChainVerifier as Service<zebra_consensus::Request>>::Future: Send,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     fn get_block_count(&self) -> Result<u32> {
         best_chain_tip_height(&self.latest_chain_tip).map(|height| height.0)
@@ -312,11 +327,11 @@ where
         .boxed()
     }
 
-    // TODO: use HexData to handle block proposal data, and a generic error constructor (#5548)
+    // TODO: use a generic error constructor (#5548)
     fn get_block_template(
         &self,
         parameters: Option<get_block_template::JsonParameters>,
-    ) -> BoxFuture<Result<GetBlockTemplate>> {
+    ) -> BoxFuture<Result<get_block_template::Response>> {
         // Should we generate coinbase transactions that are exactly like zcashd's?
         //
         // This is useful for testing, but either way Zebra should obey the consensus rules.
@@ -332,20 +347,27 @@ where
         let sync_status = self.sync_status.clone();
         let state = self.state.clone();
 
+        if let Some(HexData(block_proposal_bytes)) = parameters
+            .as_ref()
+            .and_then(get_block_template::JsonParameters::block_proposal_data)
+        {
+            return validate_block_proposal(self.chain_verifier.clone(), block_proposal_bytes)
+                .boxed();
+        }
+
         // To implement long polling correctly, we split this RPC into multiple phases.
         async move {
+            get_block_template::check_parameters(&parameters)?;
+
+            let client_long_poll_id = parameters
+                .as_ref()
+                .and_then(|params| params.long_poll_id.clone());
+
             // - One-off checks
 
             // Check config and parameters.
             // These checks always have the same result during long polling.
             let miner_address = check_miner_address(miner_address)?;
-
-            let mut client_long_poll_id = None;
-            if let Some(parameters) = parameters {
-                check_block_template_parameters(&parameters)?;
-
-                client_long_poll_id = parameters.long_poll_id;
-            }
 
             // - Checks and fetches that can change during long polling
             //
@@ -506,7 +528,7 @@ where
                                     ?server_long_poll_id,
                                     ?client_long_poll_id,
                                     "returning from long poll due to a state error.\
-                                     Is Zebra shutting down?"
+                                    Is Zebra shutting down?"
                                 );
 
                                 return Err(Error {
@@ -560,29 +582,17 @@ where
 
             // - After this point, the template only depends on the previously fetched data.
 
-            // Generate the coinbase transaction and default roots
-            //
-            // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
-            let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
-                network,
-                next_block_height,
-                miner_address,
-                &mempool_txs,
-                chain_tip_and_local_time.history_tree.clone(),
-                COINBASE_LIKE_ZCASHD,
-            );
-
             let response = GetBlockTemplate::new(
+                network,
+                miner_address,
                 &chain_tip_and_local_time,
                 server_long_poll_id,
-                coinbase_txn,
-                &mempool_txs,
-                default_roots,
+                mempool_txs,
                 submit_old,
                 COINBASE_LIKE_ZCASHD,
             );
 
-            Ok(response)
+            Ok(response.into())
         }
         .boxed()
     }
@@ -608,7 +618,7 @@ where
                     message: error.to_string(),
                     data: None,
                 })?
-                .call(Arc::new(block))
+                .call(zebra_consensus::Request::Commit(Arc::new(block)))
                 .await;
 
             let chain_error = match chain_verifier_response {
@@ -707,6 +717,18 @@ where
             Ok(solution_rate
                 .try_into()
                 .expect("per-second solution rate always fits in u64"))
+        }
+        .boxed()
+    }
+
+    fn get_peer_info(&self) -> BoxFuture<Result<Vec<PeerInfo>>> {
+        let address_book = self.address_book.clone();
+        async move {
+            Ok(address_book
+                .recently_live_peers(chrono::Utc::now())
+                .into_iter()
+                .map(PeerInfo::from)
+                .collect())
         }
         .boxed()
     }

@@ -54,7 +54,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v3.2.0
+      - uses: actions/checkout@v3.3.0
         with:
           persist-credentials: false
 
@@ -66,7 +66,7 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v4.1.1
+        uses: docker/metadata-action@v4.3.0
         with:
           # list of Docker images to use as base name for tags
           images: |
@@ -124,7 +124,7 @@ jobs:
       # Build and push image to Google Artifact Registry, and possibly DockerHub
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v3.2.0
+        uses: docker/build-push-action@v3.3.0
         with:
           target: ${{ inputs.dockerfile_target }}
           context: .
@@ -155,3 +155,8 @@ jobs:
             type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
             type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:main-cache
           cache-to: type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
+          # TODO: change after new buildkit version gets fixed
+          # https://github.com/moby/buildkit/issues/3347
+          # https://github.com/docker/build-push-action/issues/761
+          driver-opts: |
+            image=moby/buildkit:v0.10.6

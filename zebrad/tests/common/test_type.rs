@@ -23,7 +23,10 @@ use TestType::*;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum TestType {
     /// Launch with an empty Zebra and lightwalletd state.
-    LaunchWithEmptyState,
+    LaunchWithEmptyState {
+        /// Configures whether the test uses lightwalletd.
+        launches_lightwalletd: bool,
+    },
 
     /// Do a full sync from an empty lightwalletd state.
     ///
@@ -66,7 +69,7 @@ impl TestType {
         // - FullSyncFromGenesis, UpdateCachedState, UpdateZebraCachedStateNoRpc:
         //   skip the test if it is not available
         match self {
-            LaunchWithEmptyState => false,
+            LaunchWithEmptyState { .. } => false,
             FullSyncFromGenesis { .. }
             | UpdateCachedState
             | UpdateZebraCachedStateNoRpc
@@ -77,11 +80,10 @@ impl TestType {
     /// Does this test need a Zebra rpc server?
     pub fn needs_zebra_rpc_server(&self) -> bool {
         match self {
-            UpdateZebraCachedStateWithRpc => true,
-            UpdateZebraCachedStateNoRpc
-            | LaunchWithEmptyState
-            | FullSyncFromGenesis { .. }
-            | UpdateCachedState => self.launches_lightwalletd(),
+            UpdateZebraCachedStateWithRpc | LaunchWithEmptyState { .. } => true,
+            UpdateZebraCachedStateNoRpc | FullSyncFromGenesis { .. } | UpdateCachedState => {
+                self.launches_lightwalletd()
+            }
         }
     }
 
@@ -89,7 +91,10 @@ impl TestType {
     pub fn launches_lightwalletd(&self) -> bool {
         match self {
             UpdateZebraCachedStateNoRpc | UpdateZebraCachedStateWithRpc => false,
-            LaunchWithEmptyState | FullSyncFromGenesis { .. } | UpdateCachedState => true,
+            FullSyncFromGenesis { .. } | UpdateCachedState => true,
+            LaunchWithEmptyState {
+                launches_lightwalletd,
+            } => *launches_lightwalletd,
         }
     }
 
@@ -100,7 +105,7 @@ impl TestType {
         // - FullSyncFromGenesis: use it if available, timeout if it is already populated
         // - UpdateCachedState: skip the test if it is not available
         match self {
-            LaunchWithEmptyState
+            LaunchWithEmptyState { .. }
             | FullSyncFromGenesis { .. }
             | UpdateZebraCachedStateNoRpc
             | UpdateZebraCachedStateWithRpc => false,
@@ -111,7 +116,7 @@ impl TestType {
     /// Does this test allow a `lightwalletd` cached state, even if it is not required?
     pub fn allow_lightwalletd_cached_state(&self) -> bool {
         match self {
-            LaunchWithEmptyState => false,
+            LaunchWithEmptyState { .. } => false,
             FullSyncFromGenesis {
                 allow_lightwalletd_cached_state,
             } => *allow_lightwalletd_cached_state,
@@ -122,7 +127,7 @@ impl TestType {
     /// Can this test create a new `LIGHTWALLETD_DATA_DIR` cached state?
     pub fn can_create_lightwalletd_cached_state(&self) -> bool {
         match self {
-            LaunchWithEmptyState => false,
+            LaunchWithEmptyState { .. } => false,
             FullSyncFromGenesis { .. } | UpdateCachedState => true,
             UpdateZebraCachedStateNoRpc | UpdateZebraCachedStateWithRpc => false,
         }
@@ -232,7 +237,7 @@ impl TestType {
     /// Returns the `zebrad` timeout for this test type.
     pub fn zebrad_timeout(&self) -> Duration {
         match self {
-            LaunchWithEmptyState => LIGHTWALLETD_DELAY,
+            LaunchWithEmptyState { .. } => LIGHTWALLETD_DELAY,
             FullSyncFromGenesis { .. } => LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
             UpdateCachedState | UpdateZebraCachedStateNoRpc => LIGHTWALLETD_UPDATE_TIP_DELAY,
             UpdateZebraCachedStateWithRpc => FINISH_PARTIAL_SYNC_TIMEOUT,
@@ -249,7 +254,7 @@ impl TestType {
         // We use the same timeouts for zebrad and lightwalletd,
         // because the tests check zebrad and lightwalletd concurrently.
         match self {
-            LaunchWithEmptyState => LIGHTWALLETD_DELAY,
+            LaunchWithEmptyState { .. } => LIGHTWALLETD_DELAY,
             FullSyncFromGenesis { .. } => LIGHTWALLETD_FULL_SYNC_TIP_DELAY,
             UpdateCachedState | UpdateZebraCachedStateNoRpc | UpdateZebraCachedStateWithRpc => {
                 LIGHTWALLETD_UPDATE_TIP_DELAY
@@ -270,7 +275,7 @@ impl TestType {
             // Fail if we need a cached Zebra state, but it's empty
             zebrad_failure_messages.push("loaded Zebra state cache .*tip.*=.*None".to_string());
         }
-        if *self == LaunchWithEmptyState {
+        if matches!(*self, LaunchWithEmptyState { .. }) {
             // Fail if we need an empty Zebra state, but it has blocks
             zebrad_failure_messages
                 .push(r"loaded Zebra state cache .*tip.*=.*Height\([1-9][0-9]*\)".to_string());
@@ -311,7 +316,7 @@ impl TestType {
             lightwalletd_failure_messages.push("Found [1-9][0-9]* blocks in cache".to_string());
         }
 
-        let lightwalletd_ignore_messages = if *self == LaunchWithEmptyState {
+        let lightwalletd_ignore_messages = if matches!(*self, LaunchWithEmptyState { .. }) {
             LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES.iter()
         } else {
             NO_MATCHES_REGEX_ITER.iter()
