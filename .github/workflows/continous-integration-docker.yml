@@ -316,10 +316,9 @@ jobs:
       - name: Run tests using the default config
         run: |
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
-          docker run --detach --name default-conf-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} start
+          docker run --detach --name default-conf-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
           docker logs --tail all --follow default-conf-tests | tee --output-error=exit /dev/stderr | grep --extended-regexp --max-count=1 -e 'estimated progress to chain tip.*BeforeOverwinter'
           docker stop default-conf-tests
-
 
   # Test that Zebra works using the $ZEBRA_CONF_PATH config
   test-zebra-conf-path:
