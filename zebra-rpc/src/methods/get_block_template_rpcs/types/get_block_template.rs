@@ -30,8 +30,8 @@ use crate::methods::{
 pub mod parameters;
 pub mod proposal;
 
-pub use parameters::*;
-pub use proposal::*;
+pub use parameters::{GetBlockTemplateCapability, GetBlockTemplateRequestMode, JsonParameters};
+pub use proposal::{proposal_block_from_template, ProposalRejectReason, ProposalResponse};
 
 /// A serialized `getblocktemplate` RPC response in template mode.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -286,7 +286,7 @@ impl GetBlockTemplate {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 /// A `getblocktemplate` RPC response.
 pub enum Response {
