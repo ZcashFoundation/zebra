@@ -645,6 +645,64 @@ where
             })
     }
 
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    // TODO: use a generic error constructor (#5548)
+    fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {
+        use std::cmp::Ordering;
+        use zebra_chain::transaction::VerifiedUnminedTx;
+
+        /// Returns relative score for sorting [`VerifiedUnminedTx`]s (fee/size)
+        fn tx_sort_score(tx: &VerifiedUnminedTx, tx2: &VerifiedUnminedTx) -> Option<u64> {
+            u64::try_from(tx2.transaction.size)
+                .expect("transaction size should fit in u64")
+                .checked_mul(u64::from(tx.miner_fee))
+        }
+
+        let mut mempool = self.mempool.clone();
+
+        async move {
+            let request = mempool::Request::FullTransactions;
+
+            // `zcashd` doesn't check if it is synced to the tip here, so we don't either.
+            let response = mempool
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            if let mempool::Response::FullTransactions(mut transactions) = response {
+                transactions.sort_by(|tx, tx2| {
+                    match tx_sort_score(tx2, tx).cmp(&tx_sort_score(tx, tx2)) {
+                        Ordering::Equal => {
+                            tracing::info!("tx_sort_scores are equal");
+
+                            tx.transaction
+                                .id
+                                .mined_id()
+                                .cmp(&tx2.transaction.id.mined_id())
+                        }
+                        gt_or_lt => gt_or_lt,
+                    }
+                });
+
+                let tx_ids: Vec<String> = transactions
+                    .iter()
+                    .map(|unmined_tx| unmined_tx.transaction.id.mined_id().encode_hex())
+                    .collect();
+
+                Ok(tx_ids)
+            } else {
+                unreachable!("unmatched response to a mempool::FullTransactions request")
+            }
+        }
+        .boxed()
+    }
+
+    #[cfg(not(feature = "getblocktemplate-rpcs"))]
     // TODO: use a generic error constructor (#5548)
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {
         let mut mempool = self.mempool.clone();
