@@ -681,6 +681,7 @@ where
                     transactions.sort_by_cached_key(|tx| {
                         std::cmp::Reverse((
                             u64::from(tx.miner_fee) / tx.transaction.size as u64,
+                            // transaction hashes are compared in their serialized byte-order.
                             tx.transaction.id.mined_id(),
                         ))
                     });
