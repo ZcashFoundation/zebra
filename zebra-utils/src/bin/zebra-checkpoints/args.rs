@@ -5,8 +5,10 @@
 use structopt::StructOpt;
 use thiserror::Error;
 
-///
-#[derive(Debug)]
+use std::str::FromStr;
+
+/// Backend
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Mode {
     Zebra,
     Zcash,
@@ -24,7 +26,7 @@ impl FromStr for Mode {
     }
 }
 
-#[derive(Clone, Debug, Error)]
+#[derive(Debug, Error)]
 #[error("Invalid mode: {0}")]
 pub struct InvalidModeError(String);
 
