@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     amount::{Amount, NegativeAllowed, NonNegative},
     block::MAX_BLOCK_BYTES,
+    fmt::HexDebug,
     primitives::{x25519, Bctv14Proof, Groth16Proof, ZkSnarkProof},
     serialization::{
         ReadZcashExt, SerializationError, TrustedPreallocate, WriteZcashExt, ZcashDeserialize,
@@ -25,17 +26,17 @@ use super::{commitment, note, tree};
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
 )]
-pub struct RandomSeed([u8; 32]);
+pub struct RandomSeed(HexDebug<[u8; 32]>);
 
 impl From<[u8; 32]> for RandomSeed {
     fn from(bytes: [u8; 32]) -> Self {
-        Self(bytes)
+        Self(bytes.into())
     }
 }
 
 impl From<RandomSeed> for [u8; 32] {
     fn from(rt: RandomSeed) -> [u8; 32] {
-        rt.0
+        *rt.0
     }
 }
 

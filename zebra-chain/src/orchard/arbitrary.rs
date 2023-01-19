@@ -74,8 +74,8 @@ impl Arbitrary for Signature<SpendAuth> {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (array::uniform32(any::<u8>()), array::uniform32(any::<u8>()))
             .prop_map(|(r_bytes, s_bytes)| Self {
-                r_bytes,
-                s_bytes,
+                r_bytes: r_bytes.into(),
+                s_bytes: s_bytes.into(),
                 _marker: PhantomData,
             })
             .boxed()

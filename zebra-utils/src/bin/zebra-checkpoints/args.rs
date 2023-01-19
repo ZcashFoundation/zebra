@@ -2,10 +2,6 @@
 //!
 //! For usage please refer to the program help: `zebra-checkpoints --help`
 
-#![deny(missing_docs)]
-#![allow(clippy::try_err)]
-
-use std::str::FromStr;
 use structopt::StructOpt;
 use thiserror::Error;
 
@@ -33,7 +29,7 @@ impl FromStr for Mode {
 pub struct InvalidModeError(String);
 
 /// zebra-checkpoints arguments
-#[derive(Debug, StructOpt)]
+#[derive(Clone, Debug, Eq, PartialEq, StructOpt)]
 pub struct Args {
     /// Mode
     #[structopt(default_value = "zebra", short, long)]

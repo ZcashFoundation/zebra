@@ -8,17 +8,21 @@
 //! zebra-consensus accepts an ordered list of checkpoints, starting with the
 //! genesis block. Checkpoint heights can be chosen arbitrarily.
 
-use color_eyre::eyre::{ensure, Result};
-use hex::FromHex;
-use serde_json::Value;
 use std::process::Stdio;
-use structopt::StructOpt;
-
-use zebra_chain::{block, serialization::ZcashDeserializeInto};
-use zebra_utils::init_tracing;
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
+
+use color_eyre::eyre::{ensure, Result};
+use hex::FromHex;
+use serde_json::Value;
+use structopt::StructOpt;
+
+use zebra_chain::{
+    block, serialization::ZcashDeserializeInto, transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
+};
+use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
+use zebra_utils::init_tracing;
 
 mod args;
 
@@ -59,10 +63,11 @@ fn cmd_output(cmd: &mut std::process::Command) -> Result<String> {
     Ok(s)
 }
 
+/// Process entry point for `zebra-checkpoints`
 #[allow(clippy::print_stdout)]
 fn main() -> Result<()> {
+    // initialise
     init_tracing();
-
     color_eyre::install()?;
 
     // get the current block count
@@ -80,7 +85,7 @@ fn main() -> Result<()> {
     // Zcash reorg limit.
     let height_limit = height_limit
         .0
-        .checked_sub(zebra_state::MAX_BLOCK_REORG_HEIGHT)
+        .checked_sub(MIN_TRANSPARENT_COINBASE_MATURITY)
         .map(block::Height)
         .expect("zcashd has some mature blocks: wait for zcashd to sync more blocks");
 
@@ -152,8 +157,8 @@ fn main() -> Result<()> {
 
         // check if checkpoint
         if height == block::Height(0)
-            || cumulative_bytes >= zebra_consensus::MAX_CHECKPOINT_BYTE_COUNT
-            || height_gap.0 >= zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP as u32
+            || cumulative_bytes >= MAX_CHECKPOINT_BYTE_COUNT
+            || height_gap.0 >= MAX_CHECKPOINT_HEIGHT_GAP as u32
         {
             // print to output
             println!("{} {hash}", height.0);

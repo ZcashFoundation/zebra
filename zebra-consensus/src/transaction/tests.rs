@@ -963,7 +963,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
         // Add a new joinsplit with the duplicate nullifier
         let mut new_joinsplit = joinsplit_data.first.clone();
         new_joinsplit.nullifiers[0] = duplicate_nullifier;
-        new_joinsplit.nullifiers[1] = sprout::note::Nullifier([2u8; 32]);
+        new_joinsplit.nullifiers[1] = sprout::note::Nullifier([2u8; 32].into());
 
         joinsplit_data.rest.push(new_joinsplit);
 
@@ -1981,8 +1981,8 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
         .try_into()
         .expect("Invalid JoinSplit transparent input");
     let anchor = sprout::tree::Root::default();
-    let first_nullifier = sprout::note::Nullifier([0u8; 32]);
-    let second_nullifier = sprout::note::Nullifier([1u8; 32]);
+    let first_nullifier = sprout::note::Nullifier([0u8; 32].into());
+    let second_nullifier = sprout::note::Nullifier([1u8; 32].into());
     let commitment = sprout::commitment::NoteCommitment::from([0u8; 32]);
     let ephemeral_key = x25519::PublicKey::from(&x25519::EphemeralSecret::new(rand::thread_rng()));
     let random_seed = sprout::RandomSeed::from([0u8; 32]);

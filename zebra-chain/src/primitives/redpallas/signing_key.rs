@@ -1,4 +1,5 @@
-use std::convert::{TryFrom, TryInto};
+//! Redpallas signing keys for Zebra.
+
 use std::marker::PhantomData;
 
 use group::{ff::PrimeField, GroupEncoding};
@@ -117,8 +118,8 @@ impl<T: SigType> SigningKey<T> {
         let s_bytes = (nonce + (c * self.sk)).to_repr();
 
         Signature {
-            r_bytes,
-            s_bytes,
+            r_bytes: r_bytes.into(),
+            s_bytes: s_bytes.into(),
             _marker: PhantomData,
         }
     }

@@ -11,13 +11,9 @@ use tokio::time::timeout;
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::parameters::Network::*;
-use zebra_chain::serialization::ZcashDeserialize;
+use zebra_chain::{parameters::Network::*, serialization::ZcashDeserialize};
 
-use super::{
-    types::{Progress::*, TargetHeight::*},
-    *,
-};
+use super::*;
 
 /// The timeout we apply to each verify future during testing.
 ///

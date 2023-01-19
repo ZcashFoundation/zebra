@@ -59,6 +59,10 @@ pub enum Response {
     ///
     /// Does not check transparent UTXO inputs
     ValidBestChainTipNullifiersAndAnchors,
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Response to [`Request::CheckBlockProposalValidity`](crate::Request::CheckBlockProposalValidity)
+    ValidBlockProposal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,6 +141,10 @@ pub enum ReadResponse {
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::SolutionRate`](crate::ReadRequest::SolutionRate)
     SolutionRate(Option<u128>),
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Response to [`ReadRequest::CheckBlockProposalValidity`](crate::ReadRequest::CheckBlockProposalValidity)
+    ValidBlockProposal,
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -158,16 +166,14 @@ pub struct GetBlockTemplateChainInfo {
     /// Depends on the `tip_hash`.
     pub history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
 
-    // Data derived from the state tip and recent blocks.
-    //
-    /// The expected difficulty of the candidate block.
-    /// Depends on the `tip_hash`.
-    pub expected_difficulty: CompactDifficulty,
-
     // Data derived from the state tip and recent blocks, and the current local clock.
     //
+    /// The expected difficulty of the candidate block.
+    /// Depends on the `tip_hash`, and the local clock on testnet.
+    pub expected_difficulty: CompactDifficulty,
+
     /// The current system time, adjusted to fit within `min_time` and `max_time`.
-    /// Depends on the local clock and the `tip_hash`.
+    /// Always depends on the local clock and the `tip_hash`.
     pub cur_time: DateTime32,
 
     /// The mininimum time the miner can use in this block.
@@ -214,6 +220,9 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressUtxos(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
+
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::BlockHash(_) => {

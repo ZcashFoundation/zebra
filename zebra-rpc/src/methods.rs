@@ -1195,7 +1195,7 @@ pub enum GetBlock {
 ///
 /// Also see the notes for the [`Rpc::get_best_block_hash`] and `get_block_hash` methods.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct GetBlockHash(#[serde(with = "hex")] block::Hash);
+pub struct GetBlockHash(#[serde(with = "hex")] pub block::Hash);
 
 /// Response to a `z_gettreestate` RPC request.
 ///

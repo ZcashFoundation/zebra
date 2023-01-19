@@ -89,7 +89,7 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
         .respond(zn::Response::Blocks(vec![Available(block0.clone())]));
 
     chain_verifier
-        .expect_request(block0)
+        .expect_request(zebra_consensus::Request::Commit(block0))
         .await
         .respond(block0_hash);
 
@@ -175,9 +175,9 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 
     for _ in 1..=2 {
         chain_verifier
-            .expect_request_that(|req| remaining_blocks.remove(&req.hash()).is_some())
+            .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
             .await
-            .respond_with(|req| req.hash());
+            .respond_with(|req| req.block().hash());
     }
     assert_eq!(
         remaining_blocks,
@@ -239,9 +239,9 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
 
     for _ in 3..=4 {
         chain_verifier
-            .expect_request_that(|req| remaining_blocks.remove(&req.hash()).is_some())
+            .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
             .await
-            .respond_with(|req| req.hash());
+            .respond_with(|req| req.block().hash());
     }
     assert_eq!(
         remaining_blocks,
@@ -316,7 +316,7 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
         .respond(zn::Response::Blocks(vec![Available(block0.clone())]));
 
     chain_verifier
-        .expect_request(block0)
+        .expect_request(zebra_consensus::Request::Commit(block0))
         .await
         .respond(block0_hash);
 
@@ -404,9 +404,9 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 
     for _ in 1..=2 {
         chain_verifier
-            .expect_request_that(|req| remaining_blocks.remove(&req.hash()).is_some())
+            .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
             .await
-            .respond_with(|req| req.hash());
+            .respond_with(|req| req.block().hash());
     }
     assert_eq!(
         remaining_blocks,
@@ -470,9 +470,9 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
 
     for _ in 3..=4 {
         chain_verifier
-            .expect_request_that(|req| remaining_blocks.remove(&req.hash()).is_some())
+            .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
             .await
-            .respond_with(|req| req.hash());
+            .respond_with(|req| req.block().hash());
     }
     assert_eq!(
         remaining_blocks,
@@ -598,7 +598,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
         .respond(zn::Response::Blocks(vec![Available(block0.clone())]));
 
     chain_verifier
-        .expect_request(block0)
+        .expect_request(zebra_consensus::Request::Commit(block0))
         .await
         .respond(block0_hash);
 
@@ -759,7 +759,7 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
         .respond(zn::Response::Blocks(vec![Available(block0.clone())]));
 
     chain_verifier
-        .expect_request(block0)
+        .expect_request(zebra_consensus::Request::Commit(block0))
         .await
         .respond(block0_hash);
 
@@ -845,9 +845,9 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
 
     for _ in 1..=2 {
         chain_verifier
-            .expect_request_that(|req| remaining_blocks.remove(&req.hash()).is_some())
+            .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
             .await
-            .respond_with(|req| req.hash());
+            .respond_with(|req| req.block().hash());
     }
     assert_eq!(
         remaining_blocks,
@@ -927,7 +927,7 @@ fn setup() -> (
     impl Future<Output = Result<(), Report>> + Send,
     SyncStatus,
     // ChainVerifier
-    MockService<Arc<Block>, block::Hash, PanicAssertion>,
+    MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
     // PeerSet
     MockService<zebra_network::Request, zebra_network::Response, PanicAssertion>,
     // StateService
