@@ -141,8 +141,6 @@ pub trait Rpc {
     /// result](https://github.com/zcash/lightwalletd/blob/dfac02093d85fb31fb9a8475b884dd6abca966c7/common/common.go#L152),
     /// so we only return that for now.
     ///
-    /// Additionally, we return block height, hash and size to be compatible with our `zebra-checkpoints` utility.
-    ///
     /// `lightwalletd` only requests blocks by height, so we don't support
     /// getting blocks by hash. (But we parse the height as a JSON string, not an integer).
     /// `lightwalletd` also does not use verbosity=2, so we don't support it.

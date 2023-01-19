@@ -113,7 +113,7 @@ async fn rpc_getblock() {
                     .transactions
                     .iter()
                     .map(|tx| tx.hash().encode_hex())
-                    .collect(),
+                    .collect()
             }
         );
     }
