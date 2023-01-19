@@ -112,9 +112,9 @@ fn main() -> Result<()> {
         // unfortunately we need to create a process for each block
         let mut cmd = passthrough_cmd();
 
-        let (hash, height, size) = match args::Args::from_args().mode {
-            args::Mode::Zcash => {
-                // get block data
+        let (hash, height, size) = match args::Args::from_args().backend {
+            args::Backend::Zcashd => {
+                // get block data from zcashd using verbose=1
                 cmd.args(["getblock", &x.to_string(), "1"]);
                 let output = cmd_output(&mut cmd)?;
 
@@ -129,8 +129,8 @@ fn main() -> Result<()> {
 
                 (hash, height, size)
             }
-            args::Mode::Zebra => {
-                // get block data
+            args::Backend::Zebrad => {
+                // get block data from zebrad by deserializing the raw block
                 cmd.args(["getblock", &x.to_string(), "0"]);
                 let output = cmd_output(&mut cmd)?;
 

@@ -7,20 +7,20 @@ use thiserror::Error;
 
 use std::str::FromStr;
 
-/// Backend
+/// The backend type the zebra-checkpoints utility will use to get data from.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Mode {
-    Zebra,
-    Zcash,
+pub enum Backend {
+    Zebrad,
+    Zcashd,
 }
 
-impl FromStr for Mode {
+impl FromStr for Backend {
     type Err = InvalidModeError;
 
     fn from_str(string: &str) -> Result<Self, Self::Err> {
         match string.to_lowercase().as_str() {
-            "zebra" => Ok(Mode::Zebra),
-            "zcash" => Ok(Mode::Zcash),
+            "zebrad" => Ok(Backend::Zebrad),
+            "zcashd" => Ok(Backend::Zcashd),
             _ => Err(InvalidModeError(string.to_owned())),
         }
     }
@@ -33,9 +33,9 @@ pub struct InvalidModeError(String);
 /// zebra-checkpoints arguments
 #[derive(Clone, Debug, Eq, PartialEq, StructOpt)]
 pub struct Args {
-    /// Mode
-    #[structopt(default_value = "zebra", short, long)]
-    pub mode: Mode,
+    /// Backend type
+    #[structopt(default_value = "zebrad", short, long)]
+    pub backend: Backend,
 
     /// Path to zcash-cli command
     #[structopt(default_value = "zcash-cli", short, long)]
