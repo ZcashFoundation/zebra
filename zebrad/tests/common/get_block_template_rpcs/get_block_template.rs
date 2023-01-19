@@ -27,6 +27,10 @@ use crate::common::{
 /// We've seen it take anywhere from 1-45 seconds for the mempool to have some transactions in it.
 pub const EXPECTED_MEMPOOL_TRANSACTION_TIME: Duration = Duration::from_secs(45);
 
+/// Number of times we want to try submitting a block template as a block proposal at an interval
+/// that allows testing the varying mempool contents.
+const NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED: usize = 3;
+
 /// Launch Zebra, wait for it to sync, and check the getblocktemplate RPC returns without errors.
 pub(crate) async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -86,22 +90,24 @@ pub(crate) async fn run() -> Result<()> {
 
     assert!(is_response_success);
 
-    tracing::info!(
-        "waiting {EXPECTED_MEMPOOL_TRANSACTION_TIME:?} for the mempool \
-         to download and verify some transactions...",
-    );
+    for _ in 0..NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED {
+        tracing::info!(
+            "waiting {EXPECTED_MEMPOOL_TRANSACTION_TIME:?} for the mempool \
+             to download and verify some transactions...",
+        );
 
-    tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
+        tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
 
-    tracing::info!(
-        "calling getblocktemplate RPC method at {rpc_address}, \
-             with a mempool that likely has transactions and attempting \
-             to validate response result as a block proposal",
-    );
+        tracing::info!(
+            "calling getblocktemplate RPC method at {rpc_address}, \
+                 with a mempool that likely has transactions and attempting \
+                 to validate response result as a block proposal",
+        );
 
-    try_validate_block_template(&client)
-        .await
-        .expect("block proposal validation failed");
+        try_validate_block_template(&client)
+            .await
+            .expect("block proposal validation failed");
+    }
 
     zebrad.kill(false)?;
 
