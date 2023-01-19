@@ -658,7 +658,7 @@ where
 
         async move {
             #[cfg(feature = "getblocktemplate-rpcs")]
-            let request = if SHOULD_USE_ZCASHD_ORDER && cfg!(not(test)) {
+            let request = if SHOULD_USE_ZCASHD_ORDER {
                 mempool::Request::FullTransactions
             } else {
                 mempool::Request::TransactionIds
