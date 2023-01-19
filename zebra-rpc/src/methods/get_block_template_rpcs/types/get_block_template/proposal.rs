@@ -2,13 +2,14 @@
 //!
 //! `ProposalResponse` is the output of the `getblocktemplate` RPC method in 'proposal' mode.
 
-use std::{num::ParseIntError, str::FromStr, sync::Arc};
+use std::{error::Error, num::ParseIntError, str::FromStr, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block, Height},
     serialization::{DateTime32, SerializationError, ZcashDeserializeInto},
     work::equihash::Solution,
 };
+use zebra_node_services::BoxError;
 
 use crate::methods::{
     get_block_template_rpcs::types::{
@@ -18,47 +19,46 @@ use crate::methods::{
     GetBlockHash,
 };
 
-/// Error response to a `getblocktemplate` RPC request in proposal mode.
-///
-/// See <https://en.bitcoin.it/wiki/BIP_0022#Appendix:_Example_Rejection_Reasons>
-#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProposalRejectReason {
-    /// Block proposal rejected as invalid.
-    Rejected,
-}
-
 /// Response to a `getblocktemplate` RPC request in proposal mode.
 ///
-/// See <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
+/// <https://en.bitcoin.it/wiki/BIP_0022#Appendix:_Example_Rejection_Reasons>
+///
+/// Note:
+/// The error response specification at <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
+/// seems to have a copy-paste issue, or it is under-specified. We follow the `zcashd`
+/// implementation instead, which returns a single raw string.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged, rename_all = "kebab-case")]
 pub enum ProposalResponse {
-    /// Block proposal was rejected as invalid, returns `reject-reason` and server `capabilities`.
-    ErrorResponse {
-        /// Reason the proposal was invalid as-is.
-        reject_reason: ProposalRejectReason,
-
-        /// The getblocktemplate RPC capabilities supported by Zebra.
-        capabilities: Vec<String>,
-    },
+    /// Block proposal was rejected as invalid.
+    /// Contains the reason that the proposal was invalid.
+    ///
+    /// TODO: turn this into a typed error enum?
+    Rejected(String),
 
     /// Block proposal was successfully validated, returns null.
     Valid,
 }
 
-impl From<ProposalRejectReason> for ProposalResponse {
-    fn from(reject_reason: ProposalRejectReason) -> Self {
-        Self::ErrorResponse {
-            reject_reason,
-            capabilities: GetBlockTemplate::capabilities(),
-        }
+impl ProposalResponse {
+    /// Return a rejected response containing an error kind and detailed error info.
+    pub fn rejected<S: ToString>(kind: S, error: BoxError) -> Self {
+        let kind = kind.to_string();
+
+        // Pretty-print the detailed error for now
+        ProposalResponse::Rejected(format!("{kind}: {error:#?}"))
+    }
+
+    /// Return a rejected response containing just the detailed error information.
+    pub fn error(error: BoxError) -> Self {
+        // Pretty-print the detailed error for now
+        ProposalResponse::Rejected(format!("{error:#?}"))
     }
 }
 
-impl From<ProposalRejectReason> for Response {
-    fn from(error_response: ProposalRejectReason) -> Self {
-        Self::ProposalMode(ProposalResponse::from(error_response))
+impl<E: Error + Send + Sync + 'static> From<E> for ProposalResponse {
+    fn from(error: E) -> Self {
+        Self::error(error.into())
     }
 }
 
