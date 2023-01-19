@@ -24,7 +24,7 @@ use zebra_chain::{
     orchard,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     sapling,
-    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
+    serialization::{SerializationError, ZcashDeserialize},
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
 };
@@ -139,7 +139,7 @@ pub trait Rpc {
     ///
     /// With verbosity=1, [`lightwalletd` only reads the `tx` field of the
     /// result](https://github.com/zcash/lightwalletd/blob/dfac02093d85fb31fb9a8475b884dd6abca966c7/common/common.go#L152),
-    /// so we return that.
+    /// so we only return that for now.
     ///
     /// Additionally, we return block height, hash and size to be compatible with our `zebra-checkpoints` utility.
     ///
@@ -577,29 +577,29 @@ where
                         data: None,
                     })?;
 
-            let request = zebra_state::ReadRequest::Block(hash_or_height);
-            let response = state
-                .ready()
-                .and_then(|service| service.call(request))
-                .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
-
-            let block = match response {
-                zebra_state::ReadResponse::Block(Some(block)) => Ok(block),
-                zebra_state::ReadResponse::Block(None) => Err(Error {
-                    code: MISSING_BLOCK_ERROR_CODE,
-                    message: "Block not found".to_string(),
-                    data: None,
-                }),
-                _ => unreachable!("unmatched response to a block request"),
-            }?;
-
             if verbosity == 0 {
-                Ok(GetBlock::Raw(block.into()))
+                let request = zebra_state::ReadRequest::Block(hash_or_height);
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
+
+                match response {
+                    zebra_state::ReadResponse::Block(Some(block)) => {
+                        Ok(GetBlock::Raw(block.into()))
+                    }
+                    zebra_state::ReadResponse::Block(None) => Err(Error {
+                        code: MISSING_BLOCK_ERROR_CODE,
+                        message: "Block not found".to_string(),
+                        data: None,
+                    }),
+                    _ => unreachable!("unmatched response to a block request"),
+                }
             } else if verbosity == 1 {
                 let request = zebra_state::ReadRequest::TransactionIdsForBlock(hash_or_height);
                 let response = state
@@ -615,14 +615,7 @@ where
                 match response {
                     zebra_state::ReadResponse::TransactionIdsForBlock(Some(tx_ids)) => {
                         let tx_ids = tx_ids.iter().map(|tx_id| tx_id.encode_hex()).collect();
-                        Ok(GetBlock::Object {
-                            hash: block.hash(),
-                            height: block
-                                .coinbase_height()
-                                .expect("all blocks should have a coinbase height"),
-                            size: block.zcash_serialized_size(),
-                            tx: tx_ids,
-                        })
+                        Ok(GetBlock::Object { tx: tx_ids })
                     }
                     zebra_state::ReadResponse::TransactionIdsForBlock(None) => Err(Error {
                         code: MISSING_BLOCK_ERROR_CODE,
@@ -1191,13 +1184,6 @@ pub enum GetBlock {
     Raw(#[serde(with = "hex")] SerializedBlock),
     /// The block object.
     Object {
-        /// Requested block hash.
-        #[serde(with = "hex")]
-        hash: block::Hash,
-        /// Requested block height.
-        height: Height,
-        /// Requested block size.
-        size: usize,
         /// List of transaction IDs in block order, hex-encoded.
         tx: Vec<String>,
     },

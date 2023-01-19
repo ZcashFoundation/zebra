@@ -9,11 +9,12 @@
 //! genesis block. Checkpoint heights can be chosen arbitrarily.
 
 use color_eyre::eyre::{ensure, Result};
+use hex::FromHex;
 use serde_json::Value;
 use std::process::Stdio;
 use structopt::StructOpt;
 
-use zebra_chain::block;
+use zebra_chain::{block, serialization::ZcashDeserializeInto};
 use zebra_utils::init_tracing;
 
 #[cfg(unix)]
@@ -106,19 +107,44 @@ fn main() -> Result<()> {
         // unfortunately we need to create a process for each block
         let mut cmd = passthrough_cmd();
 
-        // get block data
-        cmd.args(["getblock", &x.to_string(), "1"]);
-        let output = cmd_output(&mut cmd)?;
+        let (hash, height, size) = match args::Args::from_args().mode {
+            args::Mode::Zcash => {
+                // get block data
+                cmd.args(["getblock", &x.to_string(), "1"]);
+                let output = cmd_output(&mut cmd)?;
 
-        // parse json
-        let v: Value = serde_json::from_str(&output)?;
+                // parse json
+                let v: Value = serde_json::from_str(&output)?;
 
-        // get the values we are interested in
-        let hash: block::Hash = v["hash"].as_str().unwrap().parse()?;
-        let height = block::Height(v["height"].as_u64().unwrap() as u32);
+                // get the values we are interested in
+                let hash: block::Hash = v["hash"].as_str().unwrap().parse()?;
+                let height = block::Height(v["height"].as_u64().unwrap() as u32);
+
+                let size = v["size"].as_u64().unwrap();
+
+                (hash, height, size)
+            }
+            args::Mode::Zebra => {
+                // get block data
+                cmd.args(["getblock", &x.to_string(), "0"]);
+                let output = cmd_output(&mut cmd)?;
+
+                let block_bytes = <Vec<u8>>::from_hex(output.trim_end_matches('\n'))?;
+
+                let block = block_bytes
+                    .zcash_deserialize_into::<block::Block>()
+                    .expect("obtained block should deserialize");
+
+                (
+                    block.hash(),
+                    block.coinbase_height().expect("wat"),
+                    block_bytes.len().try_into()?,
+                )
+            }
+        };
+
         assert!(height <= block::Height::MAX);
         assert_eq!(x, height.0);
-        let size = v["size"].as_u64().unwrap();
 
         // compute
         cumulative_bytes += size;

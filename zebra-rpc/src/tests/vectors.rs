@@ -30,11 +30,8 @@ pub fn test_block_serialization() {
 
     let expected_tx = GetBlock::Object {
         tx: vec!["42".into()],
-        height: zebra_chain::block::Height(1),
-        hash: zebra_chain::block::Hash([0; 32]),
-        size: 1,
     };
-    let expected_json = r#"{"hash":"0000000000000000000000000000000000000000000000000000000000000000","height":1,"size":1,"tx":["42"]}"#;
+    let expected_json = r#"{"tx":["42"]}"#;
     let j = serde_json::to_string(&expected_tx).unwrap();
 
     assert_eq!(j, expected_json);

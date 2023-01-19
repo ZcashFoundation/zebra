@@ -5638,6 +5638,7 @@ dependencies = [
  "hex",
  "serde_json",
  "structopt",
+ "thiserror",
  "tinyvec",
  "tracing-error",
  "tracing-subscriber 0.3.16",
