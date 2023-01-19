@@ -142,7 +142,9 @@ fn main() -> Result<()> {
 
                 (
                     block.hash(),
-                    block.coinbase_height().expect("wat"),
+                    block
+                        .coinbase_height()
+                        .expect("block has always a coinbase height"),
                     block_bytes.len().try_into()?,
                 )
             }

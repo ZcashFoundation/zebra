@@ -30,6 +30,8 @@ When updating the lists there is no need to start from the genesis block. The pr
 
 It is easier if `zcash-cli` is in your execution path however you can specify the location of it anywhere in the filesystem with option `--cli`.
 
+By default, `zebra-checkpoints` will use a `zebrad` backend. If the running instance is `zcashd`, please add `-b zcashd` to your command. 
+
 To update the checkpoint list, run:
 
 ```sh
