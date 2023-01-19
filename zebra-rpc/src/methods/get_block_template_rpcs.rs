@@ -568,6 +568,14 @@ where
             let next_block_height =
                 (chain_tip_and_local_time.tip_height + 1).expect("tip is far below Height::MAX");
 
+            tracing::info!(
+                mempool_tx_hashes = ?mempool_txs
+                    .iter()
+                    .map(|tx| tx.transaction.id.mined_id())
+                    .collect::<Vec<_>>(),
+                "Selecting transactions for the template from the mempool"
+            );
+
             // Randomly select some mempool transactions.
             //
             // TODO: sort these transactions to match zcashd's order, to make testing easier.
@@ -579,6 +587,14 @@ where
                 COINBASE_LIKE_ZCASHD,
             )
             .await;
+
+            tracing::info!(
+                mempool_tx_hashes = ?mempool_txs
+                    .iter()
+                    .map(|tx| tx.transaction.id.mined_id())
+                    .collect::<Vec<_>>(),
+                "Selected transactions for the template from the mempool"
+            );
 
             // - After this point, the template only depends on the previously fetched data.
 
