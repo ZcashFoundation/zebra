@@ -5,8 +5,11 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use rand::{thread_rng, Rng};
-
-use zebra_chain::primitives::redpallas::*;
+use reddsa::{
+    batch,
+    orchard::{Binding, SpendAuth},
+    Signature, SigningKey, VerificationKey, VerificationKeyBytes,
+};
 
 const MESSAGE_BYTES: &[u8; 0] = b"";
 
@@ -95,10 +98,18 @@ fn bench_batch_verify(c: &mut Criterion) {
                     for item in sigs.iter() {
                         match item {
                             Item::SpendAuth { vk_bytes, sig } => {
-                                batch.queue((*vk_bytes, *sig, MESSAGE_BYTES));
+                                batch.queue(batch::Item::from_spendauth(
+                                    *vk_bytes,
+                                    *sig,
+                                    MESSAGE_BYTES,
+                                ));
                             }
                             Item::Binding { vk_bytes, sig } => {
-                                batch.queue((*vk_bytes, *sig, MESSAGE_BYTES));
+                                batch.queue(batch::Item::from_binding(
+                                    *vk_bytes,
+                                    *sig,
+                                    MESSAGE_BYTES,
+                                ));
                             }
                         }
                     }

@@ -1,12 +1,10 @@
 use std::{convert::TryFrom, io};
 
 use halo2::pasta::pallas;
+use reddsa::orchard::SpendAuth;
 
-use crate::{
-    primitives::redpallas::{self, SpendAuth},
-    serialization::{
-        serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
-    },
+use crate::serialization::{
+    serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
 use super::{
@@ -29,7 +27,7 @@ pub struct Action {
     /// The nullifier of the input note being spent.
     pub nullifier: note::Nullifier,
     /// The randomized validating key for spendAuthSig,
-    pub rk: redpallas::VerificationKeyBytes<SpendAuth>,
+    pub rk: reddsa::VerificationKeyBytes<SpendAuth>,
     /// The x-coordinate of the note commitment for the output note.
     #[serde(with = "serde_helpers::Base")]
     pub cm_x: pallas::Base,

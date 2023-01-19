@@ -1,12 +1,13 @@
 //! Tests for trusted preallocation during deserialization.
 
+use reddsa::{orchard::SpendAuth, Signature};
+
 use crate::{
     block::MAX_BLOCK_BYTES,
     orchard::{
         shielded_data::{ACTION_SIZE, AUTHORIZED_ACTION_SIZE},
         Action, AuthorizedAction,
     },
-    primitives::redpallas::{Signature, SpendAuth},
     serialization::{arbitrary::max_allocation_is_big_enough, TrustedPreallocate, ZcashSerialize},
 };
 

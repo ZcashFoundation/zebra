@@ -8,15 +8,13 @@ use std::{
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use halo2::pasta::pallas;
+use reddsa::{self, orchard::Binding, orchard::SpendAuth, Signature};
 
 use crate::{
     amount::{Amount, NegativeAllowed},
     block::MAX_BLOCK_BYTES,
     orchard::{tree, Action, Nullifier, ValueCommitment},
-    primitives::{
-        redpallas::{self, Binding, Signature, SpendAuth},
-        Halo2Proof,
-    },
+    primitives::Halo2Proof,
     serialization::{
         AtLeastOne, SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
     },
@@ -98,7 +96,7 @@ impl ShieldedData {
     /// the balancing value.
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#orchardbalance>
-    pub fn binding_verification_key(&self) -> redpallas::VerificationKeyBytes<Binding> {
+    pub fn binding_verification_key(&self) -> reddsa::VerificationKeyBytes<Binding> {
         let cv: ValueCommitment = self.actions().map(|action| action.cv).sum();
         let cv_balance: ValueCommitment =
             ValueCommitment::new(pallas::Scalar::zero(), self.value_balance);

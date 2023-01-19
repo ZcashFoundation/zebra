@@ -992,11 +992,13 @@ where
                 // description while adding the resulting future to
                 // our collection of async checks that (at a
                 // minimum) must pass for the transaction to verify.
-                async_checks.push(
-                    primitives::redpallas::VERIFIER
-                        .clone()
-                        .oneshot((action.rk, spend_auth_sig, &shielded_sighash).into()),
-                );
+                async_checks.push(primitives::redpallas::VERIFIER.clone().oneshot(
+                    primitives::redpallas::Item::from_spendauth(
+                        action.rk,
+                        spend_auth_sig,
+                        &shielded_sighash,
+                    ),
+                ));
             }
 
             let bvk = orchard_shielded_data.binding_verification_key();
@@ -1029,11 +1031,13 @@ where
             // It calls [`pallas::Affine::from_bytes`] to parse R and
             // that enforces the canonical encoding.
 
-            async_checks.push(
-                primitives::redpallas::VERIFIER
-                    .clone()
-                    .oneshot((bvk, orchard_shielded_data.binding_sig, &shielded_sighash).into()),
-            );
+            async_checks.push(primitives::redpallas::VERIFIER.clone().oneshot(
+                primitives::redpallas::Item::from_binding(
+                    bvk,
+                    orchard_shielded_data.binding_sig,
+                    &shielded_sighash,
+                ),
+            ));
         }
 
         Ok(async_checks)
