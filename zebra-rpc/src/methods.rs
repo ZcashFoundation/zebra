@@ -647,6 +647,7 @@ where
 
     // TODO: use a generic error constructor (#5548)
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {
+        #[cfg(feature = "getblocktemplate-rpcs")]
         use zebra_chain::block::MAX_BLOCK_BYTES;
 
         /// Determines whether the output of this RPC is sorted like zcashd
@@ -655,15 +656,11 @@ where
         let mut mempool = self.mempool.clone();
 
         async move {
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            let request = if SHOULD_USE_ZCASHD_ORDER {
+            let request = if SHOULD_USE_ZCASHD_ORDER && cfg!(feature = "getblocktemplate-rpcs") {
                 mempool::Request::FullTransactions
             } else {
                 mempool::Request::TransactionIds
             };
-
-            #[cfg(not(feature = "getblocktemplate-rpcs"))]
-            let request = mempool::Request::TransactionIds;
 
             // `zcashd` doesn't check if it is synced to the tip here, so we don't either.
             let response = mempool
@@ -679,6 +676,7 @@ where
             match response {
                 #[cfg(feature = "getblocktemplate-rpcs")]
                 mempool::Response::FullTransactions(mut transactions) => {
+                    // Sort transactions in descending order by fee/size, using hash in serialized byte order as a tie-breaker
                     transactions.sort_by_cached_key(|tx| {
                         // zcashd uses modified fee here but Zebra doesn't currently
                         // support prioritizing transactions
