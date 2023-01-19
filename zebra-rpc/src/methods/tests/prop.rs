@@ -352,6 +352,7 @@ proptest! {
                 expected_response
             };
 
+            // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
             #[cfg(feature = "getblocktemplate-rpcs")]
             let expected_response = {
                 let mut expected_response = transactions.clone();
@@ -371,7 +372,6 @@ proptest! {
                     .map(|tx| tx.transaction.id.mined_id().encode_hex())
                     .collect();
 
-                // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
                 mempool
                     .expect_request(mempool::Request::FullTransactions)
                     .await?
