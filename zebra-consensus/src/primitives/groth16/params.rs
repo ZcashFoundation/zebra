@@ -101,6 +101,8 @@ impl Groth16Parameters {
                 .expect("unreachable code: sprout loader panics on failure"),
         };
 
+        tracing::info!("Zcash Sapling and Sprout parameters downloaded and/or verified");
+
         Groth16Parameters { sapling, sprout }
     }
 
