@@ -656,11 +656,15 @@ where
         let mut mempool = self.mempool.clone();
 
         async move {
-            let request = if SHOULD_USE_ZCASHD_ORDER && cfg!(feature = "getblocktemplate-rpcs") {
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            let request = if SHOULD_USE_ZCASHD_ORDER {
                 mempool::Request::FullTransactions
             } else {
                 mempool::Request::TransactionIds
             };
+
+            #[cfg(not(feature = "getblocktemplate-rpcs"))]
+            let request = mempool::Request::TransactionIds;
 
             // `zcashd` doesn't check if it is synced to the tip here, so we don't either.
             let response = mempool
