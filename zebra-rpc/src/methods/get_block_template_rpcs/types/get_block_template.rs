@@ -31,7 +31,7 @@ pub mod parameters;
 pub mod proposal;
 
 pub use parameters::{GetBlockTemplateCapability, GetBlockTemplateRequestMode, JsonParameters};
-pub use proposal::{proposal_block_from_template, ProposalRejectReason, ProposalResponse};
+pub use proposal::{proposal_block_from_template, ProposalResponse};
 
 /// A serialized `getblocktemplate` RPC response in template mode.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

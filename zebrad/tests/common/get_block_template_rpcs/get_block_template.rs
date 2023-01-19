@@ -167,7 +167,7 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
             "got getblocktemplate proposal response"
         );
 
-        if let ProposalResponse::ErrorResponse { reject_reason, .. } = json_result {
+        if let ProposalResponse::Rejected(reject_reason) = json_result {
             Err(eyre!(
                 "unsuccessful block proposal validation, reason: {reject_reason:?}"
             ))?;

@@ -10,7 +10,7 @@ use zebra_chain::{
     block::{
         self,
         merkle::{self, AuthDataRoot},
-        ChainHistoryBlockTxAuthCommitmentHash, Height,
+        Block, ChainHistoryBlockTxAuthCommitmentHash, Height,
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
@@ -108,8 +108,18 @@ where
         + Sync
         + 'static,
 {
-    let Ok(block) = block_proposal_bytes.zcash_deserialize_into::<block::Block>() else {
-         return Ok(ProposalRejectReason::Rejected.into())
+    let block: Block = match block_proposal_bytes.zcash_deserialize_into() {
+        Ok(block) => block,
+        Err(parse_error) => {
+            tracing::info!(
+                ?parse_error,
+                "error response from block parser in CheckProposal request"
+            );
+
+            return Ok(
+                ProposalResponse::rejected("invalid proposal format", parse_error.into()).into(),
+            );
+        }
     };
 
     let chain_verifier_response = chain_verifier
@@ -127,11 +137,11 @@ where
         .map(|_hash| ProposalResponse::Valid)
         .unwrap_or_else(|verify_chain_error| {
             tracing::info!(
-                verify_chain_error,
-                "Got error response from chain_verifier CheckProposal request"
+                ?verify_chain_error,
+                "error response from chain_verifier in CheckProposal request"
             );
 
-            ProposalRejectReason::Rejected.into()
+            ProposalResponse::rejected("invalid proposal", verify_chain_error)
         })
         .into())
 }
