@@ -650,6 +650,7 @@ where
         #[cfg(feature = "getblocktemplate-rpcs")]
         use zebra_chain::block::MAX_BLOCK_BYTES;
 
+        #[cfg(feature = "getblocktemplate-rpcs")]
         /// Determines whether the output of this RPC is sorted like zcashd
         const SHOULD_USE_ZCASHD_ORDER: bool = true;
 
