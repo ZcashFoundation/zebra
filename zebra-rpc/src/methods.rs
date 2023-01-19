@@ -645,9 +645,10 @@ where
             })
     }
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     // TODO: use a generic error constructor (#5548)
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {
+        use zebra_chain::block::MAX_BLOCK_BYTES;
+
         /// Determines whether the output of this RPC is sorted like zcashd
         const SHOULD_USE_ZCASHD_ORDER: bool = true;
 
@@ -679,8 +680,11 @@ where
                 #[cfg(feature = "getblocktemplate-rpcs")]
                 mempool::Response::FullTransactions(mut transactions) => {
                     transactions.sort_by_cached_key(|tx| {
+                        // zcashd uses modified fee here but Zebra doesn't currently
+                        // support prioritizing transactions
                         std::cmp::Reverse((
-                            u64::from(tx.miner_fee) / tx.transaction.size as u64,
+                            i64::from(tx.miner_fee) as u128 * MAX_BLOCK_BYTES as u128
+                                / tx.transaction.size as u128,
                             // transaction hashes are compared in their serialized byte-order.
                             tx.transaction.id.mined_id(),
                         ))
