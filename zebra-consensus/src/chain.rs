@@ -258,7 +258,6 @@ where
                 // The lazy static initializer does the download, if needed,
                 // and the file hash checks.
                 lazy_static::initialize(&crate::groth16::GROTH16_PARAMETERS);
-                tracing::info!("Groth16 pre-download and check task finished");
             }
         })
     });
