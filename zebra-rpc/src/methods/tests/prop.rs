@@ -337,10 +337,15 @@ proptest! {
 
 
             #[cfg(not(feature = "getblocktemplate-rpcs"))]
-            let mut expected_response = {
+            let expected_response = {
+                let transaction_ids: HashSet<_> = transactions
+                    .iter()
+                    .map(|tx| tx.transaction.id)
+                    .collect();
+
                 let mut expected_response: Vec<String> = transaction_ids
                     .iter()
-                    .map(|tx| tx.transaction.id.mined_id().encode_hex())
+                    .map(|id| id.mined_id().encode_hex())
                     .collect();
                 expected_response.sort();
 
