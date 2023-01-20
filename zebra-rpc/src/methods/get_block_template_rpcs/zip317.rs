@@ -207,7 +207,8 @@ fn choose_transaction_weighted_random(
     let candidate_position = weighted_index.sample(&mut thread_rng());
     let candidate_tx = candidate_txs.swap_remove(candidate_position);
 
-    // Only pick each transaction once, by setting picked transaction weights to zero
-    // All weights are zero, so each transaction has either been selected or rejected
-    (setup_fee_weighted_index(&candidate_txs), candidate_tx)
+    // We have to regenerate this index each time we choose a transaction, due to floating-point sum inaccuracies.
+    // If we don't, some chosen transactions can end up with a tiny non-zero weight, leading to duplicates.
+    // <https://github.com/rust-random/rand/blob/4bde8a0adb517ec956fcec91665922f6360f974b/src/distributions/weighted_index.rs#L173-L183>
+    (setup_fee_weighted_index(candidate_txs), candidate_tx)
 }

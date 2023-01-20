@@ -209,12 +209,11 @@ impl GetBlockTemplate {
         if like_zcashd {
             // Sort in serialized data order, excluding the length byte.
             // `zcashd` sometimes seems to do this, but other times the order is arbitrary.
-            mempool_txs_with_templates
-                .sort_by_cached_key(|(tx_template, _tx)| tx_template.data.clone());
+            mempool_txs_with_templates.sort_by_key(|(tx_template, _tx)| tx_template.data.clone());
         } else {
             // Sort by hash, this is faster.
             mempool_txs_with_templates
-                .sort_by_cached_key(|(tx_template, _tx)| tx_template.hash.bytes_in_display_order());
+                .sort_by_key(|(tx_template, _tx)| tx_template.hash.bytes_in_display_order());
         }
 
         let (mempool_tx_templates, mempool_txs): (Vec<_>, Vec<_>) =
@@ -245,12 +244,12 @@ impl GetBlockTemplate {
             .map(ToString::to_string)
             .collect();
 
-        tracing::info!(
+        tracing::debug!(
             selected_txs = ?mempool_txs
                 .iter()
                 .map(|tx| (tx.transaction.id.mined_id(), tx.unpaid_actions))
                 .collect::<Vec<_>>(),
-            "Creating template ... "
+            "creating template ... "
         );
 
         GetBlockTemplate {

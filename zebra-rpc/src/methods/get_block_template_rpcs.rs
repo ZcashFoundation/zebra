@@ -568,12 +568,12 @@ where
             let next_block_height =
                 (chain_tip_and_local_time.tip_height + 1).expect("tip is far below Height::MAX");
 
-            tracing::info!(
+            tracing::debug!(
                 mempool_tx_hashes = ?mempool_txs
                     .iter()
                     .map(|tx| tx.transaction.id.mined_id())
                     .collect::<Vec<_>>(),
-                "Selecting transactions for the template from the mempool"
+                "selecting transactions for the template from the mempool"
             );
 
             // Randomly select some mempool transactions.
@@ -588,12 +588,12 @@ where
             )
             .await;
 
-            tracing::info!(
-                mempool_tx_hashes = ?mempool_txs
+            tracing::debug!(
+                selected_mempool_tx_hashes = ?mempool_txs
                     .iter()
                     .map(|tx| tx.transaction.id.mined_id())
                     .collect::<Vec<_>>(),
-                "Selected transactions for the template from the mempool"
+                "selected transactions for the template from the mempool"
             );
 
             // - After this point, the template only depends on the previously fetched data.
