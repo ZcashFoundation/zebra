@@ -343,7 +343,7 @@ jobs:
           docker stop variable-conf-tests
           docker logs variable-conf-tests
         env:
-          ZEBRA_CONF_PATH: 'zebra/zebrad/tests/common/configs/v1.0.0-rc.2.toml'
+          ZEBRA_CONF_PATH: 'zebrad/tests/common/configs/v1.0.0-rc.2.toml'
 
   # zebrad cached checkpoint state tests
 
