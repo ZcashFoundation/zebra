@@ -303,7 +303,7 @@ jobs:
   #
   # Also check that $ZEBRA_CONF_PATH works
   test-configuration-file:
-    name: Test Zebra configuration file
+    name: Test Zebra default Docker config file
     runs-on: ubuntu-latest
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
@@ -324,7 +324,7 @@ jobs:
 
   # Test that Zebra works using the $ZEBRA_CONF_PATH config
   test-zebra-conf-path:
-    name: Test Zebra configuration file
+    name: Test Zebra custom Docker config file
     runs-on: ubuntu-latest
     needs: build
     if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
