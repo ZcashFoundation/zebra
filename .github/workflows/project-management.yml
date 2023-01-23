@@ -1,0 +1,28 @@
+# Configuration for automatically adding issues to various Github projects for Project Management purposes
+on:
+  issues:
+    types:
+      - opened
+
+jobs:
+  # Automatically add issues and PRs to the "Zebra Backlog" Github project.
+  add-issue-to-zebra-backlog-project:
+    name: Adds all new issues to the "Zebra Backlog" Github project
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/add-to-project@v0.4.0
+        with:
+          project-url: https://github.com/orgs/ZcashFoundation/projects/9
+          # TODO: use a PAT from a `bot` account we create for the organization
+          github-token: ${{ secrets.ACTIONS_PM_GITHUB_PROJECTS }}
+
+  # Automatically add issues and PRs to the "Engineering Backlog" Github project.
+  add-issue-to-zf-backlog-project:
+    name: Adds all new issues to the "ZF Engineering Backlog" Github project
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/add-to-project@v0.4.0
+        with:
+          project-url: https://github.com/orgs/ZcashFoundation/projects/13
+          # TODO: use a PAT from a `bot` account we create for the organization
+          github-token: ${{ secrets.ACTIONS_PM_GITHUB_PROJECTS }}
