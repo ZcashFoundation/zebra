@@ -14,10 +14,13 @@ use std::process::Stdio;
 use std::os::unix::process::ExitStatusExt;
 
 use color_eyre::eyre::{ensure, Result};
+use hex::FromHex;
 use serde_json::Value;
 use structopt::StructOpt;
 
-use zebra_chain::{block, transparent::MIN_TRANSPARENT_COINBASE_MATURITY};
+use zebra_chain::{
+    block, serialization::ZcashDeserializeInto, transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
+};
 use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 use zebra_utils::init_tracing;
 
@@ -69,9 +72,14 @@ fn main() -> Result<()> {
 
     // get the current block count
     let mut cmd = passthrough_cmd();
-    cmd.arg("getblockcount");
+    cmd.arg("getblockchaininfo");
+
+    let output = cmd_output(&mut cmd)?;
+    let get_block_chain_info: Value = serde_json::from_str(&output)?;
+
     // calculate the maximum height
-    let height_limit: block::Height = cmd_output(&mut cmd)?.trim().parse()?;
+    let height_limit = block::Height(get_block_chain_info["blocks"].as_u64().unwrap() as u32);
+
     assert!(height_limit <= block::Height::MAX);
     // Checkpoints must be on the main chain, so we skip blocks that are within the
     // Zcash reorg limit.
@@ -104,18 +112,46 @@ fn main() -> Result<()> {
         // unfortunately we need to create a process for each block
         let mut cmd = passthrough_cmd();
 
-        // get block data
-        cmd.args(["getblock", &x.to_string()]);
-        let output = cmd_output(&mut cmd)?;
-        // parse json
-        let v: Value = serde_json::from_str(&output)?;
+        let (hash, height, size) = match args::Args::from_args().backend {
+            args::Backend::Zcashd => {
+                // get block data from zcashd using verbose=1
+                cmd.args(["getblock", &x.to_string(), "1"]);
+                let output = cmd_output(&mut cmd)?;
 
-        // get the values we are interested in
-        let hash: block::Hash = v["hash"].as_str().unwrap().parse()?;
-        let height = block::Height(v["height"].as_u64().unwrap() as u32);
+                // parse json
+                let v: Value = serde_json::from_str(&output)?;
+
+                // get the values we are interested in
+                let hash: block::Hash = v["hash"].as_str().unwrap().parse()?;
+                let height = block::Height(v["height"].as_u64().unwrap() as u32);
+
+                let size = v["size"].as_u64().unwrap();
+
+                (hash, height, size)
+            }
+            args::Backend::Zebrad => {
+                // get block data from zebrad by deserializing the raw block
+                cmd.args(["getblock", &x.to_string(), "0"]);
+                let output = cmd_output(&mut cmd)?;
+
+                let block_bytes = <Vec<u8>>::from_hex(output.trim_end_matches('\n'))?;
+
+                let block = block_bytes
+                    .zcash_deserialize_into::<block::Block>()
+                    .expect("obtained block should deserialize");
+
+                (
+                    block.hash(),
+                    block
+                        .coinbase_height()
+                        .expect("block has always a coinbase height"),
+                    block_bytes.len().try_into()?,
+                )
+            }
+        };
+
         assert!(height <= block::Height::MAX);
         assert_eq!(x, height.0);
-        let size = v["size"].as_u64().unwrap();
 
         // compute
         cumulative_bytes += size;

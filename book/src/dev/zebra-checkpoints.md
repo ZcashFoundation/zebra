@@ -1,6 +1,6 @@
 # zebra-checkpoints
 
-`zebra-checkpoints` uses a local `zcashd` instance to generate a list of checkpoints for Zebra's checkpoint verifier.
+`zebra-checkpoints` uses a local `zebrad` or `zcashd` instance to generate a list of checkpoints for Zebra's checkpoint verifier.
 
 Developers should run this tool every few months to add new checkpoints to Zebra.
 (By default, Zebra uses these checkpoints to sync to the chain tip.)
