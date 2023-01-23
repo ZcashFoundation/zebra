@@ -112,7 +112,7 @@ jobs:
   # - on every release, when it's published
   deploy-nodes:
     name: Deploy ${{ inputs.network || 'Mainnet' }} nodes
-    needs: [ build, versioning ]
+    needs: [ build, test-configuration-file, versioning ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -206,7 +206,7 @@ jobs:
   # Note: this instances are not automatically replaced or deleted
   deploy-instance:
     name: Deploy single instance
-    needs: build
+    needs: [ build, test-configuration-file ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
