@@ -66,6 +66,18 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
+  test-configuration-file:
+    name: Test Zebra default Docker config file
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+  test-zebra-conf-path:
+    name: Test Zebra custom Docker config file
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
   test-stateful-sync:
     name: Zebra checkpoint update / Run sync-past-checkpoint test
     runs-on: ubuntu-latest
