@@ -300,8 +300,6 @@ jobs:
           ZEBRA_TEST_LIGHTWALLETD: '1'
 
   # Test that Zebra works using the default config with the latest Zebra version
-  #
-  # Also check that $ZEBRA_CONF_PATH works
   test-configuration-file:
     name: Test Zebra default Docker config file
     timeout-minutes: 5

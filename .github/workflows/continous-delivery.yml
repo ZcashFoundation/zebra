@@ -77,6 +77,28 @@ jobs:
       zebra_skip_ipv6_tests: '1'
       rust_log: info
 
+  # Test that Zebra works using the default config with the latest Zebra version
+  test-configuration-file:
+    name: Test Zebra default Docker config file
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v4
+        with:
+          short-length: 7
+
+      - name: Run tests using the default config
+        run: |
+          set -ex
+          docker pull ${{ env.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+          docker run --detach --name default-conf-tests -t ${{ env.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+          EXIT_STATUS=$(docker logs --tail all --follow default-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
+          docker stop default-conf-tests
+          docker logs default-conf-tests
+          exit "$EXIT_STATUS"
+
   # This jobs handles the deployment of a Managed Instance Group (MiG) with 2 nodes in
   # the us-central1 region. Two different groups of MiGs are deployed one for pushes to
   # the main branch and another for version releases of Zebra
