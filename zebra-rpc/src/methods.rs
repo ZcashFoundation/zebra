@@ -647,9 +647,24 @@ where
 
     // TODO: use a generic error constructor (#5548)
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        use zebra_chain::block::MAX_BLOCK_BYTES;
+
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        /// Determines whether the output of this RPC is sorted like zcashd
+        const SHOULD_USE_ZCASHD_ORDER: bool = true;
+
         let mut mempool = self.mempool.clone();
 
         async move {
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            let request = if SHOULD_USE_ZCASHD_ORDER {
+                mempool::Request::FullTransactions
+            } else {
+                mempool::Request::TransactionIds
+            };
+
+            #[cfg(not(feature = "getblocktemplate-rpcs"))]
             let request = mempool::Request::TransactionIds;
 
             // `zcashd` doesn't check if it is synced to the tip here, so we don't either.
@@ -664,6 +679,28 @@ where
                 })?;
 
             match response {
+                #[cfg(feature = "getblocktemplate-rpcs")]
+                mempool::Response::FullTransactions(mut transactions) => {
+                    // Sort transactions in descending order by fee/size, using hash in serialized byte order as a tie-breaker
+                    transactions.sort_by_cached_key(|tx| {
+                        // zcashd uses modified fee here but Zebra doesn't currently
+                        // support prioritizing transactions
+                        std::cmp::Reverse((
+                            i64::from(tx.miner_fee) as u128 * MAX_BLOCK_BYTES as u128
+                                / tx.transaction.size as u128,
+                            // transaction hashes are compared in their serialized byte-order.
+                            tx.transaction.id.mined_id(),
+                        ))
+                    });
+
+                    let tx_ids: Vec<String> = transactions
+                        .iter()
+                        .map(|unmined_tx| unmined_tx.transaction.id.mined_id().encode_hex())
+                        .collect();
+
+                    Ok(tx_ids)
+                }
+
                 mempool::Response::TransactionIds(unmined_transaction_ids) => {
                     let mut tx_ids: Vec<String> = unmined_transaction_ids
                         .iter()
@@ -671,11 +708,11 @@ where
                         .collect();
 
                     // Sort returned transaction IDs in numeric/string order.
-                    // (zcashd's sort order appears arbitrary.)
                     tx_ids.sort();
 
                     Ok(tx_ids)
                 }
+
                 _ => unreachable!("unmatched response to a transactionids request"),
             }
         }

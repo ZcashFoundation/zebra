@@ -86,10 +86,7 @@ fn main() -> Result<()> {
 
     template_obj.entry("maxtime").or_insert_with(|| {
         if time_source.uses_max_time() {
-            eprintln!(
-                "maxtime field is missing, using curtime for maxtime: {:?}",
-                current_time,
-            );
+            eprintln!("maxtime field is missing, using curtime for maxtime: {current_time:?}");
         }
 
         current_time.timestamp().into()

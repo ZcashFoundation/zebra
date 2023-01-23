@@ -87,6 +87,10 @@ skip-tree = [
     # wait for insta to remove duplicated dependencies
     { name = "sha-1", version = "=0.8.2" },
 
+    # wait for console-subscriber and tower to update hdrhistogram.
+    # also wait for ron to update insta, and wait for tonic update.
+    { name = "base64", version = "=0.13.0" },
+
     # Optional dependencies
 
     # upgrade abscissa (required dependency) and arti (optional dependency)

@@ -136,7 +136,7 @@ impl ZcashDeserialize for OutputInTransactionV4 {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // # Consensus
         //
-        // > Elements of a Output description MUST be valid encodings of the types given above.
+        // > Elements of an Output description MUST be valid encodings of the types given above.
         //
         // https://zips.z.cash/protocol/protocol.pdf#outputdesc
         //
@@ -199,7 +199,7 @@ impl ZcashDeserialize for OutputPrefixInTransactionV5 {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // # Consensus
         //
-        // > Elements of a Output description MUST be valid encodings of the types given above.
+        // > Elements of an Output description MUST be valid encodings of the types given above.
         //
         // https://zips.z.cash/protocol/protocol.pdf#outputdesc
         //

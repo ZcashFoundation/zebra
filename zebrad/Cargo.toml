@@ -106,7 +106,7 @@ humantime-serde = "1.1.1"
 indexmap = "1.9.2"
 lazy_static = "1.4.0"
 serde = { version = "1.0.152", features = ["serde_derive"] }
-toml = "0.5.10"
+toml = "0.5.11"
 
 futures = "0.3.25"
 rayon = "1.6.1"
@@ -184,7 +184,7 @@ serde_json = { version = "1.0.91", features = ["preserve_order"] }
 tempfile = "3.3.0"
 
 hyper = { version = "0.14.23", features = ["http1", "http2", "server"]}
-reqwest = "0.11.13"
+reqwest = "0.11.14"
 
 tokio = { version = "1.24.2", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.11"

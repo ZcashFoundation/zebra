@@ -244,6 +244,14 @@ impl GetBlockTemplate {
             .map(ToString::to_string)
             .collect();
 
+        tracing::debug!(
+            selected_txs = ?mempool_txs
+                .iter()
+                .map(|tx| (tx.transaction.id.mined_id(), tx.unpaid_actions))
+                .collect::<Vec<_>>(),
+            "creating template ... "
+        );
+
         GetBlockTemplate {
             capabilities,
 
