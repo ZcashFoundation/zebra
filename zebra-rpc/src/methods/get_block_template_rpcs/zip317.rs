@@ -53,7 +53,7 @@ pub async fn select_mempool_transactions(
         fake_coinbase_transaction(network, next_block_height, miner_address, like_zcashd);
 
     // Setup the transaction lists.
-    let (conventional_fee_txs, low_fee_txs): (Vec<_>, Vec<_>) = mempool_txs
+    let (mut conventional_fee_txs, mut low_fee_txs): (Vec<_>, Vec<_>) = mempool_txs
         .into_iter()
         .partition(VerifiedUnminedTx::pays_conventional_fee);
 
@@ -74,7 +74,7 @@ pub async fn select_mempool_transactions(
 
     while let Some(tx_weights) = conventional_fee_tx_weights {
         conventional_fee_tx_weights = checked_add_transaction_weighted_random(
-            &conventional_fee_txs,
+            &mut conventional_fee_txs,
             tx_weights,
             &mut selected_txs,
             &mut remaining_block_bytes,
@@ -90,7 +90,7 @@ pub async fn select_mempool_transactions(
 
     while let Some(tx_weights) = low_fee_tx_weights {
         low_fee_tx_weights = checked_add_transaction_weighted_random(
-            &low_fee_txs,
+            &mut low_fee_txs,
             tx_weights,
             &mut selected_txs,
             &mut remaining_block_bytes,
@@ -160,7 +160,7 @@ fn setup_fee_weighted_index(transactions: &[VerifiedUnminedTx]) -> Option<Weight
 /// Returns the updated transaction weights.
 /// If all transactions have been chosen, returns `None`.
 fn checked_add_transaction_weighted_random(
-    candidate_txs: &[VerifiedUnminedTx],
+    candidate_txs: &mut Vec<VerifiedUnminedTx>,
     tx_weights: WeightedIndex<f32>,
     selected_txs: &mut Vec<VerifiedUnminedTx>,
     remaining_block_bytes: &mut usize,
@@ -201,20 +201,14 @@ fn checked_add_transaction_weighted_random(
 /// If some transactions have not yet been chosen, returns the weighted index and the transaction.
 /// Otherwise, just returns the transaction.
 fn choose_transaction_weighted_random(
-    candidate_txs: &[VerifiedUnminedTx],
-    mut weighted_index: WeightedIndex<f32>,
+    candidate_txs: &mut Vec<VerifiedUnminedTx>,
+    weighted_index: WeightedIndex<f32>,
 ) -> (Option<WeightedIndex<f32>>, VerifiedUnminedTx) {
     let candidate_position = weighted_index.sample(&mut thread_rng());
-    let candidate_tx = candidate_txs[candidate_position].clone();
+    let candidate_tx = candidate_txs.swap_remove(candidate_position);
 
-    // Only pick each transaction once, by setting picked transaction weights to zero
-    if weighted_index
-        .update_weights(&[(candidate_position, &0.0)])
-        .is_err()
-    {
-        // All weights are zero, so each transaction has either been selected or rejected
-        (None, candidate_tx)
-    } else {
-        (Some(weighted_index), candidate_tx)
-    }
+    // We have to regenerate this index each time we choose a transaction, due to floating-point sum inaccuracies.
+    // If we don't, some chosen transactions can end up with a tiny non-zero weight, leading to duplicates.
+    // <https://github.com/rust-random/rand/blob/4bde8a0adb517ec956fcec91665922f6360f974b/src/distributions/weighted_index.rs#L173-L183>
+    (setup_fee_weighted_index(candidate_txs), candidate_tx)
 }
