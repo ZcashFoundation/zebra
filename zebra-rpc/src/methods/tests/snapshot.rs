@@ -129,6 +129,15 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // - a request to get all mempool transactions will be made by `getrawmempool` behind the scenes.
     // - as we have the mempool mocked we need to expect a request and wait for a response,
     // which will be an empty mempool in this case.
+    // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    let mempool_req = mempool
+        .expect_request_that(|request| matches!(request, mempool::Request::FullTransactions))
+        .map(|responder| {
+            responder.respond(mempool::Response::FullTransactions(vec![]));
+        });
+
+    #[cfg(not(feature = "getblocktemplate-rpcs"))]
     let mempool_req = mempool
         .expect_request_that(|request| matches!(request, mempool::Request::TransactionIds))
         .map(|responder| {
