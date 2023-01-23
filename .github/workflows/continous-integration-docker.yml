@@ -318,8 +318,10 @@ jobs:
           set -x
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
           docker run --detach --name default-conf-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} zebrad start
-          docker logs --tail all --follow default-conf-tests 2>&1 | grep --extended-regexp --max-count=1 -e 'estimated progress to chain tip.*BeforeOverwinter' || exit 1
+          EXIT_STATUS=$(docker logs --tail all --follow default-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'estimated progress to chain tip.*BeforeOverwinter'; echo $?; )
           docker stop default-conf-tests
+          docker logs default-conf-tests
+          exit "$EXIT_STATUS"
 
   # Test that Zebra works using the $ZEBRA_CONF_PATH config
   test-zebra-conf-path:
@@ -338,8 +340,10 @@ jobs:
           set -x
           docker pull ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}
           docker run --detach -e ZEBRA_CONF_PATH --name variable-conf-tests -t ${{ env.GAR_BASE }}/${{ env.IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} -c $ZEBRA_CONF_PATH start
-          docker logs --tail all --follow variable-conf-tests 2>&1 | grep --extended-regexp --max-count=1 -e 'v1.0.0-rc.2.toml' || exit 1
+          EXIT_STATUS=$(docker logs --tail all --follow variable-conf-tests 2>&1 | grep -q --extended-regexp --max-count=1 -e 'v1.0.0-rc.2.toml'; echo $?; )
           docker stop variable-conf-tests
+          docker logs variable-conf-tests
+          exit "$EXIT_STATUS"
         env:
           ZEBRA_CONF_PATH: 'zebrad/tests/common/configs/v1.0.0-rc.2.toml'
 
