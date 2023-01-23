@@ -13,6 +13,7 @@ jobs:
       - uses: actions/add-to-project@v0.4.0
         with: 
           project-url: https://github.com/orgs/ZcashFoundation/projects/9
+          # TODO: use a PAT from a `bot` account we create for the organization
           github-token: ${{ secrets.ACTIONS_PM_GITHUB_PROJECTS }}
 
   # Automatically add issues and PRs to the "Engineering Backlog" Github project.
@@ -23,4 +24,5 @@ jobs:
       - uses: actions/add-to-project@v0.4.0
         with: 
           project-url: https://github.com/orgs/ZcashFoundation/projects/13
+          # TODO: use a PAT from a `bot` account we create for the organization
           github-token: ${{ secrets.ACTIONS_PM_GITHUB_PROJECTS }}
