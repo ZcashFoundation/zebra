@@ -20,7 +20,10 @@ use crate::{
             AdjustedDifficulty,
         },
         finalized_state::ZebraDb,
-        read::{self, tree::history_tree, FINALIZED_STATE_QUERY_RETRIES},
+        read::{
+            self, find::calculate_median_time_past, tree::history_tree,
+            FINALIZED_STATE_QUERY_RETRIES,
+        },
         NonFinalizedState,
     },
     BoxError, GetBlockTemplateChainInfo,
@@ -200,24 +203,10 @@ fn difficulty_time_and_history_tree(
 
     let cur_time = DateTime32::now();
 
-    // Get the median-time-past, which doesn't depend on the time, previous block height,
-    // or network.
-    // `context` will always have the correct length, because this function takes an array.
-    //
-    // TODO: split out median-time-past into its own struct?
-    let median_time_past = AdjustedDifficulty::new_from_header_time(
-        cur_time.into(),
-        tip_height,
-        network,
-        relevant_data.clone(),
-    )
-    .median_time_past();
-
     // > For each block other than the genesis block , nTime MUST be strictly greater than
     // > the median-time-past of that block.
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
-    let median_time_past =
-        DateTime32::try_from(median_time_past).expect("valid blocks have in-range times");
+    let median_time_past = calculate_median_time_past(relevant_chain);
 
     let min_time = median_time_past
         .checked_add(Duration32::from_seconds(1))

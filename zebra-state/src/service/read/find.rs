@@ -605,7 +605,7 @@ fn best_relevant_chain(
 /// The `relevant_chain` has blocks in reverse height order.
 ///
 /// See [`next_median_time_past()`] for details.
-fn calculate_median_time_past(
+pub(crate) fn calculate_median_time_past(
     relevant_chain: [Arc<Block>; POW_ADJUSTMENT_BLOCK_SPAN],
 ) -> DateTime32 {
     let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
@@ -613,7 +613,8 @@ fn calculate_median_time_past(
         .map(|block| (block.header.difficulty_threshold, block.header.time))
         .collect();
 
-    // TODO: split out median-time-past into its own struct?
+    // TODO: split out median-time-past into its own struct,
+    //       so we don't have to supply these arguments
     let ignored_time = DateTime::default();
     let ignored_height = Height(0);
     let ignored_network = Network::Mainnet;
