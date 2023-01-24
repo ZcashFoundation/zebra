@@ -16,12 +16,11 @@ use crate::service;
 
 pub mod address;
 pub mod block;
+pub mod find;
+pub mod tree;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub mod difficulty;
-
-pub mod find;
-pub mod tree;
 
 #[cfg(test)]
 mod tests;
@@ -34,15 +33,14 @@ pub use address::{
 pub use block::{
     any_utxo, block, block_header, transaction, transaction_hashes_for_block, unspent_utxo, utxo,
 };
+pub use find::{
+    best_tip, block_locator, chain_contains_hash, depth, find_chain_hashes, find_chain_headers,
+    hash_by_height, height_by_hash, next_median_time_past, tip, tip_height,
+};
+pub use tree::{orchard_tree, sapling_tree};
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use difficulty::get_block_template_chain_info;
-
-pub use find::{
-    best_tip, block_locator, chain_contains_hash, depth, find_chain_hashes, find_chain_headers,
-    hash_by_height, height_by_hash, tip, tip_height,
-};
-pub use tree::{orchard_tree, sapling_tree};
 
 /// If a finalized state query is interrupted by a new finalized block,
 /// retry this many times.

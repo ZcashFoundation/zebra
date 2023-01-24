@@ -1023,8 +1023,9 @@ impl Service<Request> for StateService {
             }
 
             // Runs concurrently using the ReadStateService
-            Request::Depth(_)
-            | Request::Tip
+            Request::Tip
+            | Request::Depth(_)
+            | Request::BestChainNextMedianTimePast
             | Request::BlockLocator
             | Request::Transaction(_)
             | Request::UnspentBestChainUtxo(_)
@@ -1152,6 +1153,35 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
+                .boxed()
+            }
+
+            // Used by the StateService.
+            ReadRequest::BestChainNextMedianTimePast => {
+                let timer = CodeTimer::start();
+
+                let state = self.clone();
+
+                let span = Span::current();
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let non_finalized_state = state.latest_non_finalized_state();
+                        let median_time_past =
+                            read::next_median_time_past(&non_finalized_state, &state.db);
+
+                        // The work is done in the future.
+                        timer.finish(
+                            module_path!(),
+                            line!(),
+                            "ReadRequest::BestChainNextMedianTimePast",
+                        );
+
+                        Ok(ReadResponse::BestChainNextMedianTimePast(median_time_past?))
+                    })
+                })
+                .map(|join_result| {
+                    join_result.expect("panic in ReadRequest::BestChainNextMedianTimePast")
+                })
                 .boxed()
             }
 
