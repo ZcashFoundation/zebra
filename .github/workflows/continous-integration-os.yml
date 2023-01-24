@@ -19,11 +19,14 @@ on:
       # production code and test code
       - '**/*.rs'
       # hard-coded checkpoints
-      # TODO: skip proptest regressions
+      # TODO: skip proptest regressions?
       - '**/*.txt'
+      # test data snapshots
+      - '**/*.snap'
       # dependencies
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      - '**/deny.toml'
       # configuration files
       - '.cargo/config.toml'
       - '**/clippy.toml'
@@ -41,6 +44,9 @@ on:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - '**/deny.toml'
+      # configuration files
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
       # workflow definitions
       - '.github/workflows/continous-integration-os.yml'
 
