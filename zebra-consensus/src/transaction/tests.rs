@@ -14,7 +14,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,
-    serialization::{ZcashDeserialize, ZcashDeserializeInto},
+    serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto},
     sprout,
     transaction::{
         arbitrary::{
@@ -196,9 +196,17 @@ async fn mempool_request_with_missing_input_is_rejected() {
 
     tokio::spawn(async move {
         state
+            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                DateTime32::MAX,
+            ));
+
+        state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
             .await
-            .expect("verifier should call mock state service")
+            .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::UnspentBestChainUtxo(None));
 
         state
@@ -209,7 +217,7 @@ async fn mempool_request_with_missing_input_is_rejected() {
                 )
             })
             .await
-            .expect("verifier should call mock state service")
+            .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
     });
 
@@ -256,7 +264,7 @@ async fn mempool_request_with_present_input_is_accepted() {
         state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
             .await
-            .expect("verifier should call mock state service")
+            .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::UnspentBestChainUtxo(
                 known_utxos
                     .get(&input_outpoint)
@@ -271,7 +279,7 @@ async fn mempool_request_with_present_input_is_accepted() {
                 )
             })
             .await
-            .expect("verifier should call mock state service")
+            .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
     });
 
