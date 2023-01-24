@@ -47,7 +47,7 @@ use crate::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
         finalized_state::{FinalizedState, ZebraDb},
-        non_finalized_state::NonFinalizedState,
+        non_finalized_state::{Chain, NonFinalizedState},
         pending_utxos::PendingUtxos,
         queued_blocks::QueuedBlocks,
         watch_receiver::WatchReceiver,
@@ -802,6 +802,15 @@ impl ReadStateService {
     /// Gets a clone of the latest non-finalized state from the `non_finalized_state_receiver`
     fn latest_non_finalized_state(&self) -> NonFinalizedState {
         self.non_finalized_state_receiver.cloned_watch_data()
+    }
+
+    /// Gets a clone of the latest, best non-finalized chain from the `non_finalized_state_receiver`
+    #[allow(dead_code)]
+    fn latest_best_chain(&self) -> Option<Arc<Chain>> {
+        self.non_finalized_state_receiver
+            .cloned_watch_data()
+            .best_chain()
+            .cloned()
     }
 }
 
