@@ -35,6 +35,8 @@ on:
       - '**/*.snap'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+      - '.cargo/config.toml'
+      - '**/clippy.toml'
       - 'codecov.yml'
       - '.github/workflows/coverage.yml'
 

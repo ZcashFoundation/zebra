@@ -1,5 +1,11 @@
 # Zebra cargo configuration
 
+# Disabled until we upgrade to abscissa 0.7 or later:
+# https://github.com/ZcashFoundation/zebra/issues/5502
+# https://doc.rust-lang.org/cargo/reference/future-incompat-report.html
+[future-incompat-report]
+frequency = "never"
+
 # Flags that apply to all Zebra crates and configurations
 [target.'cfg(all())']
 rustflags = [
@@ -38,7 +44,7 @@ rustflags = [
     # Incomplete code
     "-Wclippy::dbg_macro",
     "-Wclippy::todo",
-    
+
     # Manual debugging output.
     # Use tracing::trace!() or tracing::debug!() instead.
     "-Wclippy::print_stdout",
@@ -51,13 +57,13 @@ rustflags = [
     # Panics
     "-Wclippy::fallible_impl_from",
     "-Wclippy::unwrap_in_result",
-    
+
     # Documentation
     "-Wmissing_docs",
 
     # These rustdoc -A and -W settings must be the same as the RUSTDOCFLAGS in:
     # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/lint.yml#L152
-    
+
     # Links in public docs can point to private items.
     "-Arustdoc::private_intra_doc_links",
 
