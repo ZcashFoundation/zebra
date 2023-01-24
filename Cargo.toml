@@ -66,6 +66,11 @@ opt-level = 3
 
 [profile.release]
 panic = "abort"
+# We want backtraces with file and line information in production builds.
+# If we get disk space errors or hangs in our GitHub actions builds, turn this off.
+#
+# Using line tables adds 300 MB to the zebrad binary, full debug info adds 500 MB.
+debug = 1
 
 # Speed up release builds and sync tests using link-time optimization.
 # Some of Zebra's code is CPU-intensive, and needs extra optimizations for peak performance.
