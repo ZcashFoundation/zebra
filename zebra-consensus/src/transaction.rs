@@ -23,6 +23,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     sapling,
+    serialization::DateTime32,
     transaction::{
         self, HashType, SigHash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx,
     },
@@ -306,17 +307,15 @@ where
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
-            // Do basic checks first
-            if let Some(block_time) = req.block_time() {
-                check::lock_time_has_passed(&tx, req.height(), block_time)?;
-            }
-
+            // Do quick checks first
             check::has_inputs_and_outputs(&tx)?;
             check::has_enough_orchard_flags(&tx)?;
 
+            // Validate the coinbase input consensus rules
             if req.is_mempool() && tx.is_coinbase() {
                 return Err(TransactionError::CoinbaseInMempool);
             }
+
             if tx.is_coinbase() {
                 check::coinbase_tx_no_prevout_joinsplit_spend(&tx)?;
             } else if !tx.is_valid_non_coinbase() {
@@ -345,6 +344,34 @@ where
 
             tracing::trace!(?tx_id, "passed quick checks");
 
+            if let Some(block_time) = req.block_time() {
+                check::lock_time_has_passed(&tx, req.height(), block_time)?;
+            } else {
+                // This state query is much faster than loading UTXOs from the database,
+                // so it doesn't need to be executed in parallel
+                let state = state.clone();
+                let next_median_time_past = Self::mempool_best_chain_next_median_time_past(state).await?;
+
+                // # Consensus
+                //
+                // > the nTime field MUST represent a time strictly greater than the median of the
+                // > timestamps of the past PoWMedianBlockSpan blocks.
+                // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+                //
+                // > The transaction can be added to any block whose block time is greater than the locktime.
+                // <https://developer.bitcoin.org/devguide/transactions.html#locktime-and-sequence-number>
+                //
+                // If the transaction's lock time is less than the median-time-past,
+                // it will always be less than the next block's time,
+                // because the next block's time is strictly greater than the median-time-past.
+                //
+                // This is the rule implemented by `zcashd`'s mempool:
+                // <https://github.com/zcash/zcash/blob/9e1efad2d13dca5ee094a38e6aa25b0f2464da94/src/main.cpp#L776-L784>
+                //
+                // This consensus check makes sure Zebra produces valid block templates.
+                check::lock_time_has_passed(&tx, req.height(), next_median_time_past.to_chrono())?;
+            }
+
             // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig
             // in non-coinbase transactions MUST also be applied to coinbase transactions."
             //
@@ -356,7 +383,7 @@ where
             // https://zips.z.cash/zip-0213#specification
 
             // Load spent UTXOs from state.
-            // TODO: Make this a method of `Request` and replace `tx.clone()` with `self.transaction()`?
+            // The UTXOs are required for almost all the async checks.
             let load_spent_utxos_fut =
                 Self::spent_utxos(tx.clone(), req.known_utxos(), req.is_mempool(), state.clone());
             let (spent_utxos, spent_outputs) = load_spent_utxos_fut.await?;
@@ -426,7 +453,7 @@ where
             // Calculate the fee only for non-coinbase transactions.
             let mut miner_fee = None;
             if !tx.is_coinbase() {
-                // TODO: deduplicate this code with remaining_transaction_value (#TODO: open ticket)
+                // TODO: deduplicate this code with remaining_transaction_value()?
                 miner_fee = match value_balance {
                     Ok(vb) => match vb.remaining_transaction_value() {
                         Ok(tx_rtv) => Some(tx_rtv),
@@ -471,7 +498,28 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
-    /// Get the UTXOs that are being spent by the given transaction.
+    /// Fetches the median-time-past of the *next* block after the best state tip.
+    ///
+    /// This is used to verify that the lock times of mempool transactions
+    /// can be included in any valid next block.
+    async fn mempool_best_chain_next_median_time_past(
+        state: Timeout<ZS>,
+    ) -> Result<DateTime32, TransactionError> {
+        let query = state
+            .clone()
+            .oneshot(zs::Request::BestChainNextMedianTimePast);
+
+        if let zebra_state::Response::BestChainNextMedianTimePast(median_time_past) = query
+            .await
+            .map_err(|e| TransactionError::ValidateMempoolLockTimeError(e.to_string()))?
+        {
+            Ok(median_time_past)
+        } else {
+            unreachable!("Request::BestChainNextMedianTimePast always responds with BestChainNextMedianTimePast")
+        }
+    }
+
+    /// Wait for the UTXOs that are being spent by the given transaction.
     ///
     /// `known_utxos` are additional UTXOs known at the time of validation (i.e.
     /// from previous transactions in the block).
