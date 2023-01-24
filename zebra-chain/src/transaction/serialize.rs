@@ -251,7 +251,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
         //
         // # Consensus
         //
-        // > Elements of a Output description MUST be valid encodings of the types given above.
+        // > Elements of an Output description MUST be valid encodings of the types given above.
         //
         // https://zips.z.cash/protocol/protocol.pdf#outputdesc
         //

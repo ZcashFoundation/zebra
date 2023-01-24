@@ -22,13 +22,15 @@ Or jump straight to [the exact commands for updating the lists](https://github.c
 
 ### Use the `zebra-checkpoints` utility
 
-`zebra-checkpoints` is the program we use to collect checkpoints. Currently this program uses `zcash-cli` to get the hashes. `zcash-cli` must be available in your machine and it must be connected to a synchronized (Mainnet or Testnet) instance of `zcashd` to get the most recent hashes.
+`zebra-checkpoints` is the program we use to collect checkpoints. Currently this program uses `zcash-cli` to get the hashes. `zcash-cli` must be available in your machine and it must be connected to a synchronized (Mainnet or Testnet) instance of `zebrad` or `zcashd` to get the most recent hashes.
 
 First, [build the `zebra-checkpoints` binary](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils/README.md#zebra-checkpoints).
 
 When updating the lists there is no need to start from the genesis block. The program option `--last-checkpoint` will let you specify at what block height you want to start. In general the maintainer will copy the last height from each list and use the mentioned option to start from there.
 
 It is easier if `zcash-cli` is in your execution path however you can specify the location of it anywhere in the filesystem with option `--cli`.
+
+By default, `zebra-checkpoints` will use a `zebrad` backend. If the running instance is `zcashd`, please add `-b zcashd` to your command. 
 
 To update the checkpoint list, run:
 
@@ -43,7 +45,7 @@ $ zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/m
 ...
 ```
 
-If we are looking to update the testnet hashes we must make sure the cli is connected with a testnet chain. If we have our `zcashd` running locally we can make this by starting with `zcashd -testnet`.
+If we are looking to update the testnet hashes we must make sure the cli is connected with a testnet chain. If we are using `zcashd` as the backend and this is running locally, we can make this by starting with `zcashd -testnet`. If we are using `zebrad` as the backend, then we must start with a configuration file where the `network` field of the `[network]` section is `Testnet`.
 
 Anything we add after `--` will pass through into the `zcash-cli` program so we can specify the testnet here.
 
