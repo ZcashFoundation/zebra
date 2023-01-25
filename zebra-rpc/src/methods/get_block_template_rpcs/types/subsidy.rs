@@ -1,7 +1,7 @@
 //! Types for the `getblocksubsidy` RPC.
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
+    amount::{Amount, NonNegative, Zec},
     transparent,
 };
 use zebra_consensus::{funding_stream_recipient_info, FundingStreamReceiver};
@@ -12,16 +12,13 @@ pub struct BlockSubsidy {
     /// The mining reward amount in ZEC.
     ///
     /// This does not include the miner fee.
-    //
-    // TODO: format ZEC amounts as fixed-point decimal, like `zcashd`:
-    // https://github.com/zcash/zcash/blob/f6a4f68115ea4c58d55c8538579d0877ba9c8f79/src/rpc/server.cpp#L127-L135
-    pub miner: Amount<NonNegative>,
+    pub miner: Zec<NonNegative>,
 
     /// The founders' reward amount in ZEC.
     ///
     /// Zebra returns an error when asked for founders reward heights,
     /// because it checkpoints those blocks instead.
-    pub founders: Amount<NonNegative>,
+    pub founders: Zec<NonNegative>,
 
     /// An array of funding stream descriptions.
     /// Always present, because Zebra returns an error for heights before the first halving.
@@ -39,7 +36,7 @@ pub struct FundingStream {
     pub specification: String,
 
     /// The funding stream amount in ZEC.
-    pub value: Amount<NonNegative>,
+    pub value: Zec<NonNegative>,
 
     /// The funding stream amount in zatoshis.
     #[serde(rename = "valueZat")]
@@ -64,7 +61,7 @@ impl FundingStream {
         FundingStream {
             recipient: recipient.to_string(),
             specification: specification.to_string(),
-            value,
+            value: value.into(),
             value_zat: value,
             address,
         }

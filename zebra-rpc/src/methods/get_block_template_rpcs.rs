@@ -812,8 +812,8 @@ where
                 .collect();
 
             Ok(BlockSubsidy {
-                miner,
-                founders,
+                miner: miner.into(),
+                founders: founders.into(),
                 funding_streams,
             })
         }
