@@ -213,7 +213,7 @@ if [ "$1" == "getrawmempool" ] && [ $CHECK_EXIT_STATUS != 0 ]; then
                 TRANSACTION_ID="${line:3:-1}"
             fi
 
-            TRANSACTION_HEX=`$ZCASH_CLI -rpccookiefile="$ZCASH_RPC_COOKIE_FILE" -rpcport="$ZEBRAD_RPC_PORT" getrawtransaction $TRANSACTION_ID 0`
+            TRANSACTION_HEX=`$ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getrawtransaction $TRANSACTION_ID 0`
 
             echo "## Displaying transaction $TRANSACTION_ID"
             echo
