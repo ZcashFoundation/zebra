@@ -7,6 +7,7 @@
 
 use std::{
     cmp::Ordering,
+    fmt,
     hash::{Hash, Hasher},
     marker::PhantomData,
     ops::RangeInclusive,
@@ -14,6 +15,10 @@ use std::{
 
 use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+
+pub mod zec;
+
+pub use zec::Zec;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
@@ -25,6 +30,10 @@ mod tests;
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A runtime validated type for representing amounts of zatoshis
+//
+// TODO:
+// - remove the default NegativeAllowed bound, to make consensus rule reviews easier
+// - put a Constraint bound on the type generic, not just some implementations
 #[derive(Clone, Copy, Serialize, Deserialize)]
 #[serde(try_from = "i64")]
 #[serde(into = "i64")]
@@ -42,8 +51,16 @@ pub struct Amount<C = NegativeAllowed>(
     PhantomData<C>,
 );
 
-impl<C> std::fmt::Debug for Amount<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<C> fmt::Display for Amount<C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let zats = self.zatoshis();
+
+        f.pad_integral(zats > 0, "", &zats.to_string())
+    }
+}
+
+impl<C> fmt::Debug for Amount<C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple(&format!("Amount<{}>", std::any::type_name::<C>()))
             .field(&self.0)
             .finish()
@@ -57,6 +74,11 @@ impl<C> Amount<C> {
         C2: Constraint,
     {
         self.0.try_into()
+    }
+
+    /// Returns the number of zatoshis in this amount.
+    pub fn zatoshis(&self) -> i64 {
+        self.0
     }
 
     /// To little endian byte array
@@ -391,7 +413,7 @@ where
 
 impl<'amt, C> std::iter::Sum<&'amt Amount<C>> for Result<Amount<C>>
 where
-    C: Constraint + std::marker::Copy + 'amt,
+    C: Constraint + Copy + 'amt,
 {
     fn sum<I: Iterator<Item = &'amt Amount<C>>>(iter: I) -> Self {
         iter.copied().sum()
