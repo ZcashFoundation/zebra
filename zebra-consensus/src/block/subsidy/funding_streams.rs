@@ -9,7 +9,7 @@ use zebra_chain::{
     block::Height,
     parameters::{Network, NetworkUpgrade::*},
     transaction::Transaction,
-    transparent::{Address, Output, Script},
+    transparent::{self, Script},
 };
 
 use crate::{block::subsidy::general::block_subsidy, parameters::subsidy::*};
@@ -104,25 +104,28 @@ fn funding_stream_address_index(height: Height, network: Network) -> usize {
 }
 
 /// Return the address corresponding to given height, network and funding stream receiver.
+///
+/// This function only returns transparent addresses, because the current Zcash funding streams
+/// only use transparent addresses,
 pub fn funding_stream_address(
     height: Height,
     network: Network,
     receiver: FundingStreamReceiver,
-) -> Address {
+) -> transparent::Address {
     let index = funding_stream_address_index(height, network);
     let address = &FUNDING_STREAM_ADDRESSES
         .get(&network)
         .expect("there is always another hash map as value for a given valid network")
         .get(&receiver)
         .expect("in the inner hash map there is always a vector of strings with addresses")[index];
-    Address::from_str(address).expect("address should deserialize")
+    transparent::Address::from_str(address).expect("address should deserialize")
 }
 
 /// Given a funding stream P2SH address, create a script and check if it is the same
 /// as the given lock_script as described in [protocol specification §7.10][7.10]
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-pub fn check_script_form(lock_script: &Script, address: Address) -> bool {
+pub fn check_script_form(lock_script: &Script, address: transparent::Address) -> bool {
     assert!(
         address.is_script_hash(),
         "incorrect funding stream address constant: {address} \
@@ -136,7 +139,7 @@ pub fn check_script_form(lock_script: &Script, address: Address) -> bool {
 }
 
 /// Returns a new funding stream coinbase output lock script, which pays to the P2SH `address`.
-pub fn new_coinbase_script(address: Address) -> Script {
+pub fn new_coinbase_script(address: transparent::Address) -> Script {
     assert!(
         address.is_script_hash(),
         "incorrect coinbase script address: {address} \
@@ -150,8 +153,11 @@ pub fn new_coinbase_script(address: Address) -> Script {
     address.create_script_from_address()
 }
 
-/// Returns a list of outputs in `Transaction`, which have a script address equal to `Address`.
-pub fn filter_outputs_by_address(transaction: &Transaction, address: Address) -> Vec<Output> {
+/// Returns a list of outputs in `transaction`, which have a script address equal to `address`.
+pub fn filter_outputs_by_address(
+    transaction: &Transaction,
+    address: transparent::Address,
+) -> Vec<transparent::Output> {
     transaction
         .outputs()
         .iter()

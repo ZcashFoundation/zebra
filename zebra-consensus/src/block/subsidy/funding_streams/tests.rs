@@ -65,7 +65,8 @@ fn test_funding_stream_addresses() -> Result<(), Report> {
     for (network, receivers) in FUNDING_STREAM_ADDRESSES.iter() {
         for (receiver, addresses) in receivers {
             for address in addresses {
-                let address = Address::from_str(address).expect("address should deserialize");
+                let address =
+                    transparent::Address::from_str(address).expect("address should deserialize");
                 assert_eq!(
                     &address.network(),
                     network,
