@@ -71,8 +71,7 @@ pub const FUNDING_STREAM_SPECIFICATION: &str = "https://zips.z.cash/zip-0214";
 // TODO: use a struct for the info for each funding stream, like zcashd does:
 // https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
 lazy_static! {
-    /// The name for each funding stream receiver,
-    /// as described in [ZIP-1014] and [`zcashd`].
+    /// The name for each funding stream receiver, as described in [ZIP-1014] and [`zcashd`].
     ///
     /// [ZIP-1014]: https://zips.z.cash/zip-1014#abstract
     /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32

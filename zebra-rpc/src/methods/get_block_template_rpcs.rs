@@ -29,6 +29,7 @@ use crate::methods::{
     get_block_template_rpcs::{
         constants::{
             DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
+            ZCASHD_FUNDING_STREAM_ORDER,
         },
         get_block_template::{
             check_miner_address, check_synced_to_tip, fetch_mempool_transactions,
@@ -803,13 +804,22 @@ where
                     message: error.to_string(),
                     data: None,
                 })?;
-            let funding_streams = funding_streams
+            let mut funding_streams: Vec<_> = funding_streams
                 .iter()
                 .map(|(receiver, value)| {
                     let address = funding_stream_address(height, network, *receiver);
-                    FundingStream::new(*receiver, *value, address)
+                    (*receiver, FundingStream::new(*receiver, *value, address))
                 })
                 .collect();
+
+            // Use the same funding stream order as zcashd
+            funding_streams.sort_by_key(|(receiver, _funding_stream)| {
+                ZCASHD_FUNDING_STREAM_ORDER
+                    .iter()
+                    .position(|zcashd_receiver| zcashd_receiver == receiver)
+            });
+
+            let (_receivers, funding_streams): (Vec<_>, _) = funding_streams.into_iter().unzip();
 
             Ok(BlockSubsidy {
                 miner: miner.into(),
