@@ -9,6 +9,11 @@ use zebra_consensus::{funding_stream_recipient_info, FundingStreamReceiver};
 /// A response to a `getblocksubsidy` RPC request
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockSubsidy {
+    /// An array of funding stream descriptions.
+    /// Always present, because Zebra returns an error for heights before the first halving.
+    #[serde(rename = "fundingstreams")]
+    pub funding_streams: Vec<FundingStream>,
+
     /// The mining reward amount in ZEC.
     ///
     /// This does not include the miner fee.
@@ -19,11 +24,6 @@ pub struct BlockSubsidy {
     /// Zebra returns an error when asked for founders reward heights,
     /// because it checkpoints those blocks instead.
     pub founders: Zec<NonNegative>,
-
-    /// An array of funding stream descriptions.
-    /// Always present, because Zebra returns an error for heights before the first halving.
-    #[serde(rename = "fundingstreams")]
-    pub funding_streams: Vec<FundingStream>,
 }
 
 /// A single funding stream's information in a  `getblocksubsidy` RPC request
