@@ -120,6 +120,8 @@ EXIT_STATUS=$?
 
 if [ "$1" == "getaddressutxos" ]; then
     set "getaddressbalance" "$2"
+elif [ "$1" == "getrawmempool" ]; then
+    set "getrawmempool"
 else
     exit $EXIT_STATUS
 fi
@@ -191,6 +193,37 @@ if [ "$1" == "getaddressbalance" ]; then
     if [ $COMPARE_EXIT_STATUS -ne 0 ]; then
         exit $COMPARE_EXIT_STATUS
     fi
+fi
+
+if [ "$1" == "getrawmempool" ] && [ $CHECK_EXIT_STATUS != 0 ]; then
+    echo
+    echo "Obtaining transaction details"
+    echo
+
+    set TRANSACTION_ID
+    set TRANSACTION_HEX
+    set TRANSACTION_DECODED
+
+    while IFS= read -r line
+    do
+        if [ "$line" != "[" ] && [ "$line" != "]" ]; then
+            if [[ "${line:0-1}" == "," ]]; then
+                TRANSACTION_ID="${line:3:-2}"
+            else
+                TRANSACTION_ID="${line:3:-1}"
+            fi
+
+            TRANSACTION_HEX=`$ZCASH_CLI -rpccookiefile="$ZCASH_RPC_COOKIE_FILE" -rpcport="$ZEBRAD_RPC_PORT" getrawtransaction $TRANSACTION_ID 0`
+
+            echo "## Displaying transaction $TRANSACTION_ID"
+            echo
+
+            TRANSACTION_DECODED=`$ZCASH_CLI -rpccookiefile="$ZCASH_RPC_COOKIE_FILE" decoderawtransaction $TRANSACTION_HEX`
+
+            echo $TRANSACTION_DECODED | $JQ
+            echo
+        fi
+    done < "$ZEBRAD_RESPONSE"
 fi
 
 if [ $EXIT_STATUS -ne 0 ]; then
