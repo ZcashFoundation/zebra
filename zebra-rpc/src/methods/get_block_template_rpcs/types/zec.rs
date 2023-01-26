@@ -11,14 +11,13 @@ use std::{
     str::FromStr,
 };
 
-use crate::{
-    amount::{self, Amount, Constraint, COIN},
-    BoxError,
-};
+use zebra_chain::amount::{self, Amount, Constraint, COIN};
+
+use zebra_node_services::BoxError;
 
 // Doc links only
 #[allow(clippy::unused_imports)]
-use crate::amount::MAX_MONEY;
+use zebra_chain::amount::MAX_MONEY;
 
 /// The maximum precision of a zatoshi in ZEC.
 /// Also used as the default decimal precision for ZEC formatting.

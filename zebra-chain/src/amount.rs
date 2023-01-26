@@ -16,10 +16,6 @@ use std::{
 use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 
-pub mod zec;
-
-pub use zec::Zec;
-
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
 

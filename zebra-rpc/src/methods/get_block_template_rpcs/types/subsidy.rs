@@ -1,10 +1,12 @@
 //! Types for the `getblocksubsidy` RPC.
 
 use zebra_chain::{
-    amount::{Amount, NonNegative, Zec},
+    amount::{Amount, NonNegative},
     transparent,
 };
 use zebra_consensus::{funding_stream_recipient_info, FundingStreamReceiver};
+
+use crate::methods::get_block_template_rpcs::types::zec::Zec;
 
 /// A response to a `getblocksubsidy` RPC request
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
