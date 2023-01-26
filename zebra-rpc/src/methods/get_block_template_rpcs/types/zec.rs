@@ -4,7 +4,6 @@
 //! The values themselves are accurate, but any calculations using them could be lossy.
 
 use std::{
-    cmp::Ordering,
     fmt,
     hash::{Hash, Hasher},
     ops,
@@ -211,15 +210,3 @@ impl<C1: Constraint, C2: Constraint> PartialEq<Zec<C2>> for Amount<C1> {
 }
 
 impl<C: Constraint> Eq for Zec<C> {}
-
-impl<C1: Constraint, C2: Constraint> PartialOrd<Zec<C2>> for Zec<C1> {
-    fn partial_cmp(&self, other: &Zec<C2>) -> Option<Ordering> {
-        self.0.partial_cmp(&other.0)
-    }
-}
-
-impl<C: Constraint> Ord for Zec<C> {
-    fn cmp(&self, other: &Zec<C>) -> Ordering {
-        self.0.cmp(&other.0)
-    }
-}
