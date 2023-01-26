@@ -29,7 +29,7 @@ pub const EXPECTED_MEMPOOL_TRANSACTION_TIME: Duration = Duration::from_secs(45);
 
 /// Number of times we want to try submitting a block template as a block proposal at an interval
 /// that allows testing the varying mempool contents.
-const NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED: usize = 3;
+const NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED: usize = 10;
 
 /// Launch Zebra, wait for it to sync, and check the getblocktemplate RPC returns without errors.
 pub(crate) async fn run() -> Result<()> {
