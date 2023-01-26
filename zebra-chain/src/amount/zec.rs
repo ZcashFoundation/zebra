@@ -16,6 +16,10 @@ use crate::{
     BoxError,
 };
 
+// Doc links only
+#[allow(clippy::unused_imports)]
+use crate::amount::MAX_MONEY;
+
 /// The maximum precision of a zatoshi in ZEC.
 /// Also used as the default decimal precision for ZEC formatting.
 ///
