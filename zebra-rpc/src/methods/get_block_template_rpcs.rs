@@ -7,6 +7,7 @@ use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
+use zcash_address::{TryFromAddress, ZcashAddress};
 use zebra_chain::{
     block::{self, Block, Height},
     chain_sync_status::ChainSyncStatus,

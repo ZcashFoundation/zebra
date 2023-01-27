@@ -8,6 +8,9 @@ mod proofs;
 // TODO: re-export redpallas if needed, or reddsa if that gets merged https://github.com/ZcashFoundation/zebra/issues/2044
 pub mod redpallas;
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+mod address;
+
 pub use ed25519_zebra as ed25519;
 pub use redjubjub;
 pub use x25519_dalek as x25519;
