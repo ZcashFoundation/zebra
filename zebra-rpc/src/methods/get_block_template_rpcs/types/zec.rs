@@ -15,7 +15,7 @@ use zebra_chain::amount::{self, Amount, Constraint, COIN};
 use zebra_node_services::BoxError;
 
 // Doc links only
-#[allow(clippy::unused_imports)]
+#[allow(unused_imports)]
 use zebra_chain::amount::MAX_MONEY;
 
 /// The maximum precision of a zatoshi in ZEC.
