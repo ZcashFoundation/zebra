@@ -26,7 +26,13 @@ use crate::methods::get_block_template_rpcs::{
 
 /// The ZIP-317 recommended limit on the number of unpaid actions per block.
 /// `block_unpaid_action_limit` in ZIP-317.
+//
+// To make its block templates more similar to zcashd, build `zebrad` with:
+// RUSTFLAGS="--cfg disable_zip317" cargo build
+#[cfg(not(disable_zip317))]
 pub const BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT: u32 = 50;
+#[cfg(disable_zip317)]
+pub const BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT: u32 = 1000_000;
 
 /// Selects mempool transactions for block production according to [ZIP-317],
 /// using a fake coinbase transaction and the mempool.
