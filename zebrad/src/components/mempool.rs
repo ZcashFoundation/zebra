@@ -401,10 +401,16 @@ impl Service<Request> for Mempool {
                 let mined_ids = block.transaction_hashes.iter().cloned().collect();
                 tx_downloads.cancel(&mined_ids);
                 storage.reject_and_remove_same_effects(&mined_ids, block.transactions);
+
+                // Clear any transaction rejections if they might have become valid after
+                // the new block was added to the tip.
                 storage.clear_tip_rejections();
             }
 
             // Remove expired transactions from the mempool.
+            //
+            // Lock times never expire, because block times are strictly increasing.
+            // So we don't need to check them here.
             if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
                 let expired_transactions = storage.remove_expired_transactions(tip_height);
                 // Remove transactions that are expired from the peers list

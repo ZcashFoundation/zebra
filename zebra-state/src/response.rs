@@ -6,6 +6,7 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block},
     orchard, sapling,
+    serialization::DateTime32,
     transaction::{self, Transaction},
     transparent,
 };
@@ -56,6 +57,10 @@ pub enum Response {
     ///
     /// Does not check transparent UTXO inputs
     ValidBestChainTipNullifiersAndAnchors,
+
+    /// Response to [`Request::BestChainNextMedianTimePast`].
+    /// Contains the median-time-past for the *next* block on the best chain.
+    BestChainNextMedianTimePast(DateTime32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,6 +125,10 @@ pub enum ReadResponse {
     ///
     /// Does not check transparent UTXO inputs
     ValidBestChainTipNullifiersAndAnchors,
+
+    /// Response to [`ReadRequest::BestChainNextMedianTimePast`].
+    /// Contains the median-time-past for the *next* block on the best chain.
+    BestChainNextMedianTimePast(DateTime32),
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.
@@ -132,6 +141,7 @@ impl TryFrom<ReadResponse> for Response {
         match response {
             ReadResponse::Tip(height_and_hash) => Ok(Response::Tip(height_and_hash)),
             ReadResponse::Depth(depth) => Ok(Response::Depth(depth)),
+            ReadResponse::BestChainNextMedianTimePast(median_time_past) => Ok(Response::BestChainNextMedianTimePast(median_time_past)),
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
             ReadResponse::Transaction(tx_and_height) => {

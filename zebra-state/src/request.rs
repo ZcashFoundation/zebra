@@ -545,6 +545,11 @@ pub enum Request {
     ///
     /// Returns [`Response::ValidBestChainTipNullifiersAndAnchors`]
     CheckBestChainTipNullifiersAndAnchors(UnminedTx),
+
+    /// Calculates the median-time-past for the *next* block on the best chain.
+    ///
+    /// Returns [`Response::BestChainNextMedianTimePast`] when successful.
+    BestChainNextMedianTimePast,
 }
 
 impl Request {
@@ -564,6 +569,7 @@ impl Request {
             Request::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"
             }
+            Request::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
         }
     }
 
@@ -749,6 +755,11 @@ pub enum ReadRequest {
     ///
     /// Returns [`ReadResponse::ValidBestChainTipNullifiersAndAnchors`].
     CheckBestChainTipNullifiersAndAnchors(UnminedTx),
+
+    /// Calculates the median-time-past for the *next* block on the best chain.
+    ///
+    /// Returns [`ReadResponse::BestChainNextMedianTimePast`] when successful.
+    BestChainNextMedianTimePast,
 }
 
 impl ReadRequest {
@@ -772,6 +783,7 @@ impl ReadRequest {
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"
             }
+            ReadRequest::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
         }
     }
 
@@ -796,6 +808,7 @@ impl TryFrom<Request> for ReadRequest {
         match request {
             Request::Tip => Ok(ReadRequest::Tip),
             Request::Depth(hash) => Ok(ReadRequest::Depth(hash)),
+            Request::BestChainNextMedianTimePast => Ok(ReadRequest::BestChainNextMedianTimePast),
 
             Request::Block(hash_or_height) => Ok(ReadRequest::Block(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),

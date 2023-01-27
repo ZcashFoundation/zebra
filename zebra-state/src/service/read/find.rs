@@ -17,15 +17,24 @@ use std::{
     sync::Arc,
 };
 
-use zebra_chain::block::{self, Height};
+use chrono::{DateTime, Utc};
+use zebra_chain::{
+    block::{self, Block, Height},
+    parameters::Network,
+    serialization::DateTime32,
+    work::difficulty::CompactDifficulty,
+};
 
 use crate::{
     constants,
     service::{
+        block_iter::any_ancestor_blocks,
+        check::{difficulty::POW_ADJUSTMENT_BLOCK_SPAN, AdjustedDifficulty},
         finalized_state::ZebraDb,
         non_finalized_state::{Chain, NonFinalizedState},
-        read::block::block_header,
+        read::{self, block::block_header, FINALIZED_STATE_QUERY_RETRIES},
     },
+    BoxError,
 };
 
 #[cfg(test)]
@@ -525,4 +534,103 @@ where
     let intersection = find_chain_intersection(chain, db, known_blocks);
 
     collect_chain_headers(chain, db, intersection, stop, max_len)
+}
+
+/// Returns the median-time-past of the *next* block to be added to the best chain in
+/// `non_finalized_state` or `db`.
+///
+/// # Panics
+///
+/// - If we don't have enough blocks in the state.
+pub fn next_median_time_past(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+) -> Result<DateTime32, BoxError> {
+    let mut best_relevant_chain_result = best_relevant_chain(non_finalized_state, db);
+
+    // Retry the finalized state query if it was interrupted by a finalizing block.
+    //
+    // TODO: refactor this into a generic retry(finalized_closure, process_and_check_closure) fn
+    for _ in 0..FINALIZED_STATE_QUERY_RETRIES {
+        if best_relevant_chain_result.is_ok() {
+            break;
+        }
+
+        best_relevant_chain_result = best_relevant_chain(non_finalized_state, db);
+    }
+
+    Ok(calculate_median_time_past(best_relevant_chain_result?))
+}
+
+/// Do a consistency check by checking the finalized tip before and after all other database queries.
+///
+/// Returns recent blocks in reverse height order from the tip.
+/// Returns an error if the tip obtained before and after is not the same.
+///
+/// # Panics
+///
+/// - If we don't have enough blocks in the state.
+fn best_relevant_chain(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+) -> Result<[Arc<Block>; POW_ADJUSTMENT_BLOCK_SPAN], BoxError> {
+    let state_tip_before_queries = read::best_tip(non_finalized_state, db).ok_or_else(|| {
+        BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
+    })?;
+
+    let best_relevant_chain =
+        any_ancestor_blocks(non_finalized_state, db, state_tip_before_queries.1);
+    let best_relevant_chain: Vec<_> = best_relevant_chain
+        .into_iter()
+        .take(POW_ADJUSTMENT_BLOCK_SPAN)
+        .collect();
+    let best_relevant_chain = best_relevant_chain.try_into().map_err(|_error| {
+        "Zebra's state only has a few blocks, wait until it syncs to the chain tip"
+    })?;
+
+    let state_tip_after_queries =
+        read::best_tip(non_finalized_state, db).expect("already checked for an empty tip");
+
+    if state_tip_before_queries != state_tip_after_queries {
+        return Err("Zebra is committing too many blocks to the state, \
+                    wait until it syncs to the chain tip"
+            .into());
+    }
+
+    Ok(best_relevant_chain)
+}
+
+/// Returns the median-time-past for the provided `relevant_chain`.
+///
+/// The `relevant_chain` has blocks in reverse height order.
+///
+/// See [`next_median_time_past()`] for details.
+fn calculate_median_time_past(
+    relevant_chain: [Arc<Block>; POW_ADJUSTMENT_BLOCK_SPAN],
+) -> DateTime32 {
+    let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
+        .iter()
+        .map(|block| (block.header.difficulty_threshold, block.header.time))
+        .collect();
+
+    // TODO: split out median-time-past into its own struct?
+    let ignored_time = DateTime::default();
+    let ignored_height = Height(0);
+    let ignored_network = Network::Mainnet;
+
+    // Get the median-time-past, which doesn't depend on the time or the previous block height.
+    // `context` will always have the correct length, because this function takes an array.
+    let median_time_past = AdjustedDifficulty::new_from_header_time(
+        ignored_time,
+        ignored_height,
+        ignored_network,
+        relevant_data,
+    )
+    .median_time_past();
+
+    // > Define the median-time-past of a block to be the median of the nTime fields of the
+    // > preceding PoWMedianBlockSpan blocks (or all preceding blocks if there are fewer than
+    // > PoWMedianBlockSpan). The median-time-past of a genesis block is not defined.
+    // https://zips.z.cash/protocol/protocol.pdf#blockheader
+    DateTime32::try_from(median_time_past).expect("valid blocks have in-range times")
 }
