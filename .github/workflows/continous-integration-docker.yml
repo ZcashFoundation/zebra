@@ -145,28 +145,28 @@ jobs:
           LWD_TIP_DISK=$(gcloud compute images list --filter="status=READY AND name~lwd-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           if [[ -z "$LWD_TIP_DISK" ]]; then
               echo "No TIP disk found for LWD"
-              echo "::set-output name=lwd_tip_disk::${{ toJSON(false) }}"
+              echo "lwd_tip_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
           else
               echo "Disk: $LWD_TIP_DISK"
-              echo "::set-output name=lwd_tip_disk::${{ toJSON(true) }}"
+              echo "lwd_tip_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
           fi
 
           ZEBRA_TIP_DISK=$(gcloud compute images list --filter="status=READY AND name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           if [[ -z "$ZEBRA_TIP_DISK" ]]; then
               echo "No TIP disk found for ZEBRA"
-              echo "::set-output name=zebra_tip_disk::${{ toJSON(false) }}"
+              echo "zebra_tip_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
           else
               echo "Disk: $ZEBRA_TIP_DISK"
-              echo "::set-output name=zebra_tip_disk::${{ toJSON(true) }}"
+              echo "zebra_tip_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
           fi
 
           ZEBRA_CHECKPOINT_DISK=$(gcloud compute images list --filter="status=READY AND name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           if [[ -z "$ZEBRA_CHECKPOINT_DISK" ]]; then
               echo "No CHECKPOINT found for ZEBRA"
-              echo "::set-output name=zebra_checkpoint_disk::${{ toJSON(false) }}"
+              echo "zebra_checkpoint_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
           else
               echo "Disk: $ZEBRA_CHECKPOINT_DISK"
-              echo "::set-output name=zebra_checkpoint_disk::${{ toJSON(true) }}"
+              echo "zebra_checkpoint_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
           fi
 
   build:
