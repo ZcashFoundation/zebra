@@ -2,7 +2,7 @@
 //!
 //! `ProposalResponse` is the output of the `getblocktemplate` RPC method in 'proposal' mode.
 
-use std::{error::Error, num::ParseIntError, str::FromStr, sync::Arc};
+use std::{num::ParseIntError, str::FromStr, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block, Height},
@@ -42,23 +42,22 @@ pub enum ProposalResponse {
 
 impl ProposalResponse {
     /// Return a rejected response containing an error kind and detailed error info.
-    pub fn rejected<S: ToString>(kind: S, error: BoxError) -> Self {
-        let kind = kind.to_string();
+    ///
+    /// Note: Error kind is currently ignored to match zcashd error format (`kebab-case` string).
+    pub fn rejected<S: ToString>(_kind: S, error: BoxError) -> Self {
+        // Make error `kebab-case` to match zcashd format.
+        let error_kebab1 = format!("{error:?}")
+            .replace(|c: char| !c.is_alphanumeric(), "-")
+            .to_ascii_lowercase();
 
-        // Pretty-print the detailed error for now
-        ProposalResponse::Rejected(format!("{kind}: {error:#?}"))
-    }
+        // Remove consecutive `-` characters if any.
+        let regex1 = regex::Regex::new(r"-+").expect("valid regex");
+        let error_kebab2 = regex1.replace_all(&error_kebab1, "-");
+        // Remove trailing `-` character if any.
+        let regex2 = regex::Regex::new(r"-$").expect("valid regex");
+        let final_error = regex2.replace_all(&error_kebab2, "");
 
-    /// Return a rejected response containing just the detailed error information.
-    pub fn error(error: BoxError) -> Self {
-        // Pretty-print the detailed error for now
-        ProposalResponse::Rejected(format!("{error:#?}"))
-    }
-}
-
-impl<E: Error + Send + Sync + 'static> From<E> for ProposalResponse {
-    fn from(error: E) -> Self {
-        Self::error(error.into())
+        ProposalResponse::Rejected(final_error.to_string())
     }
 }
 

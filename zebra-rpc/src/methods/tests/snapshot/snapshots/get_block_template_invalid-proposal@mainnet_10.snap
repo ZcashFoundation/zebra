@@ -1,5 +1,6 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+assertion_line: 385
 expression: block_template
 ---
-"invalid proposal format: Io(\n    Error {\n        kind: UnexpectedEof,\n        message: \"failed to fill whole buffer\",\n    },\n)"
+"io-error-kind-unexpectedeof-message-failed-to-fill-whole-buffer"
