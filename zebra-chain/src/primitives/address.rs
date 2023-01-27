@@ -26,7 +26,12 @@ impl From<Network> for zcash_address::Network {
     }
 }
 
-// TODO: implement sprout, sapling, and unified on those types
+// TODO:
+// addresses with embedded networks:
+//       implement TryFromRawAddress for sprout, sapling, unified/sapling, unified/orchard
+//       use convert_if_network(network.into()) to convert raw addresses
+// addresses which require a separate network:
+//       implement TryFromAddress for unified/transparent (p2pkh and p2sh)
 impl zcash_address::TryFromAddress for transparent::Address {
     // TODO: crate::serialization::SerializationError
     type Error = BoxError;
