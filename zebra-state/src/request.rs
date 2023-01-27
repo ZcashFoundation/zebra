@@ -559,6 +559,11 @@ pub enum Request {
     /// Returns [`Response::ValidBestChainTipNullifiersAndAnchors`]
     CheckBestChainTipNullifiersAndAnchors(UnminedTx),
 
+    /// Calculates the median-time-past for the *next* block on the best chain.
+    ///
+    /// Returns [`Response::BestChainNextMedianTimePast`] when successful.
+    BestChainNextMedianTimePast,
+
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
@@ -584,6 +589,7 @@ impl Request {
             Request::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"
             }
+            Request::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
             #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
         }
@@ -772,6 +778,11 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::ValidBestChainTipNullifiersAndAnchors`].
     CheckBestChainTipNullifiersAndAnchors(UnminedTx),
 
+    /// Calculates the median-time-past for the *next* block on the best chain.
+    ///
+    /// Returns [`ReadResponse::BestChainNextMedianTimePast`] when successful.
+    BestChainNextMedianTimePast,
+
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Looks up a block hash by height in the current best chain.
     ///
@@ -832,6 +843,7 @@ impl ReadRequest {
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"
             }
+            ReadRequest::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
             #[cfg(feature = "getblocktemplate-rpcs")]
@@ -864,6 +876,7 @@ impl TryFrom<Request> for ReadRequest {
         match request {
             Request::Tip => Ok(ReadRequest::Tip),
             Request::Depth(hash) => Ok(ReadRequest::Depth(hash)),
+            Request::BestChainNextMedianTimePast => Ok(ReadRequest::BestChainNextMedianTimePast),
 
             Request::Block(hash_or_height) => Ok(ReadRequest::Block(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),

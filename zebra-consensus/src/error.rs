@@ -186,6 +186,11 @@ pub enum TransactionError {
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     // This error variant is at least 128 bytes
     ValidateNullifiersAndAnchorsError(Box<ValidateContextError>),
+
+    #[error("could not validate mempool transaction lock time on best chain")]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    // TODO: turn this into a typed error
+    ValidateMempoolLockTimeError(String),
 }
 
 impl From<ValidateContextError> for TransactionError {
