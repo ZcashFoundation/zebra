@@ -6,8 +6,8 @@ use futures::{future::OptionFuture, FutureExt, TryFutureExt};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
+use zcash_address::ZcashAddress;
 
-use zcash_address::{TryFromAddress, ZcashAddress};
 use zebra_chain::{
     block::{self, Block, Height},
     chain_sync_status::ChainSyncStatus,
@@ -760,11 +760,27 @@ where
 
     fn parse_address(&self, address: String) -> BoxFuture<Result<String>> {
         async move {
-            // TODO: return error as isvalid = false or a RPC error depending on the RPC
-            let address = ZcashAddress::try_from_encoded(&address);
+            let address = ZcashAddress::try_from_encoded(&address)
+                .expect("TODO: return a RPC error or isvalid = false depending on the RPC");
 
-            // TODO: actually do something with the address fields here
-            Ok(format!("{address:?}"))
+            // Handle all the different address types by trying them one by one???
+            let address: transparent::Address = address
+                .convert()
+                .expect("TODO: convert to RPC error if all types fail");
+
+            // TODO: check the definitions of the remaining fields, or how zcashd implements them
+            Ok(format!(
+                "isvalid: true,\n\
+                 address: {},\n\
+                 scriptPubKey: TODO,\n\
+                 ismine: false,\n\
+                 isscript: {},\n\
+                 pubkey: TODO,\n\
+                 iscompressed: TODO,\n\
+                 account: \"\"",
+                address,
+                address.is_script_hash()
+            ))
         }
         .boxed()
     }
