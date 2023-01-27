@@ -758,8 +758,15 @@ where
         .boxed()
     }
 
-    fn parse_address(&self, _address: String) -> BoxFuture<Result<String>> {
-        async { Ok("".to_string()) }.boxed()
+    fn parse_address(&self, address: String) -> BoxFuture<Result<String>> {
+        async move {
+            // TODO: return error as isvalid = false or a RPC error depending on the RPC
+            let address = ZcashAddress::try_from_encoded(&address);
+
+            // TODO: actually do something with the address fields here
+            Ok(format!("{address:?}"))
+        }
+        .boxed()
     }
 }
 
