@@ -156,6 +156,14 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`getpeerinfo`](https://zcash.github.io/rpc/getpeerinfo.html)
     #[rpc(name = "getpeerinfo")]
     fn get_peer_info(&self) -> BoxFuture<Result<Vec<PeerInfo>>>;
+
+    /// TODO: implement the actual return types for each address RPC
+    ///
+    /// Returns the parsed result for `address`, using the `zcash_address` crate.
+    ///
+    /// zcashd reference: TODO
+    #[rpc(name = "parseaddress")]
+    fn parse_address(&self, address: String) -> BoxFuture<Result<String>>;
 }
 
 /// RPC method implementations.
@@ -747,6 +755,10 @@ where
                 .collect())
         }
         .boxed()
+    }
+
+    fn parse_address(&self, _address: String) -> BoxFuture<Result<String>> {
+        async { Ok("".to_string()) }.boxed()
     }
 }
 
