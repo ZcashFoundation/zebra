@@ -5469,6 +5469,7 @@ dependencies = [
  "tracing",
  "uint",
  "x25519-dalek",
+ "zcash_address",
  "zcash_encoding",
  "zcash_history",
  "zcash_note_encryption",
