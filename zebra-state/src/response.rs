@@ -6,12 +6,13 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block},
     orchard, sapling,
+    serialization::DateTime32,
     transaction::{self, Transaction},
     transparent,
 };
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-use zebra_chain::{serialization::DateTime32, work::difficulty::CompactDifficulty};
+use zebra_chain::work::difficulty::CompactDifficulty;
 
 // Allow *only* these unused imports, so that rustdoc link resolution
 // will work with inline links.
@@ -59,6 +60,10 @@ pub enum Response {
     ///
     /// Does not check transparent UTXO inputs
     ValidBestChainTipNullifiersAndAnchors,
+
+    /// Response to [`Request::BestChainNextMedianTimePast`].
+    /// Contains the median-time-past for the *next* block on the best chain.
+    BestChainNextMedianTimePast(DateTime32),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`Request::CheckBlockProposalValidity`](crate::Request::CheckBlockProposalValidity)
@@ -128,6 +133,10 @@ pub enum ReadResponse {
     /// Does not check transparent UTXO inputs
     ValidBestChainTipNullifiersAndAnchors,
 
+    /// Response to [`ReadRequest::BestChainNextMedianTimePast`].
+    /// Contains the median-time-past for the *next* block on the best chain.
+    BestChainNextMedianTimePast(DateTime32),
+
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::BestChainBlockHash`](crate::ReadRequest::BestChainBlockHash) with the
     /// specified block hash.
@@ -195,6 +204,7 @@ impl TryFrom<ReadResponse> for Response {
         match response {
             ReadResponse::Tip(height_and_hash) => Ok(Response::Tip(height_and_hash)),
             ReadResponse::Depth(depth) => Ok(Response::Depth(depth)),
+            ReadResponse::BestChainNextMedianTimePast(median_time_past) => Ok(Response::BestChainNextMedianTimePast(median_time_past)),
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
             ReadResponse::Transaction(tx_and_height) => {

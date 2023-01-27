@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use color_eyre::eyre::Report;
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use tower::{service_fn, ServiceExt};
@@ -14,7 +14,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,
-    serialization::{ZcashDeserialize, ZcashDeserializeInto},
+    serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto},
     sprout,
     transaction::{
         arbitrary::{
@@ -196,9 +196,17 @@ async fn mempool_request_with_missing_input_is_rejected() {
 
     tokio::spawn(async move {
         state
+            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                DateTime32::MAX,
+            ));
+
+        state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
             .await
-            .expect("verifier should call mock state service")
+            .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::UnspentBestChainUtxo(None));
 
         state
@@ -209,7 +217,7 @@ async fn mempool_request_with_missing_input_is_rejected() {
                 )
             })
             .await
-            .expect("verifier should call mock state service")
+            .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
     });
 
@@ -254,9 +262,17 @@ async fn mempool_request_with_present_input_is_accepted() {
 
     tokio::spawn(async move {
         state
+            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                DateTime32::MAX,
+            ));
+
+        state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
             .await
-            .expect("verifier should call mock state service")
+            .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::UnspentBestChainUtxo(
                 known_utxos
                     .get(&input_outpoint)
@@ -271,7 +287,298 @@ async fn mempool_request_with_present_input_is_accepted() {
                 )
             })
             .await
-            .expect("verifier should call mock state service")
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    let verifier_response = verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await;
+
+    assert!(
+        verifier_response.is_ok(),
+        "expected successful verification, got: {verifier_response:?}"
+    );
+}
+
+#[tokio::test]
+async fn mempool_request_with_invalid_lock_time_is_rejected() {
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let verifier = Verifier::new(Network::Mainnet, state.clone());
+
+    let height = NetworkUpgrade::Canopy
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+
+    // Create a non-coinbase V4 tx with the last valid expiry height.
+    let tx = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::max_lock_time_timestamp(),
+        expiry_height: height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                DateTime32::from(
+                    u32::try_from(LockTime::MIN_TIMESTAMP).expect("min time is valid"),
+                ),
+            ));
+
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(
+                known_utxos
+                    .get(&input_outpoint)
+                    .map(|utxo| utxo.utxo.clone()),
+            ));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    let verifier_response = verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await;
+
+    assert_eq!(
+        verifier_response,
+        Err(TransactionError::LockedUntilAfterBlockTime(
+            Utc.timestamp_opt(u32::MAX.into(), 0).unwrap()
+        ))
+    );
+}
+
+#[tokio::test]
+async fn mempool_request_with_unlocked_lock_time_is_accepted() {
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let verifier = Verifier::new(Network::Mainnet, state.clone());
+
+    let height = NetworkUpgrade::Canopy
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+
+    // Create a non-coinbase V4 tx with the last valid expiry height.
+    let tx = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height: height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                DateTime32::from(
+                    u32::try_from(LockTime::MIN_TIMESTAMP).expect("min time is valid"),
+                ),
+            ));
+
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(
+                known_utxos
+                    .get(&input_outpoint)
+                    .map(|utxo| utxo.utxo.clone()),
+            ));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    let verifier_response = verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await;
+
+    assert!(
+        verifier_response.is_ok(),
+        "expected successful verification, got: {verifier_response:?}"
+    );
+}
+
+#[tokio::test]
+async fn mempool_request_with_lock_time_max_sequence_number_is_accepted() {
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let verifier = Verifier::new(Network::Mainnet, state.clone());
+
+    let height = NetworkUpgrade::Canopy
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+    let (mut input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+
+    // Ignore the lock time.
+    input.set_sequence(u32::MAX);
+
+    // Create a non-coinbase V4 tx with the last valid expiry height.
+    let tx = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::max_lock_time_timestamp(),
+        expiry_height: height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                DateTime32::from(
+                    u32::try_from(LockTime::MIN_TIMESTAMP).expect("min time is valid"),
+                ),
+            ));
+
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(
+                known_utxos
+                    .get(&input_outpoint)
+                    .map(|utxo| utxo.utxo.clone()),
+            ));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    let verifier_response = verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await;
+
+    assert!(
+        verifier_response.is_ok(),
+        "expected successful verification, got: {verifier_response:?}"
+    );
+}
+
+#[tokio::test]
+async fn mempool_request_with_past_lock_time_is_accepted() {
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let verifier = Verifier::new(Network::Mainnet, state.clone());
+
+    let height = NetworkUpgrade::Canopy
+        .activation_height(Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(fund_height, true, 0);
+
+    // Create a non-coinbase V4 tx with the last valid expiry height.
+    let tx = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::min_lock_time_timestamp(),
+        expiry_height: height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                DateTime32::MAX,
+            ));
+
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(
+                known_utxos
+                    .get(&input_outpoint)
+                    .map(|utxo| utxo.utxo.clone()),
+            ));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
     });
 

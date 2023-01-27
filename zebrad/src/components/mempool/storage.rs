@@ -43,7 +43,7 @@ mod verified_set;
 pub(crate) const MAX_EVICTION_MEMORY_ENTRIES: usize = 40_000;
 
 /// Transactions rejected based on transaction authorizing data (scripts, proofs, signatures),
-/// These rejections are only valid for the current tip.
+/// or lock times. These rejections are only valid for the current tip.
 ///
 /// Each committed block clears these rejections, because new blocks can supply missing inputs.
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
