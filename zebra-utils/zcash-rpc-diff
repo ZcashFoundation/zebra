@@ -207,30 +207,22 @@ if [ "$1" == "getrawmempool" ] && [ $CHECK_EXIT_STATUS != 0 ]; then
     set TRANSACTION_HEX_FILE
     set TRANSACTION_DECODED
 
-    while IFS= read -r line
-    do
-        if [ "$line" != "[" ] && [ "$line" != "]" ]; then
-            if [[ "${line:0-1}" == "," ]]; then
-                TRANSACTION_ID="${line:3:-2}"
-            else
-                TRANSACTION_ID="${line:3:-1}"
-            fi
+    ZEBRAD_TRANSACTION_IDS=$(cat "$ZEBRAD_RESPONSE" | $JQ -r 'join(" ")')
+    for TRANSACTION_ID in $ZEBRAD_TRANSACTION_IDS; do
+        TRANSACTION_HEX_FILE="$ZCASH_RPC_TMP_DIR/$ZEBRAD-$ZEBRAD_NET-$ZEBRAD_HEIGHT-TRANSACTION_HEX-$TRANSACTION_ID.json"
 
-            TRANSACTION_HEX_FILE="$ZCASH_RPC_TMP_DIR/$ZEBRAD-$ZEBRAD_NET-$ZEBRAD_HEIGHT-TRANSACTION_HEX-$TRANSACTION_ID.json"
+        $ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getrawtransaction $TRANSACTION_ID 0 > $TRANSACTION_HEX_FILE
 
-            $ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getrawtransaction $TRANSACTION_ID 0 > $TRANSACTION_HEX_FILE
+        echo "## Displaying transaction $TRANSACTION_ID"
+        echo
 
-            echo "## Displaying transaction $TRANSACTION_ID"
-            echo
+        # read the proposal data from a file, to avoid command-line length limits
+        TRANSACTION_DECODED=`cat "$TRANSACTION_HEX_FILE" | \
+            $ZCASH_CLI $ZCASHD_EXTRA_ARGS -stdin decoderawtransaction`
 
-            # read the proposal data from a file, to avoid command-line length limits
-            TRANSACTION_DECODED=`cat "$TRANSACTION_HEX_FILE" | \
-                $ZCASH_CLI $ZCASHD_EXTRA_ARGS -stdin decoderawtransaction`
-
-            echo $TRANSACTION_DECODED | $JQ
-            echo
-        fi
-    done < "$ZEBRAD_RESPONSE"
+        echo $TRANSACTION_DECODED | $JQ
+        echo
+    done
 fi
 
 if [ $EXIT_STATUS -ne 0 ]; then
