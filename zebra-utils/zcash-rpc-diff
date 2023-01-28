@@ -204,7 +204,7 @@ if [ "$1" == "getrawmempool" ] && [ $CHECK_EXIT_STATUS != 0 ]; then
     echo
 
     set TRANSACTION_ID
-    set TRANSACTION_HEX
+    set TRANSACTION_HEX_FILE
     set TRANSACTION_DECODED
 
     while IFS= read -r line
@@ -216,12 +216,16 @@ if [ "$1" == "getrawmempool" ] && [ $CHECK_EXIT_STATUS != 0 ]; then
                 TRANSACTION_ID="${line:3:-1}"
             fi
 
-            TRANSACTION_HEX=`$ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getrawtransaction $TRANSACTION_ID 0`
+            TRANSACTION_HEX_FILE="$ZCASH_RPC_TMP_DIR/$ZEBRAD-$ZEBRAD_NET-$ZEBRAD_HEIGHT-TRANSACTION_HEX-$TRANSACTION_ID.json"
+
+            $ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getrawtransaction $TRANSACTION_ID 0 > $TRANSACTION_HEX_FILE
 
             echo "## Displaying transaction $TRANSACTION_ID"
             echo
 
-            TRANSACTION_DECODED=`$ZCASH_CLI $ZCASHD_EXTRA_ARGS decoderawtransaction $TRANSACTION_HEX`
+            # read the proposal data from a file, to avoid command-line length limits
+            TRANSACTION_DECODED=`cat "$TRANSACTION_HEX_FILE" | \
+                $ZCASH_CLI $ZCASHD_EXTRA_ARGS -stdin decoderawtransaction`
 
             echo $TRANSACTION_DECODED | $JQ
             echo
