@@ -347,29 +347,18 @@ where
             if let Some(block_time) = req.block_time() {
                 check::lock_time_has_passed(&tx, req.height(), block_time)?;
             } else {
-                // This state query is much faster than loading UTXOs from the database,
-                // so it doesn't need to be executed in parallel
-                let state = state.clone();
-                let next_median_time_past = Self::mempool_best_chain_next_median_time_past(state).await?;
+                let mut next_median_time_past = None;
 
-                // # Consensus
-                //
-                // > the nTime field MUST represent a time strictly greater than the median of the
-                // > timestamps of the past PoWMedianBlockSpan blocks.
-                // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
-                //
-                // > The transaction can be added to any block whose block time is greater than the locktime.
-                // <https://developer.bitcoin.org/devguide/transactions.html#locktime-and-sequence-number>
-                //
-                // If the transaction's lock time is less than the median-time-past,
-                // it will always be less than the next block's time,
-                // because the next block's time is strictly greater than the median-time-past.
-                //
-                // This is the rule implemented by `zcashd`'s mempool:
-                // <https://github.com/zcash/zcash/blob/9e1efad2d13dca5ee094a38e6aa25b0f2464da94/src/main.cpp#L776-L784>
-                //
+                // Skip the state query if we don't need the time for this check.
+                if tx.lock_time_is_time() {
+                    // This state query is much faster than loading UTXOs from the database,
+                    // so it doesn't need to be executed in parallel
+                    let state = state.clone();
+                    next_median_time_past = Some(Self::mempool_best_chain_next_median_time_past(state).await?.to_chrono());
+                }
+
                 // This consensus check makes sure Zebra produces valid block templates.
-                check::lock_time_has_passed(&tx, req.height(), next_median_time_past.to_chrono())?;
+                check::lock_time_has_passed(&tx, req.height(), next_median_time_past)?;
             }
 
             // "The consensus rules applied to valueBalance, vShieldedOutput, and bindingSig

@@ -93,6 +93,11 @@ impl LockTime {
                 .expect("in-range number of seconds and valid nanosecond"),
         )
     }
+
+    /// Returns `true` if this lock time is a time, or `false` if it is a height.
+    pub fn is_time(&self) -> bool {
+        matches!(self, LockTime::Time(_))
+    }
 }
 
 impl ZcashSerialize for LockTime {
