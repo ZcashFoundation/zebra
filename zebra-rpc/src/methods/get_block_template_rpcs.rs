@@ -167,8 +167,8 @@ pub trait GetBlockTemplateRpc {
     #[rpc(name = "getpeerinfo")]
     fn get_peer_info(&self) -> BoxFuture<Result<Vec<PeerInfo>>>;
 
-    /// Returns the block subsidy reward of the block at `height`,
-    /// taking into account the mining slow start and the founders reward.
+    /// Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.
+    /// Returns an error if `height` is less than the height of the first halving for the current network.
     ///
     /// `height` can be any valid current or future height.
     /// If `height` is not supplied, uses the tip height.
@@ -783,7 +783,7 @@ where
             if height < height_for_first_halving(network) {
                 return Err(Error {
                     code: ErrorCode::ServerError(0),
-                    message: "Zebra does not support funding stream subsidies, \
+                    message: "Zebra does not support founders' reward subsidies, \
                               use a block height that is after the first halving"
                         .into(),
                     data: None,
