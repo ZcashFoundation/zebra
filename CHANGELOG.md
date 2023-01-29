@@ -4,6 +4,56 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-rc.4](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.4) - 2023-01-30
+
+In this release we fixed bugs and inconsistencies between zcashd and zebrad in the output of the `getblocktemplate` RPC mehod. In addition, we added the proposal mode feature while we continue the effort of adding and testing mining pool RPC methods. 
+
+### Breaking Changes
+
+- Strings in zebra configuration file now use double quotes, caused by bumping the `toml` crate. Old configs will still work [#6029](https://github.com/ZcashFoundation/zebra/pull/6029)
+
+### Security
+
+- Verify the lock times of mempool transactions ([#6027](https://github.com/ZcashFoundation/zebra/pull/6027))
+- Avoid selecting duplicate transactions in block templates ([#6006](https://github.com/ZcashFoundation/zebra/pull/6006))
+- Calculate getblocktemplate RPC testnet min and max times correctly ([#5925](https://github.com/ZcashFoundation/zebra/pull/5925))
+- Fix Merkle root transaction order in getblocktemplate RPC method ([#5953](https://github.com/ZcashFoundation/zebra/pull/5953))
+- Bump bumpalo from 3.8.0 to 3.12.0 ([#6015](https://github.com/ZcashFoundation/zebra/pull/6015))
+- Bump libgit2-sys from 0.14.0+1.5.0 to 0.14.2+1.5.1 ([#6014](https://github.com/ZcashFoundation/zebra/pull/6014))
+- Bump tokio from 1.24.1 to 1.24.2 ([#5995](https://github.com/ZcashFoundation/zebra/pull/5995))
+
+### Added
+
+- Add getpeerinfo RPC method ([#5951](https://github.com/ZcashFoundation/zebra/pull/5951))
+- Add proposal capability to getblocktemplate ([#5870](https://github.com/ZcashFoundation/zebra/pull/5870))
+- Add a test to check that the Docker image config works ([#5968](https://github.com/ZcashFoundation/zebra/pull/5968))
+- Make `zebra-checkpoints` work for zebrad backend ([#5894](https://github.com/ZcashFoundation/zebra/pull/5894))
+- Add test dependency from zebra-rpc to zebra-network with correct features ([#5992](https://github.com/ZcashFoundation/zebra/pull/5992))
+- Document zebra download command ([#5901](https://github.com/ZcashFoundation/zebra/pull/5901))
+
+### Changed
+
+- Update 'Design Overview' page of Zebra book ([#5892](https://github.com/ZcashFoundation/zebra/pull/5892))
+- Sort transaction hashes like zcashd in getrawmempool RPC response ([#5994](https://github.com/ZcashFoundation/zebra/pull/5994))
+- Create test harness for calling getblocktemplate in proposal mode, but don't use it yet ([#5884](https://github.com/ZcashFoundation/zebra/pull/5884))
+
+### Fixed
+
+- Fallback to a stable buildkit version for `docker/build-push-action` ([#5985](https://github.com/ZcashFoundation/zebra/pull/5985))
+- Move docker push fix to the setup action ([#5998](https://github.com/ZcashFoundation/zebra/pull/5998))
+- Remove warnings caused by missing `actions/checkout` step ([#5874](https://github.com/ZcashFoundation/zebra/pull/5874))
+- Fix new lints in nightly clippy ([#5959](https://github.com/ZcashFoundation/zebra/pull/5959))
+- Silence future-incompat warnings until we upgrade Abscissa ([#6024](https://github.com/ZcashFoundation/zebra/pull/6024))
+- Add test dependency from zebra-rpc to zebra-network with correct features ([#5992](https://github.com/ZcashFoundation/zebra/pull/5992))
+- Hex-encode debug format of commitments, nonces, and nullifiers ([#5960](https://github.com/ZcashFoundation/zebra/pull/5960))
+- Return detailed errors to the RPC client when a block proposal fails ([#5993](https://github.com/ZcashFoundation/zebra/pull/5993))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @conradoplg, @gustavovalverde, @mpguerra, @oxarbitrage and @teor2345
+
+
 ## [Zebra 1.0.0-rc.3](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.3) - 2023-01-10
 
 This release continues our work on mining pool RPCs, and brings Zebra up to date with the latest [ZIP-317](https://zips.z.cash/zip-0317) changes. It also fixes a minor network protocol compatibility bug.
