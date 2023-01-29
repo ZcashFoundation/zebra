@@ -16,7 +16,9 @@ use crate::{
     service::{
         any_ancestor_blocks,
         check::{
-            difficulty::{BLOCK_MAX_TIME_SINCE_MEDIAN, POW_ADJUSTMENT_BLOCK_SPAN},
+            difficulty::{
+                BLOCK_MAX_TIME_SINCE_MEDIAN, POW_ADJUSTMENT_BLOCK_SPAN, POW_MEDIAN_BLOCK_SPAN,
+            },
             AdjustedDifficulty,
         },
         finalized_state::ZebraDb,
@@ -206,7 +208,12 @@ fn difficulty_time_and_history_tree(
     // > For each block other than the genesis block , nTime MUST be strictly greater than
     // > the median-time-past of that block.
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
-    let median_time_past = calculate_median_time_past(relevant_chain);
+    let median_time_past = calculate_median_time_past(
+        relevant_chain[0..POW_MEDIAN_BLOCK_SPAN]
+            .to_vec()
+            .try_into()
+            .expect("slice is correct size"),
+    );
 
     let min_time = median_time_past
         .checked_add(Duration32::from_seconds(1))
