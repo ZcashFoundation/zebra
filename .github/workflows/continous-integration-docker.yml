@@ -33,12 +33,6 @@ on:
         default: false
         description: 'Just run a lightwalletd full sync and update tip disks'
         required: true
-      run-lwd-send-tx:
-        type: boolean
-        default: false
-        description: 'Just run a lightwalletd send transactions test'
-        required: true
-
 
   pull_request:
     paths:
@@ -581,7 +575,7 @@ jobs:
     name: lightwalletd tip send
     needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' || github.event.inputs.run-lwd-send-tx == 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-send-transactions
