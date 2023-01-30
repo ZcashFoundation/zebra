@@ -148,7 +148,7 @@ jobs:
               echo "lwd_tip_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
           else
               echo "Disk: $LWD_TIP_DISK"
-              echo "lwd_tip_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
+              echo "lwd_tip_disk=${{ toJSON(true) }}" >> "$GITHUB_OUTPUT"
           fi
 
           ZEBRA_TIP_DISK=$(gcloud compute images list --filter="status=READY AND name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
@@ -157,7 +157,7 @@ jobs:
               echo "zebra_tip_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
           else
               echo "Disk: $ZEBRA_TIP_DISK"
-              echo "zebra_tip_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
+              echo "zebra_tip_disk=${{ toJSON(true) }}" >> "$GITHUB_OUTPUT"
           fi
 
           ZEBRA_CHECKPOINT_DISK=$(gcloud compute images list --filter="status=READY AND name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
@@ -166,7 +166,7 @@ jobs:
               echo "zebra_checkpoint_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
           else
               echo "Disk: $ZEBRA_CHECKPOINT_DISK"
-              echo "zebra_checkpoint_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
+              echo "zebra_checkpoint_disk=${{ toJSON(true) }}" >> "$GITHUB_OUTPUT"
           fi
 
   build:
