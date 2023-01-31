@@ -8,6 +8,7 @@ use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
 use zebra_chain::{
+    amount::Amount,
     block::{self, Block, Height},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
@@ -15,7 +16,10 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
     transparent,
 };
-use zebra_consensus::VerifyChainError;
+use zebra_consensus::{
+    funding_stream_address, funding_stream_values, height_for_first_halving, miner_subsidy,
+    VerifyChainError,
+};
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{ReadRequest, ReadResponse};
@@ -25,14 +29,20 @@ use crate::methods::{
     get_block_template_rpcs::{
         constants::{
             DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
+            ZCASHD_FUNDING_STREAM_ORDER,
         },
         get_block_template::{
             check_miner_address, check_synced_to_tip, fetch_mempool_transactions,
             fetch_state_tip_and_local_time, validate_block_proposal,
         },
         types::{
-            get_block_template::GetBlockTemplate, get_mining_info, hex_data::HexData,
-            long_poll::LongPollInput, peer_info::PeerInfo, submit_block,
+            get_block_template::GetBlockTemplate,
+            get_mining_info,
+            hex_data::HexData,
+            long_poll::LongPollInput,
+            peer_info::PeerInfo,
+            submit_block,
+            subsidy::{BlockSubsidy, FundingStream},
         },
     },
     height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
@@ -156,6 +166,16 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`getpeerinfo`](https://zcash.github.io/rpc/getpeerinfo.html)
     #[rpc(name = "getpeerinfo")]
     fn get_peer_info(&self) -> BoxFuture<Result<Vec<PeerInfo>>>;
+
+    /// Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.
+    /// Returns an error if `height` is less than the height of the first halving for the current network.
+    ///
+    /// `height` can be any valid current or future height.
+    /// If `height` is not supplied, uses the tip height.
+    ///
+    /// zcashd reference: [`getblocksubsidy`](https://zcash.github.io/rpc/getblocksubsidy.html)
+    #[rpc(name = "getblocksubsidy")]
+    fn get_block_subsidy(&self, height: Option<u32>) -> BoxFuture<Result<BlockSubsidy>>;
 }
 
 /// RPC method implementations.
@@ -745,6 +765,67 @@ where
                 .into_iter()
                 .map(PeerInfo::from)
                 .collect())
+        }
+        .boxed()
+    }
+
+    fn get_block_subsidy(&self, height: Option<u32>) -> BoxFuture<Result<BlockSubsidy>> {
+        let latest_chain_tip = self.latest_chain_tip.clone();
+        let network = self.network;
+
+        async move {
+            let height = if let Some(height) = height {
+                Height(height)
+            } else {
+                best_chain_tip_height(&latest_chain_tip)?
+            };
+
+            if height < height_for_first_halving(network) {
+                return Err(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "Zebra does not support founders' reward subsidies, \
+                              use a block height that is after the first halving"
+                        .into(),
+                    data: None,
+                });
+            }
+
+            let miner = miner_subsidy(height, network).map_err(|error| Error {
+                code: ErrorCode::ServerError(0),
+                message: error.to_string(),
+                data: None,
+            })?;
+            // Always zero for post-halving blocks
+            let founders = Amount::zero();
+
+            let funding_streams =
+                funding_stream_values(height, network).map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+            let mut funding_streams: Vec<_> = funding_streams
+                .iter()
+                .map(|(receiver, value)| {
+                    let address = funding_stream_address(height, network, *receiver);
+                    (*receiver, FundingStream::new(*receiver, *value, address))
+                })
+                .collect();
+
+            // Use the same funding stream order as zcashd
+            funding_streams.sort_by_key(|(receiver, _funding_stream)| {
+                ZCASHD_FUNDING_STREAM_ORDER
+                    .iter()
+                    .position(|zcashd_receiver| zcashd_receiver == receiver)
+            });
+
+            let (_receivers, funding_streams): (Vec<_>, _) = funding_streams.into_iter().unzip();
+
+            Ok(BlockSubsidy {
+                miner: miner.into(),
+                founders: founders.into(),
+                funding_streams,
+            })
         }
         .boxed()
     }
