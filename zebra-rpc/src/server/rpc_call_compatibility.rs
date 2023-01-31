@@ -9,7 +9,7 @@ use futures::future::{Either, FutureExt};
 use jsonrpc_core::{
     middleware::Middleware,
     types::{Call, Failure, Output, Response},
-    BoxFuture, Error, ErrorCode, Metadata, MethodCall, Notification,
+    BoxFuture, Metadata, MethodCall, Notification,
 };
 
 /// JSON-RPC [`Middleware`] with compatibility workarounds.
@@ -44,7 +44,7 @@ impl<M: Metadata> Middleware<M> for FixRpcResponseMiddleware {
     {
         Either::Left(
             next(call.clone(), meta)
-                .inspect(|output| Self::log_error_if_method_not_found(output, call))
+                .inspect(|output| Self::log_if_error(output, call))
                 .boxed(),
         )
     }
@@ -66,19 +66,13 @@ impl FixRpcResponseMiddleware {
         }
     }
 
-    /// Check an RPC output and log an error if it indicates the method was not found.
-    fn log_error_if_method_not_found(output: &Option<Output>, call: Call) {
-        if let Some(Output::Failure(Failure {
-            error:
-                Error {
-                    code: ErrorCode::MethodNotFound,
-                    ..
-                },
-            ..
-        })) = output
-        {
+    /// Check RPC output and log any errors.
+    //
+    // TODO: do we want to ignore ErrorCode::ServerError(_), or log it at debug?
+    fn log_if_error(output: &Option<Output>, call: Call) {
+        if let Some(Output::Failure(Failure { error, .. })) = output {
             let call_description = Self::call_description(&call);
-            tracing::warn!("Received unrecognized RPC request: {call_description}");
+            tracing::info!("RPC error: {error} in call: {call_description}");
         }
     }
 }
