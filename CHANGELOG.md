@@ -31,7 +31,7 @@ In this release we fixed bugs and inconsistencies between zcashd and zebrad in t
 - Calculate getblocktemplate RPC testnet min and max times correctly ([#5925](https://github.com/ZcashFoundation/zebra/pull/5925))
 - Fix Merkle root transaction order in getblocktemplate RPC method ([#5953](https://github.com/ZcashFoundation/zebra/pull/5953))
 
-### Miscellaneous
+### Changed
 
 - Strings in zebra configuration file now use double quotes, caused by upgrading the `toml` crate. Old configs will still work [#6029](https://github.com/ZcashFoundation/zebra/pull/6029)
 
