@@ -57,7 +57,7 @@ jobs:
             return context.payload.release.tag_name.substring(0,2)
       - name: Setting API Version
         id: set
-        run: echo "::set-output name=major_version::${{ steps.get.outputs.result }}"
+        run: echo "major_version=${{ steps.get.outputs.result }}" >> "$GITHUB_OUTPUT"
 
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from Git
