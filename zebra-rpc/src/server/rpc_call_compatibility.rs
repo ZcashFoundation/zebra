@@ -9,8 +9,10 @@ use futures::future::{Either, FutureExt};
 use jsonrpc_core::{
     middleware::Middleware,
     types::{Call, Failure, Output, Response},
-    BoxFuture, Metadata, MethodCall, Notification,
+    BoxFuture, ErrorCode, Metadata, MethodCall, Notification,
 };
+
+use crate::constants::INVALID_PARAMETERS_ERROR_CODE;
 
 /// JSON-RPC [`Middleware`] with compatibility workarounds.
 ///
@@ -44,6 +46,10 @@ impl<M: Metadata> Middleware<M> for FixRpcResponseMiddleware {
     {
         Either::Left(
             next(call.clone(), meta)
+                .map(|mut output| {
+                    Self::fix_error_codes(&mut output);
+                    output
+                })
                 .inspect(|output| Self::log_if_error(output, call))
                 .boxed(),
         )
@@ -51,6 +57,18 @@ impl<M: Metadata> Middleware<M> for FixRpcResponseMiddleware {
 }
 
 impl FixRpcResponseMiddleware {
+    /// Replace [`jsonrpc_core`] server error codes in `output` with the `zcashd` equivalents.
+    fn fix_error_codes(output: &mut Option<Output>) {
+        if let Some(Output::Failure(Failure { ref mut error, .. })) = output {
+            if matches!(error.code, ErrorCode::InvalidParams) {
+                let original_code = error.code.clone();
+
+                error.code = INVALID_PARAMETERS_ERROR_CODE;
+                tracing::debug!("Replacing RPC error: {original_code:?} with {error}");
+            }
+        }
+    }
+
     /// Obtain a description string for a received request.
     ///
     /// Prints out only the method name and the received parameters.
