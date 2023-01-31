@@ -330,7 +330,7 @@ impl AdjustedDifficulty {
     /// slice of `PoWMedianBlockSpan` (11) blocks in the relevant chain.
     ///
     /// Implements `MedianTime` from the Zcash specification.
-    fn median_time(
+    pub(crate) fn median_time(
         mut median_block_span_times: [DateTime<Utc>; POW_MEDIAN_BLOCK_SPAN],
     ) -> DateTime<Utc> {
         median_block_span_times.sort_unstable();
