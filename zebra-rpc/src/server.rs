@@ -27,7 +27,7 @@ use crate::{
     methods::{Rpc, RpcImpl},
     server::{
         http_request_compatibility::FixHttpRequestMiddleware,
-        rpc_call_compatibility::TracingMiddleware,
+        rpc_call_compatibility::FixRpcResponseMiddleware,
     },
 };
 
@@ -127,7 +127,7 @@ impl RpcServer {
 
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io: MetaIoHandler<(), _> =
-                MetaIoHandler::new(Compatibility::Both, TracingMiddleware);
+                MetaIoHandler::new(Compatibility::Both, FixRpcResponseMiddleware);
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             {

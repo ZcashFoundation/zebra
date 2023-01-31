@@ -1,4 +1,7 @@
-//! A custom middleware to trace unrecognized RPC requests.
+//! Compatibility fixes for JSON-RPC remote procedure calls.
+//!
+//! These fixes are applied at the JSON-RPC call level,
+//! after the RPC request is parsed and split into calls.
 
 use std::future::Future;
 
@@ -9,10 +12,23 @@ use jsonrpc_core::{
     BoxFuture, Error, ErrorCode, Metadata, MethodCall, Notification,
 };
 
-/// A custom RPC middleware that logs unrecognized RPC requests.
-pub struct TracingMiddleware;
+/// JSON-RPC [`Middleware`] with compatibility workarounds.
+///
+/// This middleware makes the following changes to JSON-RPC calls:
+///
+/// ## Make RPC framework response codes match `zcashd`
+///
+/// [`jsonrpc_core`] returns specific error codes while parsing requests:
+/// <https://docs.rs/jsonrpc-core/18.0.0/jsonrpc_core/types/error/enum.ErrorCode.html#variants>
+///
+/// But these codes are different from `zcashd`, and some RPC clients rely on the exact code.
+///
+/// ## Read-Only Functionality
+///
+/// This middleware also logs unrecognized RPC requests.
+pub struct FixRpcResponseMiddleware;
 
-impl<M: Metadata> Middleware<M> for TracingMiddleware {
+impl<M: Metadata> Middleware<M> for FixRpcResponseMiddleware {
     type Future = BoxFuture<Option<Response>>;
     type CallFuture = BoxFuture<Option<Output>>;
 
@@ -34,7 +50,7 @@ impl<M: Metadata> Middleware<M> for TracingMiddleware {
     }
 }
 
-impl TracingMiddleware {
+impl FixRpcResponseMiddleware {
     /// Obtain a description string for a received request.
     ///
     /// Prints out only the method name and the received parameters.
