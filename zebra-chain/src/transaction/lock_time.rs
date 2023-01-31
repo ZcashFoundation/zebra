@@ -94,7 +94,7 @@ impl LockTime {
         )
     }
 
-    /// Returns `true` if this lock time is a time, or `false` if it is a height.
+    /// Returns `true` if this lock time is a [`LockTime::Time`], or `false` if it is a [`LockTime::Height`].
     pub fn is_time(&self) -> bool {
         matches!(self, LockTime::Time(_))
     }

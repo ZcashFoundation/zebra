@@ -53,7 +53,7 @@ use crate::error::TransactionError;
 /// because the next block's time is strictly greater than the median-time-past.
 /// (That is, `lock-time < median-time-past < block-header-time`.)
 ///
-/// Using `median-time-past + 1` would also satisfy this consensus rule,
+/// Using `median-time-past + 1s` (the next block's mintime) would also satisfy this consensus rule,
 /// but we prefer the rule implemented by `zcashd`'s mempool:
 /// <https://github.com/zcash/zcash/blob/9e1efad2d13dca5ee094a38e6aa25b0f2464da94/src/main.cpp#L776-L784>
 pub fn lock_time_has_passed(
