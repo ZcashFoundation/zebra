@@ -25,14 +25,17 @@ use zebra_node_services::mempool;
 use crate::{
     config::Config,
     methods::{Rpc, RpcImpl},
-    server::{compatibility::FixHttpRequestMiddleware, tracing_middleware::TracingMiddleware},
+    server::{
+        http_request_compatibility::FixHttpRequestMiddleware,
+        rpc_call_compatibility::TracingMiddleware,
+    },
 };
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 use crate::methods::{get_block_template_rpcs, GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
-pub mod compatibility;
-mod tracing_middleware;
+pub mod http_request_compatibility;
+pub mod rpc_call_compatibility;
 
 #[cfg(test)]
 mod tests;
