@@ -27,6 +27,10 @@ use crate::common::{
 /// We've seen it take anywhere from 1-45 seconds for the mempool to have some transactions in it.
 pub const EXPECTED_MEMPOOL_TRANSACTION_TIME: Duration = Duration::from_secs(45);
 
+/// Number of times we want to try submitting a block template as a block proposal at an interval
+/// that allows testing the varying mempool contents.
+const NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED: usize = 10;
+
 /// Launch Zebra, wait for it to sync, and check the getblocktemplate RPC returns without errors.
 pub(crate) async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -86,25 +90,24 @@ pub(crate) async fn run() -> Result<()> {
 
     assert!(is_response_success);
 
-    tracing::info!(
-        "waiting {EXPECTED_MEMPOOL_TRANSACTION_TIME:?} for the mempool \
-         to download and verify some transactions...",
-    );
+    for _ in 0..NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED {
+        tracing::info!(
+            "waiting {EXPECTED_MEMPOOL_TRANSACTION_TIME:?} for the mempool \
+             to download and verify some transactions...",
+        );
 
-    tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
+        tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
 
-    /* TODO: activate this test after #5925 and #5953 have merged,
-             and we've checked for any other bugs using #5944.
-    tracing::info!(
-        "calling getblocktemplate RPC method at {rpc_address}, \
-             with a mempool that likely has transactions and attempting \
-             to validate response result as a block proposal",
-    );
+        tracing::info!(
+            "calling getblocktemplate RPC method at {rpc_address}, \
+                 with a mempool that likely has transactions and attempting \
+                 to validate response result as a block proposal",
+        );
 
-    try_validate_block_template(&client)
-        .await
-        .expect("block proposal validation failed");
-     */
+        try_validate_block_template(&client)
+            .await
+            .expect("block proposal validation failed");
+    }
 
     zebrad.kill(false)?;
 
@@ -130,7 +133,6 @@ pub(crate) async fn run() -> Result<()> {
 /// If an RPC call returns a failure
 /// If the response result cannot be deserialized to `GetBlockTemplate` in 'template' mode
 /// or `ProposalResponse` in 'proposal' mode.
-#[allow(dead_code)]
 async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
     let response_json_result = client
         .json_result_from_call("getblocktemplate", "[]".to_string())
@@ -142,16 +144,16 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
         "got getblocktemplate response, hopefully with transactions"
     );
 
-    // Propose a new block with an empty solution and nonce field
-    tracing::info!("calling getblocktemplate with a block proposal...",);
+    for time_source in TimeSource::valid_sources() {
+        // Propose a new block with an empty solution and nonce field
+        tracing::info!(
+            "calling getblocktemplate with a block proposal and time source {time_source:?}...",
+        );
 
-    // TODO: update this to use all valid time sources in the next PR
-    #[allow(clippy::single_element_loop)]
-    for proposal_block in [proposal_block_from_template(
-        response_json_result,
-        TimeSource::CurTime,
-    )?] {
-        let raw_proposal_block = hex::encode(proposal_block.zcash_serialize_to_vec()?);
+        let raw_proposal_block = hex::encode(
+            proposal_block_from_template(&response_json_result, time_source)?
+                .zcash_serialize_to_vec()?,
+        );
 
         let json_result = client
             .json_result_from_call(
@@ -163,7 +165,7 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
 
         tracing::info!(
             ?json_result,
-            ?proposal_block.header.time,
+            ?time_source,
             "got getblocktemplate proposal response"
         );
 
