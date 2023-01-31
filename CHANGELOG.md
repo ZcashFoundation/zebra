@@ -8,10 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 In this release we fixed bugs and inconsistencies between zcashd and zebrad in the output of the `getblocktemplate` RPC method. In addition, we added block proposal mode to the `getblocktemplate` RPC, while we continue the effort of adding and testing mining pool RPC methods.
 
-### Breaking Changes
-
-- Strings in zebra configuration file now use double quotes, caused by upgrading the `toml` crate. Old configs will still work [#6029](https://github.com/ZcashFoundation/zebra/pull/6029)
-
 ### Security
 
 - Verify the lock times of mempool transactions. Previously, Zebra was ignoring mempool transaction lock times, but checking them in mined blocks. Credit to DeckerSU for reporting this issue. ([#6027](https://github.com/ZcashFoundation/zebra/pull/6027))
@@ -34,6 +30,10 @@ In this release we fixed bugs and inconsistencies between zcashd and zebrad in t
 - Avoid selecting duplicate transactions in block templates ([#6006](https://github.com/ZcashFoundation/zebra/pull/6006))
 - Calculate getblocktemplate RPC testnet min and max times correctly ([#5925](https://github.com/ZcashFoundation/zebra/pull/5925))
 - Fix Merkle root transaction order in getblocktemplate RPC method ([#5953](https://github.com/ZcashFoundation/zebra/pull/5953))
+
+### Miscellaneous
+
+- Strings in zebra configuration file now use double quotes, caused by upgrading the `toml` crate. Old configs will still work [#6029](https://github.com/ZcashFoundation/zebra/pull/6029)
 
 ### Contributors
 
