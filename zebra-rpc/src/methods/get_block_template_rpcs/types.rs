@@ -7,4 +7,6 @@ pub mod hex_data;
 pub mod long_poll;
 pub mod peer_info;
 pub mod submit_block;
+pub mod subsidy;
 pub mod transaction;
+pub mod zec;
