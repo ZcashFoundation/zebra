@@ -807,10 +807,7 @@ impl ReadStateService {
     /// Gets a clone of the latest, best non-finalized chain from the `non_finalized_state_receiver`
     #[allow(dead_code)]
     fn latest_best_chain(&self) -> Option<Arc<Chain>> {
-        self.non_finalized_state_receiver
-            .cloned_watch_data()
-            .best_chain()
-            .cloned()
+        self.latest_non_finalized_state().best_chain().cloned()
     }
 }
 
