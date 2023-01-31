@@ -16,11 +16,16 @@ use crate::{
     service::{
         any_ancestor_blocks,
         check::{
-            difficulty::{BLOCK_MAX_TIME_SINCE_MEDIAN, POW_ADJUSTMENT_BLOCK_SPAN},
+            difficulty::{
+                BLOCK_MAX_TIME_SINCE_MEDIAN, POW_ADJUSTMENT_BLOCK_SPAN, POW_MEDIAN_BLOCK_SPAN,
+            },
             AdjustedDifficulty,
         },
         finalized_state::ZebraDb,
-        read::{self, tree::history_tree, FINALIZED_STATE_QUERY_RETRIES},
+        read::{
+            self, find::calculate_median_time_past, tree::history_tree,
+            FINALIZED_STATE_QUERY_RETRIES,
+        },
         NonFinalizedState,
     },
     BoxError, GetBlockTemplateChainInfo,
@@ -36,36 +41,35 @@ pub const EXTRA_TIME_TO_MINE_A_BLOCK: u32 = POST_BLOSSOM_POW_TARGET_SPACING * 2;
 /// # Panics
 ///
 /// - If we don't have enough blocks in the state.
-/// - If a consistency check fails `RETRIES` times.
 pub fn get_block_template_chain_info(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
     network: Network,
 ) -> Result<GetBlockTemplateChainInfo, BoxError> {
-    let mut relevant_chain_and_history_tree_result =
-        relevant_chain_and_history_tree(non_finalized_state, db);
+    let mut best_relevant_chain_and_history_tree_result =
+        best_relevant_chain_and_history_tree(non_finalized_state, db);
 
     // Retry the finalized state query if it was interrupted by a finalizing block.
     //
     // TODO: refactor this into a generic retry(finalized_closure, process_and_check_closure) fn
     for _ in 0..FINALIZED_STATE_QUERY_RETRIES {
-        if relevant_chain_and_history_tree_result.is_ok() {
+        if best_relevant_chain_and_history_tree_result.is_ok() {
             break;
         }
 
-        relevant_chain_and_history_tree_result =
-            relevant_chain_and_history_tree(non_finalized_state, db);
+        best_relevant_chain_and_history_tree_result =
+            best_relevant_chain_and_history_tree(non_finalized_state, db);
     }
 
-    let (tip_height, tip_hash, relevant_chain, history_tree) =
-        relevant_chain_and_history_tree_result?;
+    let (best_tip_height, best_tip_hash, best_relevant_chain, best_tip_history_tree) =
+        best_relevant_chain_and_history_tree_result?;
 
     Ok(difficulty_time_and_history_tree(
-        relevant_chain,
-        tip_height,
-        tip_hash,
+        best_relevant_chain,
+        best_tip_height,
+        best_tip_hash,
         network,
-        history_tree,
+        best_tip_history_tree,
     ))
 }
 
@@ -121,15 +125,17 @@ pub fn solution_rate(
     }
 }
 
-/// Do a consistency check by checking the finalized tip before and after all other database queries.
+/// Do a consistency check by checking the finalized tip before and after all other database
+/// queries.
 ///
-/// Returns the state tip, recent blocks in reverse order from the tip, and the tip history tree.
+/// Returns the best chain tip, recent blocks in reverse height order from the tip,
+/// and the tip history tree.
 /// Returns an error if the tip obtained before and after is not the same.
 ///
 /// # Panics
 ///
 /// - If we don't have enough blocks in the state.
-fn relevant_chain_and_history_tree(
+fn best_relevant_chain_and_history_tree(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
 ) -> Result<
@@ -145,12 +151,13 @@ fn relevant_chain_and_history_tree(
         BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
     })?;
 
-    let relevant_chain = any_ancestor_blocks(non_finalized_state, db, state_tip_before_queries.1);
-    let relevant_chain: Vec<_> = relevant_chain
+    let best_relevant_chain =
+        any_ancestor_blocks(non_finalized_state, db, state_tip_before_queries.1);
+    let best_relevant_chain: Vec<_> = best_relevant_chain
         .into_iter()
         .take(POW_ADJUSTMENT_BLOCK_SPAN)
         .collect();
-    let relevant_chain = relevant_chain.try_into().map_err(|_error| {
+    let best_relevant_chain = best_relevant_chain.try_into().map_err(|_error| {
         "Zebra's state only has a few blocks, wait until it syncs to the chain tip"
     })?;
 
@@ -173,14 +180,15 @@ fn relevant_chain_and_history_tree(
     Ok((
         state_tip_before_queries.0,
         state_tip_before_queries.1,
-        relevant_chain,
+        best_relevant_chain,
         history_tree,
     ))
 }
 
-/// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
+/// Returns the [`GetBlockTemplateChainInfo`] for the supplied `relevant_chain`, tip, `network`,
+/// and `history_tree`.
 ///
-/// The `relevant_chain` has recent blocks in reverse order from the tip.
+/// The `relevant_chain` has recent blocks in reverse height order from the tip.
 ///
 /// See [`get_block_template_chain_info()`] for details.
 fn difficulty_time_and_history_tree(
@@ -197,23 +205,15 @@ fn difficulty_time_and_history_tree(
 
     let cur_time = DateTime32::now();
 
-    // Get the median-time-past, which doesn't depend on the time or the previous block height.
-    // `context` will always have the correct length, because this function takes an array.
-    //
-    // TODO: split out median-time-past into its own struct?
-    let median_time_past = AdjustedDifficulty::new_from_header_time(
-        cur_time.into(),
-        tip_height,
-        network,
-        relevant_data.clone(),
-    )
-    .median_time_past();
-
     // > For each block other than the genesis block , nTime MUST be strictly greater than
     // > the median-time-past of that block.
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
-    let median_time_past =
-        DateTime32::try_from(median_time_past).expect("valid blocks have in-range times");
+    let median_time_past = calculate_median_time_past(
+        relevant_chain[0..POW_MEDIAN_BLOCK_SPAN]
+            .to_vec()
+            .try_into()
+            .expect("slice is correct size"),
+    );
 
     let min_time = median_time_past
         .checked_add(Duration32::from_seconds(1))
