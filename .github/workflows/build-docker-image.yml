@@ -84,7 +84,6 @@ jobs:
             type=ref,event=pr
             type=sha
             # edge is the latest commit on the default branch.
-            # TODO: We only want edge builds for `us-docker.pkg.dev`, because DockerHub doesn't keep up with every `main` branch commit.
             type=edge,enable={{is_default_branch}}
 
       # Setup Docker Buildx to allow use of docker cache layers from GH
@@ -158,6 +157,7 @@ jobs:
           # The caches are tried in top-down order, the first available cache is used:
           # https://github.com/moby/moby/pull/26839#issuecomment-277383550
           cache-from: |
-            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
-            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:main-cache
-          cache-to: type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra-caching/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra-caching/${{ inputs.image_name }}:main-cache
+          cache-to: |
+            type=registry,ref=us-docker.pkg.dev/zealous-zebra/zebra-caching/${{ inputs.image_name }}:${{ env.GITHUB_REF_SLUG_URL }}-cache,mode=max
