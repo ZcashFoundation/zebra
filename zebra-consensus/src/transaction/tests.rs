@@ -1,4 +1,6 @@
 //! Tests for Zcash transaction consensus checks.
+//
+// TODO: split fixed test vectors into a `vectors` module?
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -195,13 +197,8 @@ async fn mempool_request_with_missing_input_is_rejected() {
     };
 
     tokio::spawn(async move {
-        state
-            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
-            .await
-            .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::BestChainNextMedianTimePast(
-                DateTime32::MAX,
-            ));
+        // The first non-coinbase transaction with transparent inputs in our test vectors
+        // does not use a lock time, so we don't see Request::BestChainNextMedianTimePast here
 
         state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
@@ -261,14 +258,6 @@ async fn mempool_request_with_present_input_is_accepted() {
     };
 
     tokio::spawn(async move {
-        state
-            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
-            .await
-            .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::BestChainNextMedianTimePast(
-                DateTime32::MAX,
-            ));
-
         state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
             .await
@@ -406,16 +395,6 @@ async fn mempool_request_with_unlocked_lock_time_is_accepted() {
 
     tokio::spawn(async move {
         state
-            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
-            .await
-            .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::BestChainNextMedianTimePast(
-                DateTime32::from(
-                    u32::try_from(LockTime::MIN_TIMESTAMP).expect("min time is valid"),
-                ),
-            ));
-
-        state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
             .await
             .expect("verifier should call mock state service with correct request")
@@ -480,16 +459,6 @@ async fn mempool_request_with_lock_time_max_sequence_number_is_accepted() {
     };
 
     tokio::spawn(async move {
-        state
-            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
-            .await
-            .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::BestChainNextMedianTimePast(
-                DateTime32::from(
-                    u32::try_from(LockTime::MIN_TIMESTAMP).expect("min time is valid"),
-                ),
-            ));
-
         state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
             .await

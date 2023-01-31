@@ -83,6 +83,11 @@ impl LockTime {
     pub fn max_lock_time_timestamp() -> LockTime {
         LockTime::Time(Utc.timestamp(Self::MAX_TIMESTAMP, 0))
     }
+
+    /// Returns `true` if this lock time is a [`LockTime::Time`], or `false` if it is a [`LockTime::Height`].
+    pub fn is_time(&self) -> bool {
+        matches!(self, LockTime::Time(_))
+    }
 }
 
 impl ZcashSerialize for LockTime {

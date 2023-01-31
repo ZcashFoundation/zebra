@@ -20,16 +20,14 @@ use std::{
 use chrono::{DateTime, Utc};
 use zebra_chain::{
     block::{self, Block, Height},
-    parameters::Network,
     serialization::DateTime32,
-    work::difficulty::CompactDifficulty,
 };
 
 use crate::{
     constants,
     service::{
         block_iter::any_ancestor_blocks,
-        check::{difficulty::POW_ADJUSTMENT_BLOCK_SPAN, AdjustedDifficulty},
+        check::{difficulty::POW_MEDIAN_BLOCK_SPAN, AdjustedDifficulty},
         finalized_state::ZebraDb,
         non_finalized_state::{Chain, NonFinalizedState},
         read::{self, block::block_header, FINALIZED_STATE_QUERY_RETRIES},
@@ -573,7 +571,7 @@ pub fn next_median_time_past(
 fn best_relevant_chain(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
-) -> Result<[Arc<Block>; POW_ADJUSTMENT_BLOCK_SPAN], BoxError> {
+) -> Result<[Arc<Block>; POW_MEDIAN_BLOCK_SPAN], BoxError> {
     let state_tip_before_queries = read::best_tip(non_finalized_state, db).ok_or_else(|| {
         BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
     })?;
@@ -582,7 +580,7 @@ fn best_relevant_chain(
         any_ancestor_blocks(non_finalized_state, db, state_tip_before_queries.1);
     let best_relevant_chain: Vec<_> = best_relevant_chain
         .into_iter()
-        .take(POW_ADJUSTMENT_BLOCK_SPAN)
+        .take(POW_MEDIAN_BLOCK_SPAN)
         .collect();
     let best_relevant_chain = best_relevant_chain.try_into().map_err(|_error| {
         "Zebra's state only has a few blocks, wait until it syncs to the chain tip"
@@ -605,32 +603,23 @@ fn best_relevant_chain(
 /// The `relevant_chain` has blocks in reverse height order.
 ///
 /// See [`next_median_time_past()`] for details.
-fn calculate_median_time_past(
-    relevant_chain: [Arc<Block>; POW_ADJUSTMENT_BLOCK_SPAN],
+pub(crate) fn calculate_median_time_past(
+    relevant_chain: [Arc<Block>; POW_MEDIAN_BLOCK_SPAN],
 ) -> DateTime32 {
-    let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
+    let relevant_data: Vec<DateTime<Utc>> = relevant_chain
         .iter()
-        .map(|block| (block.header.difficulty_threshold, block.header.time))
+        .map(|block| block.header.time)
         .collect();
-
-    // TODO: split out median-time-past into its own struct?
-    let ignored_time = DateTime::default();
-    let ignored_height = Height(0);
-    let ignored_network = Network::Mainnet;
-
-    // Get the median-time-past, which doesn't depend on the time or the previous block height.
-    // `context` will always have the correct length, because this function takes an array.
-    let median_time_past = AdjustedDifficulty::new_from_header_time(
-        ignored_time,
-        ignored_height,
-        ignored_network,
-        relevant_data,
-    )
-    .median_time_past();
 
     // > Define the median-time-past of a block to be the median of the nTime fields of the
     // > preceding PoWMedianBlockSpan blocks (or all preceding blocks if there are fewer than
     // > PoWMedianBlockSpan). The median-time-past of a genesis block is not defined.
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
+    let median_time_past = AdjustedDifficulty::median_time(
+        relevant_data
+            .try_into()
+            .expect("always has the correct length due to function argument type"),
+    );
+
     DateTime32::try_from(median_time_past).expect("valid blocks have in-range times")
 }
