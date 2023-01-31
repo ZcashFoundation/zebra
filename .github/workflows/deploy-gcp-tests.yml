@@ -394,7 +394,7 @@ jobs:
           fi
 
           echo "Selected Disk: $CACHED_DISK_NAME"
-          echo "::set-output name=cached_disk_name::$CACHED_DISK_NAME"
+          echo "cached_disk_name=$CACHED_DISK_NAME" >> "$GITHUB_OUTPUT"
 
           echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> "$GITHUB_ENV"
           echo "CACHED_DISK_NAME=$CACHED_DISK_NAME" >> "$GITHUB_ENV"
