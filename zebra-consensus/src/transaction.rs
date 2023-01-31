@@ -347,15 +347,15 @@ where
             if let Some(block_time) = req.block_time() {
                 check::lock_time_has_passed(&tx, req.height(), block_time)?;
             } else {
-                let mut next_median_time_past = None;
-
                 // Skip the state query if we don't need the time for this check.
-                if tx.lock_time_is_time() {
+                let next_median_time_past = if tx.lock_time_is_time() {
                     // This state query is much faster than loading UTXOs from the database,
                     // so it doesn't need to be executed in parallel
                     let state = state.clone();
-                    next_median_time_past = Some(Self::mempool_best_chain_next_median_time_past(state).await?.to_chrono());
-                }
+                    Some(Self::mempool_best_chain_next_median_time_past(state).await?.to_chrono())
+                } else {
+                    None
+                };
 
                 // This consensus check makes sure Zebra produces valid block templates.
                 check::lock_time_has_passed(&tx, req.height(), next_median_time_past)?;
