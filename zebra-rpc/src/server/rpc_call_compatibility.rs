@@ -44,7 +44,7 @@ impl<M: Metadata> Middleware<M> for FixRpcResponseMiddleware {
     {
         Either::Left(
             next(call.clone(), meta)
-                .then(move |output| Self::log_error_if_method_not_found(output, call))
+                .inspect(|output| Self::log_error_if_method_not_found(output, call))
                 .boxed(),
         )
     }
@@ -67,9 +67,7 @@ impl FixRpcResponseMiddleware {
     }
 
     /// Check an RPC output and log an error if it indicates the method was not found.
-    async fn log_error_if_method_not_found(output: Option<Output>, call: Call) -> Option<Output> {
-        let call_description = Self::call_description(&call);
-
+    fn log_error_if_method_not_found(output: &Option<Output>, call: Call) {
         if let Some(Output::Failure(Failure {
             error:
                 Error {
@@ -79,9 +77,8 @@ impl FixRpcResponseMiddleware {
             ..
         })) = output
         {
+            let call_description = Self::call_description(&call);
             tracing::warn!("Received unrecognized RPC request: {call_description}");
         }
-
-        output
     }
 }
