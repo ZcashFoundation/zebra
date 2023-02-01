@@ -50,12 +50,11 @@ impl ProposalResponse {
             .replace(|c: char| !c.is_alphanumeric(), "-")
             .to_ascii_lowercase();
 
-        // Remove consecutive `-` characters if any.
+        // Remove duplicated `-` characters.
         let regex1 = regex::Regex::new(r"-+").expect("valid regex");
         let error_kebab2 = regex1.replace_all(&error_kebab1, "-");
-        // Remove trailing `-` character if any.
-        let regex2 = regex::Regex::new(r"-$").expect("valid regex");
-        let final_error = regex2.replace_all(&error_kebab2, "");
+        // Trim any leading or trailing `-` characters.
+        let final_error = error_kebab2.trim_matches('-');
 
         ProposalResponse::Rejected(final_error.to_string())
     }
