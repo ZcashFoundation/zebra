@@ -7,11 +7,14 @@ use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
+use zcash_address;
+
 use zebra_chain::{
     block::{self, Block, Height},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::Network,
+    primitives,
     serialization::ZcashDeserializeInto,
     transparent,
 };
@@ -32,7 +35,7 @@ use crate::methods::{
         },
         types::{
             get_block_template::GetBlockTemplate, get_mining_info, hex_data::HexData,
-            long_poll::LongPollInput, peer_info::PeerInfo, submit_block,
+            long_poll::LongPollInput, peer_info::PeerInfo, submit_block, validate_address,
         },
     },
     height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
@@ -156,6 +159,13 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`getpeerinfo`](https://zcash.github.io/rpc/getpeerinfo.html)
     #[rpc(name = "getpeerinfo")]
     fn get_peer_info(&self) -> BoxFuture<Result<Vec<PeerInfo>>>;
+
+    /// Checks if a zcash address is valid.
+    /// Returns information about the given address if valid.
+    ///
+    /// zcashd reference: [`validateaddress`](https://zcash.github.io/rpc/validateaddress.html)
+    #[rpc(name = "validateaddress")]
+    fn validate_address(&self, address: String) -> BoxFuture<Result<validate_address::Response>>;
 }
 
 /// RPC method implementations.
@@ -745,6 +755,47 @@ where
                 .into_iter()
                 .map(PeerInfo::from)
                 .collect())
+        }
+        .boxed()
+    }
+
+    fn validate_address(
+        &self,
+        raw_address: String,
+    ) -> BoxFuture<Result<validate_address::Response>> {
+        let network = self.network;
+
+        async move {
+            let Ok(address) = raw_address
+                .parse::<zcash_address::ZcashAddress>() else {
+                    return Ok(validate_address::Response::invalid());
+                };
+
+            let address = address
+                .convert::<primitives::Address>()
+                .map_err(|err| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: format!("conversion error: {err}"),
+                    data: None,
+                })?;
+
+            return Ok(if address.network() == network {
+                validate_address::Response {
+                    address: Some(raw_address),
+                    is_valid: true,
+                    script_pub_key: None,
+                    pub_key: None,
+                    is_script: Some(address.is_script_hash()),
+                }
+            } else {
+                tracing::info!(
+                    ?network,
+                    address_network = ?address.network(),
+                    "network mismatch"
+                );
+
+                validate_address::Response::invalid()
+            });
         }
         .boxed()
     }
