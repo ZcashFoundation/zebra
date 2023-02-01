@@ -779,6 +779,11 @@ where
                     data: None,
                 })?;
 
+            // we want to match zcashd's behaviour
+            if !address.is_transparent() {
+                return Ok(validate_address::Response::invalid());
+            }
+
             return Ok(if address.network() == network {
                 validate_address::Response {
                     address: Some(raw_address),

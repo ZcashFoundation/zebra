@@ -113,4 +113,13 @@ impl Address {
             Self::Sapling { .. } | Self::Unified { .. } => false,
         }
     }
+
+    /// Returns true if address is of the [`Address::Transparent`] variant.
+    /// Returns false if otherwise.
+    pub fn is_transparent(&self) -> bool {
+        match &self {
+            Self::Transparent(_) => true,
+            Self::Sapling { .. } | Self::Unified { .. } => false,
+        }
+    }
 }
