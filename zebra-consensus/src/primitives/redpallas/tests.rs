@@ -9,6 +9,11 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use tower::ServiceExt;
 use tower_batch::Batch;
 
+use zebra_chain::primitives::reddsa::{
+    orchard::{Binding, SpendAuth},
+    SigningKey, VerificationKey,
+};
+
 async fn sign_and_verify<V>(mut verifier: V, n: usize) -> Result<(), V::Error>
 where
     V: Service<Item, Response = ()>,
@@ -25,14 +30,17 @@ where
                 let vk = VerificationKey::from(&sk);
                 let sig = sk.sign(&mut rng, &msg[..]);
                 verifier.ready().await?;
-                results.push(span.in_scope(|| verifier.call((vk.into(), sig, msg).into())))
+                results.push(
+                    span.in_scope(|| verifier.call(Item::from_spendauth(vk.into(), sig, msg))),
+                )
             }
             1 => {
                 let sk = SigningKey::<Binding>::new(&mut rng);
                 let vk = VerificationKey::from(&sk);
                 let sig = sk.sign(&mut rng, &msg[..]);
                 verifier.ready().await?;
-                results.push(span.in_scope(|| verifier.call((vk.into(), sig, msg).into())))
+                results
+                    .push(span.in_scope(|| verifier.call(Item::from_binding(vk.into(), sig, msg))))
             }
             _ => panic!(),
         }

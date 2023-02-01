@@ -12,6 +12,7 @@ use chrono::{TimeZone, Utc};
 use proptest::{
     arbitrary::any, array, collection::vec, option, prelude::*, test_runner::TestRunner,
 };
+use reddsa::{orchard::Binding, Signature};
 
 use crate::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
@@ -19,10 +20,7 @@ use crate::{
     block::{self, arbitrary::MAX_PARTIAL_CHAIN_BLOCKS},
     orchard,
     parameters::{Network, NetworkUpgrade},
-    primitives::{
-        redpallas::{Binding, Signature},
-        Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof,
-    },
+    primitives::{Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof},
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
     serialization::ZcashDeserializeInto,
     sprout, transparent,
@@ -696,7 +694,7 @@ impl Arbitrary for orchard::ShieldedData {
                 any::<orchard::shielded_data::AuthorizedAction>(),
                 1..MAX_ARBITRARY_ITEMS,
             ),
-            any::<Signature<Binding>>(),
+            any::<BindingSignature>(),
         )
             .prop_map(
                 |(flags, value_balance, shared_anchor, proof, actions, binding_sig)| Self {
@@ -707,7 +705,7 @@ impl Arbitrary for orchard::ShieldedData {
                     actions: actions
                         .try_into()
                         .expect("arbitrary vector size range produces at least one action"),
-                    binding_sig,
+                    binding_sig: binding_sig.0,
                 },
             )
             .boxed()
@@ -716,7 +714,10 @@ impl Arbitrary for orchard::ShieldedData {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for Signature<Binding> {
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct BindingSignature(pub(crate) Signature<Binding>);
+
+impl Arbitrary for BindingSignature {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -729,7 +730,7 @@ impl Arbitrary for Signature<Binding> {
                     if b == [0u8; 64] {
                         return None;
                     }
-                    Some(Signature::<Binding>::from(b))
+                    Some(BindingSignature(Signature::<Binding>::from(b)))
                 },
             )
             .boxed()
