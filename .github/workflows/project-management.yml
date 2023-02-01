@@ -1,3 +1,5 @@
+name: Add new issues to GitHub projects
+
 # Configuration for automatically adding issues to various Github projects for Project Management purposes
 on:
   issues:
