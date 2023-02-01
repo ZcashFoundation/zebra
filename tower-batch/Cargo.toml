@@ -6,7 +6,7 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-futures = "0.3.25"
+futures = "0.3.26"
 futures-core = "0.3.26"
 pin-project = "1.0.12"
 rayon = "1.6.1"
