@@ -17,13 +17,13 @@ use tower::{util::ServiceFn, Service};
 use tower_batch::{Batch, BatchControl};
 use tower_fallback::Fallback;
 
-use zebra_chain::primitives::redpallas::{batch, *};
+use zebra_chain::primitives::reddsa::{batch, orchard, Error};
 
 #[cfg(test)]
 mod tests;
 
 /// The type of the batch verifier.
-type BatchVerifier = batch::Verifier;
+type BatchVerifier = batch::Verifier<orchard::SpendAuth, orchard::Binding>;
 
 /// The type of verification results.
 type VerifyResult = Result<(), Error>;
@@ -33,7 +33,7 @@ type Sender = watch::Sender<Option<VerifyResult>>;
 
 /// The type of the batch item.
 /// This is a `RedPallasItem`.
-pub type Item = batch::Item;
+pub type Item = batch::Item<orchard::SpendAuth, orchard::Binding>;
 
 /// Global batch verification context for RedPallas signatures.
 ///
