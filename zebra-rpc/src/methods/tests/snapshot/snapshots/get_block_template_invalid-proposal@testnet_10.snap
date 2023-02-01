@@ -1,6 +1,5 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
-assertion_line: 385
 expression: block_template
 ---
 "io-error-kind-unexpectedeof-message-failed-to-fill-whole-buffer"
