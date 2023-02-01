@@ -3054,7 +3054,7 @@ dependencies = [
  "nonempty",
  "pasta_curves",
  "rand 0.8.5",
- "reddsa",
+ "reddsa 0.3.0",
  "serde",
  "subtle",
  "tracing",
@@ -3857,6 +3857,24 @@ dependencies = [
  "blake2b_simd",
  "byteorder",
  "group",
+ "jubjub",
+ "pasta_curves",
+ "rand_core 0.6.4",
+ "serde",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
+name = "reddsa"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c56c56c88c633d5ccc03ec3931a0d3991c2ae8d92c049ece060d41f6662a818c"
+dependencies = [
+ "blake2b_simd",
+ "byteorder",
+ "group",
+ "hex",
  "jubjub",
  "pasta_curves",
  "rand_core 0.6.4",
@@ -6386,6 +6404,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
  "rayon",
+ "reddsa 0.4.0",
  "redjubjub",
  "ripemd",
  "secp256k1",

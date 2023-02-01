@@ -5,15 +5,14 @@ use std::{borrow::Borrow, convert::TryInto, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use halo2::pasta::{group::ff::PrimeField, pallas};
+use hex::FromHex;
+use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 
 use crate::{
     amount,
     block::MAX_BLOCK_BYTES,
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
-    primitives::{
-        redpallas::{Binding, Signature, SpendAuth},
-        Groth16Proof, Halo2Proof, ZkSnarkProof,
-    },
+    primitives::{Groth16Proof, Halo2Proof, ZkSnarkProof},
     serialization::{
         zcash_deserialize_external_count, zcash_serialize_empty_list,
         zcash_serialize_external_count, AtLeastOne, ReadZcashExt, SerializationError,
@@ -444,6 +443,19 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
             actions,
             binding_sig,
         }))
+    }
+}
+
+impl<T: reddsa::SigType> ZcashSerialize for reddsa::Signature<T> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&<[u8; 64]>::from(*self)[..])?;
+        Ok(())
+    }
+}
+
+impl<T: reddsa::SigType> ZcashDeserialize for reddsa::Signature<T> {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Ok(reader.read_64_bytes()?.into())
     }
 }
 

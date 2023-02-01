@@ -5,10 +5,8 @@
 //! whose functionality is implemented elsewhere.
 
 mod proofs;
-// TODO: re-export redpallas if needed, or reddsa if that gets merged https://github.com/ZcashFoundation/zebra/issues/2044
-pub mod redpallas;
-
 pub use ed25519_zebra as ed25519;
+pub use reddsa;
 pub use redjubjub;
 pub use x25519_dalek as x25519;
 

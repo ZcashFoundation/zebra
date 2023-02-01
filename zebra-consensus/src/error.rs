@@ -149,7 +149,7 @@ pub enum TransactionError {
 
     #[error("Orchard bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
-    RedPallas(zebra_chain::primitives::redpallas::Error),
+    RedPallas(zebra_chain::primitives::reddsa::Error),
 
     // temporary error type until #1186 is fixed
     #[error("Downcast from BoxError to redjubjub::Error failed")]
