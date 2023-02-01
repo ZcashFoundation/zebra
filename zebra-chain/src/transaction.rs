@@ -363,6 +363,17 @@ impl Transaction {
         }
     }
 
+    /// Returns `true` if this transaction's `lock_time` is a [`LockTime::Time`].
+    /// Returns `false` if it is a [`LockTime::Height`] (locked or unlocked), is unlocked,
+    /// or if the transparent input sequence numbers have disabled lock times.
+    pub fn lock_time_is_time(&self) -> bool {
+        if let Some(lock_time) = self.lock_time() {
+            return lock_time.is_time();
+        }
+
+        false
+    }
+
     /// Get this transaction's expiry height, if any.
     pub fn expiry_height(&self) -> Option<block::Height> {
         match self {

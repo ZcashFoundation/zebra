@@ -1,0 +1,31 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+expression: get_block_subsidy
+---
+{
+  "fundingstreams": [
+    {
+      "recipient": "Electric Coin Company",
+      "specification": "https://zips.z.cash/zip-0214",
+      "value": 0.21875,
+      "valueZat": 21875000,
+      "address": "t3PdBRr2S1XTDzrV8bnZkXF3SJcrzHWe1wj"
+    },
+    {
+      "recipient": "Zcash Foundation",
+      "specification": "https://zips.z.cash/zip-0214",
+      "value": 0.15625,
+      "valueZat": 15625000,
+      "address": "t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"
+    },
+    {
+      "recipient": "Major Grants",
+      "specification": "https://zips.z.cash/zip-0214",
+      "value": 0.25,
+      "valueZat": 25000000,
+      "address": "t3XyYW8yBFRuMnfvm5KLGFbEVz25kckZXym"
+    }
+  ],
+  "miner": 2.5,
+  "founders": 0.0
+}

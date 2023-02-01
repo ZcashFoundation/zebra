@@ -40,7 +40,9 @@ use crate::methods::{
             hex_data::HexData,
             long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
             peer_info::PeerInfo,
-            submit_block, validate_address,
+            submit_block,
+            subsidy::BlockSubsidy,
+            validate_address,
         },
     },
     tests::utils::fake_history_tree,
@@ -157,6 +159,14 @@ pub async fn test_responses<State, ReadState>(
         .await
         .expect("We should have a success response");
     snapshot_rpc_getmininginfo(get_mining_info, &settings);
+
+    // `getblocksubsidy`
+    let fake_future_block_height = fake_tip_height.0 + 100_000;
+    let get_block_subsidy = get_block_template_rpc
+        .get_block_subsidy(Some(fake_future_block_height))
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getblocksubsidy(get_block_subsidy, &settings);
 
     // `getpeerinfo`
     let get_peer_info = get_block_template_rpc
@@ -423,6 +433,11 @@ fn snapshot_rpc_getmininginfo(
     settings: &insta::Settings,
 ) {
     settings.bind(|| insta::assert_json_snapshot!("get_mining_info", get_mining_info));
+}
+
+/// Snapshot `getblocksubsidy` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getblocksubsidy(get_block_subsidy: BlockSubsidy, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_block_subsidy", get_block_subsidy));
 }
 
 /// Snapshot `getpeerinfo` response, using `cargo insta` and JSON serialization.

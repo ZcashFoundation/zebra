@@ -3,7 +3,7 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 repository = "https://github.com/ZcashFoundation/zebra"
 
 # Settings that impact compilation
@@ -106,11 +106,11 @@ humantime-serde = "1.1.1"
 indexmap = "1.9.2"
 lazy_static = "1.4.0"
 serde = { version = "1.0.152", features = ["serde_derive"] }
-toml = "0.6.0"
+toml = "0.7.1"
 
-futures = "0.3.25"
+futures = "0.3.26"
 rayon = "1.6.1"
-tokio = { version = "1.24.2", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { version = "1.25.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.0.12"
 
@@ -186,7 +186,7 @@ tempfile = "3.3.0"
 hyper = { version = "0.14.23", features = ["http1", "http2", "server"]}
 reqwest = "0.11.14"
 
-tokio = { version = "1.24.2", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.25.0", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.11"
 
 # test feature lightwalletd-grpc-tests

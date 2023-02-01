@@ -19,19 +19,47 @@ use crate::error::TransactionError;
 
 /// Checks if the transaction's lock time allows this transaction to be included in a block.
 ///
-/// Consensus rule:
+/// Arguments:
+/// - `block_height`: the height of the mined block, or the height of the next block for mempool
+///                   transactions
+/// - `block_time`: the time in the mined block header, or the median-time-past of the next block
+///                 for the mempool. Optional if the lock time is a height.
+///
+/// # Panics
+///
+/// If the lock time is a time, and `block_time` is `None`.
+///
+/// # Consensus
 ///
 /// > The transaction must be finalized: either its locktime must be in the past (or less
 /// > than or equal to the current block height), or all of its sequence numbers must be
 /// > 0xffffffff.
 ///
 /// [`Transaction::lock_time`] validates the transparent input sequence numbers, returning [`None`]
-/// if they indicate that the transaction is finalized by them. Otherwise, this function validates
-/// if the lock time is in the past.
+/// if they indicate that the transaction is finalized by them.
+/// Otherwise, this function checks that the lock time is in the past.
+///
+/// ## Mempool Consensus for Block Templates
+///
+/// > the nTime field MUST represent a time strictly greater than the median of the
+/// > timestamps of the past PoWMedianBlockSpan blocks.
+/// <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+///
+/// > The transaction can be added to any block whose block time is greater than the locktime.
+/// <https://developer.bitcoin.org/devguide/transactions.html#locktime-and-sequence-number>
+///
+/// If the transaction's lock time is less than the median-time-past,
+/// it will always be less than the next block's time,
+/// because the next block's time is strictly greater than the median-time-past.
+/// (That is, `lock-time < median-time-past < block-header-time`.)
+///
+/// Using `median-time-past + 1s` (the next block's mintime) would also satisfy this consensus rule,
+/// but we prefer the rule implemented by `zcashd`'s mempool:
+/// <https://github.com/zcash/zcash/blob/9e1efad2d13dca5ee094a38e6aa25b0f2464da94/src/main.cpp#L776-L784>
 pub fn lock_time_has_passed(
     tx: &Transaction,
     block_height: Height,
-    block_time: DateTime<Utc>,
+    block_time: impl Into<Option<DateTime<Utc>>>,
 ) -> Result<(), TransactionError> {
     match tx.lock_time() {
         Some(LockTime::Height(unlock_height)) => {
@@ -48,6 +76,10 @@ pub fn lock_time_has_passed(
         Some(LockTime::Time(unlock_time)) => {
             // > The transaction can be added to any block whose block time is greater than the locktime.
             // https://developer.bitcoin.org/devguide/transactions.html#locktime-and-sequence-number
+            let block_time = block_time
+                .into()
+                .expect("time must be provided if LockTime is a time");
+
             if block_time > unlock_time {
                 Ok(())
             } else {

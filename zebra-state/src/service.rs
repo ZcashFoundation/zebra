@@ -47,7 +47,7 @@ use crate::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
         finalized_state::{FinalizedState, ZebraDb},
-        non_finalized_state::NonFinalizedState,
+        non_finalized_state::{Chain, NonFinalizedState},
         pending_utxos::PendingUtxos,
         queued_blocks::QueuedBlocks,
         watch_receiver::WatchReceiver,
@@ -803,6 +803,12 @@ impl ReadStateService {
     fn latest_non_finalized_state(&self) -> NonFinalizedState {
         self.non_finalized_state_receiver.cloned_watch_data()
     }
+
+    /// Gets a clone of the latest, best non-finalized chain from the `non_finalized_state_receiver`
+    #[allow(dead_code)]
+    fn latest_best_chain(&self) -> Option<Arc<Chain>> {
+        self.latest_non_finalized_state().best_chain().cloned()
+    }
 }
 
 impl Service<Request> for StateService {
@@ -1152,7 +1158,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::Depth(depth))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
+                .map(|join_result| join_result.expect("panic in ReadRequest::Depth"))
                 .boxed()
             }
 
@@ -1268,7 +1274,9 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::TransactionIdsForBlock(transaction_ids))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Block"))
+                .map(|join_result| {
+                    join_result.expect("panic in ReadRequest::TransactionIdsForBlock")
+                })
                 .boxed()
             }
 
@@ -1348,7 +1356,7 @@ impl Service<ReadRequest> for ReadStateService {
                         ))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
+                .map(|join_result| join_result.expect("panic in ReadRequest::BlockLocator"))
                 .boxed()
             }
 
@@ -1379,7 +1387,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::BlockHashes(block_hashes))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
+                .map(|join_result| join_result.expect("panic in ReadRequest::FindBlockHashes"))
                 .boxed()
             }
 
@@ -1415,7 +1423,7 @@ impl Service<ReadRequest> for ReadStateService {
                         Ok(ReadResponse::BlockHeaders(block_headers))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::Tip"))
+                .map(|join_result| join_result.expect("panic in ReadRequest::FindBlockHeaders"))
                 .boxed()
             }
 
@@ -1728,12 +1736,12 @@ impl Service<ReadRequest> for ReadStateService {
                         });
 
                         // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");
+                        timer.finish(module_path!(), line!(), "ReadRequest::SolutionRate");
 
                         Ok(ReadResponse::SolutionRate(solution_rate))
                     })
                 })
-                .map(|join_result| join_result.expect("panic in ReadRequest::ChainInfo"))
+                .map(|join_result| join_result.expect("panic in ReadRequest::SolutionRate"))
                 .boxed()
             }
 

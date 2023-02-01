@@ -4,6 +4,43 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-rc.4](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.4) - 2023-01-30
+
+In this release we fixed bugs and inconsistencies between zcashd and zebrad in the output of the `getblocktemplate` RPC method. In addition, we added block proposal mode to the `getblocktemplate` RPC, while we continue the effort of adding and testing mining pool RPC methods.
+
+### Security
+
+- Verify the lock times of mempool transactions. Previously, Zebra was ignoring mempool transaction lock times, but checking them in mined blocks. Credit to DeckerSU for reporting this issue. ([#6027](https://github.com/ZcashFoundation/zebra/pull/6027))
+- Bump bumpalo from 3.8.0 to 3.12.0, removing undefined behaviour on `wasm` targets. These targets are not supported Zebra platforms. ([#6015](https://github.com/ZcashFoundation/zebra/pull/6015))
+- Bump libgit2-sys from 0.14.0+1.5.0 to 0.14.2+1.5.1, to ensure that SSH server keys are checked. Zebra only uses `libgit2` during builds, and we don't make SSH connections. ([#6014](https://github.com/ZcashFoundation/zebra/pull/6014))
+- Bump tokio from 1.24.1 to 1.24.2, to fix unsoundness. The unsound methods are not directly used by Zebra. ([#5995](https://github.com/ZcashFoundation/zebra/pull/5995))
+
+### Added
+
+- Add getpeerinfo RPC method ([#5951](https://github.com/ZcashFoundation/zebra/pull/5951))
+- Add proposal capability to getblocktemplate ([#5870](https://github.com/ZcashFoundation/zebra/pull/5870))
+- Add a test to check that the Docker image config works ([#5968](https://github.com/ZcashFoundation/zebra/pull/5968))
+- Make `zebra-checkpoints` work for zebrad backend ([#5894](https://github.com/ZcashFoundation/zebra/pull/5894))
+- Add test dependency from zebra-rpc to zebra-network with correct features ([#5992](https://github.com/ZcashFoundation/zebra/pull/5992))
+- Document zebra download command ([#5901](https://github.com/ZcashFoundation/zebra/pull/5901))
+
+### Fixed
+
+- Return detailed errors to the RPC client when a block proposal fails ([#5993](https://github.com/ZcashFoundation/zebra/pull/5993))
+- Avoid selecting duplicate transactions in block templates ([#6006](https://github.com/ZcashFoundation/zebra/pull/6006))
+- Calculate getblocktemplate RPC testnet min and max times correctly ([#5925](https://github.com/ZcashFoundation/zebra/pull/5925))
+- Fix Merkle root transaction order in getblocktemplate RPC method ([#5953](https://github.com/ZcashFoundation/zebra/pull/5953))
+
+### Changed
+
+- Strings in zebra configuration file now use double quotes, caused by upgrading the `toml` crate. Old configs will still work [#6029](https://github.com/ZcashFoundation/zebra/pull/6029)
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @conradoplg, @gustavovalverde, @mpguerra, @oxarbitrage and @teor2345
+
+
 ## [Zebra 1.0.0-rc.3](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.3) - 2023-01-10
 
 This release continues our work on mining pool RPCs, and brings Zebra up to date with the latest [ZIP-317](https://zips.z.cash/zip-0317) changes. It also fixes a minor network protocol compatibility bug.

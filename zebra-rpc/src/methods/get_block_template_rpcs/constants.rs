@@ -2,6 +2,8 @@
 
 use jsonrpc_core::ErrorCode;
 
+use zebra_consensus::FundingStreamReceiver::{self, *};
+
 /// When long polling, the amount of time we wait between mempool queries.
 /// (And sync status queries, which we do right before mempool queries.)
 ///
@@ -52,3 +54,9 @@ pub const NOT_SYNCED_ERROR_CODE: ErrorCode = ErrorCode::ServerError(-10);
 ///
 /// Based on default value in zcashd.
 pub const DEFAULT_SOLUTION_RATE_WINDOW_SIZE: usize = 120;
+
+/// The funding stream order in `zcashd` RPC responses.
+///
+/// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
+pub const ZCASHD_FUNDING_STREAM_ORDER: &[FundingStreamReceiver] =
+    &[Ecc, ZcashFoundation, MajorGrants];

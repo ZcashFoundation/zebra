@@ -63,7 +63,27 @@ pub enum FundingStreamReceiver {
 /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 
+/// The specification for all current funding stream receivers, a URL that links to [ZIP-214].
+///
+/// [ZIP-214]: https://zips.z.cash/zip-0214
+pub const FUNDING_STREAM_SPECIFICATION: &str = "https://zips.z.cash/zip-0214";
+
+// TODO: use a struct for the info for each funding stream, like zcashd does:
+// https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
 lazy_static! {
+    /// The name for each funding stream receiver, as described in [ZIP-1014] and [`zcashd`].
+    ///
+    /// [ZIP-1014]: https://zips.z.cash/zip-1014#abstract
+    /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
+    pub static ref FUNDING_STREAM_NAMES: HashMap<FundingStreamReceiver, &'static str> = {
+        let mut hash_map = HashMap::new();
+        hash_map.insert(FundingStreamReceiver::Ecc, "Electric Coin Company");
+        hash_map.insert(FundingStreamReceiver::ZcashFoundation, "Zcash Foundation");
+        hash_map.insert(FundingStreamReceiver::MajorGrants, "Major Grants");
+        hash_map
+    };
+
+
     /// The numerator for each funding stream receiver category
     /// as described in [protocol specification §7.10.1][7.10.1].
     ///

@@ -33,12 +33,6 @@ on:
         default: false
         description: 'Just run a lightwalletd full sync and update tip disks'
         required: true
-      run-lwd-send-tx:
-        type: boolean
-        default: false
-        description: 'Just run a lightwalletd send transactions test'
-        required: true
-
 
   pull_request:
     paths:
@@ -145,28 +139,28 @@ jobs:
           LWD_TIP_DISK=$(gcloud compute images list --filter="status=READY AND name~lwd-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           if [[ -z "$LWD_TIP_DISK" ]]; then
               echo "No TIP disk found for LWD"
-              echo "::set-output name=lwd_tip_disk::${{ toJSON(false) }}"
+              echo "lwd_tip_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
           else
               echo "Disk: $LWD_TIP_DISK"
-              echo "::set-output name=lwd_tip_disk::${{ toJSON(true) }}"
+              echo "lwd_tip_disk=${{ toJSON(true) }}" >> "$GITHUB_OUTPUT"
           fi
 
           ZEBRA_TIP_DISK=$(gcloud compute images list --filter="status=READY AND name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-tip" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           if [[ -z "$ZEBRA_TIP_DISK" ]]; then
               echo "No TIP disk found for ZEBRA"
-              echo "::set-output name=zebra_tip_disk::${{ toJSON(false) }}"
+              echo "zebra_tip_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
           else
               echo "Disk: $ZEBRA_TIP_DISK"
-              echo "::set-output name=zebra_tip_disk::${{ toJSON(true) }}"
+              echo "zebra_tip_disk=${{ toJSON(true) }}" >> "$GITHUB_OUTPUT"
           fi
 
           ZEBRA_CHECKPOINT_DISK=$(gcloud compute images list --filter="status=READY AND name~zebrad-cache-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-checkpoint" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
           if [[ -z "$ZEBRA_CHECKPOINT_DISK" ]]; then
               echo "No CHECKPOINT found for ZEBRA"
-              echo "::set-output name=zebra_checkpoint_disk::${{ toJSON(false) }}"
+              echo "zebra_checkpoint_disk=${{ toJSON(false) }}" >> "$GITHUB_OUTPUT"
           else
               echo "Disk: $ZEBRA_CHECKPOINT_DISK"
-              echo "::set-output name=zebra_checkpoint_disk::${{ toJSON(true) }}"
+              echo "zebra_checkpoint_disk=${{ toJSON(true) }}" >> "$GITHUB_OUTPUT"
           fi
 
   build:
@@ -198,7 +192,7 @@ jobs:
     name: Test all
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -220,7 +214,7 @@ jobs:
     name: Test all with getblocktemplate-rpcs feature
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -245,7 +239,7 @@ jobs:
     name: Test with fake activation heights
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -266,7 +260,7 @@ jobs:
     name: Test checkpoint sync from empty state
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -285,7 +279,7 @@ jobs:
     name: Test integration with lightwalletd
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -305,7 +299,7 @@ jobs:
     timeout-minutes: 5
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -328,7 +322,7 @@ jobs:
     timeout-minutes: 5
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     steps:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v4
@@ -388,7 +382,7 @@ jobs:
     name: Zebra checkpoint update
     needs: regenerate-stateful-disks
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: sync-past-checkpoint
@@ -459,7 +453,7 @@ jobs:
     name: Zebra tip update
     needs: test-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: update-to-tip
@@ -526,7 +520,7 @@ jobs:
     name: lightwalletd tip update
     needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-update-sync
@@ -556,7 +550,7 @@ jobs:
     name: Zebra tip JSON-RPC
     needs: test-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: fully-synced-rpc
@@ -581,7 +575,7 @@ jobs:
     name: lightwalletd tip send
     needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event.inputs.run-lwd-send-tx == 'true') }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-send-transactions
@@ -616,7 +610,7 @@ jobs:
     name: lightwalletd GRPC tests
     needs: lightwalletd-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-grpc-wallet
@@ -643,7 +637,7 @@ jobs:
     name: get block template
     needs: test-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: get-block-template
@@ -669,7 +663,7 @@ jobs:
     name: submit block
     needs: test-full-sync
     uses: ./.github/workflows/deploy-gcp-tests.yml
-    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' && github.event.inputs.run-lwd-send-tx != 'true' }}
+    if: ${{ !cancelled() && !failure() && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: submit-block
