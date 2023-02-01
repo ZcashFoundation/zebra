@@ -18,7 +18,7 @@ function usage()
 ZCASH_CLI="${ZCASH_CLI:-zcash-cli}"
 DIFF="${DIFF:-diff --unified --color=always}"
 JQ="${JQ:-jq}"
-# Zcashd authentification modes:
+# Zcashd authentication modes:
 # - Use `-rpccookiefile=your/cookie/file` for a cookie file.
 # - Use `-rpcpassword=your-password` for a password.
 ZCASHD_EXTRA_ARGS="${ZCASHD_EXTRA_ARGS:-}"
@@ -124,6 +124,7 @@ EXIT_STATUS=$?
 if [ "$1" == "getaddressutxos" ]; then
     set "getaddressbalance" "$2"
 elif [ "$1" == "getrawmempool" ]; then
+    # Call `getrawmempool` again as a dummy request (this script isn't set up to do multiple cross-check calls)
     set "getrawmempool"
 else
     exit $EXIT_STATUS
@@ -211,7 +212,7 @@ if [ "$1" == "getrawmempool" ] && [ $CHECK_EXIT_STATUS != 0 ]; then
     echo
 
     for TRANSACTION_ID in $ZEBRAD_TRANSACTION_IDS; do
-        TRANSACTION_HEX_FILE="$ZCASH_RPC_TMP_DIR/$ZEBRAD-$ZEBRAD_NET-$ZEBRAD_HEIGHT-TRANSACTION_HEX-$TRANSACTION_ID.json"
+        TRANSACTION_HEX_FILE="$ZCASH_RPC_TMP_DIR/$ZEBRAD-$ZEBRAD_NET-$ZEBRAD_HEIGHT-$TRANSACTION_ID.json"
 
         $ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getrawtransaction $TRANSACTION_ID 0 > $TRANSACTION_HEX_FILE
 
@@ -247,6 +248,8 @@ if [ "$1" == "getrawmempool" ] && [ $CHECK_EXIT_STATUS != 0 ]; then
     done
 
 fi
+
+echo "Full RPC output is in $ZCASH_RPC_TMP_DIR"
 
 if [ $EXIT_STATUS -ne 0 ]; then
     exit $EXIT_STATUS
