@@ -49,10 +49,10 @@ impl ProposalResponse {
         let error_kebab1 = format!("{error:?}")
             .replace(|c: char| !c.is_alphanumeric(), "-")
             .to_ascii_lowercase();
-
-        // Remove duplicated `-` characters.
-        let regex1 = regex::Regex::new(r"-+").expect("valid regex");
-        let error_kebab2 = regex1.replace_all(&error_kebab1, "-");
+        // Remove consecutive duplicated `-` characters.
+        let mut error_v: Vec<char> = error_kebab1.chars().collect();
+        error_v.dedup_by(|a, b| a == &'-' && b == &'-');
+        let error_kebab2: String = error_v.into_iter().collect();
         // Trim any leading or trailing `-` characters.
         let final_error = error_kebab2.trim_matches('-');
 

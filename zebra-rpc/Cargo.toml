@@ -15,7 +15,6 @@ default = []
 # Experimental mining RPC support
 getblocktemplate-rpcs = [
     "rand",
-    "regex",
     "zebra-consensus/getblocktemplate-rpcs",
     "zebra-state/getblocktemplate-rpcs",
     "zebra-node-services/getblocktemplate-rpcs",
@@ -59,7 +58,6 @@ serde = { version = "1.0.152", features = ["serde_derive"] }
 
 # Experimental features getblocktemplate-rpcs
 rand = { version = "0.8.5", package = "rand", optional = true }
-regex = { version = "1.7.1", package = "regex", optional = true }
 
 # Test-only feature proptest-impl
 proptest = { version = "0.10.1", optional = true }
