@@ -383,7 +383,13 @@ pub async fn test_responses<State, ReadState>(
         .validate_address(founder_address.to_string())
         .await
         .expect("We should have a validate_address::Response");
-    snapshot_rpc_validateaddress(validate_address, &settings);
+    snapshot_rpc_validateaddress("basic", validate_address, &settings);
+
+    let validate_address = get_block_template_rpc
+        .validate_address("".to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+    snapshot_rpc_validateaddress("invalid", validate_address, &settings);
 }
 
 /// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
@@ -450,10 +456,13 @@ fn snapshot_rpc_getnetworksolps(get_network_sol_ps: u64, settings: &insta::Setti
     settings.bind(|| insta::assert_json_snapshot!("get_network_sol_ps", get_network_sol_ps));
 }
 
-/// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
+/// Snapshot `validateaddress` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_validateaddress(
+    variant: &'static str,
     validate_address: validate_address::Response,
     settings: &insta::Settings,
 ) {
-    settings.bind(|| insta::assert_json_snapshot!("validate_address", validate_address));
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("validate_address_{variant}"), validate_address)
+    });
 }

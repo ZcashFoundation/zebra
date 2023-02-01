@@ -1,7 +1,5 @@
 //! Response type for the `validateaddress` RPC.
 
-use crate::methods::get_block_template_rpcs::types::hex_data::HexData;
-
 /// `validateaddress` response
 #[derive(Clone, Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Response {

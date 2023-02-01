@@ -815,7 +815,7 @@ where
                 tracing::info!(
                     ?network,
                     address_network = ?address.network(),
-                    "network mismatch"
+                    "invalid address in validateaddress RPC: Zebra's configured network must match address network"
                 );
 
                 validate_address::Response::invalid()
