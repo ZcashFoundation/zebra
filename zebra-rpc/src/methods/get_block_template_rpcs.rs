@@ -809,8 +809,6 @@ where
                 validate_address::Response {
                     address: Some(raw_address),
                     is_valid: true,
-                    script_pub_key: None,
-                    pub_key: None,
                     is_script: Some(address.is_script_hash()),
                 }
             } else {
