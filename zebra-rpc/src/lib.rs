@@ -5,8 +5,10 @@
 #![doc(html_root_url = "https://doc.zebra.zfnd.org/zebra_rpc")]
 
 pub mod config;
+pub mod constants;
 pub mod methods;
 pub mod queue;
 pub mod server;
+
 #[cfg(test)]
 mod tests;
