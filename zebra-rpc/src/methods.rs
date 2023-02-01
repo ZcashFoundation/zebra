@@ -32,16 +32,10 @@ use zebra_network::constants::USER_AGENT;
 use zebra_node_services::{mempool, BoxError};
 use zebra_state::{HashOrHeight, OutputIndex, OutputLocation, TransactionLocation};
 
-use crate::queue::Queue;
+use crate::{constants::MISSING_BLOCK_ERROR_CODE, queue::Queue};
 
 #[cfg(test)]
 mod tests;
-
-/// The RPC error code used by `zcashd` for missing blocks.
-///
-/// `lightwalletd` expects error code `-8` when a block is not found:
-/// <https://github.com/adityapk00/lightwalletd/blob/c1bab818a683e4de69cd952317000f9bb2932274/common/common.go#L251-L254>
-pub const MISSING_BLOCK_ERROR_CODE: ErrorCode = ErrorCode::ServerError(-8);
 
 #[rpc(server)]
 /// RPC method signatures.

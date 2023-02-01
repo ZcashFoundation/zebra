@@ -22,11 +22,14 @@ use zebra_node_services::{mempool, BoxError};
 use crate::{
     config::Config,
     methods::{Rpc, RpcImpl},
-    server::{compatibility::FixHttpRequestMiddleware, tracing_middleware::TracingMiddleware},
+    server::{
+        http_request_compatibility::FixHttpRequestMiddleware,
+        rpc_call_compatibility::FixRpcResponseMiddleware,
+    },
 };
 
-pub mod compatibility;
-mod tracing_middleware;
+pub mod http_request_compatibility;
+pub mod rpc_call_compatibility;
 
 #[cfg(test)]
 mod tests;
@@ -64,6 +67,10 @@ impl RpcServer {
         if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
+            // Create handler compatible with V1 and V2 RPC protocols
+            let mut io: MetaIoHandler<(), _> =
+                MetaIoHandler::new(Compatibility::Both, FixRpcResponseMiddleware);
+
             // Initialize the rpc methods with the zebra version
             let (rpc_impl, rpc_tx_queue_task_handle) = RpcImpl::new(
                 app_version,
@@ -73,10 +80,6 @@ impl RpcServer {
                 state,
                 latest_chain_tip,
             );
-
-            // Create handler compatible with V1 and V2 RPC protocols
-            let mut io: MetaIoHandler<(), _> =
-                MetaIoHandler::new(Compatibility::Both, TracingMiddleware);
             io.extend_with(rpc_impl.to_delegate());
 
             // If zero, automatically scale threads to the number of CPU cores
