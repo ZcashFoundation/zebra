@@ -108,7 +108,7 @@ lazy_static = "1.4.0"
 serde = { version = "1.0.152", features = ["serde_derive"] }
 toml = "0.7.1"
 
-futures = "0.3.25"
+futures = "0.3.26"
 rayon = "1.6.1"
 tokio = { version = "1.25.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
