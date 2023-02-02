@@ -147,7 +147,7 @@ inferno = { version = "0.11.14", default-features = false, optional = true }
 tracing-journald = { version = "0.3.0", optional = true }
 
 # prod feature filter-reload
-hyper = { version = "0.14.23", features = ["http1", "http2", "server"], optional = true }
+hyper = { version = "0.14.24", features = ["http1", "http2", "server"], optional = true }
 
 # prod feature prometheus
 metrics-exporter-prometheus = { version = "0.11.0", default-features = false, features = ["http-listener"], optional = true }
@@ -183,7 +183,7 @@ semver = "1.0.16"
 serde_json = { version = "1.0.91", features = ["preserve_order"] }
 tempfile = "3.3.0"
 
-hyper = { version = "0.14.23", features = ["http1", "http2", "server"]}
+hyper = { version = "0.14.24", features = ["http1", "http2", "server"]}
 reqwest = "0.11.14"
 
 tokio = { version = "1.25.0", features = ["full", "tracing", "test-util"] }
