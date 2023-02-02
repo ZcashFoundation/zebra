@@ -9,9 +9,12 @@ use std::time::Duration;
 
 use color_eyre::eyre::{eyre, Context, Result};
 
+use futures::FutureExt;
 use zebra_chain::{parameters::Network, serialization::ZcashSerialize};
 use zebra_rpc::methods::get_block_template_rpcs::{
-    get_block_template::{proposal::TimeSource, ProposalResponse},
+    get_block_template::{
+        proposal::TimeSource, GetBlockTemplate, JsonParameters, ProposalResponse,
+    },
     types::get_block_template::proposal_block_from_template,
 };
 
@@ -26,6 +29,9 @@ use crate::common::{
 ///
 /// We've seen it take anywhere from 1-45 seconds for the mempool to have some transactions in it.
 pub const EXPECTED_MEMPOOL_TRANSACTION_TIME: Duration = Duration::from_secs(45);
+
+/// Delay between getting block proposal results and cancelling long poll requests.
+pub const EXTRA_LONGPOLL_WAIT_TIME: Duration = Duration::from_millis(500);
 
 /// Number of times we want to try submitting a block template as a block proposal at an interval
 /// that allows testing the varying mempool contents.
@@ -134,47 +140,91 @@ pub(crate) async fn run() -> Result<()> {
 /// If the response result cannot be deserialized to `GetBlockTemplate` in 'template' mode
 /// or `ProposalResponse` in 'proposal' mode.
 async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
-    let response_json_result = client
+    let mut response_json_result: GetBlockTemplate = client
         .json_result_from_call("getblocktemplate", "[]".to_string())
         .await
         .expect("response should be success output with with a serialized `GetBlockTemplate`");
 
-    tracing::info!(
-        ?response_json_result,
-        "got getblocktemplate response, hopefully with transactions"
-    );
+    loop {
+        let long_poll_json_params = serde_json::to_string(&vec![JsonParameters {
+            long_poll_id: Some(response_json_result.long_poll_id.clone()),
+            ..Default::default()
+        }])?;
 
-    for time_source in TimeSource::valid_sources() {
-        // Propose a new block with an empty solution and nonce field
-        tracing::info!(
-            "calling getblocktemplate with a block proposal and time source {time_source:?}...",
-        );
-
-        let raw_proposal_block = hex::encode(
-            proposal_block_from_template(&response_json_result, time_source)?
-                .zcash_serialize_to_vec()?,
-        );
-
-        let json_result = client
-            .json_result_from_call(
-                "getblocktemplate",
-                format!(r#"[{{"mode":"proposal","data":"{raw_proposal_block}"}}]"#),
-            )
-            .await
-            .expect("response should be success output with with a serialized `ProposalResponse`");
+        let long_poll_request = async move {
+            client
+                .json_result_from_call("getblocktemplate", long_poll_json_params)
+                .await
+                .expect(
+                    "response should be success output with with a serialized `GetBlockTemplate`",
+                )
+        };
 
         tracing::info!(
-            ?json_result,
-            ?time_source,
-            "got getblocktemplate proposal response"
+            ?response_json_result,
+            "got getblocktemplate response, hopefully with transactions"
         );
 
-        if let ProposalResponse::Rejected(reject_reason) = json_result {
-            Err(eyre!(
-                "unsuccessful block proposal validation, reason: {reject_reason:?}"
-            ))?;
-        } else {
-            assert_eq!(ProposalResponse::Valid, json_result);
+        let mut proposal_requests = vec![];
+
+        for time_source in TimeSource::valid_sources() {
+            // Propose a new block with an empty solution and nonce field
+            tracing::info!(
+                "calling getblocktemplate with a block proposal and time source {time_source:?}...",
+            );
+
+            let raw_proposal_block = hex::encode(
+                proposal_block_from_template(&response_json_result, time_source)?
+                    .zcash_serialize_to_vec()?,
+            );
+
+            proposal_requests.push(async move {
+                (
+                    client
+                        .json_result_from_call(
+                            "getblocktemplate",
+                            format!(r#"[{{"mode":"proposal","data":"{raw_proposal_block}"}}]"#),
+                        )
+                        .await,
+                    time_source,
+                )
+            });
+        }
+
+        tokio::select! {
+            updated_response_json = long_poll_request => {
+                tracing::info!("Got longpolling response before result of proposal tests");
+
+                response_json_result = updated_response_json;
+
+                continue;
+            },
+
+            proposal_results = futures::future::join_all(proposal_requests).then(|results| async move {
+                tokio::time::sleep(EXTRA_LONGPOLL_WAIT_TIME).await;
+                results
+            }) => {
+                for (proposal_result, time_source) in proposal_results {
+                    let proposal_result = proposal_result
+                        .expect("response should be success output with with a serialized `ProposalResponse`");
+
+                    tracing::info!(
+                        ?proposal_result,
+                        ?time_source,
+                        "got getblocktemplate proposal response"
+                    );
+
+                    if let ProposalResponse::Rejected(reject_reason) = proposal_result {
+                        Err(eyre!(
+                            "unsuccessful block proposal validation, reason: {reject_reason:?}"
+                        ))?;
+                    } else {
+                        assert_eq!(ProposalResponse::Valid, proposal_result);
+                    }
+                }
+
+                break;
+            }
         }
     }
 

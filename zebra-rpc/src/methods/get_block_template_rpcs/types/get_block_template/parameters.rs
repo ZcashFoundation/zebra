@@ -3,7 +3,7 @@
 use crate::methods::get_block_template_rpcs::types::{hex_data::HexData, long_poll::LongPollId};
 
 /// Defines whether the RPC method should generate a block template or attempt to validate a block proposal.
-#[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum GetBlockTemplateRequestMode {
     /// Indicates a request for a block template.
@@ -20,7 +20,7 @@ impl Default for GetBlockTemplateRequestMode {
 }
 
 /// Valid `capabilities` values that indicate client-side support.
-#[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum GetBlockTemplateCapability {
     /// Long Polling support.
@@ -59,7 +59,7 @@ pub enum GetBlockTemplateCapability {
 ///
 /// The `data` field must be provided in `proposal` mode, and must be omitted in `template` mode.
 /// All other fields are optional.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, Default)]
 pub struct JsonParameters {
     /// Defines whether the RPC method should generate a block template or attempt to
     /// validate block data, checking against all of the server's usual acceptance rules
