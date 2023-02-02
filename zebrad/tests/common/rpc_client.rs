@@ -8,6 +8,7 @@ use reqwest::Client;
 use color_eyre::{eyre::eyre, Result};
 
 /// An http client for making Json-RPC requests
+#[derive(Clone)]
 pub struct RPCRequestClient {
     client: Client,
     rpc_address: SocketAddr,
