@@ -118,9 +118,13 @@ pub(crate) async fn run() -> Result<()> {
                  to validate response result as a block proposal",
         );
 
-        try_validate_block_template(&client)
-            .await
-            .expect("block proposal validation failed");
+        let (validation_result, _) = futures::future::join(
+            try_validate_block_template(&client),
+            tokio::time::sleep(BLOCK_PROPOSAL_INTERVAL),
+        )
+        .await;
+
+        validation_result.expect("block proposal validation failed");
     }
 
     zebrad.kill(false)?;
