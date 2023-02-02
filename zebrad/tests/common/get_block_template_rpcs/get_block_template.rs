@@ -177,13 +177,11 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
                     }
 
                     long_poll_result = long_poll_request => {
+                        long_poll_id = long_poll_result.long_poll_id.clone();
+
                         if let Some(false) = long_poll_result.submit_old {
                             let _ = long_poll_result_tx.send(long_poll_result);
-                            break;
-                        } else {
-                            long_poll_id = long_poll_result.long_poll_id;
-                        };
-
+                        }
                     }
                 }
             }
