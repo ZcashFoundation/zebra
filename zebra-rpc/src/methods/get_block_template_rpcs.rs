@@ -643,8 +643,17 @@ where
         async move {
             let block: Block = match block_bytes.zcash_deserialize_into() {
                 Ok(block_bytes) => block_bytes,
-                Err(_) => return Ok(submit_block::ErrorResponse::Rejected.into()),
+                Err(error) => {
+                    tracing::info!(?error, "submit block failed");
+
+                    return Ok(submit_block::ErrorResponse::Rejected.into());
+                }
             };
+
+            let block_height = block
+                .coinbase_height()
+                .map(|height| height.0.to_string())
+                .unwrap_or_else(|| "invalid coinbase height".to_string());
 
             let chain_verifier_response = chain_verifier
                 .ready()
@@ -664,13 +673,23 @@ where
                 // TODO (#5487):
                 // - Inconclusive: check if the block is on a side-chain
                 // The difference is important to miners, because they want to mine on the best chain.
-                Ok(_block_hash) => return Ok(submit_block::Response::Accepted),
+                Ok(block_hash) => {
+                    tracing::info!(?block_hash, ?block_height, "submit block accepted");
+                    return Ok(submit_block::Response::Accepted);
+                }
 
                 // Turns BoxError into Result<VerifyChainError, BoxError>,
                 // by downcasting from Any to VerifyChainError.
-                Err(box_error) => box_error
-                    .downcast::<VerifyChainError>()
-                    .map(|boxed_chain_error| *boxed_chain_error),
+                Err(box_error) => {
+                    let error = box_error
+                        .downcast::<VerifyChainError>()
+                        .map(|boxed_chain_error| *boxed_chain_error);
+
+                    // TODO: add block hash to error?
+                    tracing::info!(?error, ?block_height, "submit block failed");
+
+                    error
+                }
             };
 
             let response = match chain_error {
