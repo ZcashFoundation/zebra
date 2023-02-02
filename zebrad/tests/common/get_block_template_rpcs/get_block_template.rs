@@ -31,11 +31,17 @@ use crate::common::{
 pub const EXPECTED_MEMPOOL_TRANSACTION_TIME: Duration = Duration::from_secs(45);
 
 /// Delay between getting block proposal results and cancelling long poll requests.
-pub const EXTRA_LONGPOLL_WAIT_TIME: Duration = Duration::from_millis(500);
+pub const EXTRA_LONGPOLL_WAIT_TIME: Duration = Duration::from_millis(150);
+
+/// Delay between attempts to validate a template as block proposals.
+///
+/// Running many iterations in short intervals tests that long poll requests correctly
+/// return `submit_old: false` when the old template becomes invalid.
+pub const BLOCK_PROPOSAL_INTERVAL: Duration = Duration::from_millis(300);
 
 /// Number of times we want to try submitting a block template as a block proposal at an interval
 /// that allows testing the varying mempool contents.
-const NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED: usize = 10;
+const NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED: usize = 1000;
 
 /// Launch Zebra, wait for it to sync, and check the getblocktemplate RPC returns without errors.
 pub(crate) async fn run() -> Result<()> {
@@ -96,13 +102,15 @@ pub(crate) async fn run() -> Result<()> {
 
     assert!(is_response_success);
 
+    tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
+
     for _ in 0..NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED {
         tracing::info!(
             "waiting {EXPECTED_MEMPOOL_TRANSACTION_TIME:?} for the mempool \
              to download and verify some transactions...",
         );
 
-        tokio::time::sleep(EXPECTED_MEMPOOL_TRANSACTION_TIME).await;
+        tokio::time::sleep(BLOCK_PROPOSAL_INTERVAL).await;
 
         tracing::info!(
             "calling getblocktemplate RPC method at {rpc_address}, \
