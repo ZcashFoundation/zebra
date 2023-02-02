@@ -792,13 +792,14 @@ where
                     return Ok(validate_address::Response::invalid());
                 };
 
-            let address = address
-                .convert::<primitives::Address>()
-                .map_err(|err| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: format!("conversion error: {err}"),
-                    data: None,
-                })?;
+            let address = match address
+                .convert::<primitives::Address>() {
+                    Ok(address) => address,
+                    Err(err) => {
+                        tracing::debug!(?err, "conversion error");
+                        return Ok(validate_address::Response::invalid());
+                    }
+                };
 
             // we want to match zcashd's behaviour
             if !address.is_transparent() {
