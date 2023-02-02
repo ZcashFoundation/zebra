@@ -236,7 +236,7 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
                 tokio::time::sleep(EXTRA_LONGPOLL_WAIT_TIME).await;
                 results
             }) => {
-                let _ = done_tx.blocking_send(());
+                let _ = done_tx.send(()).await;
                 for (proposal_result, time_source) in proposal_results {
                     let proposal_result = proposal_result
                         .expect("response should be success output with with a serialized `ProposalResponse`");
