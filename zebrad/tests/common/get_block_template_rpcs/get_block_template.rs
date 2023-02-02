@@ -143,9 +143,10 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
     let mut response_json_result: GetBlockTemplate = client
         .json_result_from_call("getblocktemplate", "[]".to_string())
         .await
-        .expect("response should be success output with with a serialized `GetBlockTemplate`");
+        .expect("response should be success output with a serialized `GetBlockTemplate`");
 
-    let (long_poll_result_tx, mut long_poll_result_rx) = tokio::sync::mpsc::channel(1);
+    let (long_poll_result_tx, mut long_poll_result_rx) =
+        tokio::sync::watch::channel(response_json_result.clone());
     let (done_tx, mut done_rx) = tokio::sync::mpsc::channel(1);
 
     {
@@ -165,7 +166,7 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
                             .json_result_from_call("getblocktemplate", long_poll_json_params)
                             .await
                             .expect(
-                                "response should be success output with with a serialized `GetBlockTemplate`",
+                                "response should be success output with a serialized `GetBlockTemplate`",
                             );
 
                     result
@@ -221,13 +222,12 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
         }
 
         tokio::select! {
-            updated_response_json = long_poll_result_rx.recv() => {
-                tracing::info!("Got longpolling response with submitold of false before result of proposal tests");
+            Ok(()) = long_poll_result_rx.changed() => {
+                tracing::info!("got longpolling response with submitold of false before result of proposal tests");
 
-                // Sender should not be dropped without sending a message.
                 // The task that handles the long polling request will keep checking for
                 // a new template with `submit_old`
-                response_json_result = updated_response_json.expect("sender should not be dropped while polling");
+                response_json_result = long_poll_result_rx.borrow().clone();
 
                 continue;
             },
@@ -236,7 +236,7 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
                 tokio::time::sleep(EXTRA_LONGPOLL_WAIT_TIME).await;
                 results
             }) => {
-                let _ = done_tx.send(());
+                let _ = done_tx.blocking_send(());
                 for (proposal_result, time_source) in proposal_results {
                     let proposal_result = proposal_result
                         .expect("response should be success output with with a serialized `ProposalResponse`");
