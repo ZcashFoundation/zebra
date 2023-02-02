@@ -238,7 +238,7 @@ async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
                 tracing::info!("got longpolling response with submitold of false before result of proposal tests");
 
                 // The task that handles the long polling request will keep checking for
-                // a new template with `submit_old`
+                // a new template with `submit_old`: false
                 response_json_result = long_poll_result_rx.borrow().clone();
 
                 continue;
