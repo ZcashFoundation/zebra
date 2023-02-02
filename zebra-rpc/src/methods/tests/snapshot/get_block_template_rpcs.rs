@@ -371,6 +371,34 @@ pub async fn test_responses<State, ReadState>(
         .expect("unexpected error in submitblock RPC call");
 
     snapshot_rpc_submit_block_invalid(submit_block, &settings);
+
+    // getdifficulty
+
+    // Fake the ChainInfo response
+    let response_read_state = new_read_state.clone();
+
+    tokio::spawn(async move {
+        response_read_state
+            .clone()
+            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .await
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_difficulty: fake_difficulty,
+                tip_height: fake_tip_height,
+                tip_hash: fake_tip_hash,
+                cur_time: fake_cur_time,
+                min_time: fake_min_time,
+                max_time: fake_max_time,
+                history_tree: fake_history_tree(network),
+            }));
+    });
+
+    let get_difficulty = tokio::spawn(get_block_template_rpc.get_difficulty())
+        .await
+        .expect("unexpected panic in getdifficulty RPC task")
+        .expect("unexpected error in getdifficulty RPC call");
+
+    snapshot_rpc_getdifficulty(get_difficulty, &settings);
 }
 
 /// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
@@ -435,4 +463,9 @@ fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Sett
 /// Snapshot `getnetworksolps` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getnetworksolps(get_network_sol_ps: u64, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_network_sol_ps", get_network_sol_ps));
+}
+
+/// Snapshot `getdifficulty` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getdifficulty(difficulty: f64, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_difficulty", difficulty));
 }

@@ -176,6 +176,12 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`getblocksubsidy`](https://zcash.github.io/rpc/getblocksubsidy.html)
     #[rpc(name = "getblocksubsidy")]
     fn get_block_subsidy(&self, height: Option<u32>) -> BoxFuture<Result<BlockSubsidy>>;
+
+    /// Returns the proof-of-work difficulty as a multiple of the minimum difficulty.
+    ///
+    /// zcashd reference: [`getdifficulty`](https://zcash.github.io/rpc/getdifficulty.html)
+    #[rpc(name = "getdifficulty")]
+    fn get_difficulty(&self) -> BoxFuture<Result<f64>>;
 }
 
 /// RPC method implementations.
@@ -826,6 +832,58 @@ where
                 founders: founders.into(),
                 funding_streams,
             })
+        }
+        .boxed()
+    }
+
+    fn get_difficulty(&self) -> BoxFuture<Result<f64>> {
+        let network = self.network;
+        let mut state = self.state.clone();
+
+        async move {
+            let request = ReadRequest::ChainInfo;
+
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            let chain_info = match response {
+                ReadResponse::ChainInfo(info) => info,
+                _ => unreachable!("unmatched response to a chain info request"),
+            };
+
+            // The following code is ported from zcashd implementation.
+            // https://github.com/zcash/zcash/blob/v5.4.0-rc4/src/rpc/blockchain.cpp#L46-L73
+
+            let pow_limit = u32::from_be_bytes(
+                zebra_chain::work::difficulty::ExpandedDifficulty::target_difficulty_limit(network)
+                    .to_compact()
+                    .bytes_in_display_order(),
+            );
+            let bits = u32::from_be_bytes(chain_info.expected_difficulty.bytes_in_display_order());
+
+            let mut n_shift = (bits >> 24) & 0xff;
+            let n_shift_amount = (pow_limit >> 24) & 0xff;
+
+            let mut d_diff: f64 = (pow_limit & 0x00ffffff) as f64 / (bits & 0x00ffffff) as f64;
+
+            while n_shift < n_shift_amount {
+                d_diff *= 256.0;
+                n_shift += 1;
+            }
+
+            while n_shift > n_shift_amount {
+                d_diff /= 256.0;
+                n_shift -= 1;
+            }
+
+            Ok(d_diff)
         }
         .boxed()
     }

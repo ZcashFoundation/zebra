@@ -1290,3 +1290,88 @@ async fn rpc_submitblock_errors() {
 
     // See zebrad::tests::acceptance::submit_block for success case.
 }
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getdifficulty() {
+    use zebra_chain::{
+        block::Hash,
+        chain_sync_status::MockSyncStatus,
+        chain_tip::mock::MockChainTip,
+        serialization::DateTime32,
+        work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
+    };
+
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+
+    use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
+
+    use crate::methods::{
+        get_block_template_rpcs::config::Config, tests::utils::fake_history_tree,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let mut read_state = MockService::build().for_unit_tests();
+    let chain_verifier = MockService::build().for_unit_tests();
+
+    let mut mock_sync_status = MockSyncStatus::default();
+    mock_sync_status.set_is_close_to_tip(true);
+
+    let mining_config = Config {
+        miner_address: None,
+    };
+
+    // nu5 block height
+    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(Mainnet).unwrap();
+    // nu5 block hash
+    let fake_tip_hash =
+        Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
+    //  nu5 block time + 1
+    let fake_min_time = DateTime32::from(1654008606);
+    // nu5 block time + 12
+    let fake_cur_time = DateTime32::from(1654008617);
+    // nu5 block time + 123
+    let fake_max_time = DateTime32::from(1654008728);
+    let fake_difficulty = CompactDifficulty::from(ExpandedDifficulty::from(U256::MAX));
+
+    let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
+    mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
+    mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+
+    // Init RPC
+    let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        mining_config,
+        Buffer::new(mempool.clone(), 1),
+        read_state.clone(),
+        mock_chain_tip,
+        chain_verifier,
+        mock_sync_status.clone(),
+        MockAddressBookPeers::default(),
+    );
+
+    // Fake the ChainInfo response
+    let mock_read_state_request_handler = async move {
+        read_state
+            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .await
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_difficulty: fake_difficulty,
+                tip_height: fake_tip_height,
+                tip_hash: fake_tip_hash,
+                cur_time: fake_cur_time,
+                min_time: fake_min_time,
+                max_time: fake_max_time,
+                history_tree: fake_history_tree(Mainnet),
+            }));
+    };
+
+    let get_difficulty_fut = get_block_template_rpc.get_difficulty();
+    let (get_difficulty, ..) = tokio::join!(get_difficulty_fut, mock_read_state_request_handler,);
+
+    assert_eq!(get_difficulty.unwrap(), 0.00012207194233937495);
+}
