@@ -139,7 +139,7 @@ pub trait Rpc {
     /// getting blocks by hash. (But we parse the height as a JSON string, not an integer).
     /// `lightwalletd` also does not use verbosity=2, so we don't support it.
     #[rpc(name = "getblock")]
-    fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>>;
+    fn get_block(&self, height: String, verbosity: Option<u8>) -> BoxFuture<Result<GetBlock>>;
 
     /// Returns the hash of the current best blockchain tip block, as a [`GetBlockHash`] JSON string.
     ///
@@ -556,8 +556,16 @@ where
     // - use `height_from_signed_int()` to handle negative heights
     //   (this might be better in the state request, because it needs the state height)
     // - create a function that handles block hashes or heights, and use it in `z_get_treestate()`
-    fn get_block(&self, hash_or_height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>> {
+    fn get_block(
+        &self,
+        hash_or_height: String,
+        verbosity: Option<u8>,
+    ) -> BoxFuture<Result<GetBlock>> {
+        // From <https://zcash.github.io/rpc/getblock.html>
+        const DEFAULT_GETBLOCK_VERBOSITY: u8 = 1;
+
         let mut state = self.state.clone();
+        let verbosity = verbosity.unwrap_or(DEFAULT_GETBLOCK_VERBOSITY);
 
         async move {
             let hash_or_height: HashOrHeight =
