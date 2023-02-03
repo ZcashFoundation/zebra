@@ -9,4 +9,5 @@ pub mod peer_info;
 pub mod submit_block;
 pub mod subsidy;
 pub mod transaction;
+pub mod validate_address;
 pub mod zec;
