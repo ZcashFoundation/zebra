@@ -1290,3 +1290,48 @@ async fn rpc_submitblock_errors() {
 
     // See zebrad::tests::acceptance::submit_block for success case.
 }
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_validateaddress() {
+    use get_block_template_rpcs::types::validate_address;
+    use zebra_chain::{chain_sync_status::MockSyncStatus, chain_tip::mock::MockChainTip};
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+
+    let _init_guard = zebra_test::init();
+
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+
+    // Init RPC
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Buffer::new(MockService::build().for_unit_tests(), 1),
+        MockService::build().for_unit_tests(),
+        mock_chain_tip,
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        MockAddressBookPeers::default(),
+    );
+
+    let validate_address = get_block_template_rpc
+        .validate_address("t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR".to_string())
+        .await
+        .expect("we should have a validate_address::Response");
+
+    assert!(
+        validate_address.is_valid,
+        "Mainnet founder address should be valid on Mainnet"
+    );
+
+    let validate_address = get_block_template_rpc
+        .validate_address("t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi".to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert_eq!(
+        validate_address,
+        validate_address::Response::invalid(),
+        "Testnet founder address should be invalid on Mainnet"
+    );
+}

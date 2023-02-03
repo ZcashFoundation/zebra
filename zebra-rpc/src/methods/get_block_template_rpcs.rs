@@ -7,12 +7,15 @@ use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
+use zcash_address;
+
 use zebra_chain::{
     amount::Amount,
     block::{self, Block, Height},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::Network,
+    primitives,
     serialization::ZcashDeserializeInto,
     transparent,
 };
@@ -43,6 +46,7 @@ use crate::methods::{
             peer_info::PeerInfo,
             submit_block,
             subsidy::{BlockSubsidy, FundingStream},
+            validate_address,
         },
     },
     height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
@@ -166,6 +170,13 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`getpeerinfo`](https://zcash.github.io/rpc/getpeerinfo.html)
     #[rpc(name = "getpeerinfo")]
     fn get_peer_info(&self) -> BoxFuture<Result<Vec<PeerInfo>>>;
+
+    /// Checks if a zcash address is valid.
+    /// Returns information about the given address if valid.
+    ///
+    /// zcashd reference: [`validateaddress`](https://zcash.github.io/rpc/validateaddress.html)
+    #[rpc(name = "validateaddress")]
+    fn validate_address(&self, address: String) -> BoxFuture<Result<validate_address::Response>>;
 
     /// Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.
     /// Returns an error if `height` is less than the height of the first halving for the current network.
@@ -784,6 +795,51 @@ where
                 .into_iter()
                 .map(PeerInfo::from)
                 .collect())
+        }
+        .boxed()
+    }
+
+    fn validate_address(
+        &self,
+        raw_address: String,
+    ) -> BoxFuture<Result<validate_address::Response>> {
+        let network = self.network;
+
+        async move {
+            let Ok(address) = raw_address
+                .parse::<zcash_address::ZcashAddress>() else {
+                    return Ok(validate_address::Response::invalid());
+                };
+
+            let address = match address
+                .convert::<primitives::Address>() {
+                    Ok(address) => address,
+                    Err(err) => {
+                        tracing::debug!(?err, "conversion error");
+                        return Ok(validate_address::Response::invalid());
+                    }
+                };
+
+            // we want to match zcashd's behaviour
+            if !address.is_transparent() {
+                return Ok(validate_address::Response::invalid());
+            }
+
+            return Ok(if address.network() == network {
+                validate_address::Response {
+                    address: Some(raw_address),
+                    is_valid: true,
+                    is_script: Some(address.is_script_hash()),
+                }
+            } else {
+                tracing::info!(
+                    ?network,
+                    address_network = ?address.network(),
+                    "invalid address in validateaddress RPC: Zebra's configured network must match address network"
+                );
+
+                validate_address::Response::invalid()
+            });
         }
         .boxed()
     }
