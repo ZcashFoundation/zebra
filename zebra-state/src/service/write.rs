@@ -316,7 +316,7 @@ pub fn write_blocks_from_channels(
 /// Log a message if this block was mined by Zebra.
 /// Does not detect early Zebra blocks, and blocks with custom coinbase transactions.
 fn log_if_mined_by_zebra(tip_block: &ChainTipBlock) {
-    let height = tip_block.height;
+    let height = tip_block.height.0;
     let hash = tip_block.hash;
     let coinbase_data = tip_block.transactions[0].inputs()[0]
         .extra_coinbase_data()
@@ -332,8 +332,8 @@ fn log_if_mined_by_zebra(tip_block: &ChainTipBlock) {
         info!(
             ?text,
             ?data,
-            ?height,
-            ?hash,
+            %height,
+            %hash,
             "looks like this block was mined by Zebra!"
         );
     }
