@@ -85,14 +85,14 @@ async fn rpc_getblock() {
         let expected_result = GetBlock::Raw(block.clone().into());
 
         let get_block = rpc
-            .get_block(i.to_string(), 0u8)
+            .get_block(i.to_string(), Some(0u8))
             .await
             .expect("We should have a GetBlock struct");
 
         assert_eq!(get_block, expected_result);
 
         let get_block = rpc
-            .get_block(block.hash().to_string(), 0u8)
+            .get_block(block.hash().to_string(), Some(0u8))
             .await
             .expect("We should have a GetBlock struct");
 
@@ -102,7 +102,25 @@ async fn rpc_getblock() {
     // Make calls with verbosity=1 and check response
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
-            .get_block(i.to_string(), 1u8)
+            .get_block(i.to_string(), Some(1u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(
+            get_block,
+            GetBlock::Object {
+                tx: block
+                    .transactions
+                    .iter()
+                    .map(|tx| tx.hash().encode_hex())
+                    .collect()
+            }
+        );
+    }
+
+    for (i, block) in blocks.iter().enumerate() {
+        let get_block = rpc
+            .get_block(i.to_string(), None)
             .await
             .expect("We should have a GetBlock struct");
 
@@ -144,7 +162,17 @@ async fn rpc_getblock_parse_error() {
 
     // Make sure we get an error if Zebra can't parse the block height.
     assert!(rpc
-        .get_block("not parsable as height".to_string(), 0u8)
+        .get_block("not parsable as height".to_string(), Some(0u8))
+        .await
+        .is_err());
+
+    assert!(rpc
+        .get_block("not parsable as height".to_string(), Some(1u8))
+        .await
+        .is_err());
+
+    assert!(rpc
+        .get_block("not parsable as height".to_string(), None)
         .await
         .is_err());
 
@@ -175,7 +203,7 @@ async fn rpc_getblock_missing_error() {
 
     // Make sure Zebra returns the correct error code `-8` for missing blocks
     // https://github.com/adityapk00/lightwalletd/blob/c1bab818a683e4de69cd952317000f9bb2932274/common/common.go#L251-L254
-    let block_future = tokio::spawn(rpc.get_block("0".to_string(), 0u8));
+    let block_future = tokio::spawn(rpc.get_block("0".to_string(), Some(0u8)));
 
     // Make the mock service respond with no block
     let response_handler = state
