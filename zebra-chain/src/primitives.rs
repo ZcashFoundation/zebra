@@ -5,6 +5,13 @@
 //! whose functionality is implemented elsewhere.
 
 mod proofs;
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+mod address;
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+pub use address::Address;
+
 pub use ed25519_zebra as ed25519;
 pub use reddsa;
 pub use redjubjub;

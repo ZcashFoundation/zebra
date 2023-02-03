@@ -106,17 +106,24 @@ async fn test_rpc_response_data_for_network(network: Network) {
     // `getblock`, verbosity=0
     const BLOCK_HEIGHT: u32 = 1;
     let get_block = rpc
-        .get_block(BLOCK_HEIGHT.to_string(), 0u8)
+        .get_block(BLOCK_HEIGHT.to_string(), Some(0u8))
         .await
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblock(get_block, block_data.get(&BLOCK_HEIGHT).unwrap(), &settings);
 
     // `getblock`, verbosity=1
     let get_block = rpc
-        .get_block(BLOCK_HEIGHT.to_string(), 1u8)
+        .get_block(BLOCK_HEIGHT.to_string(), Some(1u8))
         .await
         .expect("We should have a GetBlock struct");
-    snapshot_rpc_getblock_verbose(get_block, &settings);
+    snapshot_rpc_getblock_verbose("2_args", get_block, &settings);
+
+    // `getblock`, no verbosity, defaults to 1
+    let get_block = rpc
+        .get_block(BLOCK_HEIGHT.to_string(), None)
+        .await
+        .expect("We should have a GetBlock struct");
+    snapshot_rpc_getblock_verbose("1_arg", get_block, &settings);
 
     // `getbestblockhash`
     let get_best_block_hash = rpc
@@ -251,8 +258,12 @@ fn snapshot_rpc_getblock(block: GetBlock, block_data: &[u8], settings: &insta::S
 }
 
 /// Check `getblock` response with verbosity=1, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getblock_verbose(block: GetBlock, settings: &insta::Settings) {
-    settings.bind(|| insta::assert_json_snapshot!("get_block_verbose", block));
+fn snapshot_rpc_getblock_verbose(
+    variant: &'static str,
+    block: GetBlock,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| insta::assert_json_snapshot!(format!("get_block_verbose_{variant}"), block));
 }
 
 /// Snapshot `getbestblockhash` response, using `cargo insta` and JSON serialization.
