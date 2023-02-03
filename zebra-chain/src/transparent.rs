@@ -212,6 +212,14 @@ impl Input {
         }
     }
 
+    /// Returns the extra coinbase data in this input, if it is an [`Input::Coinbase`].
+    pub fn extra_coinbase_data(&self) -> Option<&CoinbaseData> {
+        match self {
+            Input::PrevOut { .. } => None,
+            Input::Coinbase { data, .. } => Some(data),
+        }
+    }
+
     /// Returns the input's sequence number.
     pub fn sequence(&self) -> u32 {
         match self {

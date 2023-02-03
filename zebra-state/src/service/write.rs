@@ -6,7 +6,10 @@ use tokio::sync::{
     watch,
 };
 
-use zebra_chain::block::{self, Height};
+use zebra_chain::{
+    block::{self, Height},
+    transparent::EXTRA_ZEBRA_COINBASE_DATA,
+};
 
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
@@ -74,6 +77,8 @@ fn update_latest_chain_channels(
         .expect("unexpected empty chain: must commit at least one block before updating channels")
         .clone();
     let tip_block = ChainTipBlock::from(tip_block);
+
+    log_if_mined_by_zebra(&tip_block);
 
     let tip_block_height = tip_block.height;
 
@@ -146,6 +151,8 @@ pub fn write_blocks_from_channels(
         match finalized_state.commit_finalized(ordered_block) {
             Ok(finalized) => {
                 let tip_block = ChainTipBlock::from(finalized);
+
+                log_if_mined_by_zebra(&tip_block);
 
                 chain_tip_sender.set_finalized_tip(tip_block);
             }
@@ -284,4 +291,30 @@ pub fn write_blocks_from_channels(
     // done writing to the finalized state, so we can force it to shut down.
     finalized_state.db.shutdown(true);
     std::mem::drop(finalized_state);
+}
+
+/// Log a message if this block was mined by Zebra.
+/// Does not detect early Zebra blocks, and blocks with custom coinbase transactions.
+fn log_if_mined_by_zebra(tip_block: &ChainTipBlock) {
+    let height = tip_block.height;
+    let hash = tip_block.hash;
+    let coinbase_data = tip_block.transactions[0].inputs()[0]
+        .extra_coinbase_data()
+        .expect("valid blocks must start with a coinbase input")
+        .clone();
+
+    if coinbase_data
+        .as_ref()
+        .starts_with(EXTRA_ZEBRA_COINBASE_DATA.as_bytes())
+    {
+        let text = String::from_utf8_lossy(coinbase_data.as_ref());
+        let data = hex::encode(coinbase_data.as_ref());
+        info!(
+            ?text,
+            ?data,
+            ?height,
+            ?hash,
+            "looks like this block was mined by Zebra!"
+        );
+    }
 }
