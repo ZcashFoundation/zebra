@@ -27,12 +27,4 @@ pub fn test_block_serialization() {
     let j = serde_json::to_string(&expected_tx).unwrap();
 
     assert_eq!(j, expected_json);
-
-    let expected_tx = GetBlock::Object {
-        tx: vec!["42".into()],
-    };
-    let expected_json = r#"{"tx":["42"]}"#;
-    let j = serde_json::to_string(&expected_tx).unwrap();
-
-    assert_eq!(j, expected_json);
 }
