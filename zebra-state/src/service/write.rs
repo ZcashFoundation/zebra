@@ -37,7 +37,15 @@ const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
 
 /// Run contextual validation on the prepared block and add it to the
 /// non-finalized state if it is contextually valid.
-#[tracing::instrument(level = "debug", skip(prepared), fields(height = ?prepared.height, hash = %prepared.hash))]
+#[tracing::instrument(
+    level = "debug",
+    skip(finalized_state, non_finalized_state, prepared),
+    fields(
+        height = ?prepared.height,
+        hash = %prepared.hash,
+        chains = non_finalized_state.chain_set.len()
+    )
+)]
 pub(crate) fn validate_and_commit_non_finalized(
     finalized_state: &ZebraDb,
     non_finalized_state: &mut NonFinalizedState,
@@ -64,7 +72,11 @@ pub(crate) fn validate_and_commit_non_finalized(
 /// # Panics
 ///
 /// If the `non_finalized_state` is empty.
-#[instrument(level = "debug", skip(chain_tip_sender, non_finalized_state_sender))]
+#[instrument(
+    level = "debug",
+    skip(non_finalized_state, chain_tip_sender, non_finalized_state_sender),
+    fields(chains = non_finalized_state.chain_set.len())
+)]
 fn update_latest_chain_channels(
     non_finalized_state: &NonFinalizedState,
     chain_tip_sender: &mut ChainTipSender,
@@ -95,13 +107,21 @@ fn update_latest_chain_channels(
 /// `non_finalized_state_sender`.
 // TODO: make the task an object
 #[allow(clippy::too_many_arguments)]
-#[instrument(skip(
-    finalized_block_write_receiver,
-    non_finalized_block_write_receiver,
-    invalid_block_reset_sender,
-    chain_tip_sender,
-    non_finalized_state_sender,
-))]
+#[instrument(
+    level = "debug",
+    skip(
+        finalized_block_write_receiver,
+        non_finalized_block_write_receiver,
+        finalized_state,
+        non_finalized_state,
+        invalid_block_reset_sender,
+        chain_tip_sender,
+        non_finalized_state_sender,
+    ),
+    fields(
+        network = %non_finalized_state.network
+    )
+)]
 pub fn write_blocks_from_channels(
     mut finalized_block_write_receiver: UnboundedReceiver<QueuedFinalized>,
     mut non_finalized_block_write_receiver: UnboundedReceiver<QueuedNonFinalized>,
