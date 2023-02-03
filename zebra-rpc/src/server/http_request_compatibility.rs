@@ -1,4 +1,6 @@
-//! Compatibility fixes for JSON-RPC requests.
+//! Compatibility fixes for JSON-RPC HTTP requests.
+//!
+//! These fixes are applied at the HTTP level, before the RPC request is parsed.
 
 use futures::TryStreamExt;
 use hyper::{body::Bytes, Body};
@@ -7,7 +9,7 @@ use jsonrpc_http_server::RequestMiddleware;
 
 /// HTTP [`RequestMiddleware`] with compatibility workarounds.
 ///
-/// This middleware makes the following changes to requests:
+/// This middleware makes the following changes to HTTP requests:
 ///
 /// ## Remove `jsonrpc` field in JSON RPC 1.0
 ///

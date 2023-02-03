@@ -25,14 +25,17 @@ use zebra_node_services::mempool;
 use crate::{
     config::Config,
     methods::{Rpc, RpcImpl},
-    server::{compatibility::FixHttpRequestMiddleware, tracing_middleware::TracingMiddleware},
+    server::{
+        http_request_compatibility::FixHttpRequestMiddleware,
+        rpc_call_compatibility::FixRpcResponseMiddleware,
+    },
 };
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 use crate::methods::{get_block_template_rpcs, GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
-pub mod compatibility;
-mod tracing_middleware;
+pub mod http_request_compatibility;
+pub mod rpc_call_compatibility;
 
 #[cfg(test)]
 mod tests;
@@ -124,7 +127,7 @@ impl RpcServer {
 
             // Create handler compatible with V1 and V2 RPC protocols
             let mut io: MetaIoHandler<(), _> =
-                MetaIoHandler::new(Compatibility::Both, TracingMiddleware);
+                MetaIoHandler::new(Compatibility::Both, FixRpcResponseMiddleware);
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             {

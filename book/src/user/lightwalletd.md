@@ -81,14 +81,14 @@ For implementing zebra as a service please see [here](https://github.com/ZcashFo
 ## Download and build lightwalletd
 [#download-and-build-lightwalletd]: #download-and-build-lightwalletd
 
-While you synchronize Zebra you can install [lightwalletd](https://github.com/zcash/lightwalletd).
+While you synchronize Zebra you can install [lightwalletd](https://github.com/adityapk00/lightwalletd).
 
 Before installing, you need to have `go` in place. Please visit the [go install page](https://go.dev/doc/install) with download and installation instructions.
 
 With go installed and in your path, download and install lightwalletd:
 
 ```console
-git clone https://github.com/zcash/lightwalletd
+git clone https://github.com/adityapk00/lightwalletd
 cd lightwalletd
 make
 make install
@@ -101,7 +101,10 @@ If everything went good you should have a `lightwalletd` binary in `~/go/bin/`.
 
 Please make sure you have zebrad running (with RPC endpoint and up to date blockchain) to synchronize lightwalletd.
 
-- `lightwalletd` requires a `zcash.conf` file located somewhere, however this file can be empty if you are using the default zebra rpc endpoint (`127.0.0.1:8232`).
+- `lightwalletd` requires a `zcash.conf` file, however this file can be empty if you are using the default Zebra rpc endpoint (`127.0.0.1:8232`) and the `adityapk00/lightwalletd` fork 
+    - Some `lightwalletd` forks also require a `rpcuser` and `rpcpassword`, but Zebra ignores them if it receives them from `lightwalletd`
+    - When using a non-default port, use `rpcport=28232` and `rpcbind=127.0.0.1`
+    - When using testnet, use `testnet=1`
 
 - For production setups `lightwalletd` requires a `cert.pem`. For more information on how to do this please [see here](https://github.com/zcash/lightwalletd#production-usage).
 

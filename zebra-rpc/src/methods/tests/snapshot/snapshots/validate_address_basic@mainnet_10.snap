@@ -1,0 +1,9 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+expression: validate_address
+---
+{
+  "isvalid": true,
+  "address": "t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR",
+  "isscript": true
+}

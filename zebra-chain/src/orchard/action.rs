@@ -1,12 +1,10 @@
 use std::{convert::TryFrom, io};
 
 use halo2::pasta::pallas;
+use reddsa::orchard::SpendAuth;
 
-use crate::{
-    primitives::redpallas::{self, SpendAuth},
-    serialization::{
-        serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
-    },
+use crate::serialization::{
+    serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
 use super::{
@@ -29,7 +27,7 @@ pub struct Action {
     /// The nullifier of the input note being spent.
     pub nullifier: note::Nullifier,
     /// The randomized validating key for spendAuthSig,
-    pub rk: redpallas::VerificationKeyBytes<SpendAuth>,
+    pub rk: reddsa::VerificationKeyBytes<SpendAuth>,
     /// The x-coordinate of the note commitment for the output note.
     #[serde(with = "serde_helpers::Base")]
     pub cm_x: pallas::Base,
@@ -81,7 +79,7 @@ impl ZcashDeserialize for Action {
             // https://zips.z.cash/protocol/protocol.pdf#concretespendauthsig
             // https://zips.z.cash/protocol/protocol.pdf#concretereddsa
             // This only reads the 32-byte buffer. The type is enforced
-            // on signature verification; see [`redpallas::batch`]
+            // on signature verification; see [`reddsa::batch`]
             rk: reader.read_32_bytes()?.into(),
             // Type is `{0 .. 𝑞_ℙ − 1}`. Note that the second rule quoted above
             // is also enforced here and it is technically redundant with the first.

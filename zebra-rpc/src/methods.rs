@@ -32,7 +32,7 @@ use zebra_network::constants::USER_AGENT;
 use zebra_node_services::mempool;
 use zebra_state::{HashOrHeight, OutputIndex, OutputLocation, TransactionLocation};
 
-use crate::queue::Queue;
+use crate::{constants::MISSING_BLOCK_ERROR_CODE, queue::Queue};
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub mod get_block_template_rpcs;
@@ -42,12 +42,6 @@ pub use get_block_template_rpcs::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
 #[cfg(test)]
 mod tests;
-
-/// The RPC error code used by `zcashd` for missing blocks.
-///
-/// `lightwalletd` expects error code `-8` when a block is not found:
-/// <https://github.com/adityapk00/lightwalletd/blob/c1bab818a683e4de69cd952317000f9bb2932274/common/common.go#L251-L254>
-pub const MISSING_BLOCK_ERROR_CODE: ErrorCode = ErrorCode::ServerError(-8);
 
 #[rpc(server)]
 /// RPC method signatures.
@@ -145,7 +139,7 @@ pub trait Rpc {
     /// getting blocks by hash. (But we parse the height as a JSON string, not an integer).
     /// `lightwalletd` also does not use verbosity=2, so we don't support it.
     #[rpc(name = "getblock")]
-    fn get_block(&self, height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>>;
+    fn get_block(&self, height: String, verbosity: Option<u8>) -> BoxFuture<Result<GetBlock>>;
 
     /// Returns the hash of the current best blockchain tip block, as a [`GetBlockHash`] JSON string.
     ///
@@ -562,8 +556,16 @@ where
     // - use `height_from_signed_int()` to handle negative heights
     //   (this might be better in the state request, because it needs the state height)
     // - create a function that handles block hashes or heights, and use it in `z_get_treestate()`
-    fn get_block(&self, hash_or_height: String, verbosity: u8) -> BoxFuture<Result<GetBlock>> {
+    fn get_block(
+        &self,
+        hash_or_height: String,
+        verbosity: Option<u8>,
+    ) -> BoxFuture<Result<GetBlock>> {
+        // From <https://zcash.github.io/rpc/getblock.html>
+        const DEFAULT_GETBLOCK_VERBOSITY: u8 = 1;
+
         let mut state = self.state.clone();
+        let verbosity = verbosity.unwrap_or(DEFAULT_GETBLOCK_VERBOSITY);
 
         async move {
             let hash_or_height: HashOrHeight =

@@ -42,6 +42,7 @@ use crate::methods::{
             peer_info::PeerInfo,
             submit_block,
             subsidy::BlockSubsidy,
+            validate_address,
         },
     },
     tests::utils::fake_history_tree,
@@ -372,6 +373,24 @@ pub async fn test_responses<State, ReadState>(
 
     snapshot_rpc_submit_block_invalid(submit_block, &settings);
 
+    // `validateaddress`
+    let founder_address = match network {
+        Network::Mainnet => "t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR",
+        Network::Testnet => "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi",
+    };
+
+    let validate_address = get_block_template_rpc
+        .validate_address(founder_address.to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+    snapshot_rpc_validateaddress("basic", validate_address, &settings);
+
+    let validate_address = get_block_template_rpc
+        .validate_address("".to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+    snapshot_rpc_validateaddress("invalid", validate_address, &settings);
+
     // getdifficulty
 
     // Fake the ChainInfo response
@@ -463,6 +482,17 @@ fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Sett
 /// Snapshot `getnetworksolps` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getnetworksolps(get_network_sol_ps: u64, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_network_sol_ps", get_network_sol_ps));
+}
+
+/// Snapshot `validateaddress` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_validateaddress(
+    variant: &'static str,
+    validate_address: validate_address::Response,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("validate_address_{variant}"), validate_address)
+    });
 }
 
 /// Snapshot `getdifficulty` response, using `cargo insta` and JSON serialization.
