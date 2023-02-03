@@ -5,7 +5,7 @@ use crate::{
     block::Height,
     parameters::{Network, NetworkUpgrade},
     transaction::{LockTime, Transaction},
-    transparent,
+    transparent::{self, EXTRA_ZEBRA_COINBASE_DATA},
 };
 
 impl Transaction {
@@ -42,7 +42,11 @@ impl Transaction {
         // See `Transaction::lock_time()` for the relevant consensus rules.
         //
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-        let inputs = vec![transparent::Input::new_coinbase(height, None, None)];
+        let inputs = vec![transparent::Input::new_coinbase(
+            height,
+            Some(EXTRA_ZEBRA_COINBASE_DATA.as_bytes().to_vec()),
+            None,
+        )];
 
         // > The block subsidy is composed of a miner subsidy and a series of funding streams.
         //
@@ -115,7 +119,10 @@ impl Transaction {
         let mut sequence = None;
 
         if like_zcashd {
-            extra_data = Some(vec![0x00]);
+            // TODO: add a debug_like_zcashd config and use 0x00 for like_zcashd
+            //       add an arbitrary extra coinbase data config?
+            //extra_data = Some(vec![0x00]);
+            extra_data = Some(EXTRA_ZEBRA_COINBASE_DATA.as_bytes().to_vec());
             sequence = Some(u32::MAX);
         }
 
