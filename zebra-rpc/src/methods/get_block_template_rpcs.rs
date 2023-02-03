@@ -825,12 +825,12 @@ where
                 return Ok(validate_address::Response::invalid());
             }
 
-            return Ok(if address.network() == network {
-                validate_address::Response {
+            if address.network() == network {
+                Ok(validate_address::Response {
                     address: Some(raw_address),
                     is_valid: true,
                     is_script: Some(address.is_script_hash()),
-                }
+                })
             } else {
                 tracing::info!(
                     ?network,
@@ -838,8 +838,8 @@ where
                     "invalid address in validateaddress RPC: Zebra's configured network must match address network"
                 );
 
-                validate_address::Response::invalid()
-            });
+                Ok(validate_address::Response::invalid())
+            }
         }
         .boxed()
     }
