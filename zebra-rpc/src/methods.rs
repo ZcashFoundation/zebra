@@ -581,6 +581,10 @@ where
                     })?;
 
             if verbosity == 0 {
+                // # Peformance
+                //
+                // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
+                // so it needs to load block data very efficiently.
                 let request = zebra_state::ReadRequest::Block(hash_or_height);
                 let response = state
                     .ready()
@@ -604,6 +608,14 @@ where
                     _ => unreachable!("unmatched response to a block request"),
                 }
             } else if verbosity == 1 {
+                // # Peformance
+                //
+                // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
+                // so it needs to load all its fields very efficiently.
+                //
+                // Currently, we get the transaction IDs from an index, which is much more
+                // efficient than loading all the block data and hashing all the transactions.
+
                 // TODO: look up the hash if we only have a height,
                 //       and look up the height if we only have a hash
                 let hash = hash_or_height.hash().map(GetBlockHash);
