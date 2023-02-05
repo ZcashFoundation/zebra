@@ -2,4 +2,4 @@
 source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
 expression: difficulty
 ---
-14134749558280407000000000000000000000000000000000000000000000000000000000.0
+1.5

@@ -28,7 +28,7 @@ expression: block_template
     "required": true
   },
   "longpollid": "00016871043eab7f731654008728000000000000000000",
-  "target": "0000000000000000000000000000000000000000000000000000000000000001",
+  "target": "0005555400000000000000000000000000000000000000000000000000000000",
   "mintime": 1654008606,
   "mutable": [
     "time",
@@ -39,7 +39,7 @@ expression: block_template
   "sigoplimit": 20000,
   "sizelimit": 2000000,
   "curtime": 1654008617,
-  "bits": "01010000",
+  "bits": "1f055554",
   "height": 1687105,
   "maxtime": 1654008728,
   "submitold": false
