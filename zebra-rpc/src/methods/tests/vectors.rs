@@ -151,7 +151,7 @@ async fn rpc_getblock() {
             get_block,
             GetBlock::Object {
                 hash: Some(GetBlockHash(block.hash())),
-                confirmations: Some((blocks.len() - i - 1).try_into().expect("valid i64")),
+                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
                 height: None,
                 tx: block
                     .transactions
@@ -195,7 +195,7 @@ async fn rpc_getblock() {
             get_block,
             GetBlock::Object {
                 hash: Some(GetBlockHash(block.hash())),
-                confirmations: Some((blocks.len() - i - 1).try_into().expect("valid i64")),
+                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
                 height: None,
                 tx: block
                     .transactions

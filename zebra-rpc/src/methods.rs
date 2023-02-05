@@ -677,7 +677,9 @@ where
                         })?;
 
                     match response {
-                        zebra_state::ReadResponse::Depth(Some(depth)) => Some(depth.into()),
+                        // Confirmations are one more than the depth.
+                        // Depth is limited by height, so it will never overflow an i64.
+                        zebra_state::ReadResponse::Depth(Some(depth)) => Some(i64::from(depth) + 1),
                         zebra_state::ReadResponse::Depth(None) => {
                             Some(NOT_IN_BEST_CHAIN_CONFIRMATIONS)
                         }
