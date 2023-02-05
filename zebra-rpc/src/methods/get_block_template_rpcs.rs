@@ -18,6 +18,7 @@ use zebra_chain::{
     primitives,
     serialization::ZcashDeserializeInto,
     transparent,
+    work::difficulty::{ExpandedDifficulty, Work},
 };
 use zebra_consensus::{
     funding_stream_address, funding_stream_values, height_for_first_halving, miner_subsidy,
@@ -918,6 +919,10 @@ where
         async move {
             let request = ReadRequest::ChainInfo;
 
+            // # TODO
+            // - add a separate request like BestChainNextMedianTimePast, but skipping the
+            //   consistency check, because any block's difficulty is ok for display
+            // - return 1.0 for a "not enough blocks in the state" error
             let response = state
                 .ready()
                 .and_then(|service| service.call(request))
@@ -933,32 +938,24 @@ where
                 _ => unreachable!("unmatched response to a chain info request"),
             };
 
-            // The following code is ported from zcashd implementation.
-            // https://github.com/zcash/zcash/blob/v5.4.0-rc4/src/rpc/blockchain.cpp#L46-L73
+            // The zcashd implementation performs to_expanded() on f64:
+            // https://github.com/zcash/zcash/blob/d6e2fada844373a8554ee085418e68de4b593a6c/src/rpc/blockchain.cpp#L46-L73
+            // But Zebra already has a `Work` type that can be used to do those calculations.
 
-            let pow_limit = u32::from_be_bytes(
-                zebra_chain::work::difficulty::ExpandedDifficulty::target_difficulty_limit(network)
-                    .to_compact()
-                    .bytes_in_display_order(),
-            );
-            let bits = u32::from_be_bytes(chain_info.expected_difficulty.bytes_in_display_order());
+            // Get difficulties as work (u128)
+            let pow_limit = ExpandedDifficulty::target_difficulty_limit(network);
+            let pow_limit = Work::try_from(pow_limit).expect("work is within u128");
 
-            let mut n_shift = (bits >> 24) & 0xff;
-            let n_shift_amount = (pow_limit >> 24) & 0xff;
+            let difficulty = chain_info
+                .expected_difficulty
+                .to_work()
+                .expect("valid blocks have valid difficulties, work is within u218");
 
-            let mut d_diff: f64 = (pow_limit & 0x00ffffff) as f64 / (bits & 0x00ffffff) as f64;
+            // Convert to u128 then f64
+            let pow_limit = pow_limit.as_u128() as f64;
+            let difficulty = difficulty.as_u128() as f64;
 
-            while n_shift < n_shift_amount {
-                d_diff *= 256.0;
-                n_shift += 1;
-            }
-
-            while n_shift > n_shift_amount {
-                d_diff /= 256.0;
-                n_shift -= 1;
-            }
-
-            Ok(d_diff)
+            Ok(difficulty / pow_limit)
         }
         .boxed()
     }
