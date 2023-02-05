@@ -19,7 +19,7 @@ use zebra_chain::{
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::Transaction,
     transparent,
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 use zebra_network::{address_book_peers::MockAddressBookPeers, types::MetaAddr};
 use zebra_node_services::mempool;
@@ -112,7 +112,11 @@ pub async fn test_responses<State, ReadState>(
     let fake_cur_time = DateTime32::from(1654008617);
     // nu5 block time + 123
     let fake_max_time = DateTime32::from(1654008728);
-    let fake_difficulty = CompactDifficulty::from(ExpandedDifficulty::from(U256::one()));
+
+    // Use a valid fractional difficulty for snapshots
+    let pow_limit = ExpandedDifficulty::target_difficulty_limit(network);
+    let fake_difficulty = pow_limit * 2 / 3;
+    let fake_difficulty = CompactDifficulty::from(fake_difficulty);
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
