@@ -3409,6 +3409,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "redjubjub"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf55143417b1e64f982dd27847ad9dbd085923e1bcdbdc331fdc1399cfe6bb50"
+dependencies = [
+ "rand_core 0.6.4",
+ "reddsa 0.3.0",
+ "serde",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5408,7 +5421,7 @@ dependencies = [
  "lazy_static",
  "minreq",
  "rand_core 0.6.4",
- "redjubjub",
+ "redjubjub 0.5.0",
  "tracing",
  "zcash_primitives 0.10.0",
 ]
@@ -5472,7 +5485,7 @@ dependencies = [
  "rand_core 0.6.4",
  "rayon",
  "reddsa 0.4.0",
- "redjubjub",
+ "redjubjub 0.6.0",
  "ripemd",
  "secp256k1",
  "serde",
