@@ -950,7 +950,7 @@ where
             let difficulty = chain_info
                 .expected_difficulty
                 .to_work()
-                .expect("valid blocks have valid difficulties, work is within u218");
+                .expect("valid blocks have valid difficulties, work is within u128");
 
             // Convert to u128 then f64
             let pow_limit = pow_limit.as_u128() as f64;
