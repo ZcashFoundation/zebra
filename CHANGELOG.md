@@ -20,7 +20,7 @@ In this release we fixed bugs and inconsistencies between zcashd and zebrad in t
 - Add getpeerinfo RPC method ([#5951](https://github.com/ZcashFoundation/zebra/pull/5951))
 - Add proposal capability to getblocktemplate ([#5870](https://github.com/ZcashFoundation/zebra/pull/5870))
 - Add a test to check that the Docker image config works ([#5968](https://github.com/ZcashFoundation/zebra/pull/5968))
-- Make `zebra-checkpoints` work for zebrad backend ([#5894](https://github.com/ZcashFoundation/zebra/pull/5894))
+- Make `zebra-checkpoints` work for zebrad backend ([#5894](https://github.com/ZcashFoundation/zebra/pull/5894), [#5961](https://github.com/ZcashFoundation/zebra/pull/5961))
 - Add test dependency from zebra-rpc to zebra-network with correct features ([#5992](https://github.com/ZcashFoundation/zebra/pull/5992))
 - Document zebra download command ([#5901](https://github.com/ZcashFoundation/zebra/pull/5901))
 
@@ -151,7 +151,7 @@ This release starts work on mining pool RPCs, including some mempool fixes. It a
 ### Breaking Changes
 
 This release has the following breaking changes:
-- Remove unused buggy cryptographic code from zebra-chain ([#5464](https://github.com/ZcashFoundation/zebra/pull/5464)). This code was never used in production, and it had known bugs. Anyone using it should migrate to `librustzcash` instead.
+- Remove unused buggy cryptographic code from zebra-chain ([#5464](https://github.com/ZcashFoundation/zebra/pull/5464), [#5476](https://github.com/ZcashFoundation/zebra/pull/5476)). This code was never used in production, and it had known bugs. Anyone using it should migrate to `librustzcash` instead.
 
 ### Added
 
