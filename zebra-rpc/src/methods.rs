@@ -581,7 +581,7 @@ where
                     })?;
 
             if verbosity == 0 {
-                // # Peformance
+                // # Performance
                 //
                 // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
                 // so it needs to load block data very efficiently.
@@ -608,7 +608,7 @@ where
                     _ => unreachable!("unmatched response to a block request"),
                 }
             } else if verbosity == 1 {
-                // # Peformance
+                // # Performance
                 //
                 // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
                 // so it needs to load all its fields very efficiently.
