@@ -922,7 +922,8 @@ where
             // # TODO
             // - add a separate request like BestChainNextMedianTimePast, but skipping the
             //   consistency check, because any block's difficulty is ok for display
-            // - return 1.0 for a "not enough blocks in the state" error
+            // - return 1.0 for a "not enough blocks in the state" error, like `zcashd`:
+            // <https://github.com/zcash/zcash/blob/7b28054e8b46eb46a9589d0bdc8e29f9fa1dc82d/src/rpc/blockchain.cpp#L40-L41>
             let response = state
                 .ready()
                 .and_then(|service| service.call(request))
