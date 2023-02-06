@@ -2,7 +2,7 @@
 
 This is a list of production Rust code that is in scope and out of scope for Zebra's first audit.
 
-Test code, deployment configurations, and other configuration files in the `zebra` repository are out of scope. Due to the way we've created the `audit-v1.0.0-rc.0` branch, they might not compile, run, or pass.
+Test code, deployment configurations, and other configuration files in the `zebra` repository are out of scope. Due to the way we've created the `audit-v1.0.0-rc.0` branch, tests might not compile, run, or pass.
 
 ---
 ## Full Audit 
@@ -45,10 +45,12 @@ Test code, deployment configurations, and other configuration files in the `zebr
 | zcash_proofs | 0.8.0 | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) | <i>Most of `zcash_proofs` got audited as part of the ECC audit, so we only need to audit the proof parameter download code in: <br />- [downloadreader.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/downloadreader.rs), <br />- [hashreader.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/hashreader.rs), and <br />- [lib.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/lib.rs).</i>
 | zcash_script | 0.1.8 || <i>The C++ parts of `zcashd` got audited as part of the ECC audit, so we only need to audit: <br />- [zcash_script.cpp](https://github.com/ZcashFoundation/zcash_script/blob/v0.1.8/depend/zcash/src/script/zcash_script.cpp), <br />- [zcash_script.h](https://github.com/ZcashFoundation/zcash_script/blob/v0.1.8/depend/zcash/src/script/zcash_script.h), and <br />- [the rust code in the zcash_script crate](https://github.com/ZcashFoundation/zcash_script/tree/v0.1.8/src).</i>
 
-Note: there are duplicate `zcash_primitives` and `zcash_proofs` dependencies in Zebra's audit and development branches, [this will get fixed](https://github.com/ZcashFoundation/zebra/issues/6107) after the `zcashd` 5.4.0 release.
+Note: there are duplicate `zcash_primitives`, `zcash_proofs`, and `reddsa` dependencies in Zebra's audit and development branches, [this will get fixed](https://github.com/ZcashFoundation/zebra/issues/6107) after the `zcashd` 5.4.0 release.
 
 ---
 ## Not Included
+
+The changes in these PRs are out of scope for the audit. When the Zebra team checks for bugs that have already been fixed, we can check these PRs, and any changes after commit [c4032e2b](https://github.com/ZcashFoundation/zebra/commit/c4032e2b7f6dbee8a9480d3c978c70a3cfc3332c).
 
 The following consensus, security, and functional changes are in Zebra's development branch, but they are not included in the `audit-v1.0.0-rc.0` branch, because they caused too many merge conflicts:
 - [fix(sync): Pause new downloads when Zebra reaches the lookahead limit #5561](https://github.com/ZcashFoundation/zebra/pull/5561)
