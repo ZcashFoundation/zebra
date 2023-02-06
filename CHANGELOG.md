@@ -4,6 +4,10 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## Zebra Audit Branch
+
+This is the Zebra audit branch for `v1.0.0`. It only contains consensus and security fixes after `v1.0.0-rc.0`. See the [full list of commits](https://github.com/ZcashFoundation/zebra/commits/audit-v1.0.0-rc.0) for details.
+
 ## [Zebra 1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.0) - 2022-10-12
 
 This is the first Zebra release candidate. Zebra's consensus rules, node sync, and `lightwalletd` RPCs are ready for user testing and experimental use. Zebra has not been audited yet.
