@@ -19,7 +19,7 @@ use zebra_chain::{
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::Transaction,
     transparent,
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 use zebra_network::{address_book_peers::MockAddressBookPeers, types::MetaAddr};
 use zebra_node_services::mempool;
@@ -112,7 +112,11 @@ pub async fn test_responses<State, ReadState>(
     let fake_cur_time = DateTime32::from(1654008617);
     // nu5 block time + 123
     let fake_max_time = DateTime32::from(1654008728);
-    let fake_difficulty = CompactDifficulty::from(ExpandedDifficulty::from(U256::one()));
+
+    // Use a valid fractional difficulty for snapshots
+    let pow_limit = ExpandedDifficulty::target_difficulty_limit(network);
+    let fake_difficulty = pow_limit * 2 / 3;
+    let fake_difficulty = CompactDifficulty::from(fake_difficulty);
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
@@ -390,6 +394,34 @@ pub async fn test_responses<State, ReadState>(
         .await
         .expect("We should have a validate_address::Response");
     snapshot_rpc_validateaddress("invalid", validate_address, &settings);
+
+    // getdifficulty
+
+    // Fake the ChainInfo response
+    let response_read_state = new_read_state.clone();
+
+    tokio::spawn(async move {
+        response_read_state
+            .clone()
+            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .await
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_difficulty: fake_difficulty,
+                tip_height: fake_tip_height,
+                tip_hash: fake_tip_hash,
+                cur_time: fake_cur_time,
+                min_time: fake_min_time,
+                max_time: fake_max_time,
+                history_tree: fake_history_tree(network),
+            }));
+    });
+
+    let get_difficulty = tokio::spawn(get_block_template_rpc.get_difficulty())
+        .await
+        .expect("unexpected panic in getdifficulty RPC task")
+        .expect("unexpected error in getdifficulty RPC call");
+
+    snapshot_rpc_getdifficulty(get_difficulty, &settings);
 }
 
 /// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
@@ -465,4 +497,9 @@ fn snapshot_rpc_validateaddress(
     settings.bind(|| {
         insta::assert_json_snapshot!(format!("validate_address_{variant}"), validate_address)
     });
+}
+
+/// Snapshot `getdifficulty` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getdifficulty(difficulty: f64, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_difficulty", difficulty));
 }

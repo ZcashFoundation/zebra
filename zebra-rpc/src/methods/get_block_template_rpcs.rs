@@ -18,6 +18,7 @@ use zebra_chain::{
     primitives,
     serialization::ZcashDeserializeInto,
     transparent,
+    work::difficulty::{ExpandedDifficulty, Work},
 };
 use zebra_consensus::{
     funding_stream_address, funding_stream_values, height_for_first_halving, miner_subsidy,
@@ -187,6 +188,12 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`getblocksubsidy`](https://zcash.github.io/rpc/getblocksubsidy.html)
     #[rpc(name = "getblocksubsidy")]
     fn get_block_subsidy(&self, height: Option<u32>) -> BoxFuture<Result<BlockSubsidy>>;
+
+    /// Returns the proof-of-work difficulty as a multiple of the minimum difficulty.
+    ///
+    /// zcashd reference: [`getdifficulty`](https://zcash.github.io/rpc/getdifficulty.html)
+    #[rpc(name = "getdifficulty")]
+    fn get_difficulty(&self) -> BoxFuture<Result<f64>>;
 }
 
 /// RPC method implementations.
@@ -901,6 +908,55 @@ where
                 founders: founders.into(),
                 funding_streams,
             })
+        }
+        .boxed()
+    }
+
+    fn get_difficulty(&self) -> BoxFuture<Result<f64>> {
+        let network = self.network;
+        let mut state = self.state.clone();
+
+        async move {
+            let request = ReadRequest::ChainInfo;
+
+            // # TODO
+            // - add a separate request like BestChainNextMedianTimePast, but skipping the
+            //   consistency check, because any block's difficulty is ok for display
+            // - return 1.0 for a "not enough blocks in the state" error, like `zcashd`:
+            // <https://github.com/zcash/zcash/blob/7b28054e8b46eb46a9589d0bdc8e29f9fa1dc82d/src/rpc/blockchain.cpp#L40-L41>
+            let response = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            let chain_info = match response {
+                ReadResponse::ChainInfo(info) => info,
+                _ => unreachable!("unmatched response to a chain info request"),
+            };
+
+            // The zcashd implementation performs to_expanded() on f64:
+            // https://github.com/zcash/zcash/blob/d6e2fada844373a8554ee085418e68de4b593a6c/src/rpc/blockchain.cpp#L46-L73
+            // But Zebra already has a `Work` type that can be used to do those calculations.
+
+            // Get difficulties as work (u128)
+            let pow_limit = ExpandedDifficulty::target_difficulty_limit(network);
+            let pow_limit = Work::try_from(pow_limit).expect("work is within u128");
+
+            let difficulty = chain_info
+                .expected_difficulty
+                .to_work()
+                .expect("valid blocks have valid difficulties, work is within u128");
+
+            // Convert to u128 then f64
+            let pow_limit = pow_limit.as_u128() as f64;
+            let difficulty = difficulty.as_u128() as f64;
+
+            Ok(difficulty / pow_limit)
         }
         .boxed()
     }
