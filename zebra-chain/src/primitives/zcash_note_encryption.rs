@@ -1,6 +1,6 @@
 //! Contains code that interfaces with the zcash_note_encryption crate from
 //! librustzcash.
-//!
+
 use crate::{
     block::Height,
     parameters::{Network, NetworkUpgrade},
@@ -24,7 +24,7 @@ pub fn decrypts_successfully(transaction: &Transaction, network: Network, height
     let null_sapling_ovk = zcash_primitives::keys::OutgoingViewingKey([0u8; 32]);
 
     if let Some(bundle) = alt_tx.sapling_bundle() {
-        for output in bundle.shielded_outputs.iter() {
+        for output in bundle.shielded_outputs().iter() {
             let recovery = match network {
                 Network::Mainnet => {
                     zcash_primitives::sapling::note_encryption::try_sapling_output_recovery(
