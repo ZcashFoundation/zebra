@@ -5,7 +5,6 @@ use std::{borrow::Borrow, convert::TryInto, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use halo2::pasta::{group::ff::PrimeField, pallas};
-use hex::FromHex;
 use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 
 use crate::{

@@ -46,7 +46,7 @@ pub const POW_MAX_ADJUST_DOWN_PERCENT: i32 = 32;
 pub const BLOCK_MAX_TIME_SINCE_MEDIAN: i64 = 90 * 60;
 
 /// Contains the context needed to calculate the adjusted difficulty for a block.
-pub(super) struct AdjustedDifficulty {
+pub(crate) struct AdjustedDifficulty {
     /// The `header.time` field from the candidate block
     candidate_time: DateTime<Utc>,
     /// The coinbase height from the candidate block
