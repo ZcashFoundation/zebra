@@ -73,9 +73,6 @@ pub struct Chain {
 
     // Note commitment trees
     //
-    /// The Sprout note commitment tree of the tip of this [`Chain`],
-    /// including all finalized notes, and the non-finalized notes in this chain.
-    pub(super) sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
     /// The Sprout note commitment tree for each anchor.
     /// This is required for interstitial states.
     pub(crate) sprout_trees_by_anchor:
@@ -158,22 +155,22 @@ pub struct Chain {
 }
 
 impl Chain {
-    /// Create a new Chain with the given trees and network.
+    /// Create a new Chain with the given finalized tip trees and network.
     pub(crate) fn new(
         network: Network,
+        finalized_tip_height: Height,
         sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
         history_tree: Arc<HistoryTree>,
         finalized_tip_chain_value_pools: ValueBalance<NonNegative>,
     ) -> Self {
-        Self {
+        let mut chain = Self {
             network,
             blocks: Default::default(),
             height_by_hash: Default::default(),
             tx_loc_by_hash: Default::default(),
             created_utxos: Default::default(),
-            sprout_note_commitment_tree,
             sapling_note_commitment_tree,
             orchard_note_commitment_tree,
             spent_utxos: Default::default(),
@@ -195,7 +192,11 @@ impl Chain {
             history_tree,
             history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
-        }
+        };
+
+        chain.add_sprout_tree_and_anchor(finalized_tip_height, sprout_note_commitment_tree);
+
+        chain
     }
 
     /// Is the internal state of `self` the same as `other`?
@@ -220,7 +221,6 @@ impl Chain {
             self.spent_utxos == other.spent_utxos &&
 
             // note commitment trees
-            self.sprout_note_commitment_tree.root() == other.sprout_note_commitment_tree.root() &&
             self.sprout_trees_by_anchor == other.sprout_trees_by_anchor &&
             self.sprout_trees_by_height == other.sprout_trees_by_height &&
             self.sapling_note_commitment_tree.root() == other.sapling_note_commitment_tree.root() &&
@@ -305,17 +305,14 @@ impl Chain {
             .expect("only called while blocks is populated")
     }
 
-    /// Fork a chain at the block with the given hash, if it is part of this
-    /// chain.
+    /// Fork and return a chain at the block with the given `fork_tip`, if it is part of this
+    /// chain. Otherwise, if this chain does not contain `fork_tip`, returns `Ok(None)`.
     ///
-    /// The passed trees must match the trees of the finalized tip. They are
-    /// extended by the commitments from the newly forked chain up to the passed
-    /// `fork_tip`.
+    /// If forking the chain fails, returns `Err(_)`.
     #[allow(clippy::unwrap_in_result)]
     pub fn fork(
         &self,
         fork_tip: block::Hash,
-        sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
         history_tree: Arc<HistoryTree>,
@@ -325,7 +322,6 @@ impl Chain {
         }
 
         let mut forked = self.with_trees(
-            sprout_note_commitment_tree,
             sapling_note_commitment_tree,
             orchard_note_commitment_tree,
             history_tree,
@@ -373,7 +369,9 @@ impl Chain {
 
         // TODO: use NoteCommitmentTrees to store the trees as well?
         let mut nct = NoteCommitmentTrees {
-            sprout: self.sprout_note_commitment_tree.clone(),
+            sprout: self
+                .sprout_tree(fork_height.into())
+                .expect("already checked chain contains fork height"),
             sapling: self.sapling_note_commitment_tree.clone(),
             orchard: self.orchard_note_commitment_tree.clone(),
         };
@@ -398,8 +396,7 @@ impl Chain {
         note_result.expect("scope has already finished")?;
         history_result.expect("scope has already finished")?;
 
-        // Update the note commitment trees in the chain.
-        self.sprout_note_commitment_tree = nct.sprout;
+        // Update the note commitment trees and anchors in the chain.
         self.sapling_note_commitment_tree = nct.sapling;
         self.orchard_note_commitment_tree = nct.orchard;
 
@@ -535,6 +532,17 @@ impl Chain {
         )
     }
 
+    /// Returns the Sprout note commitment tree of the tip of this [`Chain`],
+    /// including all finalized notes, and the non-finalized notes in this chain.
+    ///
+    /// # Panics
+    ///
+    /// If this chain is empty.
+    pub fn sprout_note_commitment_tree(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
+        self.sprout_tree(self.non_finalized_tip_height().into())
+            .expect("only called while sprout_trees_by_height is populated")
+    }
+
     /// Returns the Sprout
     /// [`NoteCommitmentTree`](sprout::tree::NoteCommitmentTree) specified by a
     /// [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
@@ -546,6 +554,29 @@ impl Chain {
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
         self.sprout_trees_by_height.get(&height).cloned()
+    }
+
+    /// Update the Sprout `tree` and anchor indexes at `height`.
+    pub(crate) fn add_sprout_tree_and_anchor(
+        &mut self,
+        height: Height,
+        tree: Arc<sprout::tree::NoteCommitmentTree>,
+    ) {
+        // TODO:
+        // - should we assert that the height was empty before insertion?
+        //   (the roots can have duplicates, but the heights should not)
+        // - should this be an UpdateWith impl?
+        self.sprout_trees_by_height.insert(height, tree.clone());
+
+        // Having updated all the note commitment trees and nullifier sets in
+        // this block, the roots of the note commitment trees as of the last
+        // transaction are the anchor treestates of this block.
+        //
+        // Use the previously cached root which was calculated in parallel.
+        let sprout_root = self.sprout_note_commitment_tree().root();
+        self.sprout_anchors.insert(sprout_root);
+        self.sprout_anchors_by_height.insert(height, sprout_root);
+        self.sprout_trees_by_anchor.insert(sprout_root, tree);
     }
 
     /// Returns the Sapling
@@ -821,13 +852,12 @@ impl Chain {
 
     // Cloning
 
-    /// Clone the Chain but not the history and note commitment trees, using
-    /// the specified trees instead.
+    /// Clone the Chain but not the history and note commitment trees,
+    /// starting with the specified trees at `fork_height` instead.
     ///
     /// Useful when forking, where the trees are rebuilt anyway.
     fn with_trees(
         &self,
-        sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
         history_tree: Arc<HistoryTree>,
@@ -839,7 +869,6 @@ impl Chain {
             tx_loc_by_hash: self.tx_loc_by_hash.clone(),
             created_utxos: self.created_utxos.clone(),
             spent_utxos: self.spent_utxos.clone(),
-            sprout_note_commitment_tree,
             sprout_trees_by_anchor: self.sprout_trees_by_anchor.clone(),
             sprout_trees_by_height: self.sprout_trees_by_height.clone(),
             sapling_note_commitment_tree,
@@ -879,7 +908,7 @@ impl Chain {
         //
         // TODO: use NoteCommitmentTrees to store the trees as well?
         let mut nct = NoteCommitmentTrees {
-            sprout: self.sprout_note_commitment_tree.clone(),
+            sprout: self.sprout_note_commitment_tree(),
             sapling: self.sapling_note_commitment_tree.clone(),
             orchard: self.orchard_note_commitment_tree.clone(),
         };
@@ -904,15 +933,13 @@ impl Chain {
         partial_result.expect("scope has already finished")?;
 
         // Update the note commitment trees in the chain.
-        self.sprout_note_commitment_tree = nct.sprout;
+        self.add_sprout_tree_and_anchor(height, nct.sprout);
         self.sapling_note_commitment_tree = nct.sapling;
         self.orchard_note_commitment_tree = nct.orchard;
 
         // Do the Chain updates with data dependencies on note commitment tree updates
 
         // Update the note commitment trees indexed by height.
-        self.sprout_trees_by_height
-            .insert(height, self.sprout_note_commitment_tree.clone());
         self.sapling_trees_by_height
             .insert(height, self.sapling_note_commitment_tree.clone());
         self.orchard_trees_by_height
@@ -923,11 +950,6 @@ impl Chain {
         // transaction are the treestates of this block.
         //
         // Use the previously cached roots, which were calculated in parallel.
-        let sprout_root = self.sprout_note_commitment_tree.root();
-        self.sprout_anchors.insert(sprout_root);
-        self.sprout_anchors_by_height.insert(height, sprout_root);
-        self.sprout_trees_by_anchor
-            .insert(sprout_root, self.sprout_note_commitment_tree.clone());
         let sapling_root = self.sapling_note_commitment_tree.root();
         self.sapling_anchors.insert(sapling_root);
         self.sapling_anchors_by_height.insert(height, sapling_root);

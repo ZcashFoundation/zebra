@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use zebra_chain::{
     amount::NonNegative,
-    block::Block,
+    block::{Block, Height},
     history_tree::NonEmptyHistoryTree,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
@@ -27,6 +27,7 @@ fn construct_empty() {
     let _init_guard = zebra_test::init();
     let _chain = Chain::new(
         Network::Mainnet,
+        Height(0),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -43,6 +44,7 @@ fn construct_single() -> Result<()> {
 
     let mut chain = Chain::new(
         Network::Mainnet,
+        Height(0),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -73,6 +75,7 @@ fn construct_many() -> Result<()> {
 
     let mut chain = Chain::new(
         Network::Mainnet,
+        Height(block.coinbase_height().unwrap().0 - 1),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -99,6 +102,7 @@ fn ord_matches_work() -> Result<()> {
 
     let mut lesser_chain = Chain::new(
         Network::Mainnet,
+        Height(0),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -109,6 +113,7 @@ fn ord_matches_work() -> Result<()> {
 
     let mut bigger_chain = Chain::new(
         Network::Mainnet,
+        Height(0),
         Default::default(),
         Default::default(),
         Default::default(),

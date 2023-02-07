@@ -159,7 +159,6 @@ impl NonFinalizedState {
 
         let parent_chain = self.parent_chain(
             parent_hash,
-            finalized_state.sprout_note_commitment_tree(),
             finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
             finalized_state.history_tree(),
@@ -192,6 +191,9 @@ impl NonFinalizedState {
     ) -> Result<(), ValidateContextError> {
         let chain = Chain::new(
             self.network,
+            finalized_state
+                .finalized_tip_height()
+                .expect("finalized state contains blocks"),
             finalized_state.sprout_note_commitment_tree(),
             finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
@@ -456,16 +458,12 @@ impl NonFinalizedState {
 
     /// Return the chain whose tip block hash is `parent_hash`.
     ///
-    /// The chain can be an existing chain in the non-finalized state or a freshly
-    /// created fork, if needed.
-    ///
-    /// The trees must be the trees of the finalized tip.
-    /// They are used to recreate the trees if a fork is needed.
+    /// The chain can be an existing chain in the non-finalized state, or a freshly
+    /// created fork.
     #[allow(clippy::unwrap_in_result)]
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,
-        sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
         sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
         history_tree: Arc<HistoryTree>,
@@ -484,7 +482,6 @@ impl NonFinalizedState {
                         chain
                             .fork(
                                 parent_hash,
-                                sprout_note_commitment_tree.clone(),
                                 sapling_note_commitment_tree.clone(),
                                 orchard_note_commitment_tree.clone(),
                                 history_tree.clone(),

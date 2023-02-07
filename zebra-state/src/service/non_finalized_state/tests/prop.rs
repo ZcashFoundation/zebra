@@ -6,7 +6,7 @@ use zebra_test::prelude::*;
 
 use zebra_chain::{
     amount::NonNegative,
-    block::{self, arbitrary::allow_all_transparent_coinbase_spends, Block},
+    block::{self, arbitrary::allow_all_transparent_coinbase_spends, Block, Height},
     fmt::DisplayToDebug,
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     parameters::NetworkUpgrade::*,
@@ -47,7 +47,7 @@ fn push_genesis_chain() -> Result<()> {
         |((chain, count, network, empty_tree) in PreparedChain::default())| {
             prop_assert!(empty_tree.is_none());
 
-            let mut only_chain = Chain::new(network, Default::default(), Default::default(), Default::default(), empty_tree, ValueBalance::zero());
+            let mut only_chain = Chain::new(network, Height(0), Default::default(), Default::default(), Default::default(), empty_tree, ValueBalance::zero());
             // contains the block value pool changes and chain value pool balances for each height
             let mut chain_values = BTreeMap::new();
 
@@ -99,7 +99,7 @@ fn push_history_tree_chain() -> Result<()> {
         let count = std::cmp::min(count, chain.len() - 1);
         let chain = &chain[1..];
 
-        let mut only_chain = Chain::new(network, Default::default(), Default::default(), Default::default(), finalized_tree, ValueBalance::zero());
+        let mut only_chain = Chain::new(network, Height(0), Default::default(), Default::default(), Default::default(), finalized_tree, ValueBalance::zero());
 
         for block in chain
             .iter()
@@ -143,6 +143,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         // correspond to the blocks in the original chain before the fork.
         let mut partial_chain = Chain::new(
             network,
+            Height(0),
             Default::default(),
             Default::default(),
             Default::default(),
@@ -162,6 +163,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         // This chain will be forked.
         let mut full_chain = Chain::new(
             network,
+            Height(0),
             Default::default(),
             Default::default(),
             Default::default(),
@@ -195,13 +197,13 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         }
 
         // Use [`fork_at_count`] as the fork tip.
-        let fork_tip_hash = chain[fork_at_count - 1].hash;
+        let fork_tip_height = fork_at_count - 1;
+        let fork_tip_hash = chain[fork_tip_height].hash;
 
         // Fork the chain.
         let mut forked = full_chain
             .fork(
                 fork_tip_hash,
-                Default::default(),
                 Default::default(),
                 Default::default(),
                 empty_tree,
@@ -254,8 +256,8 @@ fn forked_equals_pushed_history_tree() -> Result<()> {
         // use `fork_at_count` as the fork tip
         let fork_tip_hash = chain[fork_at_count - 1].hash;
 
-        let mut full_chain = Chain::new(network, Default::default(), Default::default(), Default::default(), finalized_tree.clone(), ValueBalance::zero());
-        let mut partial_chain = Chain::new(network, Default::default(), Default::default(), Default::default(), finalized_tree.clone(), ValueBalance::zero());
+        let mut full_chain = Chain::new(network, Height(0), Default::default(), Default::default(), Default::default(), finalized_tree.clone(), ValueBalance::zero());
+        let mut partial_chain = Chain::new(network, Height(0), Default::default(), Default::default(), Default::default(), finalized_tree.clone(), ValueBalance::zero());
 
         for block in chain
             .iter()
@@ -273,7 +275,6 @@ fn forked_equals_pushed_history_tree() -> Result<()> {
         let mut forked = full_chain
             .fork(
                 fork_tip_hash,
-                Default::default(),
                 Default::default(),
                 Default::default(),
                 finalized_tree,
@@ -323,7 +324,7 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
 
         let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
 
-        let mut full_chain = Chain::new(network, Default::default(), Default::default(), Default::default(), empty_tree, fake_value_pool);
+        let mut full_chain = Chain::new(network, Height(0), Default::default(), Default::default(), Default::default(), empty_tree, fake_value_pool);
         for block in chain
             .iter()
             .take(finalized_count)
@@ -333,7 +334,8 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
 
         let mut partial_chain = Chain::new(
             network,
-            full_chain.sprout_note_commitment_tree.clone(),
+            Height(finalized_count.try_into().unwrap()),
+            full_chain.sprout_note_commitment_tree(),
             full_chain.sapling_note_commitment_tree.clone(),
             full_chain.orchard_note_commitment_tree.clone(),
             full_chain.history_tree.clone(),
@@ -393,7 +395,7 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
 
         let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
 
-        let mut full_chain = Chain::new(network, Default::default(), Default::default(), Default::default(), finalized_tree, fake_value_pool);
+        let mut full_chain = Chain::new(network, Height(0), Default::default(), Default::default(), Default::default(), finalized_tree, fake_value_pool);
         for block in chain
             .iter()
             .take(finalized_count)
@@ -403,7 +405,8 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
 
         let mut partial_chain = Chain::new(
             network,
-            full_chain.sprout_note_commitment_tree.clone(),
+            Height(finalized_count.try_into().unwrap()),
+            full_chain.sprout_note_commitment_tree(),
             full_chain.sapling_note_commitment_tree.clone(),
             full_chain.orchard_note_commitment_tree.clone(),
             full_chain.history_tree.clone(),
@@ -570,8 +573,8 @@ fn different_blocks_different_chains() -> Result<()> {
             Default::default()
         };
 
-        let chain1 = Chain::new(Network::Mainnet, Default::default(), Default::default(), Default::default(), finalized_tree1, ValueBalance::fake_populated_pool());
-        let chain2 = Chain::new(Network::Mainnet, Default::default(), Default::default(), Default::default(), finalized_tree2, ValueBalance::fake_populated_pool());
+        let chain1 = Chain::new(Network::Mainnet, Height(0), Default::default(), Default::default(), Default::default(), finalized_tree1, ValueBalance::fake_populated_pool());
+        let chain2 = Chain::new(Network::Mainnet, Height(0), Default::default(), Default::default(), Default::default(), finalized_tree2, ValueBalance::fake_populated_pool());
 
         let block1 = vec1[1].clone().prepare().test_with_zero_spent_utxos();
         let block2 = vec2[1].clone().prepare().test_with_zero_spent_utxos();
@@ -606,7 +609,6 @@ fn different_blocks_different_chains() -> Result<()> {
                 chain1.spent_utxos = chain2.spent_utxos.clone();
 
                 // note commitment trees
-                chain1.sprout_note_commitment_tree = chain2.sprout_note_commitment_tree.clone();
                 chain1.sprout_trees_by_anchor = chain2.sprout_trees_by_anchor.clone();
                 chain1.sprout_trees_by_height = chain2.sprout_trees_by_height.clone();
                 chain1.sapling_note_commitment_tree = chain2.sapling_note_commitment_tree.clone();
