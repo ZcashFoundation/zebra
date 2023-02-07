@@ -1448,7 +1448,9 @@ async fn rpc_getdifficulty() {
     let get_difficulty_fut = get_block_template_rpc.get_difficulty();
     let (get_difficulty, ..) = tokio::join!(get_difficulty_fut, mock_read_state_request_handler,);
 
-    assert_eq!(format!("{:.8}", get_difficulty.unwrap()), "0.00012207");
+    // Our implementation is slightly different to `zcashd`, so we require 6 significant figures
+    // of accuracy in our unit tests. (Most clients will hide more than 2-3.)
+    assert_eq!(format!("{:.9}", get_difficulty.unwrap()), "0.000122072");
 
     // Fake the ChainInfo response: difficulty limit - smallest valid difficulty
     let pow_limit = ExpandedDifficulty::target_difficulty_limit(Mainnet);
@@ -1472,7 +1474,7 @@ async fn rpc_getdifficulty() {
     let get_difficulty_fut = get_block_template_rpc.get_difficulty();
     let (get_difficulty, ..) = tokio::join!(get_difficulty_fut, mock_read_state_request_handler,);
 
-    assert_eq!(format!("{}", get_difficulty.unwrap()), "1");
+    assert_eq!(format!("{:.5}", get_difficulty.unwrap()), "1.00000");
 
     // Fake the ChainInfo response: fractional difficulty
     let fake_difficulty = pow_limit * 2 / 3;
@@ -1495,7 +1497,7 @@ async fn rpc_getdifficulty() {
     let get_difficulty_fut = get_block_template_rpc.get_difficulty();
     let (get_difficulty, ..) = tokio::join!(get_difficulty_fut, mock_read_state_request_handler,);
 
-    assert_eq!(format!("{:.4}", get_difficulty.unwrap()), "1.5000");
+    assert_eq!(format!("{:.5}", get_difficulty.unwrap()), "1.50000");
 
     // Fake the ChainInfo response: large integer difficulty
     let fake_difficulty = pow_limit / 4096;
@@ -1518,5 +1520,5 @@ async fn rpc_getdifficulty() {
     let get_difficulty_fut = get_block_template_rpc.get_difficulty();
     let (get_difficulty, ..) = tokio::join!(get_difficulty_fut, mock_read_state_request_handler,);
 
-    assert_eq!(format!("{:.1}", get_difficulty.unwrap()), "4096.0");
+    assert_eq!(format!("{:.2}", get_difficulty.unwrap()), "4096.00");
 }
