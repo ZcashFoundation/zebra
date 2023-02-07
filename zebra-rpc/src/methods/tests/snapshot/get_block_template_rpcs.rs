@@ -390,6 +390,34 @@ pub async fn test_responses<State, ReadState>(
         .await
         .expect("We should have a validate_address::Response");
     snapshot_rpc_validateaddress("invalid", validate_address, &settings);
+
+    // getdifficulty
+
+    // Fake the ChainInfo response
+    let response_read_state = new_read_state.clone();
+
+    tokio::spawn(async move {
+        response_read_state
+            .clone()
+            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .await
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_difficulty: fake_difficulty,
+                tip_height: fake_tip_height,
+                tip_hash: fake_tip_hash,
+                cur_time: fake_cur_time,
+                min_time: fake_min_time,
+                max_time: fake_max_time,
+                history_tree: fake_history_tree(network),
+            }));
+    });
+
+    let get_difficulty = tokio::spawn(get_block_template_rpc.get_difficulty())
+        .await
+        .expect("unexpected panic in getdifficulty RPC task")
+        .expect("unexpected error in getdifficulty RPC call");
+
+    snapshot_rpc_getdifficulty(get_difficulty, &settings);
 }
 
 /// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
@@ -465,4 +493,9 @@ fn snapshot_rpc_validateaddress(
     settings.bind(|| {
         insta::assert_json_snapshot!(format!("validate_address_{variant}"), validate_address)
     });
+}
+
+/// Snapshot `getdifficulty` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getdifficulty(difficulty: f64, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_difficulty", difficulty));
 }
