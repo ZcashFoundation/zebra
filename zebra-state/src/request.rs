@@ -52,6 +52,24 @@ impl HashOrHeight {
             HashOrHeight::Height(height) => Some(height),
         }
     }
+
+    /// Returns the hash if this is a [`HashOrHeight::Hash`].
+    pub fn hash(&self) -> Option<block::Hash> {
+        if let HashOrHeight::Hash(hash) = self {
+            Some(*hash)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the height if this is a [`HashOrHeight::Height`].
+    pub fn height(&self) -> Option<block::Height> {
+        if let HashOrHeight::Height(height) = self {
+            Some(*height)
+        } else {
+            None
+        }
+    }
 }
 
 impl From<block::Hash> for HashOrHeight {

@@ -80,7 +80,7 @@ async fn rpc_getblock() {
         latest_chain_tip,
     );
 
-    // Make calls with verbosity=0 and check response
+    // Make height calls with verbosity=0 and check response
     for (i, block) in blocks.iter().enumerate() {
         let expected_result = GetBlock::Raw(block.clone().into());
 
@@ -99,7 +99,26 @@ async fn rpc_getblock() {
         assert_eq!(get_block, expected_result);
     }
 
-    // Make calls with verbosity=1 and check response
+    // Make hash calls with verbosity=0 and check response
+    for (i, block) in blocks.iter().enumerate() {
+        let expected_result = GetBlock::Raw(block.clone().into());
+
+        let get_block = rpc
+            .get_block(blocks[i].hash().to_string(), Some(0u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(get_block, expected_result);
+
+        let get_block = rpc
+            .get_block(block.hash().to_string(), Some(0u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(get_block, expected_result);
+    }
+
+    // Make height calls with verbosity=1 and check response
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(i.to_string(), Some(1u8))
@@ -109,15 +128,41 @@ async fn rpc_getblock() {
         assert_eq!(
             get_block,
             GetBlock::Object {
+                hash: None,
+                confirmations: None,
+                height: Some(Height(i.try_into().expect("valid u32"))),
                 tx: block
                     .transactions
                     .iter()
                     .map(|tx| tx.hash().encode_hex())
-                    .collect()
+                    .collect(),
             }
         );
     }
 
+    // Make hash calls with verbosity=1 and check response
+    for (i, block) in blocks.iter().enumerate() {
+        let get_block = rpc
+            .get_block(blocks[i].hash().to_string(), Some(1u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(
+            get_block,
+            GetBlock::Object {
+                hash: Some(GetBlockHash(block.hash())),
+                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
+                height: None,
+                tx: block
+                    .transactions
+                    .iter()
+                    .map(|tx| tx.hash().encode_hex())
+                    .collect(),
+            }
+        );
+    }
+
+    // Make height calls with no verbosity (defaults to 1) and check response
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(i.to_string(), None)
@@ -127,11 +172,36 @@ async fn rpc_getblock() {
         assert_eq!(
             get_block,
             GetBlock::Object {
+                hash: None,
+                confirmations: None,
+                height: Some(Height(i.try_into().expect("valid u32"))),
                 tx: block
                     .transactions
                     .iter()
                     .map(|tx| tx.hash().encode_hex())
-                    .collect()
+                    .collect(),
+            }
+        );
+    }
+
+    // Make hash calls with no verbosity (defaults to 1) and check response
+    for (i, block) in blocks.iter().enumerate() {
+        let get_block = rpc
+            .get_block(blocks[i].hash().to_string(), None)
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(
+            get_block,
+            GetBlock::Object {
+                hash: Some(GetBlockHash(block.hash())),
+                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
+                height: None,
+                tx: block
+                    .transactions
+                    .iter()
+                    .map(|tx| tx.hash().encode_hex())
+                    .collect(),
             }
         );
     }
