@@ -972,7 +972,8 @@ where
             let pow_limit = pow_limit >> 128;
             let difficulty = difficulty >> 128;
 
-            // Convert to u128 then f64
+            // Convert to u128 then f64.
+            // We could also convert U256 to String, then parse as f64, but that's slower.
             let pow_limit = pow_limit.as_u128() as f64;
             let difficulty = difficulty.as_u128() as f64;
 
