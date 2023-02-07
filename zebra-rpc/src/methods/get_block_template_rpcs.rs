@@ -18,7 +18,7 @@ use zebra_chain::{
     primitives,
     serialization::ZcashDeserializeInto,
     transparent,
-    work::difficulty::{ExpandedDifficulty, Work},
+    work::difficulty::{ExpandedDifficulty, U256},
 };
 use zebra_consensus::{
     funding_stream_address, funding_stream_values, height_for_first_halving, miner_subsidy,
@@ -939,24 +939,45 @@ where
                 _ => unreachable!("unmatched response to a chain info request"),
             };
 
-            // The zcashd implementation performs to_expanded() on f64:
+            // This RPC is typically used for display purposes, so it is not consensus-critical.
+            // But it uses the difficulty consensus rules for its calculations.
+            //
+            // Consensus:
+            // https://zips.z.cash/protocol/protocol.pdf#nbits
+            //
+            // The zcashd implementation performs to_expanded() on f64,
+            // and then does an inverse division:
             // https://github.com/zcash/zcash/blob/d6e2fada844373a8554ee085418e68de4b593a6c/src/rpc/blockchain.cpp#L46-L73
-            // But Zebra already has a `Work` type that can be used to do those calculations.
+            //
+            // But in Zebra we divide the high 128 bits of each expanded difficulty. This gives
+            // a similar result, because the lower 128 bits are insignificant after conversion
+            // to `f64` with a 53-bit mantissa.
+            //
+            // `pow_limit >> 128 / difficulty >> 128` is the same as the work calculation
+            // `(2^256 / pow_limit) / (2^256 / difficulty)`, but it's a bit more accurate.
+            //
+            // To simplify the calculation, we don't scale for leading zeroes. (Bitcoin's
+            // difficulty currently uses 68 bits, so even it would still have full precision
+            // using this calculation.)
 
-            // Get difficulties as work (u128)
-            let pow_limit = ExpandedDifficulty::target_difficulty_limit(network);
-            let pow_limit = Work::try_from(pow_limit).expect("work is within u128");
-
-            let difficulty = chain_info
+            // Get expanded difficulties (256 bits), these are the inverse of the work
+            let pow_limit: U256 = ExpandedDifficulty::target_difficulty_limit(network).into();
+            let difficulty: U256 = chain_info
                 .expected_difficulty
-                .to_work()
-                .expect("valid blocks have valid difficulties, work is within u128");
+                .to_expanded()
+                .expect("valid blocks have valid difficulties")
+                .into();
+
+            // Shift out the lower 128 bits (256 bits, but the top 128 are all zeroes)
+            let pow_limit = pow_limit >> 128;
+            let difficulty = difficulty >> 128;
 
             // Convert to u128 then f64
             let pow_limit = pow_limit.as_u128() as f64;
             let difficulty = difficulty.as_u128() as f64;
 
-            Ok(difficulty / pow_limit)
+            // Invert the division to give approximately: `work(difficulty) / work(pow_limit)`
+            Ok(pow_limit / difficulty)
         }
         .boxed()
     }
