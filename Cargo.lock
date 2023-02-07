@@ -2634,7 +2634,7 @@ dependencies = [
  "nonempty",
  "pasta_curves",
  "rand 0.8.5",
- "reddsa",
+ "reddsa 0.3.0",
  "serde",
  "subtle",
  "tracing",
