@@ -2,7 +2,7 @@
 
 This is a list of production Rust code that is in scope and out of scope for Zebra's first audit.
 
-Test code, deployment configurations, and other configuration files in the `zebra` repository are out of scope. Due to the way we've created the `audit-v1.0.0-rc.0` branch, tests might not compile, run, or pass.
+Test code, deployment configurations, and other configuration files in the `zebra` repository are out of scope. Due to the way we've created the `audit-v1.0.0-rc.0` tag, tests might not compile, run, or pass.
 
 ---
 ## Full Audit 
@@ -52,7 +52,7 @@ Note: there are duplicate `zcash_primitives`, `zcash_proofs`, and `reddsa` depen
 
 The changes in these PRs are out of scope for the audit. When the Zebra team checks for bugs that have already been fixed, we can check these PRs, and any changes after commit [c4032e2b](https://github.com/ZcashFoundation/zebra/commit/c4032e2b7f6dbee8a9480d3c978c70a3cfc3332c).
 
-The following consensus, security, and functional changes are in Zebra's development branch, but they are not included in the `audit-v1.0.0-rc.0` branch, because they caused too many merge conflicts:
+The following consensus, security, and functional changes are in Zebra's development branch, but they are not included in the `audit-v1.0.0-rc.0` tag, because they caused too many merge conflicts:
 - [fix(sync): Pause new downloads when Zebra reaches the lookahead limit #5561](https://github.com/ZcashFoundation/zebra/pull/5561)
 - [fix(rpc): Shut down the RPC server properly when Zebra shuts down #5591](https://github.com/ZcashFoundation/zebra/pull/5591)
 - [refactor(state): Make implementation of block consensus rules clearer #5915](https://github.com/ZcashFoundation/zebra/pull/5915)
