@@ -7,7 +7,7 @@ Test code, deployment configurations, and other configuration files in the `zebr
 ---
 ## Full Audit 
 
-### Crates
+### Zebra Crates
 
 | Name | Version | Notes
 |------| ------- | -----
@@ -31,7 +31,7 @@ Test code, deployment configurations, and other configuration files in the `zebr
 ---
 ## Partial Audit 
 
-### Crates
+### Zebra Crates
 
 | Name | Version | Notes
 |------| ------- | -----
