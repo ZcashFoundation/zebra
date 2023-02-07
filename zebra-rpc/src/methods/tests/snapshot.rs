@@ -103,27 +103,61 @@ async fn test_rpc_response_data_for_network(network: Network) {
         .expect("We should have an AddressBalance struct");
     snapshot_rpc_getaddressbalance(get_address_balance, &settings);
 
-    // `getblock`, verbosity=0
+    // `getblock` variants
     const BLOCK_HEIGHT: u32 = 1;
+    let block_hash = blocks[BLOCK_HEIGHT as usize].hash();
+
+    // `getblock`, verbosity=0, height
     let get_block = rpc
         .get_block(BLOCK_HEIGHT.to_string(), Some(0u8))
         .await
         .expect("We should have a GetBlock struct");
-    snapshot_rpc_getblock(get_block, block_data.get(&BLOCK_HEIGHT).unwrap(), &settings);
+    snapshot_rpc_getblock_data(
+        "height_verbosity_0",
+        get_block,
+        block_data.get(&BLOCK_HEIGHT).unwrap(),
+        &settings,
+    );
 
-    // `getblock`, verbosity=1
+    // `getblock`, verbosity=0, hash
+    let get_block = rpc
+        .get_block(block_hash.to_string(), Some(0u8))
+        .await
+        .expect("We should have a GetBlock struct");
+    snapshot_rpc_getblock_data(
+        "hash_verbosity_0",
+        get_block,
+        block_data.get(&BLOCK_HEIGHT).unwrap(),
+        &settings,
+    );
+
+    // `getblock`, verbosity=1, height
     let get_block = rpc
         .get_block(BLOCK_HEIGHT.to_string(), Some(1u8))
         .await
         .expect("We should have a GetBlock struct");
-    snapshot_rpc_getblock_verbose("2_args", get_block, &settings);
+    snapshot_rpc_getblock_verbose("height_verbosity_1", get_block, &settings);
 
-    // `getblock`, no verbosity, defaults to 1
+    // `getblock`, verbosity=1, hash
+    let get_block = rpc
+        .get_block(block_hash.to_string(), Some(1u8))
+        .await
+        .expect("We should have a GetBlock struct");
+    snapshot_rpc_getblock_verbose("hash_verbosity_1", get_block, &settings);
+
+    // `getblock`, no verbosity - defaults to 1, height
     let get_block = rpc
         .get_block(BLOCK_HEIGHT.to_string(), None)
         .await
         .expect("We should have a GetBlock struct");
-    snapshot_rpc_getblock_verbose("1_arg", get_block, &settings);
+    snapshot_rpc_getblock_verbose("height_verbosity_default", get_block, &settings);
+
+    // `getblock`, no verbosity - defaults to 1, hash
+    let get_block = rpc
+        .get_block(block_hash.to_string(), None)
+        .await
+        .expect("We should have a GetBlock struct");
+    snapshot_rpc_getblock_verbose("hash_verbosity_default", get_block, &settings);
 
     // `getbestblockhash`
     let get_best_block_hash = rpc
@@ -242,11 +276,16 @@ fn snapshot_rpc_getaddressbalance(address_balance: AddressBalance, settings: &in
 /// Check `getblock` response, using `cargo insta`, JSON serialization, and block test vectors.
 ///
 /// The snapshot file does not contain any data, but it does enforce the response format.
-fn snapshot_rpc_getblock(block: GetBlock, block_data: &[u8], settings: &insta::Settings) {
+fn snapshot_rpc_getblock_data(
+    variant: &'static str,
+    block: GetBlock,
+    block_data: &[u8],
+    settings: &insta::Settings,
+) {
     let block_data = hex::encode(block_data);
 
     settings.bind(|| {
-        insta::assert_json_snapshot!("get_block", block, {
+        insta::assert_json_snapshot!(format!("get_block_data_{variant}"), block, {
             "." => dynamic_redaction(move |value, _path| {
                 // assert that the block data matches, without creating a 1.5 kB snapshot file
                 assert_eq!(value.as_str().unwrap(), block_data);
