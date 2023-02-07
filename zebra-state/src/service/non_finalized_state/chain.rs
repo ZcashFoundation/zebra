@@ -40,10 +40,15 @@ pub mod index;
 
 #[derive(Debug, Clone)]
 pub struct Chain {
-    // The function `eq_internal_state` must be updated every time a field is added to [`Chain`].
+    // Note: `eq_internal_state()` must be updated every time a field is added to [`Chain`].
+
+    // Config
+    //
     /// The configured network for this chain.
     network: Network,
 
+    // Blocks, heights, hashes, and transaction locations
+    //
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
     pub(crate) blocks: BTreeMap<block::Height, ContextuallyValidBlock>,
 
@@ -53,6 +58,8 @@ pub struct Chain {
     /// An index of [`TransactionLocation`]s for each transaction hash in `blocks`.
     pub tx_loc_by_hash: HashMap<transaction::Hash, TransactionLocation>,
 
+    // Transparent outputs and spends
+    //
     /// The [`transparent::Utxo`]s created by `blocks`.
     ///
     /// Note that these UTXOs may not be unspent.
@@ -64,6 +71,8 @@ pub struct Chain {
     /// including those created by earlier transactions or blocks in the chain.
     pub(crate) spent_utxos: HashSet<transparent::OutPoint>,
 
+    // Note commitment trees
+    //
     /// The Sprout note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
@@ -74,36 +83,47 @@ pub struct Chain {
     /// The Sprout note commitment tree for each height.
     pub(crate) sprout_trees_by_height:
         BTreeMap<block::Height, Arc<sprout::tree::NoteCommitmentTree>>,
+
     /// The Sapling note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
     /// The Sapling note commitment tree for each height.
     pub(crate) sapling_trees_by_height:
         BTreeMap<block::Height, Arc<sapling::tree::NoteCommitmentTree>>,
+
     /// The Orchard note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
     pub(super) orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
     /// The Orchard note commitment tree for each height.
     pub(crate) orchard_trees_by_height:
         BTreeMap<block::Height, Arc<orchard::tree::NoteCommitmentTree>>,
+
+    // History trees
+    //
     /// The ZIP-221 history tree of the tip of this [`Chain`],
     /// including all finalized blocks, and the non-finalized `blocks` in this chain.
     pub(crate) history_tree: Arc<HistoryTree>,
     pub(crate) history_trees_by_height: BTreeMap<block::Height, Arc<HistoryTree>>,
 
+    // Anchors
+    //
     /// The Sprout anchors created by `blocks`.
     pub(crate) sprout_anchors: MultiSet<sprout::tree::Root>,
     /// The Sprout anchors created by each block in `blocks`.
     pub(crate) sprout_anchors_by_height: BTreeMap<block::Height, sprout::tree::Root>,
+
     /// The Sapling anchors created by `blocks`.
     pub(crate) sapling_anchors: MultiSet<sapling::tree::Root>,
     /// The Sapling anchors created by each block in `blocks`.
     pub(crate) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
+
     /// The Orchard anchors created by `blocks`.
     pub(crate) orchard_anchors: MultiSet<orchard::tree::Root>,
     /// The Orchard anchors created by each block in `blocks`.
     pub(crate) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
 
+    // Nullifiers
+    //
     /// The Sprout nullifiers revealed by `blocks`.
     pub(crate) sprout_nullifiers: HashSet<sprout::Nullifier>,
     /// The Sapling nullifiers revealed by `blocks`.
@@ -111,9 +131,14 @@ pub struct Chain {
     /// The Orchard nullifiers revealed by `blocks`.
     pub(crate) orchard_nullifiers: HashSet<orchard::Nullifier>,
 
+    // Transparent Transfers
+    // TODO: move to the transparent section
+    //
     /// Partial transparent address index data from `blocks`.
     pub(super) partial_transparent_transfers: HashMap<transparent::Address, TransparentTransfers>,
 
+    // Chain Work
+    //
     /// The cumulative work represented by `blocks`.
     ///
     /// Since the best chain is determined by the largest cumulative work,
@@ -121,6 +146,8 @@ pub struct Chain {
     /// because they are common to all non-finalized chains.
     pub(super) partial_cumulative_work: PartialCumulativeWork,
 
+    // Chain Pools
+    //
     /// The chain value pool balances of the tip of this [`Chain`],
     /// including the block value pool changes from all finalized blocks,
     /// and the non-finalized blocks in this chain.
