@@ -360,7 +360,12 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
         }
 
         prop_assert_eq!(full_chain.blocks.len(), partial_chain.blocks.len());
-        prop_assert!(full_chain.eq_internal_state(&partial_chain));
+        prop_assert!(
+            full_chain.eq_internal_state(&partial_chain),
+            "\n\
+             full chain:\n{full_chain:#?}\n\n\
+             partial chain:\n{partial_chain:#?}\n",
+        );
     });
 
     Ok(())
@@ -432,7 +437,12 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
         }
 
         prop_assert_eq!(full_chain.blocks.len(), partial_chain.blocks.len());
-        prop_assert!(full_chain.eq_internal_state(&partial_chain));
+        prop_assert!(
+            full_chain.eq_internal_state(&partial_chain),
+            "\n\
+             full chain:\n{full_chain:#?}\n\n\
+             partial chain:\n{partial_chain:#?}\n",
+        );
     });
 
     Ok(())

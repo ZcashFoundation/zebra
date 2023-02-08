@@ -535,12 +535,18 @@ impl Chain {
     /// Returns the Sprout note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
     ///
+    /// If the chain is empty, instead returns the tree of the finalized tip,
+    /// which was supplied in [`Chain::new()`]
+    ///
     /// # Panics
     ///
-    /// If this chain is empty.
+    /// If this chain has no sprout trees. (This should be impossible.)
     pub fn sprout_note_commitment_tree(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
-        self.sprout_tree(self.non_finalized_tip_height().into())
+        self.sprout_trees_by_height
+            .last_key_value()
             .expect("only called while sprout_trees_by_height is populated")
+            .1
+            .clone()
     }
 
     /// Returns the Sprout
@@ -557,6 +563,10 @@ impl Chain {
     }
 
     /// Update the Sprout `tree` and anchor indexes at `height`.
+    ///
+    /// `height` can be either:
+    /// - the height of a new block that has just been added to the chain tip, or
+    /// - the finalized tip height: the height of the parent of the first block of a new chain.
     pub(crate) fn add_sprout_tree_and_anchor(
         &mut self,
         height: Height,
@@ -573,7 +583,7 @@ impl Chain {
         // transaction are the anchor treestates of this block.
         //
         // Use the previously cached root which was calculated in parallel.
-        let sprout_root = self.sprout_note_commitment_tree().root();
+        let sprout_root = tree.root();
         self.sprout_anchors.insert(sprout_root);
         self.sprout_anchors_by_height.insert(height, sprout_root);
         self.sprout_trees_by_anchor.insert(sprout_root, tree);

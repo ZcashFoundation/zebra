@@ -189,11 +189,17 @@ impl NonFinalizedState {
         prepared: PreparedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
+        let finalized_tip_height = finalized_state.finalized_tip_height();
+
+        // TODO: fix tests that don't initialize the finalized state
+        #[cfg(not(test))]
+        let finalized_tip_height = finalized_tip_height.expect("finalized state contains blocks");
+        #[cfg(test)]
+        let finalized_tip_height = finalized_tip_height.unwrap_or(zebra_chain::block::Height(0));
+
         let chain = Chain::new(
             self.network,
-            finalized_state
-                .finalized_tip_height()
-                .expect("finalized state contains blocks"),
+            finalized_tip_height,
             finalized_state.sprout_note_commitment_tree(),
             finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
