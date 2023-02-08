@@ -18,6 +18,7 @@ use zebra_chain::{
     primitives,
     serialization::ZcashDeserializeInto,
     transparent,
+    work::difficulty::{ExpandedDifficulty, U256},
 };
 use zebra_consensus::{
     funding_stream_address, funding_stream_values, height_for_first_halving, miner_subsidy,
@@ -918,6 +919,11 @@ where
         async move {
             let request = ReadRequest::ChainInfo;
 
+            // # TODO
+            // - add a separate request like BestChainNextMedianTimePast, but skipping the
+            //   consistency check, because any block's difficulty is ok for display
+            // - return 1.0 for a "not enough blocks in the state" error, like `zcashd`:
+            // <https://github.com/zcash/zcash/blob/7b28054e8b46eb46a9589d0bdc8e29f9fa1dc82d/src/rpc/blockchain.cpp#L40-L41>
             let response = state
                 .ready()
                 .and_then(|service| service.call(request))
@@ -933,32 +939,46 @@ where
                 _ => unreachable!("unmatched response to a chain info request"),
             };
 
-            // The following code is ported from zcashd implementation.
-            // https://github.com/zcash/zcash/blob/v5.4.0-rc4/src/rpc/blockchain.cpp#L46-L73
+            // This RPC is typically used for display purposes, so it is not consensus-critical.
+            // But it uses the difficulty consensus rules for its calculations.
+            //
+            // Consensus:
+            // https://zips.z.cash/protocol/protocol.pdf#nbits
+            //
+            // The zcashd implementation performs to_expanded() on f64,
+            // and then does an inverse division:
+            // https://github.com/zcash/zcash/blob/d6e2fada844373a8554ee085418e68de4b593a6c/src/rpc/blockchain.cpp#L46-L73
+            //
+            // But in Zebra we divide the high 128 bits of each expanded difficulty. This gives
+            // a similar result, because the lower 128 bits are insignificant after conversion
+            // to `f64` with a 53-bit mantissa.
+            //
+            // `pow_limit >> 128 / difficulty >> 128` is the same as the work calculation
+            // `(2^256 / pow_limit) / (2^256 / difficulty)`, but it's a bit more accurate.
+            //
+            // To simplify the calculation, we don't scale for leading zeroes. (Bitcoin's
+            // difficulty currently uses 68 bits, so even it would still have full precision
+            // using this calculation.)
 
-            let pow_limit = u32::from_be_bytes(
-                zebra_chain::work::difficulty::ExpandedDifficulty::target_difficulty_limit(network)
-                    .to_compact()
-                    .bytes_in_display_order(),
-            );
-            let bits = u32::from_be_bytes(chain_info.expected_difficulty.bytes_in_display_order());
+            // Get expanded difficulties (256 bits), these are the inverse of the work
+            let pow_limit: U256 = ExpandedDifficulty::target_difficulty_limit(network).into();
+            let difficulty: U256 = chain_info
+                .expected_difficulty
+                .to_expanded()
+                .expect("valid blocks have valid difficulties")
+                .into();
 
-            let mut n_shift = (bits >> 24) & 0xff;
-            let n_shift_amount = (pow_limit >> 24) & 0xff;
+            // Shift out the lower 128 bits (256 bits, but the top 128 are all zeroes)
+            let pow_limit = pow_limit >> 128;
+            let difficulty = difficulty >> 128;
 
-            let mut d_diff: f64 = (pow_limit & 0x00ffffff) as f64 / (bits & 0x00ffffff) as f64;
+            // Convert to u128 then f64.
+            // We could also convert U256 to String, then parse as f64, but that's slower.
+            let pow_limit = pow_limit.as_u128() as f64;
+            let difficulty = difficulty.as_u128() as f64;
 
-            while n_shift < n_shift_amount {
-                d_diff *= 256.0;
-                n_shift += 1;
-            }
-
-            while n_shift > n_shift_amount {
-                d_diff /= 256.0;
-                n_shift -= 1;
-            }
-
-            Ok(d_diff)
+            // Invert the division to give approximately: `work(difficulty) / work(pow_limit)`
+            Ok(pow_limit / difficulty)
         }
         .boxed()
     }

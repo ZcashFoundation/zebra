@@ -1457,7 +1457,7 @@ async fn rpc_getdifficulty() {
 
     let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
-    let mut read_state = MockService::build().for_unit_tests();
+    let read_state = MockService::build().for_unit_tests();
     let chain_verifier = MockService::build().for_unit_tests();
 
     let mut mock_sync_status = MockSyncStatus::default();
@@ -1478,7 +1478,6 @@ async fn rpc_getdifficulty() {
     let fake_cur_time = DateTime32::from(1654008617);
     // nu5 block time + 123
     let fake_max_time = DateTime32::from(1654008728);
-    let fake_difficulty = CompactDifficulty::from(ExpandedDifficulty::from(U256::MAX));
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
     mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
@@ -1497,9 +1496,12 @@ async fn rpc_getdifficulty() {
         MockAddressBookPeers::default(),
     );
 
-    // Fake the ChainInfo response
+    // Fake the ChainInfo response: smallest numeric difficulty
+    // (this is invalid on mainnet and testnet under the consensus rules)
+    let fake_difficulty = CompactDifficulty::from(ExpandedDifficulty::from(U256::MAX));
+    let mut read_state1 = read_state.clone();
     let mock_read_state_request_handler = async move {
-        read_state
+        read_state1
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
             .await
             .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
@@ -1516,5 +1518,77 @@ async fn rpc_getdifficulty() {
     let get_difficulty_fut = get_block_template_rpc.get_difficulty();
     let (get_difficulty, ..) = tokio::join!(get_difficulty_fut, mock_read_state_request_handler,);
 
-    assert_eq!(get_difficulty.unwrap(), 0.00012207194233937495);
+    // Our implementation is slightly different to `zcashd`, so we require 6 significant figures
+    // of accuracy in our unit tests. (Most clients will hide more than 2-3.)
+    assert_eq!(format!("{:.9}", get_difficulty.unwrap()), "0.000122072");
+
+    // Fake the ChainInfo response: difficulty limit - smallest valid difficulty
+    let pow_limit = ExpandedDifficulty::target_difficulty_limit(Mainnet);
+    let fake_difficulty = pow_limit.into();
+    let mut read_state2 = read_state.clone();
+    let mock_read_state_request_handler = async move {
+        read_state2
+            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .await
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_difficulty: fake_difficulty,
+                tip_height: fake_tip_height,
+                tip_hash: fake_tip_hash,
+                cur_time: fake_cur_time,
+                min_time: fake_min_time,
+                max_time: fake_max_time,
+                history_tree: fake_history_tree(Mainnet),
+            }));
+    };
+
+    let get_difficulty_fut = get_block_template_rpc.get_difficulty();
+    let (get_difficulty, ..) = tokio::join!(get_difficulty_fut, mock_read_state_request_handler,);
+
+    assert_eq!(format!("{:.5}", get_difficulty.unwrap()), "1.00000");
+
+    // Fake the ChainInfo response: fractional difficulty
+    let fake_difficulty = pow_limit * 2 / 3;
+    let mut read_state3 = read_state.clone();
+    let mock_read_state_request_handler = async move {
+        read_state3
+            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .await
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_difficulty: fake_difficulty.into(),
+                tip_height: fake_tip_height,
+                tip_hash: fake_tip_hash,
+                cur_time: fake_cur_time,
+                min_time: fake_min_time,
+                max_time: fake_max_time,
+                history_tree: fake_history_tree(Mainnet),
+            }));
+    };
+
+    let get_difficulty_fut = get_block_template_rpc.get_difficulty();
+    let (get_difficulty, ..) = tokio::join!(get_difficulty_fut, mock_read_state_request_handler,);
+
+    assert_eq!(format!("{:.5}", get_difficulty.unwrap()), "1.50000");
+
+    // Fake the ChainInfo response: large integer difficulty
+    let fake_difficulty = pow_limit / 4096;
+    let mut read_state4 = read_state.clone();
+    let mock_read_state_request_handler = async move {
+        read_state4
+            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+            .await
+            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                expected_difficulty: fake_difficulty.into(),
+                tip_height: fake_tip_height,
+                tip_hash: fake_tip_hash,
+                cur_time: fake_cur_time,
+                min_time: fake_min_time,
+                max_time: fake_max_time,
+                history_tree: fake_history_tree(Mainnet),
+            }));
+    };
+
+    let get_difficulty_fut = get_block_template_rpc.get_difficulty();
+    let (get_difficulty, ..) = tokio::join!(get_difficulty_fut, mock_read_state_request_handler,);
+
+    assert_eq!(format!("{:.2}", get_difficulty.unwrap()), "4096.00");
 }
