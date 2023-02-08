@@ -1159,6 +1159,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             "hash must be present if block was added to chain"
         );
 
+        // TODO: move this to a Work or block header UpdateWith.revert...()?
         // remove work from partial_cumulative_work
         let block_work = block
             .header
@@ -1167,12 +1168,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             .expect("work has already been validated");
         self.partial_cumulative_work -= block_work;
 
-        // Note: the history tree is not modified in this method.
-        // This method is called on two scenarios:
-        // - When popping the root: the history tree does not change.
-        // - When popping the tip: the history tree is rebuilt in fork().
-        //
-        // However, `history_trees_by_height` is reverted.
+        // TODO: move this to the history tree UpdateWith.revert...()?
         self.history_trees_by_height
             .remove(&height)
             .expect("History tree must be present if block was added to chain");
@@ -1220,6 +1216,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             // reset the utxos this consumed
             self.revert_chain_with(&(inputs, transaction_hash, spent_outputs), position);
 
+            // TODO: move this to the history tree UpdateWith.revert...()?
             // remove `transaction.hash` from `tx_loc_by_hash`
             assert!(
                 self.tx_loc_by_hash.remove(transaction_hash).is_some(),
@@ -1233,6 +1230,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             self.revert_chain_with(orchard_shielded_data, position);
         }
 
+        // TODO: move these to the shielded UpdateWith.revert...()
         let anchor = self
             .sprout_anchors_by_height
             .remove(&height)
