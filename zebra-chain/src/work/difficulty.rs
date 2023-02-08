@@ -37,7 +37,7 @@ mod tests;
 ///     with the block header hash, and
 ///   - calculating the block work.
 ///
-/// Details:
+/// # Consensus
 ///
 /// This is a floating-point encoding, with a 24-bit signed mantissa,
 /// an 8-bit exponent, an offset of 3, and a radix of 256.
@@ -56,6 +56,12 @@ mod tests;
 /// Without these consensus rules, some `ExpandedDifficulty` values would have
 /// multiple equivalent `CompactDifficulty` values, due to redundancy in the
 /// floating-point format.
+///
+/// > Deterministic conversions between a target threshold and a “compact" nBits value
+/// > are not fully defined in the Bitcoin documentation, and so we define them here:
+/// > (see equations in the Zcash Specification [section 7.7.4])
+///
+/// [section 7.7.4]: https://zips.z.cash/protocol/protocol.pdf#nbits
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CompactDifficulty(pub(crate) u32);
 
@@ -66,7 +72,7 @@ pub const INVALID_COMPACT_DIFFICULTY: CompactDifficulty = CompactDifficulty(u32:
 ///
 /// Used as a target threshold for the difficulty of a `block::Hash`.
 ///
-/// Details:
+/// # Consensus
 ///
 /// The precise bit pattern of an `ExpandedDifficulty` value is
 /// consensus-critical, because it is compared with the `block::Hash`.
@@ -82,6 +88,15 @@ pub const INVALID_COMPACT_DIFFICULTY: CompactDifficulty = CompactDifficulty(u32:
 /// Callers should avoid constructing `ExpandedDifficulty` zero
 /// values, because they are rejected by the consensus rules,
 /// and cause some conversion functions to panic.
+///
+/// > The difficulty filter is unchanged from Bitcoin, and is calculated using SHA-256d on the
+/// > whole block header (including solutionSize and solution). The result is interpreted as a
+/// > 256-bit integer represented in little-endian byte order, which MUST be less than or equal
+/// > to the target threshold given by ToTarget(nBits).
+///
+/// Zcash Specification [section 7.7.2].
+///
+/// [section 7.7.2]: https://zips.z.cash/protocol/protocol.pdf#difficulty
 //
 // TODO: Use NonZeroU256, when available
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
@@ -91,7 +106,7 @@ pub struct ExpandedDifficulty(U256);
 ///
 /// Used to calculate the total work for each chain of blocks.
 ///
-/// Details:
+/// # Consensus
 ///
 /// The relative value of `Work` is consensus-critical, because it is used to
 /// choose the best chain. But its precise value and bit pattern are not
@@ -102,6 +117,14 @@ pub struct ExpandedDifficulty(U256);
 /// work to ever exceed 2^128. The current total chain work for Zcash is 2^58,
 /// and Bitcoin adds around 2^91 work per year. (Each extra bit represents twice
 /// as much work.)
+///
+/// > a node chooses the “best” block chain visible to it by finding the chain of valid blocks
+/// > with the greatest total work. The work of a block with value nBits for the nBits field in
+/// > its block header is defined as `floor(2^256 / (ToTarget(nBits) + 1))`.
+///
+/// Zcash Specification [section 7.7.5].
+///
+/// [section 7.7.5]: https://zips.z.cash/protocol/protocol.pdf#workdef
 #[derive(Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Work(u128);
 
@@ -148,7 +171,8 @@ impl CompactDifficulty {
     /// Calculate the ExpandedDifficulty for a compact representation.
     ///
     /// See `ToTarget()` in the Zcash Specification, and `CheckProofOfWork()` in
-    /// zcashd.
+    /// zcashd:
+    /// <https://zips.z.cash/protocol/protocol.pdf#nbits>
     ///
     /// Returns None for negative, zero, and overflow values. (zcashd rejects
     /// these values, before comparing the hash.)
@@ -315,6 +339,10 @@ impl TryFrom<ExpandedDifficulty> for Work {
     type Error = ();
 
     fn try_from(expanded: ExpandedDifficulty) -> Result<Self, Self::Error> {
+        // Consensus:
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#workdef>
+        //
         // We need to compute `2^256 / (expanded + 1)`, but we can't represent
         // 2^256, as it's too large for a u256. However, as 2^256 is at least as
         // large as `expanded + 1`, it is equal to
@@ -352,7 +380,10 @@ impl ExpandedDifficulty {
 
     /// Returns the easiest target difficulty allowed on `network`.
     ///
-    /// See `PoWLimit` in the Zcash specification.
+    /// # Consensus
+    ///
+    /// See `PoWLimit` in the Zcash specification:
+    /// <https://zips.z.cash/protocol/protocol.pdf#constants>
     pub fn target_difficulty_limit(network: Network) -> ExpandedDifficulty {
         let limit: U256 = match network {
             /* 2^243 - 1 */
@@ -375,10 +406,13 @@ impl ExpandedDifficulty {
 
     /// Calculate the CompactDifficulty for an expanded difficulty.
     ///
-    /// See `ToCompact()` in the Zcash Specification, and `GetCompact()`
-    /// in zcashd.
+    /// # Consensus
     ///
-    /// Panics:
+    /// See `ToCompact()` in the Zcash Specification, and `GetCompact()`
+    /// in zcashd:
+    /// <https://zips.z.cash/protocol/protocol.pdf#nbits>
+    ///
+    /// # Panics
     ///
     /// If `self` is zero.
     ///
@@ -561,11 +595,15 @@ impl PartialEq<block::Hash> for ExpandedDifficulty {
 }
 
 impl PartialOrd<block::Hash> for ExpandedDifficulty {
+    /// # Consensus
+    ///
     /// `block::Hash`es are compared with `ExpandedDifficulty` thresholds by
     /// converting the hash to a 256-bit integer in little-endian order.
     ///
     /// Greater values represent *less* work. This matches the convention in
     /// zcashd and bitcoin.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#workdef>
     fn partial_cmp(&self, other: &block::Hash) -> Option<Ordering> {
         self.partial_cmp(&ExpandedDifficulty::from_hash(other))
     }
@@ -583,6 +621,8 @@ impl PartialEq<ExpandedDifficulty> for block::Hash {
 
 impl PartialOrd<ExpandedDifficulty> for block::Hash {
     /// How does `self` compare to `other`?
+    ///
+    /// # Consensus
     ///
     /// See `<ExpandedDifficulty as PartialOrd<block::Hash>::partial_cmp`
     /// for details.
@@ -606,8 +646,17 @@ impl std::ops::Add for Work {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 /// Partial work used to track relative work in non-finalized chains
+///
+/// # Consensus
+///
+/// Use to choose the best chain with the most work.
+///
+/// Since it is only relative values that matter, Zebra uses the partial work from a shared
+/// fork root block to find the best chain.
+///
+/// See [`Work`] for details.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PartialCumulativeWork(u128);
 
 impl PartialCumulativeWork {
