@@ -2,25 +2,25 @@
 
 This is a list of production Rust code that is in scope and out of scope for Zebra's first audit.
 
-Test code, deployment configurations, and other configuration files in the `zebra` repository are out of scope.
+Test code, deployment configurations, and other configuration files in the `zebra` repository are out of scope. Due to the way we've created the `audit-v1.0.0-rc.0` tag, tests might not compile, run, or pass.
 
 ---
 ## Full Audit 
 
-### Crates
+### Zebra Crates
 
 | Name | Version | Notes
 |------| ------- | -----
-| tower-batch | [0.2.32](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/tower-batch/src) |
-| tower-fallback | [0.2.32](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/tower-fallback/src) | 
-| zebra-chain | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-chain/src) |
-| zebra-consensus | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-consensus/src) |
-| zebra-network | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-network/src) |
-| zebra-node-services | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-node-services/src) |
-| zebra-rpc | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-rpc/src) |
-| zebra-script | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-script/src) |
-| zebra-state | [1.0.0-beta.17](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-state/src) |
-| zebrad | [1.0.0-rc.1](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebrad/src) |
+| tower-batch | [audit-v1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/audit-v1.0.0-rc.0/tower-batch/src) |
+| tower-fallback | [audit-v1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/audit-v1.0.0-rc.0/tower-fallback/src) | 
+| zebra-chain | [audit-v1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/audit-v1.0.0-rc.0/zebra-chain/src) |
+| zebra-consensus | [audit-v1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/audit-v1.0.0-rc.0/zebra-consensus/src) |
+| zebra-network | [audit-v1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/audit-v1.0.0-rc.0/zebra-network/src) |
+| zebra-node-services | [audit-v1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/audit-v1.0.0-rc.0/zebra-node-services/src) |
+| zebra-rpc | [audit-v1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/audit-v1.0.0-rc.0/zebra-rpc/src) |
+| zebra-script | [audit-v1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/audit-v1.0.0-rc.0/zebra-script/src) |
+| zebra-state | [audit-v1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/audit-v1.0.0-rc.0/zebra-state/src) |
+| zebrad | [audit-v1.0.0-rc.0](https://github.com/ZcashFoundation/zebra/tree/audit-v1.0.0-rc.0/zebrad/src) |
 
 ### Zcash/ZF dependencies
 
@@ -31,11 +31,11 @@ Test code, deployment configurations, and other configuration files in the `zebr
 ---
 ## Partial Audit 
 
-### Crates
+### Zebra Crates
 
 | Name | Version | Notes
 |------| ------- | -----
-| zebra-utils | 1.0.0-beta.17 | <i>Only the [zebra-checkpoints](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/zebra-utils/src/bin/zebra-checkpoints) utility needs to be audited.</i>
+| zebra-utils | audit-v1.0.0-rc.0 | <i>Only the [zebra-checkpoints](https://github.com/ZcashFoundation/zebra/tree/audit-v1.0.0-rc.0/zebra-utils/src/bin/zebra-checkpoints) utility needs to be audited.</i>
 
 ### Zcash/ZF dependencies
 
@@ -43,6 +43,20 @@ Test code, deployment configurations, and other configuration files in the `zebr
 |------| --------|-------- | -----
 | zcash_proofs | 0.8.0 | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) | <i>Most of `zcash_proofs` got audited as part of the ECC audit, so we only need to audit the proof parameter download code in: <br />- [downloadreader.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/downloadreader.rs), <br />- [hashreader.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/hashreader.rs), and <br />- [lib.rs](https://github.com/zcash/librustzcash/blob/zcash_proofs-0.8.0/zcash_proofs/src/lib.rs).</i>
 | zcash_script | 0.1.8 || <i>The C++ parts of `zcashd` got audited as part of the ECC audit, so we only need to audit: <br />- [zcash_script.cpp](https://github.com/ZcashFoundation/zcash_script/blob/v0.1.8/depend/zcash/src/script/zcash_script.cpp), <br />- [zcash_script.h](https://github.com/ZcashFoundation/zcash_script/blob/v0.1.8/depend/zcash/src/script/zcash_script.h), and <br />- [the rust code in the zcash_script crate](https://github.com/ZcashFoundation/zcash_script/tree/v0.1.8/src).</i>
+| redjubjub | [0.5.0](https://github.com/ZcashFoundation/redjubjub/tree/0.5.0/src) | [jp](https://github.com/ZcashFoundation/redjubjub/raw/main/zcash-frost-audit-report-20210323.pdf) <i>(FROST only)</i> | <i>All files should be audited EXCEPT:<br />- the [signing code](https://github.com/ZcashFoundation/redjubjub/blob/0.5.0/src/signing_key.rs)<br /> - the [FROST code](https://github.com/ZcashFoundation/redjubjub/blob/0.5.0/src/frost.rs), and<br />- the FROST messages [module](https://github.com/ZcashFoundation/redjubjub/blob/0.5.0/src/messages.rs) and [directory](https://github.com/ZcashFoundation/redjubjub/blob/0.5.0/src/messages)</i>
+| reddsa | [0.4.0](https://github.com/ZcashFoundation/reddsa/tree/0.4.0/src) | [jp](https://github.com/ZcashFoundation/redjubjub/raw/main/zcash-frost-audit-report-20210323.pdf) <i>(FROST only)</i> | <i>This code was moved from `zebra/zebra-chain/src/primitives/redpallas` into a separate crate after the Zebra `v1.0.0-rc.0` release. A previous version of this code was audited as the `redjubjub` crate.<br />All files should be audited EXCEPT:<br />- the [signing code](https://github.com/ZcashFoundation/reddsa/blob/0.4.0/src/signing_key.rs), and<br />- the [Sapling code](https://github.com/ZcashFoundation/reddsa/blob/0.4.0/src/sapling.rs)</i>
+
+Note: there are duplicate `zcash_primitives`, `zcash_proofs`, and `reddsa` dependencies in Zebra's audit and development branches, [this will get fixed](https://github.com/ZcashFoundation/zebra/issues/6107) after the `zcashd` 5.4.0 release.
+
+---
+## Not Included
+
+The changes in these PRs are out of scope for the audit. When the Zebra team checks for bugs that have already been fixed, we can check these PRs, and any changes after commit [c4032e2b](https://github.com/ZcashFoundation/zebra/commit/c4032e2b7f6dbee8a9480d3c978c70a3cfc3332c).
+
+The following consensus, security, and functional changes are in Zebra's development branch, but they are not included in the `audit-v1.0.0-rc.0` tag, because they caused too many merge conflicts:
+- [fix(sync): Pause new downloads when Zebra reaches the lookahead limit #5561](https://github.com/ZcashFoundation/zebra/pull/5561)
+- [fix(rpc): Shut down the RPC server properly when Zebra shuts down #5591](https://github.com/ZcashFoundation/zebra/pull/5591)
+- [refactor(state): Make implementation of block consensus rules clearer #5915](https://github.com/ZcashFoundation/zebra/pull/5915)
 
 ---
 ## Out of Scope
@@ -51,7 +65,7 @@ The following list of dependencies is out of scope for the audit.
 
 Please ignore the dependency versions in these tables, some of them are are outdated. All versions of these dependencies are out of scope.
 
-The latest versions of Zebra's dependencies are in [`Cargo.lock`](https://github.com/ZcashFoundation/zebra/tree/v1.0.0-rc.1/Cargo.lock), including transitive dependencies. They can be viewed using `cargo tree`.
+The latest versions of Zebra's dependencies are in [`Cargo.lock`](https://github.com/ZcashFoundation/zebra/tree/audit-v1.0.0-rc.0/Cargo.lock), including transitive dependencies. They can be viewed using `cargo tree`.
 
 Click the triangle for details:
 <details>
@@ -67,7 +81,6 @@ Click the triangle for details:
 | [zcash_history](https://github.com/zcash/librustzcash) | 0.3.0 | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) |
 | [zcash_note_encryption](https://github.com/zcash/librustzcash) | [0.1.0](https://github.com/zcash/librustzcash/releases/tag/0.1.0) | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) |
 | [zcash_primitives](https://github.com/zcash/librustzcash) | 0.7.0 | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) |
-| [redjubjub](https://github.com/ZcashFoundation/redjubjub) | [0.5.0](https://github.com/ZcashFoundation/redjubjub/releases/tag/0.5.0) | [jp](https://github.com/ZcashFoundation/redjubjub/raw/main/zcash-frost-audit-report-20210323.pdf) |
 | [orchard](https://github.com/zcash/orchard) | [0.2.0](https://github.com/zcash/orchard/releases/tag/0.2.0) | [qedit](https://hackmd.io/@qedit/zcash-nu5-audit) |
 
 ### Cryptography dependencies
