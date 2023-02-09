@@ -11,7 +11,6 @@ use std::{
 use zebra_chain::{
     block::{self, Block},
     history_tree::HistoryTree,
-    orchard,
     parameters::Network,
     sprout, transparent,
 };
@@ -157,11 +156,7 @@ impl NonFinalizedState {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
-        let parent_chain = self.parent_chain(
-            parent_hash,
-            finalized_state.orchard_note_commitment_tree(),
-            finalized_state.history_tree(),
-        )?;
+        let parent_chain = self.parent_chain(parent_hash, finalized_state.history_tree())?;
 
         // If the block is invalid, return the error,
         // and drop the cloned parent Arc, or newly created chain fork.
@@ -453,7 +448,10 @@ impl NonFinalizedState {
 
     /// Returns `true` if the best chain contains `orchard_nullifier`.
     #[cfg(test)]
-    pub fn best_contains_orchard_nullifier(&self, orchard_nullifier: &orchard::Nullifier) -> bool {
+    pub fn best_contains_orchard_nullifier(
+        &self,
+        orchard_nullifier: &zebra_chain::orchard::Nullifier,
+    ) -> bool {
         self.best_chain()
             .map(|best_chain| best_chain.orchard_nullifiers.contains(orchard_nullifier))
             .unwrap_or(false)
@@ -472,7 +470,6 @@ impl NonFinalizedState {
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,
-        orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
         history_tree: Arc<HistoryTree>,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         match self.find_chain(|chain| chain.non_finalized_tip_hash() == parent_hash) {
@@ -485,15 +482,7 @@ impl NonFinalizedState {
                 let fork_chain = self
                     .chain_set
                     .iter()
-                    .find_map(|chain| {
-                        chain
-                            .fork(
-                                parent_hash,
-                                orchard_note_commitment_tree.clone(),
-                                history_tree.clone(),
-                            )
-                            .transpose()
-                    })
+                    .find_map(|chain| chain.fork(parent_hash, history_tree.clone()).transpose())
                     .transpose()?
                     .ok_or(ValidateContextError::NotReadyToBeCommitted)?;
 
