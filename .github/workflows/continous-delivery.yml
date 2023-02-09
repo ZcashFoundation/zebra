@@ -151,7 +151,7 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.1
+        uses: google-github-actions/setup-gcloud@v1.1.0
 
       # TODO we should implement the fixes from https://github.com/ZcashFoundation/zebra/pull/5670 here
       # but the implementation is failing as it's requiring the disk names, contrary to what is stated in the official documentation
@@ -234,7 +234,7 @@ jobs:
           service_account: 'github-service-account@zealous-zebra.iam.gserviceaccount.com'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1.0.1
+        uses: google-github-actions/setup-gcloud@v1.1.0
 
       # Create instance template from container image
       - name: Manual deploy of a single instance running zebrad
