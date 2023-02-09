@@ -1639,11 +1639,9 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
         _position: RevertPosition,
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
-            // Note commitments are not removed from the Chain during a fork,
-            // because we don't support that operation yet. Instead, we
-            // recreate the tree from the finalized tip in Chain::fork().
-            //
-            // TODO: remove trees and anchors above the fork, to save CPU time (#4794)
+            // Note commitments are removed from the Chain during a fork,
+            // by removing trees above the fork height from the note commitment index.
+            // This happens when reverting the block itself.
 
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.sprout_nullifiers,
@@ -1685,11 +1683,9 @@ where
         _position: RevertPosition,
     ) {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
-            // Note commitments are not removed from the Chain during a fork,
-            // because we don't support that operation yet. Instead, we
-            // recreate the tree from the finalized tip in Chain::fork().
-            //
-            // TODO: remove trees and anchors above the fork, to save CPU time (#4794)
+            // Note commitments are removed from the Chain during a fork,
+            // by removing trees above the fork height from the note commitment index.
+            // This happens when reverting the block itself.
 
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.sapling_nullifiers,
@@ -1728,11 +1724,9 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
         _position: RevertPosition,
     ) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
-            // Note commitments are not removed from the Chain during a fork,
-            // because we don't support that operation yet. Instead, we
-            // recreate the tree from the finalized tip in Chain::fork().
-            //
-            // TODO: remove trees and anchors above the fork, to save CPU time (#4794)
+            // Note commitments are removed from the Chain during a fork,
+            // by removing trees above the fork height from the note commitment index.
+            // This happens when reverting the block itself.
 
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.orchard_nullifiers,
