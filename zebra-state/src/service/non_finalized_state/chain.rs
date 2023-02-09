@@ -477,22 +477,24 @@ impl Chain {
 
         // TODO: fix test code that incorrectly overwrites trees
         #[cfg(not(test))]
-        assert_eq!(
-            self.sprout_trees_by_height.insert(height, tree.clone()),
-            None,
-            "incorrect overwrite of sprout tree: trees must be reverted then inserted",
-        );
-        #[cfg(not(test))]
-        assert_eq!(
-            self.sprout_anchors_by_height.insert(height, anchor),
-            None,
-            "incorrect overwrite of sprout anchor: anchors must be reverted then inserted",
-        );
+        {
+            assert_eq!(
+                self.sprout_trees_by_height.insert(height, tree.clone()),
+                None,
+                "incorrect overwrite of sprout tree: trees must be reverted then inserted",
+            );
+            assert_eq!(
+                self.sprout_anchors_by_height.insert(height, anchor),
+                None,
+                "incorrect overwrite of sprout anchor: anchors must be reverted then inserted",
+            );
+        }
 
         #[cfg(test)]
-        self.sprout_trees_by_height.insert(height, tree.clone());
-        #[cfg(test)]
-        self.sprout_anchors_by_height.insert(height, anchor);
+        {
+            self.sprout_trees_by_height.insert(height, tree.clone());
+            self.sprout_anchors_by_height.insert(height, anchor);
+        }
 
         // Multiple inserts are expected here,
         // because the anchors only change if a block has shielded transactions.
@@ -587,22 +589,24 @@ impl Chain {
 
         // TODO: fix test code that incorrectly overwrites trees
         #[cfg(not(test))]
-        assert_eq!(
-            self.sapling_trees_by_height.insert(height, tree),
-            None,
-            "incorrect overwrite of sapling tree: trees must be reverted then inserted",
-        );
-        #[cfg(not(test))]
-        assert_eq!(
-            self.sapling_anchors_by_height.insert(height, anchor),
-            None,
-            "incorrect overwrite of sapling anchor: anchors must be reverted then inserted",
-        );
+        {
+            assert_eq!(
+                self.sapling_trees_by_height.insert(height, tree),
+                None,
+                "incorrect overwrite of sapling tree: trees must be reverted then inserted",
+            );
+            assert_eq!(
+                self.sapling_anchors_by_height.insert(height, anchor),
+                None,
+                "incorrect overwrite of sapling anchor: anchors must be reverted then inserted",
+            );
+        }
 
         #[cfg(test)]
-        self.sapling_trees_by_height.insert(height, tree);
-        #[cfg(test)]
-        self.sapling_anchors_by_height.insert(height, anchor);
+        {
+            self.sapling_trees_by_height.insert(height, tree);
+            self.sapling_anchors_by_height.insert(height, anchor);
+        }
 
         // Multiple inserts are expected here,
         // because the anchors only change if a block has shielded transactions.
@@ -699,22 +703,24 @@ impl Chain {
 
         // TODO: fix test code that incorrectly overwrites trees
         #[cfg(not(test))]
-        assert_eq!(
-            self.orchard_trees_by_height.insert(height, tree),
-            None,
-            "incorrect overwrite of orchard tree: trees must be reverted then inserted",
-        );
-        #[cfg(not(test))]
-        assert_eq!(
-            self.orchard_anchors_by_height.insert(height, anchor),
-            None,
-            "incorrect overwrite of orchard anchor: anchors must be reverted then inserted",
-        );
+        {
+            assert_eq!(
+                self.orchard_trees_by_height.insert(height, tree),
+                None,
+                "incorrect overwrite of orchard tree: trees must be reverted then inserted",
+            );
+            assert_eq!(
+                self.orchard_anchors_by_height.insert(height, anchor),
+                None,
+                "incorrect overwrite of orchard anchor: anchors must be reverted then inserted",
+            );
+        }
 
         #[cfg(test)]
-        self.orchard_trees_by_height.insert(height, tree);
-        #[cfg(test)]
-        self.orchard_anchors_by_height.insert(height, anchor);
+        {
+            self.orchard_trees_by_height.insert(height, tree);
+            self.orchard_anchors_by_height.insert(height, anchor);
+        }
 
         // Multiple inserts are expected here,
         // because the anchors only change if a block has shielded transactions.
