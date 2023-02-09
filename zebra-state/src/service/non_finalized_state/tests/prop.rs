@@ -167,7 +167,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
             Default::default(),
             Default::default(),
             Default::default(),
-            empty_tree.clone(),
+            empty_tree,
             ValueBalance::zero(),
         );
         for block in chain.iter().cloned() {
@@ -202,10 +202,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
 
         // Fork the chain.
         let mut forked = full_chain
-            .fork(
-                fork_tip_hash,
-                empty_tree,
-            )
+            .fork(fork_tip_hash)
             .expect("fork works")
             .expect("hash is present");
 
@@ -255,7 +252,7 @@ fn forked_equals_pushed_history_tree() -> Result<()> {
         let fork_tip_hash = chain[fork_at_count - 1].hash;
 
         let mut full_chain = Chain::new(network, Height(0), Default::default(), Default::default(), Default::default(), finalized_tree.clone(), ValueBalance::zero());
-        let mut partial_chain = Chain::new(network, Height(0), Default::default(), Default::default(), Default::default(), finalized_tree.clone(), ValueBalance::zero());
+        let mut partial_chain = Chain::new(network, Height(0), Default::default(), Default::default(), Default::default(), finalized_tree, ValueBalance::zero());
 
         for block in chain
             .iter()
@@ -271,10 +268,7 @@ fn forked_equals_pushed_history_tree() -> Result<()> {
             }
 
         let mut forked = full_chain
-            .fork(
-                fork_tip_hash,
-                finalized_tree,
-            )
+            .fork(fork_tip_hash)
             .expect("fork works")
             .expect("hash is present");
 
@@ -337,7 +331,7 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
             full_chain.sprout_note_commitment_tree(),
             full_chain.sapling_note_commitment_tree(),
             full_chain.orchard_note_commitment_tree(),
-            full_chain.history_tree.clone(),
+            full_chain.history_tree_at_tip(),
             full_chain.chain_value_pools,
         );
         for block in chain
@@ -417,7 +411,7 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
             full_chain.sprout_note_commitment_tree(),
             full_chain.sapling_note_commitment_tree(),
             full_chain.orchard_note_commitment_tree(),
-            full_chain.history_tree.clone(),
+            full_chain.history_tree_at_tip(),
             full_chain.chain_value_pools,
         );
 
@@ -633,7 +627,6 @@ fn different_blocks_different_chains() -> Result<()> {
                 chain1.orchard_trees_by_height = chain2.orchard_trees_by_height.clone();
 
                 // history trees
-                chain1.history_tree = chain2.history_tree.clone();
                 chain1.history_trees_by_height = chain2.history_trees_by_height.clone();
 
                 // anchors

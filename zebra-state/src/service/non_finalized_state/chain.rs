@@ -6,7 +6,6 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     ops::{Deref, RangeInclusive},
     sync::Arc,
-    time::Instant,
 };
 
 use mset::MultiSet;
@@ -15,7 +14,6 @@ use tracing::instrument;
 use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Height},
-    fmt::humantime_milliseconds,
     history_tree::HistoryTree,
     orchard,
     parallel::tree::NoteCommitmentTrees,
@@ -103,9 +101,6 @@ pub struct Chain {
 
     // History trees
     //
-    /// The ZIP-221 history tree of the tip of this [`Chain`],
-    /// including all finalized blocks, and the non-finalized `blocks` in this chain.
-    pub(crate) history_tree: Arc<HistoryTree>,
     /// The ZIP-221 history tree for each height, including all finalized blocks,
     /// and the non-finalized `blocks` below that height in this chain.
     ///
@@ -216,7 +211,6 @@ impl Chain {
             orchard_nullifiers: Default::default(),
             partial_transparent_transfers: Default::default(),
             partial_cumulative_work: Default::default(),
-            history_tree,
             history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
         };
@@ -224,6 +218,7 @@ impl Chain {
         chain.add_sprout_tree_and_anchor(finalized_tip_height, sprout_note_commitment_tree);
         chain.add_sapling_tree_and_anchor(finalized_tip_height, sapling_note_commitment_tree);
         chain.add_orchard_tree_and_anchor(finalized_tip_height, orchard_note_commitment_tree);
+        chain.add_history_tree(finalized_tip_height, history_tree);
 
         chain
     }
@@ -256,7 +251,6 @@ impl Chain {
             self.orchard_trees_by_height == other.orchard_trees_by_height &&
 
             // history trees
-            self.history_tree == other.history_tree &&
             self.history_trees_by_height == other.history_trees_by_height &&
 
             // anchors
@@ -337,134 +331,19 @@ impl Chain {
     ///
     /// If forking the chain fails, returns `Err(_)`.
     #[allow(clippy::unwrap_in_result)]
-    pub fn fork(
-        &self,
-        fork_tip: block::Hash,
-        history_tree: Arc<HistoryTree>,
-    ) -> Result<Option<Self>, ValidateContextError> {
+    pub fn fork(&self, fork_tip: block::Hash) -> Result<Option<Self>, ValidateContextError> {
         if !self.height_by_hash.contains_key(&fork_tip) {
             return Ok(None);
         }
 
-        let mut forked = self.with_trees(history_tree);
+        let mut forked = self.clone();
 
         // Revert blocks above the fork
         while forked.non_finalized_tip_hash() != fork_tip {
             forked.pop_tip();
         }
 
-        // Rebuild trees from the finalized tip, because we haven't implemented reverts yet.
-        forked.rebuild_trees_parallel()?;
-
         Ok(Some(forked))
-    }
-
-    /// Rebuild the note commitment and history trees after a chain fork,
-    /// starting from the finalized tip trees, using parallel `rayon` threads.
-    ///
-    /// Note commitments and history trees are not removed from the Chain during a fork,
-    /// because we don't support that operation yet. Instead, we recreate the tree
-    /// from the finalized tip.
-    ///
-    /// TODO: remove trees and anchors above the fork, to save CPU time (#4794)
-    #[allow(clippy::unwrap_in_result)]
-    pub fn rebuild_trees_parallel(&mut self) -> Result<(), ValidateContextError> {
-        let start_time = Instant::now();
-        let rebuilt_block_count = self.blocks.len();
-        let fork_height = self.non_finalized_tip_height();
-        let fork_tip = self.non_finalized_tip_hash();
-
-        info!(
-            ?rebuilt_block_count,
-            ?fork_height,
-            ?fork_tip,
-            "starting to rebuild note commitment trees after a non-finalized chain fork",
-        );
-
-        // Prepare data for parallel execution
-        let block_list = self
-            .blocks
-            .iter()
-            .map(|(height, block)| (*height, block.block.clone()))
-            .collect();
-
-        let mut nct = NoteCommitmentTrees {
-            sprout: self
-                .sprout_tree(fork_height.into())
-                .expect("already checked chain contains fork height"),
-            sapling: self
-                .sapling_tree(fork_height.into())
-                .expect("already checked chain contains fork height"),
-            orchard: self
-                .orchard_tree(fork_height.into())
-                .expect("already checked chain contains fork height"),
-        };
-
-        let mut note_result = None;
-        let mut history_result = None;
-
-        // Run 4 tasks in parallel:
-        // - sprout, sapling, and orchard tree updates and (redundant) root calculations
-        // - history tree updates
-        rayon::in_place_scope_fifo(|scope| {
-            // Spawns a separate rayon task for each note commitment tree.
-            //
-            // TODO: skip the unused root calculations? (redundant after #4794)
-            note_result = Some(nct.update_trees_parallel_list(block_list));
-
-            scope.spawn_fifo(|_scope| {
-                history_result = Some(self.rebuild_history_tree());
-            });
-        });
-
-        note_result.expect("scope has already finished")?;
-        history_result.expect("scope has already finished")?;
-
-        let rebuild_time = start_time.elapsed();
-        let rebuild_time_per_block =
-            rebuild_time / rebuilt_block_count.try_into().expect("fits in u32");
-        info!(
-            rebuild_time = ?humantime_milliseconds(rebuild_time),
-            rebuild_time_per_block = ?humantime_milliseconds(rebuild_time_per_block),
-            ?rebuilt_block_count,
-            ?fork_height,
-            ?fork_tip,
-            "finished rebuilding note commitment trees after a non-finalized chain fork",
-        );
-
-        Ok(())
-    }
-
-    /// Rebuild the history tree after a chain fork.
-    ///
-    /// TODO: remove trees and anchors above the fork, to save CPU time (#4794)
-    #[allow(clippy::unwrap_in_result)]
-    pub fn rebuild_history_tree(&mut self) -> Result<(), ValidateContextError> {
-        for block in self.blocks.values() {
-            // Note that anchors don't need to be recreated since they are already
-            // handled in revert_chain_state_with.
-            let sapling_root = self
-                .sapling_anchors_by_height
-                .get(&block.height)
-                .expect("Sapling anchors must exist for pre-fork blocks");
-
-            let orchard_root = self
-                .orchard_anchors_by_height
-                .get(&block.height)
-                .expect("Orchard anchors must exist for pre-fork blocks");
-
-            let history_tree_mut = Arc::make_mut(&mut self.history_tree);
-            history_tree_mut
-                .push(
-                    self.network,
-                    block.block.clone(),
-                    *sapling_root,
-                    *orchard_root,
-                )
-                .map_err(Arc::new)?;
-        }
-
-        Ok(())
     }
 
     /// Returns the [`Network`] for this chain.
@@ -591,9 +470,6 @@ impl Chain {
         height: Height,
         tree: Arc<sprout::tree::NoteCommitmentTree>,
     ) {
-        // TODO:
-        // - should this be an UpdateWith impl?
-
         // Having updated all the note commitment trees and nullifier sets in
         // this block, the roots of the note commitment trees as of the last
         // transaction are the anchor treestates of this block.
@@ -634,9 +510,6 @@ impl Chain {
     /// - a root block: all trees and anchors below that height are removed,
     ///   including temporary finalized tip trees.
     fn remove_sprout_tree_and_anchor(&mut self, position: RevertPosition, height: Height) {
-        // TODO:
-        // - should this be an UpdateWith impl?
-
         let removed_heights: Vec<Height> = if position == RevertPosition::Root {
             // Remove all trees and anchors at or below the removed block.
             // This makes sure the temporary trees from finalized tip forks are removed.
@@ -712,14 +585,6 @@ impl Chain {
         height: Height,
         tree: Arc<sapling::tree::NoteCommitmentTree>,
     ) {
-        // TODO:
-        // - should this be an UpdateWith impl?
-
-        // Having updated all the note commitment trees and nullifier sets in
-        // this block, the roots of the note commitment trees as of the last
-        // transaction are the anchor treestates of this block.
-        //
-        // Use the previously cached root which was calculated in parallel.
         let anchor = tree.root();
         trace!(?height, ?anchor, "adding sapling tree");
 
@@ -754,9 +619,6 @@ impl Chain {
     /// - a root block: all trees and anchors below that height are removed,
     ///   including temporary finalized tip trees.
     fn remove_sapling_tree_and_anchor(&mut self, position: RevertPosition, height: Height) {
-        // TODO:
-        // - should this be an UpdateWith impl?
-
         let removed_heights: Vec<Height> = if position == RevertPosition::Root {
             // Remove all trees and anchors at or below the removed block.
             // This makes sure the temporary trees from finalized tip forks are removed.
@@ -830,9 +692,6 @@ impl Chain {
         height: Height,
         tree: Arc<orchard::tree::NoteCommitmentTree>,
     ) {
-        // TODO:
-        // - should this be an UpdateWith impl?
-
         // Having updated all the note commitment trees and nullifier sets in
         // this block, the roots of the note commitment trees as of the last
         // transaction are the anchor treestates of this block.
@@ -872,9 +731,6 @@ impl Chain {
     /// - a root block: all trees and anchors below that height are removed,
     ///   including temporary finalized tip trees.
     fn remove_orchard_tree_and_anchor(&mut self, position: RevertPosition, height: Height) {
-        // TODO:
-        // - should this be an UpdateWith impl?
-
         let removed_heights: Vec<Height> = if position == RevertPosition::Root {
             // Remove all trees and anchors at or below the removed block.
             // This makes sure the temporary trees from finalized tip forks are removed.
@@ -908,6 +764,23 @@ impl Chain {
         }
     }
 
+    /// Returns the History tree of the tip of this [`Chain`],
+    /// including all finalized blocks, and the non-finalized blocks below the chain tip.
+    ///
+    /// If the chain is empty, instead returns the tree of the finalized tip,
+    /// which was supplied in [`Chain::new()`]
+    ///
+    /// # Panics
+    ///
+    /// If this chain has no history trees. (This should be impossible.)
+    pub fn history_tree_at_tip(&self) -> Arc<HistoryTree> {
+        self.history_trees_by_height
+            .last_key_value()
+            .expect("only called while history_trees_by_height is populated")
+            .1
+            .clone()
+    }
+
     /// Returns the [`HistoryTree`] specified by a [`HashOrHeight`], if it
     /// exists in the non-finalized [`Chain`].
     pub fn history_tree(&self, hash_or_height: HashOrHeight) -> Option<Arc<HistoryTree>> {
@@ -915,6 +788,51 @@ impl Chain {
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
         self.history_trees_by_height.get(&height).cloned()
+    }
+
+    /// Add the History `tree` to the history tree index at `height`.
+    ///
+    /// `height` can be either:
+    /// - the height of a new block that has just been added to the chain tip, or
+    /// - the finalized tip height: the height of the parent of the first block of a new chain.
+    fn add_history_tree(&mut self, height: Height, tree: Arc<HistoryTree>) {
+        // The history tree commits to all the blocks before this block.
+        //
+        // Use the previously cached root which was calculated in parallel.
+        trace!(?height, "adding history tree");
+
+        // TODO: fix test code that incorrectly overwrites trees
+        #[cfg(not(test))]
+        assert_eq!(
+            self.history_trees_by_height.insert(height, tree),
+            None,
+            "incorrect overwrite of history tree: trees must be reverted then inserted",
+        );
+
+        #[cfg(test)]
+        self.history_trees_by_height.insert(height, tree);
+    }
+
+    /// Remove the History tree index at `height`.
+    ///
+    /// `height` can be at two different [`RevertPosition`]s in the chain:
+    /// - a tip block above a chain fork: only that height is removed, or
+    /// - a root block: all trees below that height are removed,
+    ///   including temporary finalized tip trees.
+    fn remove_history_tree(&mut self, position: RevertPosition, height: Height) {
+        trace!(?height, ?position, "removing history tree");
+
+        if position == RevertPosition::Root {
+            // Remove all trees at or below the reverted root block.
+            // This makes sure the temporary trees from finalized tip forks are removed.
+            self.history_trees_by_height
+                .retain(|index_height, _tree| *index_height > height);
+        } else {
+            // Just remove the reverted tip tree.
+            self.history_trees_by_height
+                .remove(&height)
+                .expect("History tree must be present if block was added to chain");
+        }
     }
 
     fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
@@ -1153,41 +1071,6 @@ impl Chain {
             .collect()
     }
 
-    // Cloning
-
-    /// Clone the Chain but not the history and note commitment trees,
-    /// starting with the specified trees at `fork_height` instead.
-    ///
-    /// Useful when forking, where the trees are rebuilt anyway.
-    fn with_trees(&self, history_tree: Arc<HistoryTree>) -> Self {
-        Chain {
-            network: self.network,
-            blocks: self.blocks.clone(),
-            height_by_hash: self.height_by_hash.clone(),
-            tx_loc_by_hash: self.tx_loc_by_hash.clone(),
-            created_utxos: self.created_utxos.clone(),
-            spent_utxos: self.spent_utxos.clone(),
-            sprout_trees_by_anchor: self.sprout_trees_by_anchor.clone(),
-            sprout_trees_by_height: self.sprout_trees_by_height.clone(),
-            sapling_trees_by_height: self.sapling_trees_by_height.clone(),
-            orchard_trees_by_height: self.orchard_trees_by_height.clone(),
-            sprout_anchors: self.sprout_anchors.clone(),
-            sapling_anchors: self.sapling_anchors.clone(),
-            orchard_anchors: self.orchard_anchors.clone(),
-            sprout_anchors_by_height: self.sprout_anchors_by_height.clone(),
-            sapling_anchors_by_height: self.sapling_anchors_by_height.clone(),
-            orchard_anchors_by_height: self.orchard_anchors_by_height.clone(),
-            sprout_nullifiers: self.sprout_nullifiers.clone(),
-            sapling_nullifiers: self.sapling_nullifiers.clone(),
-            orchard_nullifiers: self.orchard_nullifiers.clone(),
-            partial_transparent_transfers: self.partial_transparent_transfers.clone(),
-            partial_cumulative_work: self.partial_cumulative_work,
-            history_tree,
-            history_trees_by_height: self.history_trees_by_height.clone(),
-            chain_value_pools: self.chain_value_pools,
-        }
-    }
-
     /// Update the chain tip with the `contextually_valid` block,
     /// running note commitment tree updates in parallel with other updates.
     ///
@@ -1235,7 +1118,8 @@ impl Chain {
         let orchard_root = self.orchard_note_commitment_tree().root();
 
         // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
-        let history_tree_mut = Arc::make_mut(&mut self.history_tree);
+        let mut history_tree = self.history_tree_at_tip();
+        let history_tree_mut = Arc::make_mut(&mut history_tree);
         history_tree_mut
             .push(
                 self.network,
@@ -1245,8 +1129,7 @@ impl Chain {
             )
             .map_err(Arc::new)?;
 
-        self.history_trees_by_height
-            .insert(height, self.history_tree.clone());
+        self.add_history_tree(height, history_tree);
 
         Ok(())
     }
@@ -1507,17 +1390,7 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         self.remove_orchard_tree_and_anchor(position, height);
 
         // TODO: move this to the history tree UpdateWith.revert...()?
-        if position == RevertPosition::Root {
-            // Remove all trees at or below the reverted root block.
-            // This makes sure the temporary trees from finalized tip forks are removed.
-            self.history_trees_by_height
-                .retain(|index_height, _tree| *index_height > height);
-        } else {
-            // Just remove the reverted tip tree.
-            self.history_trees_by_height
-                .remove(&height)
-                .expect("History tree must be present if block was added to chain");
-        }
+        self.remove_history_tree(position, height);
 
         // revert the chain value pool balances, if needed
         self.revert_chain_with(chain_value_pool_change, position);

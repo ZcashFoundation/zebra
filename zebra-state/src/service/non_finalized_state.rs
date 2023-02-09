@@ -10,7 +10,6 @@ use std::{
 
 use zebra_chain::{
     block::{self, Block},
-    history_tree::HistoryTree,
     parameters::Network,
     sprout, transparent,
 };
@@ -156,7 +155,7 @@ impl NonFinalizedState {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
-        let parent_chain = self.parent_chain(parent_hash, finalized_state.history_tree())?;
+        let parent_chain = self.parent_chain(parent_hash)?;
 
         // If the block is invalid, return the error,
         // and drop the cloned parent Arc, or newly created chain fork.
@@ -281,7 +280,7 @@ impl NonFinalizedState {
         // Clone function arguments for different threads
         let block = contextual.block.clone();
         let network = new_chain.network();
-        let history_tree = new_chain.history_tree.clone();
+        let history_tree = new_chain.history_tree_at_tip();
 
         let block2 = contextual.block.clone();
         let height = contextual.height;
@@ -470,7 +469,6 @@ impl NonFinalizedState {
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,
-        history_tree: Arc<HistoryTree>,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         match self.find_chain(|chain| chain.non_finalized_tip_hash() == parent_hash) {
             // Clone the existing Arc<Chain> in the non-finalized state
@@ -482,7 +480,7 @@ impl NonFinalizedState {
                 let fork_chain = self
                     .chain_set
                     .iter()
-                    .find_map(|chain| chain.fork(parent_hash, history_tree.clone()).transpose())
+                    .find_map(|chain| chain.fork(parent_hash).transpose())
                     .transpose()?
                     .ok_or(ValidateContextError::NotReadyToBeCommitted)?;
 
