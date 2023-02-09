@@ -13,7 +13,7 @@ use zebra_chain::{
     history_tree::HistoryTree,
     orchard,
     parameters::Network,
-    sapling, sprout, transparent,
+    sprout, transparent,
 };
 
 use crate::{
@@ -159,7 +159,6 @@ impl NonFinalizedState {
 
         let parent_chain = self.parent_chain(
             parent_hash,
-            finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
             finalized_state.history_tree(),
         )?;
@@ -443,7 +442,10 @@ impl NonFinalizedState {
 
     /// Returns `true` if the best chain contains `sapling_nullifier`.
     #[cfg(test)]
-    pub fn best_contains_sapling_nullifier(&self, sapling_nullifier: &sapling::Nullifier) -> bool {
+    pub fn best_contains_sapling_nullifier(
+        &self,
+        sapling_nullifier: &zebra_chain::sapling::Nullifier,
+    ) -> bool {
         self.best_chain()
             .map(|best_chain| best_chain.sapling_nullifiers.contains(sapling_nullifier))
             .unwrap_or(false)
@@ -470,7 +472,6 @@ impl NonFinalizedState {
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,
-        sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
         orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
         history_tree: Arc<HistoryTree>,
     ) -> Result<Arc<Chain>, ValidateContextError> {
@@ -488,7 +489,6 @@ impl NonFinalizedState {
                         chain
                             .fork(
                                 parent_hash,
-                                sapling_note_commitment_tree.clone(),
                                 orchard_note_commitment_tree.clone(),
                                 history_tree.clone(),
                             )
