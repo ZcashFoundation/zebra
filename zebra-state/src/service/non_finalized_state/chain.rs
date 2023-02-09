@@ -402,7 +402,6 @@ impl Chain {
             .map(|(height, block)| (*height, block.block.clone()))
             .collect();
 
-        // TODO: use NoteCommitmentTrees to store the trees as well?
         let mut nct = NoteCommitmentTrees {
             sprout: self
                 .sprout_tree(fork_height.into())
@@ -584,9 +583,8 @@ impl Chain {
             .clone()
     }
 
-    /// Returns the Sprout
-    /// [`NoteCommitmentTree`](sprout::tree::NoteCommitmentTree) specified by a
-    /// [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
+    /// Returns the Sprout [`NoteCommitmentTree`](sprout::tree::NoteCommitmentTree) specified by
+    /// a [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
     pub fn sprout_tree(
         &self,
         hash_or_height: HashOrHeight,
@@ -597,21 +595,18 @@ impl Chain {
         self.sprout_trees_by_height.get(&height).cloned()
     }
 
-    /// Update the Sprout `tree` and anchor indexes at `height`.
+    /// Add the Sprout `tree` to the tree and anchor indexes at `height`.
     ///
     /// `height` can be either:
     /// - the height of a new block that has just been added to the chain tip, or
     /// - the finalized tip height: the height of the parent of the first block of a new chain.
-    pub(crate) fn add_sprout_tree_and_anchor(
+    fn add_sprout_tree_and_anchor(
         &mut self,
         height: Height,
         tree: Arc<sprout::tree::NoteCommitmentTree>,
     ) {
         // TODO:
-        // - should we assert that the height was empty before insertion?
-        //   (the roots can have duplicates, but the heights should not)
         // - should this be an UpdateWith impl?
-        self.sprout_trees_by_height.insert(height, tree.clone());
 
         // Having updated all the note commitment trees and nullifier sets in
         // this block, the roots of the note commitment trees as of the last
@@ -621,9 +616,75 @@ impl Chain {
         let anchor = tree.root();
         trace!(?height, ?anchor, "adding sprout tree");
 
-        self.sprout_anchors.insert(anchor);
+        // TODO: fix test code that incorrectly overwrites trees
+        #[cfg(not(test))]
+        assert_eq!(
+            self.sprout_trees_by_height.insert(height, tree.clone()),
+            None,
+            "incorrect overwrite of sprout tree: trees must be reverted then inserted",
+        );
+        #[cfg(not(test))]
+        assert_eq!(
+            self.sprout_anchors_by_height.insert(height, anchor),
+            None,
+            "incorrect overwrite of sprout anchor: anchors must be reverted then inserted",
+        );
+
+        #[cfg(test)]
+        self.sprout_trees_by_height.insert(height, tree.clone());
+        #[cfg(test)]
         self.sprout_anchors_by_height.insert(height, anchor);
+
+        // Multiple inserts are expected here,
+        // because the anchors only change if a block has shielded transactions.
+        self.sprout_anchors.insert(anchor);
         self.sprout_trees_by_anchor.insert(anchor, tree);
+    }
+
+    /// Remove the Sprout tree and anchor indexes at `height`.
+    ///
+    /// `height` can be at two different [`RevertPosition`]s in the chain:
+    /// - a tip block above a chain fork: only that height is removed, or
+    /// - a root block: all trees and anchors below that height are removed,
+    ///   including temporary finalized tip trees.
+    fn remove_sprout_tree_and_anchor(&mut self, position: RevertPosition, height: Height) {
+        // TODO:
+        // - should this be an UpdateWith impl?
+
+        let removed_heights: Vec<Height> = if position == RevertPosition::Root {
+            // Remove all trees and anchors at or below the removed block.
+            // This makes sure the temporary trees from finalized tip forks are removed.
+            self.sprout_anchors_by_height
+                .keys()
+                .cloned()
+                .filter(|index_height| *index_height <= height)
+                .collect()
+        } else {
+            // Just remove the reverted tip trees and anchors.
+            vec![height]
+        };
+
+        for height in &removed_heights {
+            let anchor = self
+                .sprout_anchors_by_height
+                .remove(height)
+                .expect("Sprout anchor must be present if block was added to chain");
+            self.sprout_trees_by_height
+                .remove(height)
+                .expect("Sprout note commitment tree must be present if block was added to chain");
+
+            trace!(?height, ?position, ?anchor, "removing sprout tree");
+
+            // Multiple removals are expected here,
+            // because the anchors only change if a block has shielded transactions.
+            assert!(
+                self.sprout_anchors.remove(&anchor),
+                "Sprout anchor must be present if block was added to chain"
+            );
+            if !self.sprout_anchors.contains(&anchor) {
+                self.sprout_trees_by_anchor.remove(&anchor);
+            }
+        }
     }
 
     /// Returns the Sapling
@@ -952,8 +1013,6 @@ impl Chain {
         let height = contextually_valid.height;
 
         // Prepare data for parallel execution
-        //
-        // TODO: use NoteCommitmentTrees to store the trees as well?
         let mut nct = NoteCommitmentTrees {
             sprout: self.sprout_note_commitment_tree(),
             sapling: self.sapling_note_commitment_tree.clone(),
@@ -1288,10 +1347,12 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
         // TODO: move these to the shielded UpdateWith.revert...()
         //       copy the removed_heights code to each impl
 
+        self.remove_sprout_tree_and_anchor(position, height);
+
         let removed_heights: Vec<Height> = if position == RevertPosition::Root {
             // Remove all trees and anchors at or below the removed block.
             // This makes sure the temporary trees from finalized tip forks are removed.
-            self.sprout_anchors_by_height
+            self.sapling_anchors_by_height
                 .keys()
                 .cloned()
                 .filter(|index_height| *index_height <= height)
@@ -1300,26 +1361,6 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
             // Just remove the reverted tip trees and anchors.
             vec![height]
         };
-
-        for height in &removed_heights {
-            let anchor = self
-                .sprout_anchors_by_height
-                .remove(height)
-                .expect("Sprout anchor must be present if block was added to chain");
-
-            trace!(?height, ?position, ?anchor, "removing sprout tree");
-
-            assert!(
-                self.sprout_anchors.remove(&anchor),
-                "Sprout anchor must be present if block was added to chain"
-            );
-            if !self.sprout_anchors.contains(&anchor) {
-                self.sprout_trees_by_anchor.remove(&anchor);
-            }
-            self.sprout_trees_by_height
-                .remove(height)
-                .expect("Sprout note commitment tree must be present if block was added to chain");
-        }
 
         for height in &removed_heights {
             let anchor = self.sapling_anchors_by_height.remove(height);
