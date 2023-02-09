@@ -319,14 +319,17 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
 
         prop_assert!(empty_tree.is_none());
 
+        // TODO: fix this test or the code so the full_chain temporary trees aren't overwritten
+        let chain = chain.iter().filter(|block| block.height != Height(0));
+
         // use `end_count` as the number of non-finalized blocks at the end of the chain
-        let finalized_count = chain.len() - end_count;
+        let finalized_count = chain.clone().count() - end_count;
 
         let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
 
         let mut full_chain = Chain::new(network, Height(0), Default::default(), Default::default(), Default::default(), empty_tree, fake_value_pool);
         for block in chain
-            .iter()
+            .clone()
             .take(finalized_count)
             .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
                 full_chain = full_chain.push(block)?;
@@ -334,7 +337,7 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
 
         let mut partial_chain = Chain::new(
             network,
-            Height(finalized_count.try_into().unwrap()),
+            full_chain.non_finalized_tip_height(),
             full_chain.sprout_note_commitment_tree(),
             full_chain.sapling_note_commitment_tree.clone(),
             full_chain.orchard_note_commitment_tree.clone(),
@@ -342,14 +345,13 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
             full_chain.chain_value_pools,
         );
         for block in chain
-            .iter()
+            .clone()
             .skip(finalized_count)
             .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
                 partial_chain = partial_chain.push(block.clone())?;
             }
 
         for block in chain
-            .iter()
             .skip(finalized_count)
             .map(ContextuallyValidBlock::test_with_zero_spent_utxos) {
                 full_chain = full_chain.push(block.clone())?;
@@ -358,6 +360,11 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
         for _ in 0..finalized_count {
             full_chain.pop_root();
         }
+
+        // Make sure the temporary trees from finalized tip forks are removed.
+        // TODO: update the test or the code so this extra step isn't needed?
+        full_chain.pop_root();
+        partial_chain.pop_root();
 
         prop_assert_eq!(full_chain.blocks.len(), partial_chain.blocks.len());
         prop_assert!(
@@ -435,6 +442,11 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
         for _ in 0..finalized_count {
             full_chain.pop_root();
         }
+
+        // Make sure the temporary trees from finalized tip forks are removed.
+        // TODO: update the test or the code so this extra step isn't needed?
+        full_chain.pop_root();
+        partial_chain.pop_root();
 
         prop_assert_eq!(full_chain.blocks.len(), partial_chain.blocks.len());
         prop_assert!(

@@ -618,10 +618,12 @@ impl Chain {
         // transaction are the anchor treestates of this block.
         //
         // Use the previously cached root which was calculated in parallel.
-        let sprout_root = tree.root();
-        self.sprout_anchors.insert(sprout_root);
-        self.sprout_anchors_by_height.insert(height, sprout_root);
-        self.sprout_trees_by_anchor.insert(sprout_root, tree);
+        let anchor = tree.root();
+        trace!(?height, ?anchor, "adding sprout tree");
+
+        self.sprout_anchors.insert(anchor);
+        self.sprout_anchors_by_height.insert(height, anchor);
+        self.sprout_trees_by_anchor.insert(anchor, tree);
     }
 
     /// Returns the Sapling
@@ -1304,6 +1306,9 @@ impl UpdateWith<ContextuallyValidBlock> for Chain {
                 .sprout_anchors_by_height
                 .remove(height)
                 .expect("Sprout anchor must be present if block was added to chain");
+
+            trace!(?height, ?position, ?anchor, "removing sprout tree");
+
             assert!(
                 self.sprout_anchors.remove(&anchor),
                 "Sprout anchor must be present if block was added to chain"
