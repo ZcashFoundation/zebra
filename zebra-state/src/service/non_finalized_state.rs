@@ -177,6 +177,7 @@ impl NonFinalizedState {
     /// Commit block to the non-finalized state as a new chain where its parent
     /// is the finalized tip.
     #[tracing::instrument(level = "debug", skip(self, finalized_state, prepared))]
+    #[allow(clippy::unwrap_in_result)]
     pub fn commit_new_chain(
         &mut self,
         prepared: PreparedBlock,
