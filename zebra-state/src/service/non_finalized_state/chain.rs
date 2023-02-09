@@ -776,7 +776,7 @@ impl Chain {
     /// # Panics
     ///
     /// If this chain has no history trees. (This should be impossible.)
-    pub fn history_tree_at_tip(&self) -> Arc<HistoryTree> {
+    pub fn history_block_commitment_tree(&self) -> Arc<HistoryTree> {
         self.history_trees_by_height
             .last_key_value()
             .expect("only called while history_trees_by_height is populated")
@@ -1121,7 +1121,7 @@ impl Chain {
         let orchard_root = self.orchard_note_commitment_tree().root();
 
         // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
-        let mut history_tree = self.history_tree_at_tip();
+        let mut history_tree = self.history_block_commitment_tree();
         let history_tree_mut = Arc::make_mut(&mut history_tree);
         history_tree_mut
             .push(

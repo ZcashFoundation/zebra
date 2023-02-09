@@ -329,7 +329,7 @@ fn finalized_equals_pushed_genesis() -> Result<()> {
             full_chain.sprout_note_commitment_tree(),
             full_chain.sapling_note_commitment_tree(),
             full_chain.orchard_note_commitment_tree(),
-            full_chain.history_tree_at_tip(),
+            full_chain.history_block_commitment_tree(),
             full_chain.chain_value_pools,
         );
         for block in chain
@@ -409,7 +409,7 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
             full_chain.sprout_note_commitment_tree(),
             full_chain.sapling_note_commitment_tree(),
             full_chain.orchard_note_commitment_tree(),
-            full_chain.history_tree_at_tip(),
+            full_chain.history_block_commitment_tree(),
             full_chain.chain_value_pools,
         );
 

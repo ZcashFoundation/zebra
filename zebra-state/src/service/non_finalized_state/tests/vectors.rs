@@ -439,12 +439,12 @@ fn history_tree_is_updated_for_network_upgrade(
     let chain = state.best_chain().unwrap();
     if network_upgrade == NetworkUpgrade::Heartwood {
         assert!(
-            chain.history_tree_at_tip().as_ref().is_none(),
+            chain.history_block_commitment_tree().as_ref().is_none(),
             "history tree must not exist yet"
         );
     } else {
         assert!(
-            chain.history_tree_at_tip().as_ref().is_some(),
+            chain.history_block_commitment_tree().as_ref().is_some(),
             "history tree must already exist"
         );
     }
@@ -458,12 +458,12 @@ fn history_tree_is_updated_for_network_upgrade(
 
     let chain = state.best_chain().unwrap();
     assert!(
-        chain.history_tree_at_tip().as_ref().is_some(),
+        chain.history_block_commitment_tree().as_ref().is_some(),
         "history tree must have been (re)created"
     );
     assert_eq!(
         chain
-            .history_tree_at_tip()
+            .history_block_commitment_tree()
             .as_ref()
             .as_ref()
             .unwrap()
@@ -493,7 +493,7 @@ fn history_tree_is_updated_for_network_upgrade(
         state
             .best_chain()
             .unwrap()
-            .history_tree_at_tip()
+            .history_block_commitment_tree()
             .as_ref()
             .is_some(),
         "history tree must still exist"

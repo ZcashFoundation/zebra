@@ -281,7 +281,7 @@ impl NonFinalizedState {
         // Clone function arguments for different threads
         let block = contextual.block.clone();
         let network = new_chain.network();
-        let history_tree = new_chain.history_tree_at_tip();
+        let history_tree = new_chain.history_block_commitment_tree();
 
         let block2 = contextual.block.clone();
         let height = contextual.height;
