@@ -481,8 +481,7 @@ impl NonFinalizedState {
                 let fork_chain = self
                     .chain_set
                     .iter()
-                    .find_map(|chain| chain.fork(parent_hash).transpose())
-                    .transpose()?
+                    .find_map(|chain| chain.fork(parent_hash))
                     .ok_or(ValidateContextError::NotReadyToBeCommitted)?;
 
                 Ok(Arc::new(fork_chain))

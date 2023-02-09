@@ -203,7 +203,6 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         // Fork the chain.
         let mut forked = full_chain
             .fork(fork_tip_hash)
-            .expect("fork works")
             .expect("hash is present");
 
         // This check is redundant, but it's useful for debugging.
@@ -269,7 +268,6 @@ fn forked_equals_pushed_history_tree() -> Result<()> {
 
         let mut forked = full_chain
             .fork(fork_tip_hash)
-            .expect("fork works")
             .expect("hash is present");
 
         // the first check is redundant, but it's useful for debugging

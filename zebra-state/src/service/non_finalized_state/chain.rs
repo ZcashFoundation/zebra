@@ -327,13 +327,10 @@ impl Chain {
     }
 
     /// Fork and return a chain at the block with the given `fork_tip`, if it is part of this
-    /// chain. Otherwise, if this chain does not contain `fork_tip`, returns `Ok(None)`.
-    ///
-    /// If forking the chain fails, returns `Err(_)`.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn fork(&self, fork_tip: block::Hash) -> Result<Option<Self>, ValidateContextError> {
+    /// chain. Otherwise, if this chain does not contain `fork_tip`, returns `None`.
+    pub fn fork(&self, fork_tip: block::Hash) -> Option<Self> {
         if !self.height_by_hash.contains_key(&fork_tip) {
-            return Ok(None);
+            return None;
         }
 
         let mut forked = self.clone();
@@ -343,7 +340,7 @@ impl Chain {
             forked.pop_tip();
         }
 
-        Ok(Some(forked))
+        Some(forked)
     }
 
     /// Returns the [`Network`] for this chain.
