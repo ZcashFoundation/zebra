@@ -646,7 +646,7 @@ where
                             zebra_state::ReadResponse::BlockHash(Some(hash)) => hash,
                             zebra_state::ReadResponse::BlockHash(None) => {
                                 return Err(Error {
-                                    code: ErrorCode::ServerError(0),
+                                    code: MISSING_BLOCK_ERROR_CODE,
                                     message: "block height not in best chain".to_string(),
                                     data: None,
                                 })
