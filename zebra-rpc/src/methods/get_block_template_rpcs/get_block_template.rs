@@ -273,11 +273,18 @@ pub fn generate_coinbase_and_roots(
     mempool_txs: &[VerifiedUnminedTx],
     history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
     like_zcashd: bool,
+    extra_coinbase_data: Vec<u8>,
 ) -> (TransactionTemplate<NegativeOrZero>, DefaultRoots) {
     // Generate the coinbase transaction
     let miner_fee = calculate_miner_fee(mempool_txs);
-    let coinbase_txn =
-        generate_coinbase_transaction(network, height, miner_address, miner_fee, like_zcashd);
+    let coinbase_txn = generate_coinbase_transaction(
+        network,
+        height,
+        miner_address,
+        miner_fee,
+        like_zcashd,
+        extra_coinbase_data,
+    );
 
     // Calculate block default roots
     //
@@ -301,13 +308,15 @@ pub fn generate_coinbase_transaction(
     miner_address: transparent::Address,
     miner_fee: Amount<NonNegative>,
     like_zcashd: bool,
+    extra_coinbase_data: Vec<u8>,
 ) -> UnminedTx {
     let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee, like_zcashd);
 
     if like_zcashd {
-        Transaction::new_v4_coinbase(network, height, outputs, like_zcashd).into()
+        Transaction::new_v4_coinbase(network, height, outputs, like_zcashd, extra_coinbase_data)
+            .into()
     } else {
-        Transaction::new_v5_coinbase(network, height, outputs).into()
+        Transaction::new_v5_coinbase(network, height, outputs, extra_coinbase_data).into()
     }
 }
 

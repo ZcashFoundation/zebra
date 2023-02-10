@@ -413,10 +413,11 @@ where
         &self,
         parameters: Option<get_block_template::JsonParameters>,
     ) -> BoxFuture<Result<get_block_template::Response>> {
-        // Clone Config
+        // Clone Configs
         let network = self.network;
         let miner_address = self.miner_address;
         let debug_like_zcashd = self.debug_like_zcashd;
+        let extra_coinbase_data = self.extra_coinbase_data.clone();
 
         // Clone Services
         let mempool = self.mempool.clone();
@@ -660,6 +661,7 @@ where
                 miner_address,
                 mempool_txs,
                 debug_like_zcashd,
+                extra_coinbase_data.clone(),
             )
             .await;
 
@@ -681,6 +683,7 @@ where
                 mempool_txs,
                 submit_old,
                 debug_like_zcashd,
+                extra_coinbase_data,
             );
 
             Ok(response.into())
