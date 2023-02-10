@@ -1,14 +1,8 @@
 //! Block height.
 
-use crate::serialization::{SerializationError, ZcashDeserialize};
+use std::ops::{Add, Sub};
 
-use byteorder::{LittleEndian, ReadBytesExt};
-
-use std::{
-    convert::TryFrom,
-    io,
-    ops::{Add, Sub},
-};
+use crate::serialization::SerializationError;
 
 /// The length of the chain back to the genesis block.
 ///
@@ -19,6 +13,11 @@ use std::{
 /// # Invariants
 ///
 /// Users should not construct block heights greater than `Height::MAX`.
+///
+/// # Consensus
+///
+/// There are multiple formats for serializing a height, so we don't implement
+/// `ZcashSerialize` or `ZcashDeserialize` for `Height`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Height(pub u32);
 
@@ -129,18 +128,6 @@ impl Sub<i32> for Height {
             h if (Height(h) <= Height::MAX && Height(h) >= Height::MIN) => Some(Height(h)),
             _ => None,
         }
-    }
-}
-
-impl ZcashDeserialize for Height {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let height = reader.read_u32::<LittleEndian>()?;
-
-        if height > Self::MAX.0 {
-            return Err(SerializationError::Parse("Height exceeds maximum height"));
-        }
-
-        Ok(Self(height))
     }
 }
 
