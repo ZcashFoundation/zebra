@@ -53,6 +53,23 @@ impl HashOrHeight {
         }
     }
 
+    /// Unwrap the inner hash or attempt to retrieve the hash for a given
+    /// height if one exists.
+    ///
+    /// # Consensus
+    ///
+    /// In the non-finalized state, a height can have multiple valid hashes.
+    /// We typically use the hash that is currently on the best chain.
+    pub fn hash_or_else<F>(self, op: F) -> Option<block::Hash>
+    where
+        F: FnOnce(block::Height) -> Option<block::Hash>,
+    {
+        match self {
+            HashOrHeight::Hash(hash) => Some(hash),
+            HashOrHeight::Height(height) => op(height),
+        }
+    }
+
     /// Returns the hash if this is a [`HashOrHeight::Hash`].
     pub fn hash(&self) -> Option<block::Hash> {
         if let HashOrHeight::Hash(hash) = self {
