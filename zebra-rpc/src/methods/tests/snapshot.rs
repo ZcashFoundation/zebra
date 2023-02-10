@@ -70,6 +70,7 @@ async fn test_rpc_response_data_for_network(network: Network) {
         "RPC test",
         network,
         false,
+        true,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,

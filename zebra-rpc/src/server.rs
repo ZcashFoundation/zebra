@@ -145,7 +145,7 @@ impl RpcServer {
                 // Initialize the getblocktemplate rpc method handler
                 let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
                     network,
-                    mining_config,
+                    mining_config.clone(),
                     mempool.clone(),
                     state.clone(),
                     latest_chain_tip.clone(),
@@ -162,6 +162,10 @@ impl RpcServer {
                 app_version.clone(),
                 network,
                 config.debug_force_finished_sync,
+                #[cfg(feature = "getblocktemplate-rpcs")]
+                mining_config.debug_like_zcashd,
+                #[cfg(not(feature = "getblocktemplate-rpcs"))]
+                true,
                 mempool,
                 state,
                 latest_chain_tip,

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use zebra_chain::transparent;
 
 /// Mining configuration section.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The address used for miner payouts.
@@ -26,4 +26,16 @@ pub struct Config {
     ///
     /// This developer-only config is not supported for general use.
     pub debug_like_zcashd: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            miner_address: None,
+            // For now, act like `zcashd` as much as possible.
+            // TODO: do we want to default to v5 transactions and Zebra coinbase data?
+            extra_coinbase_data: None,
+            debug_like_zcashd: true,
+        }
+    }
 }
