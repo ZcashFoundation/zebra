@@ -801,7 +801,6 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::BestChainNextMedianTimePast`] when successful.
     BestChainNextMedianTimePast,
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Looks up a block hash by height in the current best chain.
     ///
     /// Returns
@@ -862,7 +861,6 @@ impl ReadRequest {
                 "best_chain_tip_nullifiers_anchors"
             }
             ReadRequest::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::ChainInfo => "chain_info",
