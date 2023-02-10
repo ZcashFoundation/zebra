@@ -148,7 +148,9 @@ where
     /// A list of pending transaction download and verify tasks.
     #[pin]
     pending: FuturesUnordered<
-        JoinHandle<Result<VerifiedUnminedTx, (TransactionDownloadVerifyError, UnminedTxId)>>,
+        JoinHandle<
+            Result<(VerifiedUnminedTx, Height), (TransactionDownloadVerifyError, UnminedTxId)>,
+        >,
     >,
 
     /// A list of channels that can be used to cancel pending transaction download and
@@ -165,7 +167,7 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    type Item = Result<VerifiedUnminedTx, (UnminedTxId, TransactionDownloadVerifyError)>;
+    type Item = Result<(VerifiedUnminedTx, Height), (UnminedTxId, TransactionDownloadVerifyError)>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -180,9 +182,9 @@ where
         // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
             match join_result.expect("transaction download and verify tasks must not panic") {
-                Ok(tx) => {
+                Ok((tx, tip_height)) => {
                     this.cancel_handles.remove(&tx.transaction.id);
-                    Poll::Ready(Some(Ok(tx)))
+                    Poll::Ready(Some(Ok((tx, tip_height))))
                 }
                 Err((e, hash)) => {
                     this.cancel_handles.remove(&hash);
@@ -282,12 +284,12 @@ where
 
             trace!(?txid, "transaction is not in best chain");
 
-            let next_height = match state.oneshot(zs::Request::Tip).await {
-                Ok(zs::Response::Tip(None)) => Ok(Height(0)),
+            let (tip_height, next_height) = match state.oneshot(zs::Request::Tip).await {
+                Ok(zs::Response::Tip(None)) => Ok((Height(0), Height(1))),
                 Ok(zs::Response::Tip(Some((height, _hash)))) => {
                     let next_height =
                         (height + 1).expect("valid heights are far below the maximum");
-                    Ok(next_height)
+                    Ok((height, next_height))
                 }
                 Ok(_) => unreachable!("wrong response"),
                 Err(e) => Err(TransactionDownloadVerifyError::StateError(e)),
@@ -341,8 +343,8 @@ where
                     height: next_height,
                 })
                 .map_ok(|rsp| {
-                    rsp.into_mempool_transaction()
-                        .expect("unexpected non-mempool response to mempool request")
+                    (rsp.into_mempool_transaction()
+                        .expect("unexpected non-mempool response to mempool request"), tip_height)
                 })
                 .await;
 
@@ -351,13 +353,13 @@ where
 
             result.map_err(|e| TransactionDownloadVerifyError::Invalid(e.into()))
         }
-        .map_ok(|tx| {
+        .map_ok(|(tx, tip_height)| {
             metrics::counter!(
                 "mempool.verified.transactions.total",
                 1,
                 "version" => format!("{}", tx.transaction.transaction.version()),
             );
-            tx
+            (tx, tip_height)
         })
         // Tack the hash onto the error so we can remove the cancel handle
         // on failure as well as on success.

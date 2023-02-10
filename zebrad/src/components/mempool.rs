@@ -375,17 +375,25 @@ impl Service<Request> for Mempool {
             // Clean up completed download tasks and add to mempool if successful.
             while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
                 match r {
-                    Ok(tx) => {
-                        let insert_result = storage.insert(tx.clone());
+                    Ok((tx, expected_tip_height)) => {
+                        if self.latest_chain_tip.best_tip_height() == Some(expected_tip_height) {
+                            let insert_result = storage.insert(tx.clone());
 
-                        tracing::trace!(
-                            ?insert_result,
-                            "got Ok(_) transaction verify, tried to store",
-                        );
+                            tracing::trace!(
+                                ?insert_result,
+                                "got Ok(_) transaction verify, tried to store",
+                            );
 
-                        if let Ok(inserted_id) = insert_result {
-                            // Save transaction ids that we will send to peers
-                            send_to_peers_ids.insert(inserted_id);
+                            if let Ok(inserted_id) = insert_result {
+                                // Save transaction ids that we will send to peers
+                                send_to_peers_ids.insert(inserted_id);
+                            }
+                        } else {
+                            tracing::trace!("chain grew during tx verification, retrying ..",);
+
+                            // We don't care if re-queueing the transaction request fails.
+                            let _result =
+                                tx_downloads.download_if_needed_and_verify(tx.transaction.into());
                         }
                     }
                     Err((txid, error)) => {
