@@ -328,13 +328,37 @@ fn log_if_mined_by_zebra(tip_block: &ChainTipBlock) {
         .starts_with(EXTRA_ZEBRA_COINBASE_DATA.as_bytes())
     {
         let text = String::from_utf8_lossy(coinbase_data.as_ref());
-        let data = hex::encode(coinbase_data.as_ref());
-        info!(
-            ?text,
-            ?data,
-            %height,
-            %hash,
-            "looks like this block was mined by Zebra!"
-        );
+
+        if coinbase_data.as_ref() == EXTRA_ZEBRA_COINBASE_DATA.as_bytes() {
+            info!(
+                %text,
+                %height,
+                %hash,
+                "looks like this block was mined by Zebra!"
+            );
+        } else {
+            // # Security
+            //
+            // Use the extra data as an allow-list, replacing unknown characters.
+            // This makes sure control characters and harmful messages don't get logged
+            // to the terminal.
+            let text = text.replace(
+                |c| {
+                    !EXTRA_ZEBRA_COINBASE_DATA
+                        .to_ascii_lowercase()
+                        .contains(c.to_ascii_lowercase())
+                },
+                "?",
+            );
+            let data = hex::encode(coinbase_data.as_ref());
+
+            info!(
+                %text,
+                %data,
+                %height,
+                %hash,
+                "looks like this block was mined by Zebra!"
+            );
+        }
     }
 }
