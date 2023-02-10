@@ -1,5 +1,15 @@
 //! Transparent-related (Bitcoin-inherited) functionality.
 
+use std::{collections::HashMap, fmt, iter};
+
+use crate::{
+    amount::{Amount, NonNegative},
+    block,
+    parameters::Network,
+    primitives::zcash_primitives,
+    transaction,
+};
+
 mod address;
 mod keys;
 mod opcodes;
@@ -9,7 +19,7 @@ mod utxo;
 
 pub use address::Address;
 pub use script::Script;
-pub use serialize::GENESIS_COINBASE_DATA;
+pub use serialize::{GENESIS_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN};
 pub use utxo::{
     new_ordered_outputs, new_outputs, outputs_from_utxos, utxos_from_ordered_utxos,
     CoinbaseSpendRestriction, OrderedUtxo, Utxo,
@@ -21,23 +31,13 @@ pub use utxo::{
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
-
-#[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 
 #[cfg(test)]
 mod tests;
 
-use crate::{
-    amount::{Amount, NonNegative},
-    block,
-    parameters::Network,
-    primitives::zcash_primitives,
-    transaction,
-};
-
-use std::{collections::HashMap, fmt, iter};
+#[cfg(any(test, feature = "proptest-impl"))]
+use proptest_derive::Arbitrary;
 
 /// The maturity threshold for transparent coinbase outputs.
 ///
@@ -61,15 +61,15 @@ pub const MIN_TRANSPARENT_COINBASE_MATURITY: u32 = 100;
 pub const EXTRA_ZEBRA_COINBASE_DATA: &str = "z\u{1F993}";
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
+//
+// TODO: rename to ExtraCoinbaseData, because height is also part of the coinbase data?
 #[derive(Clone, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]
 pub struct CoinbaseData(
     /// Invariant: this vec, together with the coinbase height, must be less than
     /// 100 bytes. We enforce this by only constructing CoinbaseData fields by
-    /// parsing blocks with 100-byte data fields. When we implement block
-    /// creation, we should provide a constructor for the coinbase data field
-    /// that restricts it to 95 = 100 -1 -4 bytes (safe for any block height up
-    /// to 500_000_000).
+    /// parsing blocks with 100-byte data fields, and checking newly created
+    /// CoinbaseData lengths in the transaction builder.
     pub(super) Vec<u8>,
 );
 
@@ -194,17 +194,39 @@ impl fmt::Display for Input {
 
 impl Input {
     /// Returns a new coinbase input for `height` with optional `data` and `sequence`.
+    ///
+    /// # Consensus
+    ///
+    /// The combined serialized size of `height` and `data` can be at most 100 bytes.
+    ///
+    /// > A coinbase transaction script MUST have length in {2 .. 100} bytes.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    ///
+    /// # Panics
+    ///
+    /// If the coinbase data is greater than [`MAX_COINBASE_DATA_LEN`].
     #[cfg(feature = "getblocktemplate-rpcs")]
     pub fn new_coinbase(
         height: block::Height,
         data: Option<Vec<u8>>,
         sequence: Option<u32>,
     ) -> Input {
+        // "No extra coinbase data" is the default.
+        let data = data.unwrap_or_default();
+        let height_size = height.coinbase_zcash_serialized_size();
+
+        assert!(
+            data.len() + height_size <= MAX_COINBASE_DATA_LEN,
+            "invalid coinbase data: extra data {} bytes + height {height_size} bytes \
+             must be {} or less",
+            data.len(),
+            MAX_COINBASE_DATA_LEN,
+        );
+
         Input::Coinbase {
             height,
-
-            // "No extra coinbase data" is the default.
-            data: CoinbaseData(data.unwrap_or_default()),
+            data: CoinbaseData(data),
 
             // If the caller does not specify the sequence number,
             // use a sequence number that activates the LockTime.
