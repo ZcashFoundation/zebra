@@ -1116,7 +1116,11 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         true => Some(transparent::Address::from_pub_key_hash(Mainnet, [0x7e; 20])),
     };
 
-    let mining_config = Config { miner_address };
+    let mining_config = Config {
+        miner_address,
+        extra_coinbase_data: None,
+        debug_like_zcashd: true,
+    };
 
     // nu5 block height
     let fake_tip_height = NetworkUpgrade::Nu5.activation_height(Mainnet).unwrap();
@@ -1465,6 +1469,8 @@ async fn rpc_getdifficulty() {
 
     let mining_config = Config {
         miner_address: None,
+        extra_coinbase_data: None,
+        debug_like_zcashd: true,
     };
 
     // nu5 block height

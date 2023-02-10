@@ -14,4 +14,16 @@ pub struct Config {
     /// Zebra sends mining fees and miner rewards to this address in the
     /// `getblocktemplate` RPC coinbase transaction.
     pub miner_address: Option<transparent::Address>,
+
+    /// Extra data to include in coinbase transaction inputs.
+    /// Limited to around 95 bytes by the consensus rules.
+    ///
+    /// If this string is hex-encoded, it will be hex-decoded into bytes.
+    /// Otherwise, it will be UTF-8 encoded into bytes.
+    pub extra_coinbase_data: Option<String>,
+
+    /// Should Zebra's block templates try to imitate `zcashd`?
+    ///
+    /// This developer-only config is not supported for general use.
+    pub debug_like_zcashd: bool,
 }
