@@ -169,8 +169,14 @@ impl ZcashDeserialize for Root {
 ///
 /// Note that it's handled as a byte buffer and not a point coordinate (jubjub::Fq)
 /// because that's how the spec handles the MerkleCRH^Sapling function inputs and outputs.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 struct Node([u8; 32]);
+
+impl fmt::Debug for Node {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("Node").field(&hex::encode(self.0)).finish()
+    }
+}
 
 /// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
 ///

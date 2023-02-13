@@ -10,10 +10,8 @@ use std::{
 
 use zebra_chain::{
     block::{self, Block},
-    history_tree::HistoryTree,
-    orchard,
     parameters::Network,
-    sapling, sprout, transparent,
+    sprout, transparent,
 };
 
 use crate::{
@@ -157,13 +155,7 @@ impl NonFinalizedState {
         let parent_hash = prepared.block.header.previous_block_hash;
         let (height, hash) = (prepared.height, prepared.hash);
 
-        let parent_chain = self.parent_chain(
-            parent_hash,
-            finalized_state.sprout_note_commitment_tree(),
-            finalized_state.sapling_note_commitment_tree(),
-            finalized_state.orchard_note_commitment_tree(),
-            finalized_state.history_tree(),
-        )?;
+        let parent_chain = self.parent_chain(parent_hash)?;
 
         // If the block is invalid, return the error,
         // and drop the cloned parent Arc, or newly created chain fork.
@@ -185,13 +177,23 @@ impl NonFinalizedState {
     /// Commit block to the non-finalized state as a new chain where its parent
     /// is the finalized tip.
     #[tracing::instrument(level = "debug", skip(self, finalized_state, prepared))]
+    #[allow(clippy::unwrap_in_result)]
     pub fn commit_new_chain(
         &mut self,
         prepared: PreparedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<(), ValidateContextError> {
+        let finalized_tip_height = finalized_state.finalized_tip_height();
+
+        // TODO: fix tests that don't initialize the finalized state
+        #[cfg(not(test))]
+        let finalized_tip_height = finalized_tip_height.expect("finalized state contains blocks");
+        #[cfg(test)]
+        let finalized_tip_height = finalized_tip_height.unwrap_or(zebra_chain::block::Height(0));
+
         let chain = Chain::new(
             self.network,
+            finalized_tip_height,
             finalized_state.sprout_note_commitment_tree(),
             finalized_state.sapling_note_commitment_tree(),
             finalized_state.orchard_note_commitment_tree(),
@@ -279,7 +281,7 @@ impl NonFinalizedState {
         // Clone function arguments for different threads
         let block = contextual.block.clone();
         let network = new_chain.network();
-        let history_tree = new_chain.history_tree.clone();
+        let history_tree = new_chain.history_block_commitment_tree();
 
         let block2 = contextual.block.clone();
         let height = contextual.height;
@@ -435,7 +437,10 @@ impl NonFinalizedState {
 
     /// Returns `true` if the best chain contains `sapling_nullifier`.
     #[cfg(test)]
-    pub fn best_contains_sapling_nullifier(&self, sapling_nullifier: &sapling::Nullifier) -> bool {
+    pub fn best_contains_sapling_nullifier(
+        &self,
+        sapling_nullifier: &zebra_chain::sapling::Nullifier,
+    ) -> bool {
         self.best_chain()
             .map(|best_chain| best_chain.sapling_nullifiers.contains(sapling_nullifier))
             .unwrap_or(false)
@@ -443,7 +448,10 @@ impl NonFinalizedState {
 
     /// Returns `true` if the best chain contains `orchard_nullifier`.
     #[cfg(test)]
-    pub fn best_contains_orchard_nullifier(&self, orchard_nullifier: &orchard::Nullifier) -> bool {
+    pub fn best_contains_orchard_nullifier(
+        &self,
+        orchard_nullifier: &zebra_chain::orchard::Nullifier,
+    ) -> bool {
         self.best_chain()
             .map(|best_chain| best_chain.orchard_nullifiers.contains(orchard_nullifier))
             .unwrap_or(false)
@@ -456,19 +464,12 @@ impl NonFinalizedState {
 
     /// Return the chain whose tip block hash is `parent_hash`.
     ///
-    /// The chain can be an existing chain in the non-finalized state or a freshly
-    /// created fork, if needed.
-    ///
-    /// The trees must be the trees of the finalized tip.
-    /// They are used to recreate the trees if a fork is needed.
+    /// The chain can be an existing chain in the non-finalized state, or a freshly
+    /// created fork.
     #[allow(clippy::unwrap_in_result)]
     fn parent_chain(
         &mut self,
         parent_hash: block::Hash,
-        sprout_note_commitment_tree: Arc<sprout::tree::NoteCommitmentTree>,
-        sapling_note_commitment_tree: Arc<sapling::tree::NoteCommitmentTree>,
-        orchard_note_commitment_tree: Arc<orchard::tree::NoteCommitmentTree>,
-        history_tree: Arc<HistoryTree>,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         match self.find_chain(|chain| chain.non_finalized_tip_hash() == parent_hash) {
             // Clone the existing Arc<Chain> in the non-finalized state
@@ -480,18 +481,7 @@ impl NonFinalizedState {
                 let fork_chain = self
                     .chain_set
                     .iter()
-                    .find_map(|chain| {
-                        chain
-                            .fork(
-                                parent_hash,
-                                sprout_note_commitment_tree.clone(),
-                                sapling_note_commitment_tree.clone(),
-                                orchard_note_commitment_tree.clone(),
-                                history_tree.clone(),
-                            )
-                            .transpose()
-                    })
-                    .transpose()?
+                    .find_map(|chain| chain.fork(parent_hash))
                     .ok_or(ValidateContextError::NotReadyToBeCommitted)?;
 
                 Ok(Arc::new(fork_chain))
