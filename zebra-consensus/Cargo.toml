@@ -21,7 +21,7 @@ getblocktemplate-rpcs = [
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
 
 [dependencies]
-blake2b_simd = "1.0.0"
+blake2b_simd = "1.0.1"
 bellman = "0.13.0"
 bls12_381 = "0.7.0"
 halo2 = { package = "halo2_proofs", version = "0.2.0" }
