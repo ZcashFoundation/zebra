@@ -128,8 +128,8 @@ async fn rpc_getblock() {
         assert_eq!(
             get_block,
             GetBlock::Object {
-                hash: None,
-                confirmations: None,
+                hash: GetBlockHash(block.hash()),
+                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 tx: block
                     .transactions
@@ -150,8 +150,8 @@ async fn rpc_getblock() {
         assert_eq!(
             get_block,
             GetBlock::Object {
-                hash: Some(GetBlockHash(block.hash())),
-                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
+                hash: GetBlockHash(block.hash()),
+                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: None,
                 tx: block
                     .transactions
@@ -172,8 +172,8 @@ async fn rpc_getblock() {
         assert_eq!(
             get_block,
             GetBlock::Object {
-                hash: None,
-                confirmations: None,
+                hash: GetBlockHash(block.hash()),
+                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 tx: block
                     .transactions
@@ -194,8 +194,8 @@ async fn rpc_getblock() {
         assert_eq!(
             get_block,
             GetBlock::Object {
-                hash: Some(GetBlockHash(block.hash())),
-                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
+                hash: GetBlockHash(block.hash()),
+                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: None,
                 tx: block
                     .transactions

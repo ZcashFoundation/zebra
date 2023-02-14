@@ -247,10 +247,15 @@ where
     fn with_lightwalletd_config(self, zebra_rpc_listener: SocketAddr) -> Result<Self> {
         use std::fs;
 
+        // zcash/lightwalletd requires rpcuser and rpcpassword, or a zcashd cookie file
+        // But when a lightwalletd with this config is used by Zebra,
+        // Zebra ignores any authentication and provides access regardless.
         let lightwalletd_config = format!(
             "\
             rpcbind={}\n\
             rpcport={}\n\
+            rpcuser=xxxxx
+            rpcpassword=xxxxx
             ",
             zebra_rpc_listener.ip(),
             zebra_rpc_listener.port(),
