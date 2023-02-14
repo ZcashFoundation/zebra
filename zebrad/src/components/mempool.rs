@@ -446,6 +446,11 @@ impl Service<Request> for Mempool {
             }
         }
 
+        // TODO: Move the above into a loop, check that the tip action hasn't changed before returning
+        //       and leave a note about correctness for using tip_height instead of tip_hash
+        //       to check that pending verifications
+        //       are still valid .
+
         Poll::Ready(Ok(()))
     }
 
