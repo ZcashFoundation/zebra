@@ -376,6 +376,12 @@ impl Service<Request> for Mempool {
             while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
                 match r {
                     Ok((tx, expected_tip_height)) => {
+                        // # Correctness:
+                        //
+                        // It's okay to use tip height here instead of the tip hash since
+                        // chain_tip_change.last_tip_change() returns a `TipAction::Reset` when
+                        // the previous block hash doesn't match the `last_change_hash` and the
+                        // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
                         if self.latest_chain_tip.best_tip_height() == Some(expected_tip_height) {
                             let insert_result = storage.insert(tx.clone());
 
@@ -447,9 +453,6 @@ impl Service<Request> for Mempool {
         }
 
         // TODO: Move the above into a loop, check that the tip action hasn't changed before returning
-        //       and leave a note about correctness for using tip_height instead of tip_hash
-        //       to check that pending verifications
-        //       are still valid .
 
         Poll::Ready(Ok(()))
     }
