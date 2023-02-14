@@ -372,6 +372,8 @@ impl Service<Request> for Mempool {
             // Collect inserted transaction ids.
             let mut send_to_peers_ids = HashSet::<_>::new();
 
+            let best_tip_height = self.latest_chain_tip.best_tip_height();
+
             // Clean up completed download tasks and add to mempool if successful.
             while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
                 match r {
@@ -382,7 +384,7 @@ impl Service<Request> for Mempool {
                         // chain_tip_change.last_tip_change() returns a `TipAction::Reset` when
                         // the previous block hash doesn't match the `last_change_hash` and the
                         // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
-                        if self.latest_chain_tip.best_tip_height() == Some(expected_tip_height) {
+                        if best_tip_height == Some(expected_tip_height) {
                             let insert_result = storage.insert(tx.clone());
 
                             tracing::trace!(
@@ -430,7 +432,7 @@ impl Service<Request> for Mempool {
             //
             // Lock times never expire, because block times are strictly increasing.
             // So we don't need to check them here.
-            if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
+            if let Some(tip_height) = best_tip_height {
                 let expired_transactions = storage.remove_expired_transactions(tip_height);
                 // Remove transactions that are expired from the peers list
                 send_to_peers_ids =
