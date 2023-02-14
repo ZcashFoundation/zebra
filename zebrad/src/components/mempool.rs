@@ -317,7 +317,7 @@ impl Service<Request> for Mempool {
             return Poll::Ready(Ok(()));
         }
 
-        let tip_action = self.chain_tip_change.last_tip_change();
+        let mut tip_action = self.chain_tip_change.last_tip_change();
 
         // If the mempool was just freshly enabled,
         // skip resetting and removing mined transactions for this tip.
@@ -325,136 +325,144 @@ impl Service<Request> for Mempool {
             return Poll::Ready(Ok(()));
         }
 
-        // Clear the mempool and cancel downloads if there has been a chain tip reset.
-        if matches!(tip_action, Some(TipAction::Reset { .. })) {
-            info!(
-                tip_height = ?tip_action.as_ref().unwrap().best_tip_height(),
-                "resetting mempool: switched best chain, skipped blocks, or activated network upgrade"
-            );
+        // Collect inserted transaction ids.
+        let mut send_to_peers_ids = HashSet::<_>::new();
 
-            let previous_state = self.active_state.take();
-            let tx_retries = previous_state.transaction_retry_requests();
-
-            // Use the same code for dropping and resetting the mempool,
-            // to avoid subtle bugs.
-            //
-            // Drop the current contents of the state,
-            // cancelling any pending download tasks,
-            // and dropping completed verification results.
-            std::mem::drop(previous_state);
-
-            // Re-initialise an empty state.
-            self.update_state();
-
-            // Re-verify the transactions that were pending or valid at the previous tip.
-            // This saves us the time and data needed to re-download them.
-            if let ActiveState::Enabled { tx_downloads, .. } = &mut self.active_state {
+        loop {
+            // Clear the mempool and cancel downloads if there has been a chain tip reset.
+            if matches!(tip_action, Some(TipAction::Reset { .. })) {
                 info!(
-                    transactions = tx_retries.len(),
-                    "re-verifying mempool transactions after a chain fork"
+                    tip_height = ?tip_action.as_ref().unwrap().best_tip_height(),
+                    "resetting mempool: switched best chain, skipped blocks, or activated network upgrade"
                 );
 
-                for tx in tx_retries {
-                    // This is just an efficiency optimisation, so we don't care if queueing
-                    // transaction requests fails.
-                    let _result = tx_downloads.download_if_needed_and_verify(tx);
-                }
-            }
+                let previous_state = self.active_state.take();
+                let tx_retries = previous_state.transaction_retry_requests();
 
-            return Poll::Ready(Ok(()));
-        }
+                // Use the same code for dropping and resetting the mempool,
+                // to avoid subtle bugs.
+                //
+                // Drop the current contents of the state,
+                // cancelling any pending download tasks,
+                // and dropping completed verification results.
+                std::mem::drop(previous_state);
 
-        if let ActiveState::Enabled {
-            storage,
-            tx_downloads,
-        } = &mut self.active_state
-        {
-            // Collect inserted transaction ids.
-            let mut send_to_peers_ids = HashSet::<_>::new();
+                // Re-initialise an empty state.
+                self.update_state();
 
-            let best_tip_height = self.latest_chain_tip.best_tip_height();
-
-            // Clean up completed download tasks and add to mempool if successful.
-            while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
-                match r {
-                    Ok((tx, expected_tip_height)) => {
-                        // # Correctness:
-                        //
-                        // It's okay to use tip height here instead of the tip hash since
-                        // chain_tip_change.last_tip_change() returns a `TipAction::Reset` when
-                        // the previous block hash doesn't match the `last_change_hash` and the
-                        // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
-                        if best_tip_height == Some(expected_tip_height) {
-                            let insert_result = storage.insert(tx.clone());
-
-                            tracing::trace!(
-                                ?insert_result,
-                                "got Ok(_) transaction verify, tried to store",
-                            );
-
-                            if let Ok(inserted_id) = insert_result {
-                                // Save transaction ids that we will send to peers
-                                send_to_peers_ids.insert(inserted_id);
-                            }
-                        } else {
-                            tracing::trace!("chain grew during tx verification, retrying ..",);
-
-                            // We don't care if re-queueing the transaction request fails.
-                            let _result =
-                                tx_downloads.download_if_needed_and_verify(tx.transaction.into());
-                        }
-                    }
-                    Err((txid, error)) => {
-                        tracing::debug!(?txid, ?error, "mempool transaction failed to verify");
-
-                        metrics::counter!("mempool.failed.verify.tasks.total", 1, "reason" => error.to_string());
-                        storage.reject_if_needed(txid, error);
-                    }
-                };
-            }
-
-            // Handle best chain tip changes
-            if let Some(TipAction::Grow { block }) = tip_action {
-                tracing::trace!(block_height = ?block.height, "handling blocks added to tip");
-
-                // Cancel downloads/verifications/storage of transactions
-                // with the same mined IDs as recently mined transactions.
-                let mined_ids = block.transaction_hashes.iter().cloned().collect();
-                tx_downloads.cancel(&mined_ids);
-                storage.reject_and_remove_same_effects(&mined_ids, block.transactions);
-
-                // Clear any transaction rejections if they might have become valid after
-                // the new block was added to the tip.
-                storage.clear_tip_rejections();
-            }
-
-            // Remove expired transactions from the mempool.
-            //
-            // Lock times never expire, because block times are strictly increasing.
-            // So we don't need to check them here.
-            if let Some(tip_height) = best_tip_height {
-                let expired_transactions = storage.remove_expired_transactions(tip_height);
-                // Remove transactions that are expired from the peers list
-                send_to_peers_ids =
-                    Self::remove_expired_from_peer_list(&send_to_peers_ids, &expired_transactions);
-
-                if !expired_transactions.is_empty() {
-                    tracing::debug!(
-                        ?expired_transactions,
-                        "removed expired transactions from the mempool",
+                // Re-verify the transactions that were pending or valid at the previous tip.
+                // This saves us the time and data needed to re-download them.
+                if let ActiveState::Enabled { tx_downloads, .. } = &mut self.active_state {
+                    info!(
+                        transactions = tx_retries.len(),
+                        "re-verifying mempool transactions after a chain fork"
                     );
+
+                    for tx in tx_retries {
+                        // This is just an efficiency optimisation, so we don't care if queueing
+                        // transaction requests fails.
+                        let _result = tx_downloads.download_if_needed_and_verify(tx);
+                    }
+                }
+
+                return Poll::Ready(Ok(()));
+            }
+
+            if let ActiveState::Enabled {
+                storage,
+                tx_downloads,
+            } = &mut self.active_state
+            {
+                let best_tip_height = self.latest_chain_tip.best_tip_height();
+
+                // Clean up completed download tasks and add to mempool if successful.
+                while let Poll::Ready(Some(r)) = tx_downloads.as_mut().poll_next(cx) {
+                    match r {
+                        Ok((tx, expected_tip_height)) => {
+                            // # Correctness:
+                            //
+                            // It's okay to use tip height here instead of the tip hash since
+                            // chain_tip_change.last_tip_change() returns a `TipAction::Reset` when
+                            // the previous block hash doesn't match the `last_change_hash` and the
+                            // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
+                            if best_tip_height == Some(expected_tip_height) {
+                                let insert_result = storage.insert(tx.clone());
+
+                                tracing::trace!(
+                                    ?insert_result,
+                                    "got Ok(_) transaction verify, tried to store",
+                                );
+
+                                if let Ok(inserted_id) = insert_result {
+                                    // Save transaction ids that we will send to peers
+                                    send_to_peers_ids.insert(inserted_id);
+                                }
+                            } else {
+                                tracing::trace!("chain grew during tx verification, retrying ..",);
+
+                                // We don't care if re-queueing the transaction request fails.
+                                let _result = tx_downloads
+                                    .download_if_needed_and_verify(tx.transaction.into());
+                            }
+                        }
+                        Err((txid, error)) => {
+                            tracing::debug!(?txid, ?error, "mempool transaction failed to verify");
+
+                            metrics::counter!("mempool.failed.verify.tasks.total", 1, "reason" => error.to_string());
+                            storage.reject_if_needed(txid, error);
+                        }
+                    };
+                }
+
+                // Handle best chain tip changes
+                if let Some(TipAction::Grow { block }) = tip_action {
+                    tracing::trace!(block_height = ?block.height, "handling blocks added to tip");
+
+                    // Cancel downloads/verifications/storage of transactions
+                    // with the same mined IDs as recently mined transactions.
+                    let mined_ids = block.transaction_hashes.iter().cloned().collect();
+                    tx_downloads.cancel(&mined_ids);
+                    storage.reject_and_remove_same_effects(&mined_ids, block.transactions);
+
+                    // Clear any transaction rejections if they might have become valid after
+                    // the new block was added to the tip.
+                    storage.clear_tip_rejections();
+                }
+
+                // Remove expired transactions from the mempool.
+                //
+                // Lock times never expire, because block times are strictly increasing.
+                // So we don't need to check them here.
+                if let Some(tip_height) = best_tip_height {
+                    let expired_transactions = storage.remove_expired_transactions(tip_height);
+                    // Remove transactions that are expired from the peers list
+                    send_to_peers_ids = Self::remove_expired_from_peer_list(
+                        &send_to_peers_ids,
+                        &expired_transactions,
+                    );
+
+                    if !expired_transactions.is_empty() {
+                        tracing::debug!(
+                            ?expired_transactions,
+                            "removed expired transactions from the mempool",
+                        );
+                    }
                 }
             }
 
-            // Send transactions that were not rejected nor expired to peers
-            if !send_to_peers_ids.is_empty() {
-                tracing::trace!(?send_to_peers_ids, "sending new transactions to peers");
+            tip_action = self.chain_tip_change.last_tip_change();
 
-                self.transaction_sender.send(send_to_peers_ids)?;
+            if tip_action.is_none() {
+                break;
             }
         }
 
-        // TODO: Move the above into a loop, check that the tip action hasn't changed before returning
+        // Send transactions that were not rejected nor expired to peers
+        if !send_to_peers_ids.is_empty() {
+            tracing::trace!(?send_to_peers_ids, "sending new transactions to peers");
+
+            self.transaction_sender.send(send_to_peers_ids)?;
+        }
 
         Poll::Ready(Ok(()))
     }
