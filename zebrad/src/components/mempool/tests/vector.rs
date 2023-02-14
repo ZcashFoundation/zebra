@@ -7,7 +7,8 @@ use tokio::time::{self, timeout};
 use tower::{ServiceBuilder, ServiceExt};
 
 use zebra_chain::{
-    block::Block, fmt::humantime_seconds, parameters::Network, serialization::ZcashDeserializeInto,
+    amount::Amount, block::Block, fmt::humantime_seconds, parameters::Network,
+    serialization::ZcashDeserializeInto, transaction::VerifiedUnminedTx,
 };
 use zebra_consensus::transaction as tx;
 use zebra_state::{Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
@@ -790,6 +791,212 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     };
     assert_eq!(queued_responses.len(), 1);
     assert!(queued_responses[0].is_ok());
+
+    Ok(())
+}
+
+/// Check that transactions are re-verified if the tip changes
+/// during verification.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let block3: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+
+    let (
+        mut mempool,
+        mut peer_set,
+        mut state_service,
+        mut chain_tip_change,
+        mut tx_verifier,
+        mut recent_syncs,
+    ) = setup(network, u64::MAX).await;
+
+    // Enable the mempool
+    mempool.enable(&mut recent_syncs).await;
+    assert!(mempool.is_enabled());
+
+    // Push the genesis block to the state
+    state_service
+        .ready()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitFinalizedBlock(
+            genesis_block.clone().into(),
+        ))
+        .await
+        .unwrap();
+
+    if let Err(timeout_error) = timeout(
+        CHAIN_TIP_UPDATE_WAIT_LIMIT,
+        chain_tip_change.wait_for_tip_change(),
+    )
+    .await
+    .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+    {
+        info!(
+            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
+            ?timeout_error,
+            "timeout waiting for chain tip change after committing block"
+        );
+    }
+
+    // Queue transaction from block 3 for download
+    let tx = block3.transactions[0].clone();
+    let txid = block3.transactions[0].unmined_id();
+    let response = mempool
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::Queue(vec![txid.into()]))
+        .await
+        .unwrap();
+    let queued_responses = match response {
+        Response::Queued(queue_responses) => queue_responses,
+        _ => unreachable!("will never happen in this test"),
+    };
+    assert_eq!(queued_responses.len(), 1);
+    assert!(queued_responses[0].is_ok());
+    assert_eq!(mempool.tx_downloads().in_flight(), 1);
+
+    peer_set
+        .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
+        .map(|responder| {
+            responder.respond(zn::Response::Transactions(vec![
+                zn::InventoryResponse::Available(tx.clone().into()),
+            ]));
+        })
+        .await;
+
+    // Verify the transaction now that the mempool has already checked chain_tip_change
+    tx_verifier
+        .expect_request_that(|_| true)
+        .map(|responder| {
+            let transaction = responder
+                .request()
+                .clone()
+                .mempool_transaction()
+                .expect("unexpected non-mempool request");
+
+            // Set a dummy fee and sigops.
+            responder.respond(transaction::Response::from(VerifiedUnminedTx::new(
+                transaction,
+                Amount::zero(),
+                0,
+            )));
+        })
+        .await;
+
+    // Push block 1 to the state. This is considered a network upgrade,
+    // and must cancel all pending transaction downloads with a `TipAction::Reset`.
+    state_service
+        .ready()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitFinalizedBlock(
+            block1.clone().into(),
+        ))
+        .await
+        .unwrap();
+
+    if let Err(timeout_error) = timeout(
+        CHAIN_TIP_UPDATE_WAIT_LIMIT,
+        chain_tip_change.wait_for_tip_change(),
+    )
+    .await
+    .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+    {
+        info!(
+            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
+            ?timeout_error,
+            "timeout waiting for chain tip change after committing block"
+        );
+    }
+
+    // Query the mempool to make it poll chain_tip_change
+    mempool.dummy_call().await;
+
+    // Check that there is still an in-flight tx_download and that
+    // no transactions were inserted in the mempool.
+    assert_eq!(mempool.tx_downloads().in_flight(), 1);
+    assert_eq!(mempool.storage().transaction_count(), 0);
+
+    peer_set
+        .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
+        .map(|responder| {
+            responder.respond(zn::Response::Transactions(vec![
+                zn::InventoryResponse::Available(tx.into()),
+            ]));
+        })
+        .await;
+
+    // Verify the transaction now that the mempool has already checked chain_tip_change
+    tx_verifier
+        .expect_request_that(|_| true)
+        .map(|responder| {
+            let transaction = responder
+                .request()
+                .clone()
+                .mempool_transaction()
+                .expect("unexpected non-mempool request");
+
+            // Set a dummy fee and sigops.
+            responder.respond(transaction::Response::from(VerifiedUnminedTx::new(
+                transaction,
+                Amount::zero(),
+                0,
+            )));
+        })
+        .await;
+
+    // Query the mempool to make it poll chain_tip_change and try reverifying its state
+    mempool.dummy_call().await;
+
+    // Push block 2 to the state. This will increase the tip height past the expected
+    // tip height that the the tx was verified at.
+    state_service
+        .ready()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitFinalizedBlock(
+            block2.clone().into(),
+        ))
+        .await
+        .unwrap();
+
+    if let Err(timeout_error) = timeout(
+        CHAIN_TIP_UPDATE_WAIT_LIMIT,
+        chain_tip_change.wait_for_tip_change(),
+    )
+    .await
+    .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+    {
+        info!(
+            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
+            ?timeout_error,
+            "timeout waiting for chain tip change after committing block"
+        );
+    }
+
+    // Query the mempool to make it poll tx_downloads.pending and try reverifying transactions
+    // because the tip height has changed.
+    mempool.dummy_call().await;
+
+    // Check that there is still an in-flight tx_download and that
+    // no transactions were inserted in the mempool.
+    assert_eq!(mempool.tx_downloads().in_flight(), 1);
+    assert_eq!(mempool.storage().transaction_count(), 0);
 
     Ok(())
 }
