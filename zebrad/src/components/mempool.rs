@@ -382,7 +382,7 @@ impl Service<Request> for Mempool {
                         //
                         // It's okay to use tip height here instead of the tip hash since
                         // chain_tip_change.last_tip_change() returns a `TipAction::Reset` when
-                        // the previous block hash doesn't match the `last_change_hash` and the
+                        // the best chain changes (which is the only way to stay at the same height), and the
                         // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
                         if best_tip_height == Some(expected_tip_height) {
                             let insert_result = storage.insert(tx.clone());
