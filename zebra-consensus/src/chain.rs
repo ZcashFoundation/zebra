@@ -297,20 +297,20 @@ where
                     Ok(zebra_state::Response::BlockHash(Some(state_hash))) => assert_eq!(
                         *checkpoint_hash, state_hash,
                         "invalid block in state: a previous Zebra instance followed an \
-                     incorrect chain. Delete and re-sync your state to use the best chain"
+                         incorrect chain. Delete and re-sync your state to use the best chain"
                     ),
 
                     Ok(zebra_state::Response::BlockHash(None)) => {
                         if checkpoint_sync {
                             tracing::info!(
                                 "state is not fully synced yet, remaining checkpoints will be \
-                             verified during syncing"
+                                 verified during syncing"
                             );
                         } else {
                             tracing::warn!(
                                 "state is not fully synced yet, remaining checkpoints will be \
-                             verified next time Zebra starts up. Zebra will be less secure \
-                             until it is restarted"
+                                 verified next time Zebra starts up. Zebra will be less secure \
+                                 until it is restarted"
                             );
                         }
 
@@ -323,7 +323,7 @@ where
                     Err(e) => {
                         tracing::warn!(
                             "unexpected error: {e:?} in state request while verifying previous \
-                         state checkpoints"
+                             state checkpoints"
                         )
                     }
                 }
