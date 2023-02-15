@@ -119,4 +119,29 @@ impl Address {
     pub fn is_transparent(&self) -> bool {
         matches!(self, Self::Transparent(_))
     }
+
+    /// Returns the payment address for transparent or sapling addresses.
+    pub fn payment_address(&self) -> Option<String> {
+        use bech32::{ToBase32, Variant};
+        match &self {
+            Self::Transparent(address) => Some(address.to_string()),
+            Self::Sapling { network, address } => {
+                let encoded = bech32::encode(
+                    Self::sapling_hrp(*network).as_str(),
+                    address.to_bytes().to_vec().to_base32(),
+                    Variant::Bech32,
+                )
+                .unwrap_or_default();
+                Some(encoded)
+            }
+            Self::Unified { .. } => None,
+        }
+    }
+
+    fn sapling_hrp(network: Network) -> String {
+        match network {
+            Network::Mainnet => String::from("zs"),
+            Network::Testnet => String::from("ztestsapling"),
+        }
+    }
 }

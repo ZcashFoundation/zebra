@@ -7,7 +7,7 @@ use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tower::{buffer::Buffer, Service, ServiceExt};
 
-use zcash_address;
+use zcash_address::{self, unified::Encoding, TryFromAddress};
 
 use zebra_chain::{
     amount::Amount,
@@ -47,7 +47,7 @@ use crate::methods::{
             peer_info::PeerInfo,
             submit_block,
             subsidy::{BlockSubsidy, FundingStream},
-            validate_address,
+            unified_address, validate_address,
         },
     },
     height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
@@ -194,6 +194,15 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`getdifficulty`](https://zcash.github.io/rpc/getdifficulty.html)
     #[rpc(name = "getdifficulty")]
     fn get_difficulty(&self) -> BoxFuture<Result<f64>>;
+
+    /// Returns the list of individual payment addresses given a unified address.
+    ///
+    /// zcashd reference: [`z_listunifiedreceivers`]( )
+    #[rpc(name = "z_listunifiedreceivers")]
+    fn z_list_unified_receivers(
+        &self,
+        address: String,
+    ) -> BoxFuture<Result<unified_address::Response>>;
 }
 
 /// RPC method implementations.
@@ -979,6 +988,75 @@ where
 
             // Invert the division to give approximately: `work(difficulty) / work(pow_limit)`
             Ok(pow_limit / difficulty)
+        }
+        .boxed()
+    }
+
+    fn z_list_unified_receivers(
+        &self,
+        address: String,
+    ) -> BoxFuture<Result<unified_address::Response>> {
+        use zcash_address::unified::Container;
+
+        async move {
+            let unified_address_data: (zcash_address::Network, zcash_address::unified::Address) =
+                zcash_address::unified::Encoding::decode(address.clone().as_str()).map_err(
+                    |error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    },
+                )?;
+
+            let mut p2pkh = String::new();
+            let mut p2sh = String::new();
+            let mut orchard = String::new();
+            let mut sapling = String::new();
+
+            for item in unified_address_data.1.items() {
+                match item {
+                    zcash_address::unified::Receiver::Orchard(_data) => {
+                        if let Ok(addr) =
+                            zcash_address::unified::Address::try_from_items(vec![item])
+                        {
+                            orchard = addr.encode(&unified_address_data.0);
+                        }
+                    }
+                    zcash_address::unified::Receiver::Sapling(data) => {
+                        if let Ok(addr) = zebra_chain::primitives::Address::try_from_sapling(
+                            unified_address_data.0,
+                            data,
+                        ) {
+                            sapling = addr.payment_address().unwrap_or_default();
+                        }
+                    }
+                    zcash_address::unified::Receiver::P2pkh(data) => {
+                        if let Ok(addr) =
+                            zebra_chain::primitives::Address::try_from_transparent_p2pkh(
+                                unified_address_data.0,
+                                data,
+                            )
+                        {
+                            p2pkh = addr.payment_address().unwrap_or_default();
+                        }
+                    }
+                    zcash_address::unified::Receiver::P2sh(data) => {
+                        if let Ok(addr) =
+                            zebra_chain::primitives::Address::try_from_transparent_p2sh(
+                                unified_address_data.0,
+                                data,
+                            )
+                        {
+                            p2sh = addr.payment_address().unwrap_or_default();
+                        }
+                    }
+                    _ => (),
+                }
+            }
+
+            Ok(unified_address::Response::new(
+                orchard, sapling, p2pkh, p2sh,
+            ))
         }
         .boxed()
     }
