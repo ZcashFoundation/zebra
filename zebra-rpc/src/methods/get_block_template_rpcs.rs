@@ -197,7 +197,7 @@ pub trait GetBlockTemplateRpc {
 
     /// Returns the list of individual payment addresses given a unified address.
     ///
-    /// zcashd reference: [`z_listunifiedreceivers`]( )
+    /// zcashd reference: [`z_listunifiedreceivers`](https://zcash.github.io/rpc/z_listunifiedreceivers.html)
     #[rpc(name = "z_listunifiedreceivers")]
     fn z_list_unified_receivers(
         &self,

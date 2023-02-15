@@ -23,4 +23,40 @@ impl Response {
             p2sh,
         }
     }
+
+    #[cfg(test)]
+    /// Return the orchard payment address from a response, if any.
+    pub fn orchard(&self) -> Option<String> {
+        match self.orchard.is_empty() {
+            true => None,
+            false => Some(self.orchard.clone()),
+        }
+    }
+
+    #[cfg(test)]
+    /// Return the sapling payment address from a response, if any.
+    pub fn sapling(&self) -> Option<String> {
+        match self.sapling.is_empty() {
+            true => None,
+            false => Some(self.sapling.clone()),
+        }
+    }
+
+    #[cfg(test)]
+    /// Return the p2pkh payment address from a response, if any.
+    pub fn p2pkh(&self) -> Option<String> {
+        match self.p2pkh.is_empty() {
+            true => None,
+            false => Some(self.p2pkh.clone()),
+        }
+    }
+
+    #[cfg(test)]
+    /// Return the p2sh payment address from a response, if any.
+    pub fn p2sh(&self) -> Option<String> {
+        match self.p2sh.is_empty() {
+            true => None,
+            false => Some(self.p2sh.clone()),
+        }
+    }
 }
