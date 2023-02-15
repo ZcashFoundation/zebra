@@ -1032,6 +1032,7 @@ impl Service<Request> for StateService {
             Request::Tip
             | Request::Depth(_)
             | Request::BestChainNextMedianTimePast
+            | Request::BestChainBlockHash(_)
             | Request::BlockLocator
             | Request::Transaction(_)
             | Request::UnspentBestChainUtxo(_)
