@@ -4,17 +4,28 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
-    /// Should Zebra use its optional checkpoints to sync?
+    /// Should Zebra make sure that it follows the consensus chain while syncing?
+    /// This is a developer-only option.
     ///
-    /// This option is `true` by default, and allows for faster chain synchronization.
+    /// # Security
     ///
-    /// Zebra requires some checkpoints to validate legacy network upgrades.
-    /// But it also ships with optional checkpoints, which can be used instead of full block validation.
+    /// Disabling this option leaves your node vulnerable to some kinds of chain-based attacks.
+    /// Zebra regularly updates its checkpoints to ensure nodes are following the best chain.
     ///
-    /// Disabling this option makes Zebra start full validation as soon as possible.
-    /// This helps developers debug Zebra, by running full validation on more blocks.
+    /// # Details
     ///
-    /// Future versions of Zebra may change the required and optional checkpoints.
+    /// This option is `true` by default, because it prevents some kinds of chain attacks.
+    ///
+    /// Disabling this option makes Zebra start full validation earlier.
+    /// It is slower and less secure.
+    ///
+    /// Zebra requires some checkpoints to simplify validation of legacy network upgrades.
+    /// So those checkpoints are always active, even when this option is `false`.
+    ///
+    /// # Deprecation
+    ///
+    /// For security reasons, this option might be deprecated or ignored in a future Zebra
+    /// release.
     pub checkpoint_sync: bool,
 
     /// Skip the pre-download of Groth16 parameters if this option is true.
