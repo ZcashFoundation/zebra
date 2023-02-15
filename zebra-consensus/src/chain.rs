@@ -21,9 +21,9 @@ use std::{
 use displaydoc::Display;
 use futures::{FutureExt, TryFutureExt};
 use thiserror::Error;
-use tokio::task::{spawn_blocking, JoinHandle};
+use tokio::task::JoinHandle;
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
-use tracing::{instrument, Span};
+use tracing::{instrument, Instrument, Span};
 
 use zebra_chain::{
     block::{self, Height},
@@ -237,22 +237,22 @@ pub async fn init<S>(
         BoxService<transaction::Request, transaction::Response, TransactionError>,
         transaction::Request,
     >,
-    JoinHandle<()>,
+    Vec<JoinHandle<()>>,
     Height,
 )
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
-    // Pre-download Groth16 parameters in a separate thread.
-
-    // Give other tasks priority, before spawning the download task.
+    // Give other tasks priority before spawning the download and checkpoint tasks.
     tokio::task::yield_now().await;
+
+    // Pre-download Groth16 parameters in a separate thread.
 
     // The parameter download thread must be launched before initializing any verifiers.
     // Otherwise, the download might happen on the startup thread.
     let span = Span::current();
-    let groth16_download_handle = spawn_blocking(move || {
+    let groth16_download_handle = tokio::task::spawn_blocking(move || {
         span.in_scope(|| {
             if !debug_skip_parameter_preload {
                 // The lazy static initializer does the download, if needed,
@@ -261,6 +261,78 @@ where
             }
         })
     });
+
+    // Make sure the state contains the known best chain checkpoints, in a separate thread.
+
+    let checkpoint_state_service = state_service.clone();
+    let checkpoint_sync = config.checkpoint_sync;
+    let _state_checkpoint_verify_handle = tokio::task::spawn(
+        // TODO: move this into an async function?
+        async move {
+            tracing::info!("starting state checkpoint validation...");
+
+            // # Consensus
+            //
+            // We want to verify all available checkpoints, even if the node is not configured
+            // to use them for syncing. Zebra's checkpoints are updated with every release,
+            // which makes sure they include the latest settled network upgrade.
+            //
+            // > A network upgrade is settled on a given network when there is a social
+            // > consensus that it has activated with a given activation block hash.
+            // > A full validator that potentially risks Mainnet funds or displays Mainnet
+            // > transaction information to a user MUST do so only for a block chain that
+            // > includes the activation block of the most recent settled network upgrade,
+            // > with the corresponding activation block hash. Currently, there is social
+            // > consensus that NU5 has activated on the Zcash Mainnet and Testnet with the
+            // > activation block hashes given in § 3.12 ‘Mainnet and Testnet’ on p. 20.
+            //
+            // <https://zips.z.cash/protocol/protocol.pdf#blockchain>
+            let full_checkpoints = CheckpointList::new(network);
+
+            for (height, checkpoint_hash) in full_checkpoints.iter() {
+                let checkpoint_state_service = checkpoint_state_service.clone();
+                let request = zebra_state::Request::BestChainBlockHash(*height);
+
+                match checkpoint_state_service.oneshot(request).await {
+                    Ok(zebra_state::Response::BlockHash(Some(state_hash))) => assert_eq!(
+                        *checkpoint_hash, state_hash,
+                        "invalid block in state: a previous Zebra instance followed an \
+                     incorrect chain. Delete and re-sync your state to use the best chain"
+                    ),
+
+                    Ok(zebra_state::Response::BlockHash(None)) => {
+                        if checkpoint_sync {
+                            tracing::info!(
+                                "state is not fully synced yet, remaining checkpoints will be \
+                             verified during syncing"
+                            );
+                        } else {
+                            tracing::warn!(
+                                "state is not fully synced yet, remaining checkpoints will be \
+                             verified next time Zebra starts up. Zebra will be less secure \
+                             until it is restarted"
+                            );
+                        }
+
+                        break;
+                    }
+
+                    Ok(response) => {
+                        unreachable!("unexpected response type: {response:?} from state request")
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "unexpected error: {e:?} in state request while verifying previous \
+                         state checkpoints"
+                        )
+                    }
+                }
+            }
+
+            tracing::info!("finished state checkpoint validation");
+        }
+        .instrument(Span::current()),
+    );
 
     // transaction verification
 
@@ -304,7 +376,7 @@ where
 /// Parses the checkpoint list for `network` and `config`.
 /// Returns the checkpoint list and maximum checkpoint height.
 pub fn init_checkpoint_list(config: Config, network: Network) -> (CheckpointList, Height) {
-    // TODO: Zebra parses the checkpoint list twice at startup.
+    // TODO: Zebra parses the checkpoint list three times at startup.
     //       Instead, cache the checkpoint list for each `network`.
     let list = CheckpointList::new(network);
 
