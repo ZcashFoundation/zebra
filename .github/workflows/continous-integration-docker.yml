@@ -490,6 +490,8 @@ jobs:
       test_id: lwd-full-sync
       test_description: Test lightwalletd full sync
       test_variables: '-e TEST_LWD_FULL_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      # This test runs for (just) longer than 6 hours, so it needs multiple jobs
+      is_long_test: true
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: true
