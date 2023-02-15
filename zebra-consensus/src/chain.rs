@@ -266,7 +266,7 @@ where
 
     let checkpoint_state_service = state_service.clone();
     let checkpoint_sync = config.checkpoint_sync;
-    let _state_checkpoint_verify_handle = tokio::task::spawn(
+    let state_checkpoint_verify_handle = tokio::task::spawn(
         // TODO: move this into an async function?
         async move {
             tracing::info!("starting state checkpoint validation...");
@@ -368,7 +368,8 @@ where
     (
         chain,
         transaction,
-        groth16_download_handle,
+        // TODO: turn this into a struct?
+        vec![groth16_download_handle, state_checkpoint_verify_handle],
         max_checkpoint_height,
     )
 }
