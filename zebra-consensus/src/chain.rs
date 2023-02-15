@@ -269,7 +269,7 @@ where
     let state_checkpoint_verify_handle = tokio::task::spawn(
         // TODO: move this into an async function?
         async move {
-            tracing::info!("starting state checkpoint validation...");
+            tracing::info!("starting state checkpoint validation");
 
             // # Consensus
             //
