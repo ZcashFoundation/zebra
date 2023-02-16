@@ -7,7 +7,6 @@ use zcash_primitives::sapling;
 use crate::{parameters::Network, transparent, BoxError};
 
 /// Zcash address variants
-// TODO: Add Sprout addresses
 pub enum Address {
     /// Transparent address
     Transparent(transparent::Address),
