@@ -1018,36 +1018,29 @@ where
             for item in unified_address.items() {
                 match item {
                     zcash_address::unified::Receiver::Orchard(_data) => {
-                        if let Ok(addr) =
-                            zcash_address::unified::Address::try_from_items(vec![item])
-                        {
-                            orchard = addr.encode(&network);
-                        }
+                        let addr = zcash_address::unified::Address::try_from_items(vec![item])
+                            .expect("using data already decoded as valid");
+                        orchard = addr.encode(&network);
                     }
                     zcash_address::unified::Receiver::Sapling(data) => {
-                        if let Ok(addr) =
+                        let addr =
                             zebra_chain::primitives::Address::try_from_sapling(network, data)
-                        {
-                            sapling = addr.payment_address(Some(network)).unwrap_or_default();
-                        }
+                                .expect("using data already decoded as valid");
+                        sapling = addr.payment_address(Some(network)).unwrap_or_default();
                     }
                     zcash_address::unified::Receiver::P2pkh(data) => {
-                        if let Ok(addr) =
-                            zebra_chain::primitives::Address::try_from_transparent_p2pkh(
-                                network, data,
-                            )
-                        {
-                            p2pkh = addr.payment_address(None).unwrap_or_default();
-                        }
+                        let addr = zebra_chain::primitives::Address::try_from_transparent_p2pkh(
+                            network, data,
+                        )
+                        .expect("using data already decoded as valid");
+                        p2pkh = addr.payment_address(None).unwrap_or_default();
                     }
                     zcash_address::unified::Receiver::P2sh(data) => {
-                        if let Ok(addr) =
-                            zebra_chain::primitives::Address::try_from_transparent_p2sh(
-                                network, data,
-                            )
-                        {
-                            p2sh = addr.payment_address(None).unwrap_or_default();
-                        }
+                        let addr = zebra_chain::primitives::Address::try_from_transparent_p2sh(
+                            network, data,
+                        )
+                        .expect("using data already decoded as valid");
+                        p2sh = addr.payment_address(None).unwrap_or_default();
                     }
                     _ => (),
                 }
