@@ -4,7 +4,7 @@
 
 use zcash_primitives::sapling;
 
-use crate::{orchard, parameters::Network, transparent, BoxError};
+use crate::{parameters::Network, transparent, BoxError};
 
 /// Zcash address variants
 // TODO: Add Sprout addresses
@@ -26,14 +26,8 @@ pub enum Address {
         /// Address' network
         network: Network,
 
-        /// Transparent address
-        transparent_address: transparent::Address,
-
-        /// Sapling address
-        sapling_address: sapling::PaymentAddress,
-
-        /// Orchard address
-        orchard_address: orchard::Address,
+        /// Unified address
+        address: zcash_address::unified::Address,
     },
 }
 
@@ -93,7 +87,13 @@ impl zcash_address::TryFromAddress for Address {
             .ok_or_else(|| BoxError::from("not a valid sapling address").into())
     }
 
-    // TODO: Add sprout and unified/orchard converters
+    fn try_from_unified(
+        network: zcash_address::Network,
+        address: zcash_address::unified::Address,
+    ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
+        let network = network.try_into()?;
+        Ok(Self::Unified { network, address })
+    }
 }
 
 impl Address {
