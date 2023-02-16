@@ -122,26 +122,24 @@ impl Address {
 
     /// Returns the payment address for transparent or sapling addresses.
     pub fn payment_address(&self) -> Option<String> {
-        use bech32::{ToBase32, Variant};
+        use zcash_address::{ToAddress, ZcashAddress};
+
         match &self {
             Self::Transparent(address) => Some(address.to_string()),
             Self::Sapling { network, address } => {
-                let encoded = bech32::encode(
-                    Self::sapling_hrp(*network).as_str(),
-                    address.to_bytes().to_vec().to_base32(),
-                    Variant::Bech32,
-                )
-                .unwrap_or_default();
-                Some(encoded)
+                let data = address.to_bytes();
+                let address = ZcashAddress::from_sapling(Self::zcash_address_network(*network), data);
+                Some(address.encode())
             }
             Self::Unified { .. } => None,
         }
     }
 
-    fn sapling_hrp(network: Network) -> String {
+    /// Convert a `zebra_chain::parameters::network::Network` type into a `zcash_address::Network` type.
+    fn zcash_address_network(network: Network) -> zcash_address::Network {
         match network {
-            Network::Mainnet => String::from("zs"),
-            Network::Testnet => String::from("ztestsapling"),
+            Network::Mainnet => zcash_address::Network::Main,
+            Network::Testnet => zcash_address::Network::Test,
         }
     }
 }
