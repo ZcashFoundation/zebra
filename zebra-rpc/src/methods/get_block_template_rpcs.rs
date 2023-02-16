@@ -999,55 +999,54 @@ where
         use zcash_address::unified::Container;
 
         async move {
-            let unified_address_data: (zcash_address::Network, zcash_address::unified::Address) =
-                zcash_address::unified::Encoding::decode(address.clone().as_str()).map_err(
-                    |error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    },
-                )?;
+            let (network, unified_address): (
+                zcash_address::Network,
+                zcash_address::unified::Address,
+            ) = zcash_address::unified::Encoding::decode(address.clone().as_str()).map_err(
+                |error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                },
+            )?;
 
             let mut p2pkh = String::new();
             let mut p2sh = String::new();
             let mut orchard = String::new();
             let mut sapling = String::new();
 
-            for item in unified_address_data.1.items() {
+            for item in unified_address.items() {
                 match item {
                     zcash_address::unified::Receiver::Orchard(_data) => {
                         if let Ok(addr) =
                             zcash_address::unified::Address::try_from_items(vec![item])
                         {
-                            orchard = addr.encode(&unified_address_data.0);
+                            orchard = addr.encode(&network);
                         }
                     }
                     zcash_address::unified::Receiver::Sapling(data) => {
-                        if let Ok(addr) = zebra_chain::primitives::Address::try_from_sapling(
-                            unified_address_data.0,
-                            data,
-                        ) {
-                            sapling = addr.payment_address().unwrap_or_default();
+                        if let Ok(addr) =
+                            zebra_chain::primitives::Address::try_from_sapling(network, data)
+                        {
+                            sapling = addr.payment_address(Some(network)).unwrap_or_default();
                         }
                     }
                     zcash_address::unified::Receiver::P2pkh(data) => {
                         if let Ok(addr) =
                             zebra_chain::primitives::Address::try_from_transparent_p2pkh(
-                                unified_address_data.0,
-                                data,
+                                network, data,
                             )
                         {
-                            p2pkh = addr.payment_address().unwrap_or_default();
+                            p2pkh = addr.payment_address(None).unwrap_or_default();
                         }
                     }
                     zcash_address::unified::Receiver::P2sh(data) => {
                         if let Ok(addr) =
                             zebra_chain::primitives::Address::try_from_transparent_p2sh(
-                                unified_address_data.0,
-                                data,
+                                network, data,
                             )
                         {
-                            p2sh = addr.payment_address().unwrap_or_default();
+                            p2sh = addr.payment_address(None).unwrap_or_default();
                         }
                     }
                     _ => (),
