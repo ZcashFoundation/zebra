@@ -310,7 +310,8 @@ where
                             tracing::warn!(
                                 "state is not fully synced yet, remaining checkpoints will be \
                                  verified next time Zebra starts up. Zebra will be less secure \
-                                 until it is restarted"
+                                 until it is restarted. Use consensus.checkpoint_sync = true \
+                                 in zebrad.toml to make sure you are following a valid chain"
                             );
                         }
 
