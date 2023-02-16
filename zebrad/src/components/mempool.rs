@@ -384,7 +384,7 @@ impl Service<Request> for Mempool {
                         // chain_tip_change.last_tip_change() returns a `TipAction::Reset` when
                         // the best chain changes (which is the only way to stay at the same height), and the
                         // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
-                        if best_tip_height == Some(expected_tip_height) {
+                        if best_tip_height == expected_tip_height {
                             let insert_result = storage.insert(tx.clone());
 
                             tracing::trace!(
@@ -453,8 +453,6 @@ impl Service<Request> for Mempool {
                 self.transaction_sender.send(send_to_peers_ids)?;
             }
         }
-
-        // TODO: Move the above into a loop, check that the tip action hasn't changed before returning
 
         Poll::Ready(Ok(()))
     }

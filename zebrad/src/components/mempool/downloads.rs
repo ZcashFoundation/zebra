@@ -149,7 +149,10 @@ where
     #[pin]
     pending: FuturesUnordered<
         JoinHandle<
-            Result<(VerifiedUnminedTx, Height), (TransactionDownloadVerifyError, UnminedTxId)>,
+            Result<
+                (VerifiedUnminedTx, Option<Height>),
+                (TransactionDownloadVerifyError, UnminedTxId),
+            >,
         >,
     >,
 
@@ -167,7 +170,8 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    type Item = Result<(VerifiedUnminedTx, Height), (UnminedTxId, TransactionDownloadVerifyError)>;
+    type Item =
+        Result<(VerifiedUnminedTx, Option<Height>), (UnminedTxId, TransactionDownloadVerifyError)>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -285,11 +289,11 @@ where
             trace!(?txid, "transaction is not in best chain");
 
             let (tip_height, next_height) = match state.oneshot(zs::Request::Tip).await {
-                Ok(zs::Response::Tip(None)) => Ok((Height(0), Height(1))),
+                Ok(zs::Response::Tip(None)) => Ok((None, Height(0))),
                 Ok(zs::Response::Tip(Some((height, _hash)))) => {
                     let next_height =
                         (height + 1).expect("valid heights are far below the maximum");
-                    Ok((height, next_height))
+                    Ok((Some(height), next_height))
                 }
                 Ok(_) => unreachable!("wrong response"),
                 Err(e) => Err(TransactionDownloadVerifyError::StateError(e)),
