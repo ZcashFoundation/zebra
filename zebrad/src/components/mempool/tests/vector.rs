@@ -838,20 +838,13 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .await
         .unwrap();
 
-    // Wait for the chain tip update
-    if let Err(timeout_error) = timeout(
-        CHAIN_TIP_UPDATE_WAIT_LIMIT,
-        chain_tip_change.wait_for_tip_change(),
-    )
-    .await
-    .map(|change_result| change_result.expect("unexpected chain tip update failure"))
-    {
-        info!(
-            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
-            ?timeout_error,
-            "timeout waiting for chain tip change after committing block"
-        );
-    }
+    // Wait for the chain tip update without a timeout
+    // (skipping the chain tip change here may cause the test to 
+    // pass without reverifying transactions for  `TipAction::Grow`)
+    chain_tip_change
+        .wait_for_tip_change()
+        .await
+        .expect("unexpected chain tip update failure");
 
     // Queue transaction from block 3 for download
     let tx = block3.transactions[0].clone();
