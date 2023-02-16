@@ -889,7 +889,6 @@ where
                     is_valid: true,
                     address: Some(raw_address),
                     address_type: Some(AddressType::from(&address)),
-                    r#type: Some(AddressType::from(&address)),
                     is_mine: Some(false),
                 })
             } else {

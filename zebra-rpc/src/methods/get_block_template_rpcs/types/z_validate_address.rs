@@ -19,10 +19,6 @@ pub struct Response {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub address_type: Option<AddressType>,
 
-    /// The type of the address (*DEPRECATED*, legacy attribute).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<AddressType>,
-
     /// Whether the address is yours or not.
     ///
     /// Always false for now since Zebra doesn't have a wallet yet.
