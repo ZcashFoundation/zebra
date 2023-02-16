@@ -42,7 +42,7 @@ use crate::methods::{
             peer_info::PeerInfo,
             submit_block,
             subsidy::BlockSubsidy,
-            validate_address,
+            unified_address, validate_address,
         },
     },
     tests::utils::fake_history_tree,
@@ -422,6 +422,15 @@ pub async fn test_responses<State, ReadState>(
         .expect("unexpected error in getdifficulty RPC call");
 
     snapshot_rpc_getdifficulty(get_difficulty, &settings);
+
+    let ua = String::from("u1l8xunezsvhq8fgzfl7404m450nwnd76zshscn6nfys7vyz2ywyh4cc5daaq0c7q2su5lqfh23sp7fkf3kt27ve5948mzpfdvckzaect2jtte308mkwlycj2u0eac077wu70vqcetkxf");
+    let z_list_unified_receivers =
+        tokio::spawn(get_block_template_rpc.z_list_unified_receivers(ua))
+            .await
+            .expect("unexpected panic in z_list_unified_receivers RPC task")
+            .expect("unexpected error in z_list_unified_receivers RPC call");
+
+    snapshot_rpc_z_listunifiedreceivers(z_list_unified_receivers, &settings);
 }
 
 /// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
@@ -502,4 +511,12 @@ fn snapshot_rpc_validateaddress(
 /// Snapshot `getdifficulty` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getdifficulty(difficulty: f64, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_difficulty", difficulty));
+}
+
+/// Snapshot `getdifficulty` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_z_listunifiedreceivers(
+    response: unified_address::Response,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| insta::assert_json_snapshot!("z_list_unified_receivers", response));
 }
