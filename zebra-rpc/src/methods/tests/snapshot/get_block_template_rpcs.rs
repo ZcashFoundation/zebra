@@ -51,7 +51,7 @@ use crate::methods::{
 
 pub async fn test_responses<State, ReadState>(
     network: Network,
-    mut mempool: MockService<
+    mempool: MockService<
         mempool::Request,
         mempool::Response,
         PanicAssertion,
@@ -186,10 +186,40 @@ pub async fn test_responses<State, ReadState>(
         .expect("We should have a success response");
     snapshot_rpc_getnetworksolps(get_network_sol_ps, &settings);
 
-    // `getblocktemplate`
+    // `getblocktemplate` - the following snapshots use a mock read_state
 
     // get a new empty state
-    let new_read_state = MockService::build().for_unit_tests();
+    let read_state = MockService::build().for_unit_tests();
+
+    let make_mock_read_state_request_handler = || {
+        let mut read_state = read_state.clone();
+
+        async move {
+            read_state
+                .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+                .await
+                .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                    expected_difficulty: fake_difficulty,
+                    tip_height: fake_tip_height,
+                    tip_hash: fake_tip_hash,
+                    cur_time: fake_cur_time,
+                    min_time: fake_min_time,
+                    max_time: fake_max_time,
+                    history_tree: fake_history_tree(network),
+                }));
+        }
+    };
+
+    let make_mock_mempool_request_handler = || {
+        let mut mempool = mempool.clone();
+
+        async move {
+            mempool
+                .expect_request(mempool::Request::FullTransactions)
+                .await
+                .respond(mempool::Response::FullTransactions(vec![]));
+        }
+    };
 
     // send tip hash and time needed for getblocktemplate rpc
     mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
@@ -199,7 +229,7 @@ pub async fn test_responses<State, ReadState>(
         network,
         mining_config.clone(),
         Buffer::new(mempool.clone(), 1),
-        new_read_state.clone(),
+        read_state.clone(),
         mock_chain_tip.clone(),
         chain_verifier,
         mock_sync_status.clone(),
@@ -208,35 +238,19 @@ pub async fn test_responses<State, ReadState>(
 
     // Basic variant (default mode and no extra features)
 
-    // Fake the ChainInfo response
-    let response_read_state = new_read_state.clone();
+    // Fake the ChainInfo and FullTransaction responses
+    let mock_read_state_request_handler = make_mock_read_state_request_handler();
+    let mock_mempool_request_handler = make_mock_mempool_request_handler();
 
-    tokio::spawn(async move {
-        response_read_state
-            .clone()
-            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
-            .await
-            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                expected_difficulty: fake_difficulty,
-                tip_height: fake_tip_height,
-                tip_hash: fake_tip_hash,
-                cur_time: fake_cur_time,
-                min_time: fake_min_time,
-                max_time: fake_max_time,
-                history_tree: fake_history_tree(network),
-            }));
-    });
+    let get_block_template_fut = get_block_template_rpc.get_block_template(None);
 
-    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template(None));
-
-    mempool
-        .expect_request(mempool::Request::FullTransactions)
-        .await
-        .respond(mempool::Response::FullTransactions(vec![]));
+    let (get_block_template, ..) = tokio::join!(
+        get_block_template_fut,
+        mock_mempool_request_handler,
+        mock_read_state_request_handler,
+    );
 
     let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
-        .await
-        .expect("unexpected panic in getblocktemplate RPC task")
         .expect("unexpected error in getblocktemplate RPC call") else {
             panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
         };
@@ -262,43 +276,25 @@ pub async fn test_responses<State, ReadState>(
         .parse()
         .expect("unexpected invalid LongPollId");
 
-    // Fake the ChainInfo response
-    let response_read_state = new_read_state.clone();
+    // Fake the ChainInfo and FullTransaction responses
+    let mock_read_state_request_handler = make_mock_read_state_request_handler();
+    let mock_mempool_request_handler = make_mock_mempool_request_handler();
 
-    tokio::spawn(async move {
-        response_read_state
-            .clone()
-            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
-            .await
-            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                expected_difficulty: fake_difficulty,
-                tip_height: fake_tip_height,
-                tip_hash: fake_tip_hash,
-                cur_time: fake_cur_time,
-                min_time: fake_min_time,
-                max_time: fake_max_time,
-                history_tree: fake_history_tree(network),
-            }));
-    });
-
-    let get_block_template = tokio::spawn(
-        get_block_template_rpc.get_block_template(
-            get_block_template::JsonParameters {
-                long_poll_id: long_poll_id.into(),
-                ..Default::default()
-            }
-            .into(),
-        ),
+    let get_block_template_fut = get_block_template_rpc.get_block_template(
+        get_block_template::JsonParameters {
+            long_poll_id: long_poll_id.into(),
+            ..Default::default()
+        }
+        .into(),
     );
 
-    mempool
-        .expect_request(mempool::Request::FullTransactions)
-        .await
-        .respond(mempool::Response::FullTransactions(vec![]));
+    let (get_block_template, ..) = tokio::join!(
+        get_block_template_fut,
+        mock_mempool_request_handler,
+        mock_read_state_request_handler,
+    );
 
     let get_block_template::Response::TemplateMode(get_block_template) = get_block_template
-        .await
-        .expect("unexpected panic in getblocktemplate RPC task")
         .expect("unexpected error in getblocktemplate RPC call") else {
             panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
         };
@@ -319,52 +315,52 @@ pub async fn test_responses<State, ReadState>(
 
     // `getblocktemplate` proposal mode variant
 
-    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template(Some(
-        get_block_template::JsonParameters {
+    let get_block_template =
+        get_block_template_rpc.get_block_template(Some(get_block_template::JsonParameters {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: Some(HexData("".into())),
             ..Default::default()
-        },
-    )));
+        }));
 
     let get_block_template = get_block_template
         .await
-        .expect("unexpected panic in getblocktemplate RPC task")
         .expect("unexpected error in getblocktemplate RPC call");
 
     snapshot_rpc_getblocktemplate("invalid-proposal", get_block_template, None, &settings);
+
+    // the following snapshots use a mock read_state and chain_verifier
 
     let mut mock_chain_verifier = MockService::build().for_unit_tests();
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
         network,
         mining_config,
         Buffer::new(mempool.clone(), 1),
-        new_read_state.clone(),
+        read_state.clone(),
         mock_chain_tip,
         mock_chain_verifier.clone(),
         mock_sync_status,
         MockAddressBookPeers::default(),
     );
 
-    let get_block_template = tokio::spawn(get_block_template_rpc.get_block_template(Some(
-        get_block_template::JsonParameters {
+    let get_block_template_fut =
+        get_block_template_rpc.get_block_template(Some(get_block_template::JsonParameters {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: Some(HexData(BLOCK_MAINNET_1_BYTES.to_vec())),
             ..Default::default()
-        },
-    )));
+        }));
 
-    tokio::spawn(async move {
+    let mock_chain_verifier_request_handler = async move {
         mock_chain_verifier
             .expect_request_that(|req| matches!(req, zebra_consensus::Request::CheckProposal(_)))
             .await
             .respond(Hash::from([0; 32]));
-    });
+    };
 
-    let get_block_template = get_block_template
-        .await
-        .expect("unexpected panic in getblocktemplate RPC task")
-        .expect("unexpected error in getblocktemplate RPC call");
+    let (get_block_template, ..) =
+        tokio::join!(get_block_template_fut, mock_chain_verifier_request_handler,);
+
+    let get_block_template =
+        get_block_template.expect("unexpected error in getblocktemplate RPC call");
 
     snapshot_rpc_getblocktemplate("proposal", get_block_template, None, &settings);
 
@@ -398,28 +394,13 @@ pub async fn test_responses<State, ReadState>(
     // getdifficulty
 
     // Fake the ChainInfo response
-    let response_read_state = new_read_state.clone();
+    let mock_read_state_request_handler = make_mock_read_state_request_handler();
 
-    tokio::spawn(async move {
-        response_read_state
-            .clone()
-            .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
-            .await
-            .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                expected_difficulty: fake_difficulty,
-                tip_height: fake_tip_height,
-                tip_hash: fake_tip_hash,
-                cur_time: fake_cur_time,
-                min_time: fake_min_time,
-                max_time: fake_max_time,
-                history_tree: fake_history_tree(network),
-            }));
-    });
+    let get_difficulty_fut = get_block_template_rpc.get_difficulty();
 
-    let get_difficulty = tokio::spawn(get_block_template_rpc.get_difficulty())
-        .await
-        .expect("unexpected panic in getdifficulty RPC task")
-        .expect("unexpected error in getdifficulty RPC call");
+    let (get_difficulty, ..) = tokio::join!(get_difficulty_fut, mock_read_state_request_handler,);
+
+    let get_difficulty = get_difficulty.expect("unexpected error in getdifficulty RPC call");
 
     snapshot_rpc_getdifficulty(get_difficulty, &settings);
 }
