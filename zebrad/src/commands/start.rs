@@ -74,6 +74,7 @@ use tokio::{pin, select, sync::oneshot};
 use tower::{builder::ServiceBuilder, util::BoxService};
 use tracing_futures::Instrument;
 
+use zebra_consensus::chain::BackgroundTaskHandles;
 use zebra_rpc::server::RpcServer;
 
 use crate::{
@@ -140,7 +141,7 @@ impl StartCmd {
             zebra_network::init(config.network.clone(), inbound, latest_chain_tip.clone()).await;
 
         info!("initializing verifiers");
-        let (chain_verifier, tx_verifier, mut consensus_task_handles, max_checkpoint_height) =
+        let (chain_verifier, tx_verifier, consensus_task_handles, max_checkpoint_height) =
             zebra_consensus::chain::init(
                 config.consensus.clone(),
                 config.network.network,
@@ -252,17 +253,14 @@ impl StartCmd {
         pin!(progress_task_handle);
 
         // startup tasks
-        assert_eq!(
-            consensus_task_handles.len(),
-            2,
-            "missing consensus task handler"
-        );
+        let BackgroundTaskHandles {
+            mut groth16_download_handle,
+            mut state_checkpoint_verify_handle,
+        } = consensus_task_handles;
 
-        let mut groth16_download_handle = consensus_task_handles.remove(0);
         let groth16_download_handle_fused = (&mut groth16_download_handle).fuse();
         pin!(groth16_download_handle_fused);
 
-        let mut state_checkpoint_verify_handle = consensus_task_handles.remove(0);
         let state_checkpoint_verify_handle_fused = (&mut state_checkpoint_verify_handle).fuse();
         pin!(state_checkpoint_verify_handle_fused);
 

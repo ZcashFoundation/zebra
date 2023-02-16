@@ -237,7 +237,7 @@ pub async fn init<S>(
         BoxService<transaction::Request, transaction::Response, TransactionError>,
         transaction::Request,
     >,
-    Vec<JoinHandle<()>>,
+    BackgroundTaskHandles,
     Height,
 )
 where
@@ -366,13 +366,12 @@ where
 
     let chain = Buffer::new(BoxService::new(chain), VERIFIER_BUFFER_BOUND);
 
-    (
-        chain,
-        transaction,
-        // TODO: turn this into a struct?
-        vec![groth16_download_handle, state_checkpoint_verify_handle],
-        max_checkpoint_height,
-    )
+    let task_handles = BackgroundTaskHandles {
+        groth16_download_handle,
+        state_checkpoint_verify_handle,
+    };
+
+    (chain, transaction, task_handles, max_checkpoint_height)
 }
 
 /// Parses the checkpoint list for `network` and `config`.
@@ -390,4 +389,11 @@ pub fn init_checkpoint_list(config: Config, network: Network) -> (CheckpointList
     };
 
     (list, max_checkpoint_height)
+}
+
+/// The background task handles for `zebra-consensus` verifier initialization.
+#[derive(Debug)]
+pub struct BackgroundTaskHandles {
+    pub groth16_download_handle: JoinHandle<()>,
+    pub state_checkpoint_verify_handle: JoinHandle<()>,
 }
