@@ -42,7 +42,7 @@ use crate::methods::{
             peer_info::PeerInfo,
             submit_block,
             subsidy::BlockSubsidy,
-            validate_address,
+            validate_address, z_validate_address,
         },
     },
     tests::utils::fake_history_tree,
@@ -395,6 +395,24 @@ pub async fn test_responses<State, ReadState>(
         .expect("We should have a validate_address::Response");
     snapshot_rpc_validateaddress("invalid", validate_address, &settings);
 
+    // `z_validateaddress`
+    let founder_address = match network {
+        Network::Mainnet => "t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR",
+        Network::Testnet => "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi",
+    };
+
+    let z_validate_address = get_block_template_rpc
+        .z_validate_address(founder_address.to_string())
+        .await
+        .expect("We should have a z_validate_address::Response");
+    snapshot_rpc_z_validateaddress("basic", z_validate_address, &settings);
+
+    let z_validate_address = get_block_template_rpc
+        .z_validate_address("".to_string())
+        .await
+        .expect("We should have a z_validate_address::Response");
+    snapshot_rpc_z_validateaddress("invalid", z_validate_address, &settings);
+
     // getdifficulty
 
     // Fake the ChainInfo response
@@ -496,6 +514,17 @@ fn snapshot_rpc_validateaddress(
 ) {
     settings.bind(|| {
         insta::assert_json_snapshot!(format!("validate_address_{variant}"), validate_address)
+    });
+}
+
+/// Snapshot `z_validateaddress` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_z_validateaddress(
+    variant: &'static str,
+    z_validate_address: z_validate_address::Response,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("z_validate_address_{variant}"), z_validate_address)
     });
 }
 
