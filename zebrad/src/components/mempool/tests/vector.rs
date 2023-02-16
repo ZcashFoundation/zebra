@@ -838,18 +838,15 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .await
         .unwrap();
 
-    if let Err(timeout_error) = timeout(
+    if timeout(
         CHAIN_TIP_UPDATE_WAIT_LIMIT,
         chain_tip_change.wait_for_tip_change(),
     )
     .await
     .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+    .is_err()
     {
-        info!(
-            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
-            ?timeout_error,
-            "timeout waiting for chain tip change after committing block"
-        );
+        panic!("timeout waiting for chain tip change after committing block");
     }
 
     // Queue transaction from block 3 for download
@@ -870,6 +867,8 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
     assert!(queued_responses[0].is_ok());
     assert_eq!(mempool.tx_downloads().in_flight(), 1);
 
+    // Verify the transaction
+
     peer_set
         .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
         .map(|responder| {
@@ -879,7 +878,6 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         })
         .await;
 
-    // Verify the transaction now that the mempool has already checked chain_tip_change
     tx_verifier
         .expect_request_that(|_| true)
         .map(|responder| {
@@ -910,27 +908,26 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .await
         .unwrap();
 
-    if let Err(timeout_error) = timeout(
+    if timeout(
         CHAIN_TIP_UPDATE_WAIT_LIMIT,
         chain_tip_change.wait_for_tip_change(),
     )
     .await
     .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+    .is_err()
     {
-        info!(
-            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
-            ?timeout_error,
-            "timeout waiting for chain tip change after committing block"
-        );
+        panic!("timeout waiting for chain tip change after committing block");
     }
 
-    // Query the mempool to make it poll chain_tip_change
+    // Query the mempool to make it poll chain_tip_change and try reverifying its state for the `TipAction::Reset`
     mempool.dummy_call().await;
 
     // Check that there is still an in-flight tx_download and that
     // no transactions were inserted in the mempool.
     assert_eq!(mempool.tx_downloads().in_flight(), 1);
     assert_eq!(mempool.storage().transaction_count(), 0);
+
+    // Verify the transaction again
 
     peer_set
         .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
@@ -960,9 +957,6 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         })
         .await;
 
-    // Query the mempool to make it poll chain_tip_change and try reverifying its state
-    mempool.dummy_call().await;
-
     // Push block 2 to the state. This will increase the tip height past the expected
     // tip height that the the tx was verified at.
     state_service
@@ -975,18 +969,15 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .await
         .unwrap();
 
-    if let Err(timeout_error) = timeout(
+    if timeout(
         CHAIN_TIP_UPDATE_WAIT_LIMIT,
         chain_tip_change.wait_for_tip_change(),
     )
     .await
     .map(|change_result| change_result.expect("unexpected chain tip update failure"))
+    .is_err()
     {
-        info!(
-            timeout = ?humantime_seconds(CHAIN_TIP_UPDATE_WAIT_LIMIT),
-            ?timeout_error,
-            "timeout waiting for chain tip change after committing block"
-        );
+        panic!("timeout waiting for chain tip change after committing block");
     }
 
     // Query the mempool to make it poll tx_downloads.pending and try reverifying transactions
