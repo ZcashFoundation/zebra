@@ -1,6 +1,9 @@
+//! Configuration for semantic verification which is run in parallel.
+
 use serde::{Deserialize, Serialize};
 
-/// Consensus configuration.
+/// Configuration for parallel semantic verification:
+/// <https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#definitions>
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
@@ -20,7 +23,7 @@ pub struct Config {
     /// It is slower and less secure.
     ///
     /// Zebra requires some checkpoints to simplify validation of legacy network upgrades.
-    /// So those checkpoints are always active, even when this option is `false`.
+    /// Required checkpoints are always active, even when this option is `false`.
     ///
     /// # Deprecation
     ///
