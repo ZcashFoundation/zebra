@@ -839,7 +839,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .unwrap();
 
     // Wait for the chain tip update without a timeout
-    // (skipping the chain tip change here may cause the test to 
+    // (skipping the chain tip change here may cause the test to
     // pass without reverifying transactions for  `TipAction::Grow`)
     chain_tip_change
         .wait_for_tip_change()
