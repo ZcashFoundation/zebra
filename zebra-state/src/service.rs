@@ -809,6 +809,13 @@ impl ReadStateService {
     fn latest_best_chain(&self) -> Option<Arc<Chain>> {
         self.latest_non_finalized_state().best_chain().cloned()
     }
+
+    /// Test-only access to the inner database.
+    /// Can be used to modify the database without doing any consensus checks.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn db(&self) -> &ZebraDb {
+        &self.db
+    }
 }
 
 impl Service<Request> for StateService {
@@ -1875,9 +1882,7 @@ pub fn spawn_init(
 
 /// Returns a [`StateService`] with an ephemeral [`Config`] and a buffer with a single slot.
 ///
-/// This can be used to create a state service for testing.
-///
-/// See also [`init`].
+/// This can be used to create a state service for testing. See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
 pub fn init_test(network: Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
     // TODO: pass max_checkpoint_height and checkpoint_verify_concurrency limit

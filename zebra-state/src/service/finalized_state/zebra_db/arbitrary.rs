@@ -1,7 +1,5 @@
 //! Arbitrary value generation and test harnesses for high-level typed database access.
 
-#![allow(dead_code)]
-
 use std::ops::Deref;
 
 use zebra_chain::{
