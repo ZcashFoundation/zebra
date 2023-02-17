@@ -394,6 +394,11 @@ pub fn init_checkpoint_list(config: Config, network: Network) -> (CheckpointList
 /// The background task handles for `zebra-consensus` verifier initialization.
 #[derive(Debug)]
 pub struct BackgroundTaskHandles {
+    /// A handle to the Groth16 parameter download task.
+    /// Finishes when the parameters are downloaded and their checksums verified.
     pub groth16_download_handle: JoinHandle<()>,
+
+    /// A handle to the state checkpoint verify task.
+    /// Finishes when all the checkpoints are verified, or when the state tip is reached.
     pub state_checkpoint_verify_handle: JoinHandle<()>,
 }
