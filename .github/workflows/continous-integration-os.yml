@@ -61,9 +61,9 @@ jobs:
   test:
     name: Test ${{ matrix.rust }} on ${{ matrix.os }}${{ matrix.features }}
     # The large timeout is to accommodate:
-    # - Windows builds (75 minutes, typically 30-50 minutes), and
-    # - parameter downloads (an extra 90 minutes, but only when the cache expires)
-    timeout-minutes: 165
+    # - macOS and Windows builds (90 minutes, typically 30-70 minutes), and
+    # - parameter downloads (an extra 100 minutes, but only when the cache expires)
+    timeout-minutes: 190
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
