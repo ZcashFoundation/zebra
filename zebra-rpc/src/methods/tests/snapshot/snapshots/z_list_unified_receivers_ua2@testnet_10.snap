@@ -1,0 +1,9 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+assertion_line: 533
+expression: response
+---
+{
+  "orchard": "u10c5q7qkhu6f0ktaz7jqu4sfsujg0gpsglzudmy982mku7t0uma52jmsaz8h24a3wa7p0jwtsjqt8shpg25cvyexzlsw3jtdz4v6w70lv",
+  "p2sh": "t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"
+}
