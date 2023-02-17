@@ -121,7 +121,6 @@ impl Address {
     }
 
     /// Returns the payment address for transparent or sapling addresses.
-    #[allow(clippy::unwrap_in_result)]
     pub fn payment_address(&self) -> Option<String> {
         use zcash_address::{ToAddress, ZcashAddress};
 
@@ -129,18 +128,10 @@ impl Address {
             Self::Transparent(address) => Some(address.to_string()),
             Self::Sapling { address, network } => {
                 let data = address.to_bytes();
-                let address =
-                    ZcashAddress::from_sapling(Self::zcash_address_network(*network), data);
+                let address = ZcashAddress::from_sapling((*network).into(), data);
                 Some(address.encode())
             }
             Self::Unified { .. } => None,
-        }
-    }
-    /// Convert a `zebra_chain::parameters::network::Network` type into a `zcash_address::Network` type.
-    fn zcash_address_network(network: Network) -> zcash_address::Network {
-        match network {
-            Network::Mainnet => zcash_address::Network::Main,
-            Network::Testnet => zcash_address::Network::Test,
         }
     }
 }
