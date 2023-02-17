@@ -10,5 +10,8 @@ pub mod methods;
 pub mod queue;
 pub mod server;
 
+#[cfg(feature = "rkyv-serialization")]
+pub mod datacake_rpc;
+
 #[cfg(test)]
 mod tests;
