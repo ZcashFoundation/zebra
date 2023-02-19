@@ -1,7 +1,7 @@
 //! Types for unified addresses
 
 /// `z_listunifiedreceivers` response
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Response {
     #[serde(skip_serializing_if = "String::is_empty")]
     orchard: String,
