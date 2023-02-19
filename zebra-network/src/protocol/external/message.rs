@@ -293,6 +293,12 @@ pub enum Message {
     FilterClear,
 }
 
+/// The maximum size of the user agent string.
+///
+/// This is equivalent to `MAX_SUBVERSION_LENGTH` in `zcashd`:
+/// <https://github.com/zcash/zcash/blob/adfc7218435faa1c8985a727f997a795dcffa0c7/src/net.h#L56>
+pub const MAX_USER_AGENT_LENGTH: usize = 256;
+
 /// A `version` message.
 ///
 /// Note that although this is called `version` in Bitcoin, its role is really

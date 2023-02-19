@@ -15,9 +15,9 @@ use zebra_chain::{
     block::{self, Block},
     parameters::Network,
     serialization::{
-        sha256d, zcash_deserialize_bytes_external_count, FakeWriter, ReadZcashExt,
-        SerializationError as Error, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
-        MAX_PROTOCOL_MESSAGE_LEN,
+        sha256d, zcash_deserialize_bytes_external_count, zcash_deserialize_string_external_count,
+        CompactSizeMessage, FakeWriter, ReadZcashExt, SerializationError as Error,
+        ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
     },
     transaction::Transaction,
 };
@@ -26,7 +26,7 @@ use crate::constants;
 
 use super::{
     addr::{AddrInVersion, AddrV1, AddrV2},
-    message::{Message, RejectReason, VersionMessage},
+    message::{Message, RejectReason, VersionMessage, MAX_USER_AGENT_LENGTH},
     types::*,
 };
 
@@ -220,6 +220,14 @@ impl Codec {
                 address_from.zcash_serialize(&mut writer)?;
 
                 writer.write_u64::<LittleEndian>(nonce.0)?;
+
+                if user_agent.as_bytes().len() > MAX_USER_AGENT_LENGTH {
+                    // zcashd won't accept this version message
+                    return Err(Error::Parse(
+                        "user agent too long: must be 256 bytes or less",
+                    ));
+                }
+
                 user_agent.zcash_serialize(&mut writer)?;
                 writer.write_u32::<LittleEndian>(start_height.0)?;
                 writer.write_u8(*relay as u8)?;
@@ -487,7 +495,24 @@ impl Codec {
             address_recv: AddrInVersion::zcash_deserialize(&mut reader)?,
             address_from: AddrInVersion::zcash_deserialize(&mut reader)?,
             nonce: Nonce(reader.read_u64::<LittleEndian>()?),
-            user_agent: String::zcash_deserialize(&mut reader)?,
+            user_agent: {
+                let byte_count: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+                let byte_count: usize = byte_count.into();
+
+                // # Security
+                //
+                // Limit peer set memory usage, Zebra stores an `Arc<VersionMessage>` per
+                // connected peer.
+                //
+                // Without this check, we can use `200 peers * 2 MB message size limit = 400 MB`.
+                if byte_count > MAX_USER_AGENT_LENGTH {
+                    return Err(Error::Parse(
+                        "user agent too long: must be 256 bytes or less",
+                    ));
+                }
+
+                zcash_deserialize_string_external_count(byte_count, &mut reader)?
+            },
             start_height: block::Height(reader.read_u32::<LittleEndian>()?),
             relay: match reader.read_u8() {
                 Ok(val @ 0..=1) => val == 1,
