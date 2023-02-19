@@ -15,13 +15,13 @@ use std::{fmt, ops::Deref};
 use byteorder::{BigEndian, ByteOrder};
 use incrementalmerkletree::{bridgetree, Frontier};
 use lazy_static::lazy_static;
+use sha2::digest::generic_array::GenericArray;
 use thiserror::Error;
 
 use super::commitment::NoteCommitment;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-use sha2::digest::generic_array::GenericArray;
 
 /// Sprout note commitment trees have a max depth of 29.
 ///
@@ -127,8 +127,14 @@ impl From<&Root> for [u8; 32] {
 }
 
 /// A node of the Sprout note commitment tree.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 struct Node([u8; 32]);
+
+impl fmt::Debug for Node {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("Node").field(&hex::encode(self.0)).finish()
+    }
+}
 
 impl incrementalmerkletree::Hashable for Node {
     /// Returns an empty leaf.

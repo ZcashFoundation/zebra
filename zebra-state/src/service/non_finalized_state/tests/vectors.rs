@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use zebra_chain::{
     amount::NonNegative,
-    block::Block,
+    block::{Block, Height},
     history_tree::NonEmptyHistoryTree,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
@@ -27,6 +27,7 @@ fn construct_empty() {
     let _init_guard = zebra_test::init();
     let _chain = Chain::new(
         Network::Mainnet,
+        Height(0),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -43,6 +44,7 @@ fn construct_single() -> Result<()> {
 
     let mut chain = Chain::new(
         Network::Mainnet,
+        Height(0),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -73,6 +75,7 @@ fn construct_many() -> Result<()> {
 
     let mut chain = Chain::new(
         Network::Mainnet,
+        Height(block.coinbase_height().unwrap().0 - 1),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -99,6 +102,7 @@ fn ord_matches_work() -> Result<()> {
 
     let mut lesser_chain = Chain::new(
         Network::Mainnet,
+        Height(0),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -109,6 +113,7 @@ fn ord_matches_work() -> Result<()> {
 
     let mut bigger_chain = Chain::new(
         Network::Mainnet,
+        Height(0),
         Default::default(),
         Default::default(),
         Default::default(),
@@ -434,12 +439,12 @@ fn history_tree_is_updated_for_network_upgrade(
     let chain = state.best_chain().unwrap();
     if network_upgrade == NetworkUpgrade::Heartwood {
         assert!(
-            chain.history_tree.as_ref().is_none(),
+            chain.history_block_commitment_tree().as_ref().is_none(),
             "history tree must not exist yet"
         );
     } else {
         assert!(
-            chain.history_tree.as_ref().is_some(),
+            chain.history_block_commitment_tree().as_ref().is_some(),
             "history tree must already exist"
         );
     }
@@ -453,11 +458,16 @@ fn history_tree_is_updated_for_network_upgrade(
 
     let chain = state.best_chain().unwrap();
     assert!(
-        chain.history_tree.as_ref().is_some(),
+        chain.history_block_commitment_tree().as_ref().is_some(),
         "history tree must have been (re)created"
     );
     assert_eq!(
-        chain.history_tree.as_ref().as_ref().unwrap().size(),
+        chain
+            .history_block_commitment_tree()
+            .as_ref()
+            .as_ref()
+            .unwrap()
+            .size(),
         1,
         "history tree must have a single node"
     );
@@ -466,8 +476,8 @@ fn history_tree_is_updated_for_network_upgrade(
     let tree = NonEmptyHistoryTree::from_block(
         Network::Mainnet,
         activation_block.clone(),
-        &chain.sapling_note_commitment_tree.root(),
-        &chain.orchard_note_commitment_tree.root(),
+        &chain.sapling_note_commitment_tree().root(),
+        &chain.orchard_note_commitment_tree().root(),
     )
     .unwrap();
 
@@ -480,7 +490,12 @@ fn history_tree_is_updated_for_network_upgrade(
         .unwrap();
 
     assert!(
-        state.best_chain().unwrap().history_tree.as_ref().is_some(),
+        state
+            .best_chain()
+            .unwrap()
+            .history_block_commitment_tree()
+            .as_ref()
+            .is_some(),
         "history tree must still exist"
     );
 
@@ -541,8 +556,8 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
     let tree = NonEmptyHistoryTree::from_block(
         Network::Mainnet,
         activation_block.clone(),
-        &chain.sapling_note_commitment_tree.root(),
-        &chain.orchard_note_commitment_tree.root(),
+        &chain.sapling_note_commitment_tree().root(),
+        &chain.orchard_note_commitment_tree().root(),
     )
     .unwrap();
 

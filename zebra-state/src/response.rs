@@ -137,7 +137,6 @@ pub enum ReadResponse {
     /// Contains the median-time-past for the *next* block on the best chain.
     BestChainNextMedianTimePast(DateTime32),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::BestChainBlockHash`](crate::ReadRequest::BestChainBlockHash) with the
     /// specified block hash.
     BlockHash(Option<block::Hash>),
@@ -231,13 +230,13 @@ impl TryFrom<ReadResponse> for Response {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
-
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::BlockHash(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
+
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
+
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::ChainInfo(_) | ReadResponse::SolutionRate(_) => {
                 Err("there is no corresponding Response for this ReadResponse")

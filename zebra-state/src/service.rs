@@ -1621,8 +1621,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
-            // Used by get_block_hash RPC.
-            #[cfg(feature = "getblocktemplate-rpcs")]
+            // Used by the get_block and get_block_hash RPCs.
             ReadRequest::BestChainBlockHash(height) => {
                 let timer = CodeTimer::start();
 

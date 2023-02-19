@@ -613,24 +613,62 @@ where
                 // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
                 // so it needs to load all its fields very efficiently.
                 //
-                // Currently, we get the transaction IDs from an index, which is much more
-                // efficient than loading all the block data and hashing all the transactions.
+                // Currently, we get the block hash and transaction IDs from indexes,
+                // which is much more efficient than loading all the block data,
+                // then hashing the block header and all the transactions.
 
-                // TODO: look up the hash if we only have a height,
-                //       and look up the height if we only have a hash
-                let hash = hash_or_height.hash().map(GetBlockHash);
-                let height = hash_or_height.height();
-
-                // TODO: do these state  queries in parallel?
-
-                // Get transaction IDs from the transaction index
+                // Get the block hash from the height -> hash index, if needed
                 //
                 // # Concurrency
+                //
+                // For consistency, this lookup must be performed first, then all the other
+                // lookups must be based on the hash.
+                //
+                // All possible responses are valid, even if the best chain changes. Clients
+                // must be able to handle chain forks, including a hash for a block that is
+                // later discovered to be on a side chain.
+
+                let hash = match hash_or_height {
+                    HashOrHeight::Hash(hash) => hash,
+                    HashOrHeight::Height(height) => {
+                        let request = zebra_state::ReadRequest::BestChainBlockHash(height);
+                        let response = state
+                            .ready()
+                            .and_then(|service| service.call(request))
+                            .await
+                            .map_err(|error| Error {
+                                code: ErrorCode::ServerError(0),
+                                message: error.to_string(),
+                                data: None,
+                            })?;
+
+                        match response {
+                            zebra_state::ReadResponse::BlockHash(Some(hash)) => hash,
+                            zebra_state::ReadResponse::BlockHash(None) => {
+                                return Err(Error {
+                                    code: MISSING_BLOCK_ERROR_CODE,
+                                    message: "block height not in best chain".to_string(),
+                                    data: None,
+                                })
+                            }
+                            _ => unreachable!("unmatched response to a block hash request"),
+                        }
+                    }
+                };
+
+                // TODO: do the txids and confirmations state queries in parallel?
+
+                // Get transaction IDs from the transaction index by block hash
+                //
+                // # Concurrency
+                //
+                // We look up by block hash so the hash, transaction IDs, and confirmations
+                // are consistent.
                 //
                 // A block's transaction IDs are never modified, so all possible responses are
                 // valid. Clients that query block heights must be able to handle chain forks,
                 // including getting transaction IDs from any chain fork.
-                let request = zebra_state::ReadRequest::TransactionIdsForBlock(hash_or_height);
+                let request = zebra_state::ReadRequest::TransactionIdsForBlock(hash.into());
                 let response = state
                     .ready()
                     .and_then(|service| service.call(request))
@@ -656,6 +694,9 @@ where
                 //
                 // # Concurrency
                 //
+                // We look up by block hash so the hash, transaction IDs, and confirmations
+                // are consistent.
+                //
                 // All possible responses are valid, even if a block is added to the chain, or
                 // the best chain changes. Clients must be able to handle chain forks, including
                 // different confirmation values before or after added blocks, and switching
@@ -664,34 +705,31 @@ where
                 // From <https://zcash.github.io/rpc/getblock.html>
                 const NOT_IN_BEST_CHAIN_CONFIRMATIONS: i64 = -1;
 
-                let confirmations = if let Some(hash) = hash_or_height.hash() {
-                    let request = zebra_state::ReadRequest::Depth(hash);
-                    let response = state
-                        .ready()
-                        .and_then(|service| service.call(request))
-                        .await
-                        .map_err(|error| Error {
-                            code: ErrorCode::ServerError(0),
-                            message: error.to_string(),
-                            data: None,
-                        })?;
+                let request = zebra_state::ReadRequest::Depth(hash);
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_err(|error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    })?;
 
-                    match response {
-                        // Confirmations are one more than the depth.
-                        // Depth is limited by height, so it will never overflow an i64.
-                        zebra_state::ReadResponse::Depth(Some(depth)) => Some(i64::from(depth) + 1),
-                        zebra_state::ReadResponse::Depth(None) => {
-                            Some(NOT_IN_BEST_CHAIN_CONFIRMATIONS)
-                        }
-                        _ => unreachable!("unmatched response to a depth request"),
-                    }
-                } else {
-                    // TODO: make Depth support heights as well
-                    None
+                let confirmations = match response {
+                    // Confirmations are one more than the depth.
+                    // Depth is limited by height, so it will never overflow an i64.
+                    zebra_state::ReadResponse::Depth(Some(depth)) => i64::from(depth) + 1,
+                    zebra_state::ReadResponse::Depth(None) => NOT_IN_BEST_CHAIN_CONFIRMATIONS,
+                    _ => unreachable!("unmatched response to a depth request"),
                 };
 
+                // TODO:  look up the height if we only have a hash,
+                //        this needs a new state request for the height -> hash index
+                let height = hash_or_height.height();
+
                 Ok(GetBlock::Object {
-                    hash,
+                    hash: GetBlockHash(hash),
                     confirmations,
                     height,
                     tx,
@@ -1285,7 +1323,7 @@ pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
 
 /// Response to a `getblock` RPC request.
 ///
-/// See the notes for the [`Rpc::get_block` method].
+/// See the notes for the [`Rpc::get_block`] method.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 #[serde(untagged)]
 pub enum GetBlock {
@@ -1294,13 +1332,11 @@ pub enum GetBlock {
     /// The block object.
     Object {
         /// The hash of the requested block.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        hash: Option<GetBlockHash>,
+        hash: GetBlockHash,
 
         /// The number of confirmations of this block in the best chain,
         /// or -1 if it is not in the best chain.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        confirmations: Option<i64>,
+        confirmations: i64,
 
         /// The height of the requested block.
         #[serde(skip_serializing_if = "Option::is_none")]
