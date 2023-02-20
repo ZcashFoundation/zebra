@@ -47,13 +47,11 @@ use crate::methods::{
             peer_info::PeerInfo,
             submit_block,
             subsidy::{BlockSubsidy, FundingStream},
-            validate_address,
+            validate_address, z_validate_address,
         },
     },
     height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
-
-use self::types::z_validate_address::{self, AddressType};
 
 pub mod config;
 pub mod constants;
@@ -888,7 +886,7 @@ where
                 Ok(z_validate_address::Response {
                     is_valid: true,
                     address: Some(raw_address),
-                    address_type: Some(AddressType::from(&address)),
+                    address_type: Some(z_validate_address::AddressType::from(&address)),
                     is_mine: Some(false),
                 })
             } else {
