@@ -1,0 +1,10 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+expression: z_validate_address
+---
+{
+  "isvalid": true,
+  "address": "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi",
+  "address_type": "p2sh",
+  "ismine": false
+}
