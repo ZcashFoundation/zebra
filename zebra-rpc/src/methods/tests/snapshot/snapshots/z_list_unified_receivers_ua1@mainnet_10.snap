@@ -1,0 +1,9 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+assertion_line: 533
+expression: response
+---
+{
+  "sapling": "zs1mrhc9y7jdh5r9ece8u5khgvj9kg0zgkxzdduyv0whkg7lkcrkx5xqem3e48avjq9wn2rukydkwn",
+  "p2pkh": "t1V9mnyk5Z5cTNMCkLbaDwSskgJZucTLdgW"
+}

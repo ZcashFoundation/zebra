@@ -119,4 +119,19 @@ impl Address {
     pub fn is_transparent(&self) -> bool {
         matches!(self, Self::Transparent(_))
     }
+
+    /// Returns the payment address for transparent or sapling addresses.
+    pub fn payment_address(&self) -> Option<String> {
+        use zcash_address::{ToAddress, ZcashAddress};
+
+        match &self {
+            Self::Transparent(address) => Some(address.to_string()),
+            Self::Sapling { address, network } => {
+                let data = address.to_bytes();
+                let address = ZcashAddress::from_sapling((*network).into(), data);
+                Some(address.encode())
+            }
+            Self::Unified { .. } => None,
+        }
+    }
 }
