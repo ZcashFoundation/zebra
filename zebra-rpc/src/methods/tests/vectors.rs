@@ -1637,3 +1637,59 @@ async fn rpc_getdifficulty() {
 
     assert_eq!(format!("{:.2}", get_difficulty.unwrap()), "4096.00");
 }
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_z_listunifiedreceivers() {
+    let _init_guard = zebra_test::init();
+
+    use zebra_chain::{chain_sync_status::MockSyncStatus, chain_tip::mock::MockChainTip};
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+
+    let _init_guard = zebra_test::init();
+
+    let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+
+    // Init RPC
+    let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Buffer::new(MockService::build().for_unit_tests(), 1),
+        MockService::build().for_unit_tests(),
+        mock_chain_tip,
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        MockAddressBookPeers::default(),
+    );
+
+    // invalid address
+    assert!(get_block_template_rpc
+        .z_list_unified_receivers("invalid string for an address".to_string())
+        .await
+        .is_err());
+
+    // address taken from https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/test-vectors/zcash/unified_address.json#L4
+    let response = get_block_template_rpc.z_list_unified_receivers("u1l8xunezsvhq8fgzfl7404m450nwnd76zshscn6nfys7vyz2ywyh4cc5daaq0c7q2su5lqfh23sp7fkf3kt27ve5948mzpfdvckzaect2jtte308mkwlycj2u0eac077wu70vqcetkxf".to_string()).await.unwrap();
+    assert_eq!(response.orchard(), None);
+    assert_eq!(
+        response.sapling(),
+        Some(String::from(
+            "zs1mrhc9y7jdh5r9ece8u5khgvj9kg0zgkxzdduyv0whkg7lkcrkx5xqem3e48avjq9wn2rukydkwn"
+        ))
+    );
+    assert_eq!(
+        response.p2pkh(),
+        Some(String::from("t1V9mnyk5Z5cTNMCkLbaDwSskgJZucTLdgW"))
+    );
+    assert_eq!(response.p2sh(), None);
+
+    // address taken from https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/test-vectors/zcash/unified_address.json#L39
+    let response = get_block_template_rpc.z_list_unified_receivers("u12acx92vw49jek4lwwnjtzm0cssn2wxfneu7ryj4amd8kvnhahdrq0htsnrwhqvl92yg92yut5jvgygk0rqfs4lgthtycsewc4t57jyjn9p2g6ffxek9rdg48xe5kr37hxxh86zxh2ef0u2lu22n25xaf3a45as6mtxxlqe37r75mndzu9z2fe4h77m35c5mrzf4uqru3fjs39ednvw9ay8nf9r8g9jx8rgj50mj098exdyq803hmqsek3dwlnz4g5whc88mkvvjnfmjldjs9hm8rx89ctn5wxcc2e05rcz7m955zc7trfm07gr7ankf96jxwwfcqppmdefj8gc6508gep8ndrml34rdpk9tpvwzgdcv7lk2d70uh5jqacrpk6zsety33qcc554r3cls4ajktg03d9fye6exk8gnve562yadzsfmfh9d7v6ctl5ufm9ewpr6se25c47huk4fh2hakkwerkdd2yy3093snsgree5lt6smejfvse8v".to_string()).await.unwrap();
+    assert_eq!(response.orchard(), Some(String::from("u10c5q7qkhu6f0ktaz7jqu4sfsujg0gpsglzudmy982mku7t0uma52jmsaz8h24a3wa7p0jwtsjqt8shpg25cvyexzlsw3jtdz4v6w70lv")));
+    assert_eq!(response.sapling(), None);
+    assert_eq!(
+        response.p2pkh(),
+        Some(String::from("t1dMjwmwM2a6NtavQ6SiPP8i9ofx4cgfYYP"))
+    );
+    assert_eq!(response.p2sh(), None);
+}
