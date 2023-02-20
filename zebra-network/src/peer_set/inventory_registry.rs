@@ -3,14 +3,13 @@
 //! [RFC]: https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html
 
 use std::{
-    collections::HashMap,
-    convert::TryInto,
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
 
 use futures::{FutureExt, Stream, StreamExt};
+use indexmap::IndexMap;
 use tokio::{
     sync::broadcast,
     time::{self, Instant},
@@ -39,8 +38,11 @@ mod tests;
 ///
 /// # Security
 ///
-/// This limits known memory denial of service attacks to a total of:
-/// `1000 inventory * 70 peers * 2 maps * 32-64 bytes per inventory = up to 9 MB`.
+/// This limits known memory denial of service attacks like <https://invdos.net/> to a total of:
+/// ```text
+/// 1000 inventory * 2 maps * 32-64 bytes per inventory = less than 1 MB
+/// 1000 inventory * 70 peers * 2 maps * 6-18 bytes per address = up to 3 MB
+/// ```
 ///
 /// Since the inventory registry is an efficiency optimisation, which falls back to a
 /// random peer, we only need to track a small number of hashes for available inventory.
@@ -92,10 +94,10 @@ pub struct InventoryRegistry {
     /// period.
     //
     // TODO: split maps into available and missing, so we can limit them separately.
-    current: HashMap<InventoryHash, HashMap<SocketAddr, InventoryMarker>>,
+    current: IndexMap<InventoryHash, IndexMap<SocketAddr, InventoryMarker>>,
 
     /// Map tracking inventory statuses from the previous interval period.
-    prev: HashMap<InventoryHash, HashMap<SocketAddr, InventoryMarker>>,
+    prev: IndexMap<InventoryHash, IndexMap<SocketAddr, InventoryMarker>>,
 
     /// Stream of incoming inventory statuses to register.
     inv_stream: Pin<
@@ -137,7 +139,7 @@ impl InventoryChange {
         // # Security
         //
         // Don't send more hashes than we're going to store.
-        // It doesn't matter which hashes we choose, because this is an effiency optimisation.
+        // It doesn't matter which hashes we choose, because this is an efficiency optimisation.
         //
         //  This limits known memory denial of service attacks to:
         // `1000 hashes * 200 peers/channel capacity * 32-64 bytes = up to 12 MB`
@@ -158,7 +160,7 @@ impl InventoryChange {
         // # Security
         //
         // Don't send more hashes than we're going to store.
-        // It doesn't matter which hashes we choose, because this is an effiency optimisation.
+        // It doesn't matter which hashes we choose, because this is an efficiency optimisation.
         hashes.truncate(MAX_INV_PER_MAP);
 
         let hashes = hashes.try_into().ok();
@@ -342,13 +344,13 @@ impl InventoryRegistry {
                 "unexpected inventory type: {inv:?} from peer: {addr:?}",
             );
 
-            let current = self.current.entry(inv).or_default();
+            let hash_peers = self.current.entry(inv).or_default();
 
             // # Security
             //
             // Prefer `missing` over `advertised`, so malicious peers can't reset their own entries,
             // and funnel multiple failing requests to themselves.
-            if let Some(old_status) = current.get(&addr) {
+            if let Some(old_status) = hash_peers.get(&addr) {
                 if old_status.is_missing() && new_status.is_available() {
                     debug!(?new_status, ?old_status, ?addr, ?inv, "skipping new status");
                     continue;
@@ -363,7 +365,8 @@ impl InventoryRegistry {
                 );
             }
 
-            let replaced_status = current.insert(addr, new_status);
+            let replaced_status = hash_peers.insert(addr, new_status);
+
             debug!(
                 ?new_status,
                 ?replaced_status,
@@ -371,6 +374,28 @@ impl InventoryRegistry {
                 ?inv,
                 "inserted new status"
             );
+
+            // # Security
+            //
+            // Limit the number of stored peers per hash, removing the oldest entries,
+            // because newer entries are likely to be more relevant.
+            //
+            // TODO: do random or weighted random eviction instead?
+            if hash_peers.len() > MAX_PEERS_PER_INV {
+                // Performance: `MAX_PEERS_PER_INV` is small, so O(n) performance is acceptable.
+                hash_peers.shift_remove_index(0);
+            }
+
+            // # Security
+            //
+            // Limit the number of stored inventory hashes, removing the oldest entries,
+            // because newer entries are likely to be more relevant.
+            //
+            // TODO: do random or weighted random eviction instead?
+            if self.current.len() > MAX_INV_PER_MAP {
+                // Performance: `MAX_INV_PER_MAP` is small, so O(n) performance is acceptable.
+                self.current.shift_remove_index(0);
+            }
         }
     }
 
