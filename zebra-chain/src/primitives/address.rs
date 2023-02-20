@@ -27,7 +27,7 @@ pub enum Address {
         network: Network,
 
         /// Unified address
-        address: zcash_address::unified::Address,
+        unified_address: zcash_address::unified::Address,
 
         /// Orchard address
         orchard: Option<orchard::Address>,
@@ -98,14 +98,14 @@ impl zcash_address::TryFromAddress for Address {
 
     fn try_from_unified(
         network: zcash_address::Network,
-        address: zcash_address::unified::Address,
+        unified_address: zcash_address::unified::Address,
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         let network = network.try_into()?;
         let mut orchard = None;
         let mut sapling = None;
         let mut transparent = None;
 
-        for receiver in address.items().into_iter() {
+        for receiver in unified_address.items().into_iter() {
             match receiver {
                 unified::Receiver::Orchard(data) => {
                     orchard = orchard::Address::from_raw_address_bytes(&data).into();
@@ -145,7 +145,7 @@ impl zcash_address::TryFromAddress for Address {
 
         Ok(Self::Unified {
             network,
-            address,
+            unified_address,
             orchard,
             sapling,
             transparent,
