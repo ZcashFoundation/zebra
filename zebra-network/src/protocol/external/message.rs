@@ -364,13 +364,17 @@ pub struct VersionMessage {
 
 /// The maximum size of the rejection message.
 ///
-/// This is equivalent to `COMMAND_SIZE` in zcashd.
-const MAX_REJECT_MESSAGE_LENGTH: usize = 12;
+/// This is equivalent to `COMMAND_SIZE` in zcashd:
+/// <https://github.com/zcash/zcash/blob/adfc7218435faa1c8985a727f997a795dcffa0c7/src/protocol.h#L33>
+/// <https://github.com/zcash/zcash/blob/c0fbeb809bf2303e30acef0d2b74db11e9177427/src/main.cpp#L7544>
+pub const MAX_REJECT_MESSAGE_LENGTH: usize = 12;
 
 /// The maximum size of the rejection reason.
 ///
-/// This is equivalent to `MAX_REJECT_MESSAGE_LENGTH` in zcashd.
-const MAX_REJECT_REASON_LENGTH: usize = 111;
+/// This is equivalent to `MAX_REJECT_MESSAGE_LENGTH` in zcashd:
+/// <https://github.com/zcash/zcash/blob/adfc7218435faa1c8985a727f997a795dcffa0c7/src/main.h#L126>
+/// <https://github.com/zcash/zcash/blob/c0fbeb809bf2303e30acef0d2b74db11e9177427/src/main.cpp#L7544>
+pub const MAX_REJECT_REASON_LENGTH: usize = 111;
 
 impl From<VersionMessage> for Message {
     fn from(version_message: VersionMessage) -> Self {

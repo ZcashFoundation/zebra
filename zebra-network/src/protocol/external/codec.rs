@@ -26,7 +26,10 @@ use crate::constants;
 
 use super::{
     addr::{AddrInVersion, AddrV1, AddrV2},
-    message::{Message, RejectReason, VersionMessage, MAX_USER_AGENT_LENGTH},
+    message::{
+        Message, RejectReason, VersionMessage, MAX_REJECT_MESSAGE_LENGTH, MAX_REJECT_REASON_LENGTH,
+        MAX_USER_AGENT_LENGTH,
+    },
     types::*,
 };
 
@@ -245,8 +248,23 @@ impl Codec {
                 reason,
                 data,
             } => {
+                if message.as_bytes().len() > MAX_REJECT_MESSAGE_LENGTH {
+                    // zcashd won't accept this reject message
+                    return Err(Error::Parse(
+                        "reject message too long: must be 12 bytes or less",
+                    ));
+                }
+
                 message.zcash_serialize(&mut writer)?;
+
                 writer.write_u8(*ccode as u8)?;
+
+                if reason.as_bytes().len() > MAX_REJECT_REASON_LENGTH {
+                    return Err(Error::Parse(
+                        "reject reason too long: must be 111 bytes or less",
+                    ));
+                }
+
                 reason.zcash_serialize(&mut writer)?;
                 if let Some(data) = data {
                     writer.write_all(data)?;
@@ -538,7 +556,21 @@ impl Codec {
 
     fn read_reject<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
         Ok(Message::Reject {
-            message: String::zcash_deserialize(&mut reader)?,
+            message: {
+                let byte_count: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+                let byte_count: usize = byte_count.into();
+
+                // # Security
+                //
+                // Limit log size on disk, Zebra might print large reject messages to disk.
+                if byte_count > MAX_REJECT_MESSAGE_LENGTH {
+                    return Err(Error::Parse(
+                        "reject message too long: must be 12 bytes or less",
+                    ));
+                }
+
+                zcash_deserialize_string_external_count(byte_count, &mut reader)?
+            },
             ccode: match reader.read_u8()? {
                 0x01 => RejectReason::Malformed,
                 0x10 => RejectReason::Invalid,
@@ -551,7 +583,21 @@ impl Codec {
                 0x50 => RejectReason::Other,
                 _ => return Err(Error::Parse("invalid RejectReason value in ccode field")),
             },
-            reason: String::zcash_deserialize(&mut reader)?,
+            reason: {
+                let byte_count: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+                let byte_count: usize = byte_count.into();
+
+                // # Security
+                //
+                // Limit log size on disk, Zebra might print large reject messages to disk.
+                if byte_count > MAX_REJECT_REASON_LENGTH {
+                    return Err(Error::Parse(
+                        "reject reason too long: must be 111 bytes or less",
+                    ));
+                }
+
+                zcash_deserialize_string_external_count(byte_count, &mut reader)?
+            },
             // Sometimes there's data, sometimes there isn't. There's no length
             // field, this is just implicitly encoded by the body_len.
             // Apparently all existing implementations only supply 32 bytes of
