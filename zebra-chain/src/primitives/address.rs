@@ -2,6 +2,7 @@
 //!
 //! Usage: <https://docs.rs/zcash_address/0.2.0/zcash_address/trait.TryFromAddress.html#examples>
 
+use zcash_address::unified::{self, Container};
 use zcash_primitives::sapling;
 
 use crate::{parameters::Network, transparent, BoxError};
@@ -27,6 +28,15 @@ pub enum Address {
 
         /// Unified address
         address: zcash_address::unified::Address,
+
+        /// Orchard address
+        orchard: Option<orchard::Address>,
+
+        /// Sapling address
+        sapling: Option<sapling::PaymentAddress>,
+
+        /// Transparent address
+        transparent: Option<transparent::Address>,
     },
 }
 
@@ -91,7 +101,55 @@ impl zcash_address::TryFromAddress for Address {
         address: zcash_address::unified::Address,
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         let network = network.try_into()?;
-        Ok(Self::Unified { network, address })
+        let mut orchard = None;
+        let mut sapling = None;
+        let mut transparent = None;
+
+        for receiver in address.items().into_iter() {
+            match receiver {
+                unified::Receiver::Orchard(data) => {
+                    orchard = orchard::Address::from_raw_address_bytes(&data).into();
+                    // ZIP 316: Consumers MUST reject Unified Addresses/Viewing Keys in
+                    // which any constituent Item does not meet the validation
+                    // requirements of its encoding.
+                    if orchard.is_none() {
+                        return Err(BoxError::from(
+                            "Unified Address contains an invalid Orchard receiver.",
+                        )
+                        .into());
+                    }
+                }
+                unified::Receiver::Sapling(data) => {
+                    sapling = sapling::PaymentAddress::from_bytes(&data);
+                    // ZIP 316: Consumers MUST reject Unified Addresses/Viewing Keys in
+                    // which any constituent Item does not meet the validation
+                    // requirements of its encoding.
+                    if sapling.is_none() {
+                        return Err(BoxError::from(
+                            "Unified Address contains an invalid Sapling receiver",
+                        )
+                        .into());
+                    }
+                }
+                unified::Receiver::P2pkh(data) => {
+                    transparent = Some(transparent::Address::from_pub_key_hash(network, data));
+                }
+                unified::Receiver::P2sh(data) => {
+                    transparent = Some(transparent::Address::from_script_hash(network, data));
+                }
+                unified::Receiver::Unknown { .. } => {
+                    return Err(BoxError::from("Unsupported receiver in a Unified Address.").into());
+                }
+            }
+        }
+
+        Ok(Self::Unified {
+            network,
+            address,
+            orchard,
+            sapling,
+            transparent,
+        })
     }
 }
 
