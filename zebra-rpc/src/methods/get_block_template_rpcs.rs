@@ -47,7 +47,7 @@ use crate::methods::{
             peer_info::PeerInfo,
             submit_block,
             subsidy::{BlockSubsidy, FundingStream},
-            unified_address, validate_address,
+            unified_address, validate_address, z_validate_address,
         },
     },
     height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
@@ -178,6 +178,16 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`validateaddress`](https://zcash.github.io/rpc/validateaddress.html)
     #[rpc(name = "validateaddress")]
     fn validate_address(&self, address: String) -> BoxFuture<Result<validate_address::Response>>;
+
+    /// Checks if a zcash address is valid.
+    /// Returns information about the given address if valid.
+    ///
+    /// zcashd reference: [`z_validateaddress`](https://zcash.github.io/rpc/z_validateaddress.html)
+    #[rpc(name = "z_validateaddress")]
+    fn z_validate_address(
+        &self,
+        address: String,
+    ) -> BoxFuture<Result<types::z_validate_address::Response>>;
 
     /// Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.
     /// Returns an error if `height` is less than the height of the first halving for the current network.
@@ -855,6 +865,49 @@ where
                 );
 
                 Ok(validate_address::Response::invalid())
+            }
+        }
+        .boxed()
+    }
+
+    fn z_validate_address(
+        &self,
+        raw_address: String,
+    ) -> BoxFuture<Result<types::z_validate_address::Response>> {
+        let network = self.network;
+
+        async move {
+            let Ok(address) = raw_address
+                .parse::<zcash_address::ZcashAddress>() else {
+                    return Ok(z_validate_address::Response::invalid());
+                };
+
+            let address = match address
+                .convert::<primitives::Address>() {
+                    Ok(address) => address,
+                    Err(err) => {
+                        tracing::debug!(?err, "conversion error");
+                        return Ok(z_validate_address::Response::invalid());
+                    }
+                };
+
+            if address.network() == network {
+                Ok(z_validate_address::Response {
+                    is_valid: true,
+                    address: Some(raw_address),
+                    address_type: Some(z_validate_address::AddressType::from(&address)),
+                    is_mine: Some(false),
+                })
+            } else {
+                tracing::info!(
+                    ?network,
+                    address_network = ?address.network(),
+                    "invalid address network in z_validateaddress RPC: address is for {:?} but Zebra is on {:?}",
+                    address.network(),
+                    network
+                );
+
+                Ok(z_validate_address::Response::invalid())
             }
         }
         .boxed()
