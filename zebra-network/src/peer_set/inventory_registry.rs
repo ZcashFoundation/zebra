@@ -35,6 +35,37 @@ pub mod update;
 #[cfg(test)]
 mod tests;
 
+/// The maximum number of inventory hashes we will track from a single peer.
+///
+/// # Security
+///
+/// This limits known memory denial of service attacks to a total of:
+/// `1000 inventory * 70 peers * 2 maps * 32-64 bytes per inventory = up to 9 MB`.
+///
+/// Since the inventory registry is an efficiency optimisation, which falls back to a
+/// random peer, we only need to track a small number of hashes for available inventory.
+///
+/// But we want to be able to track a significant amount of missing inventory,
+/// to limit queries for globally missing inventory.
+//
+// TODO: split this into available (25) and missing (1000 or more?)
+pub const MAX_INV_PER_MAP: usize = 1000;
+
+/// The maximum number of peers we will track inventory for.
+///
+/// # Security
+///
+/// This limits known memory denial of service attacks. See [`MAX_INV_PER_MAP`] for details.
+///
+/// Since the inventory registry is an efficiency optimisation, which falls back to a
+/// random peer, we only need to track a small number of peers per inv for available inventory.
+///
+/// But we want to be able to track missing inventory for almost all our peers,
+/// so we only query a few peers for inventory that is genuinely missing from the network.
+//
+// TODO: split this into available (25) and missing (70)
+pub const MAX_PEERS_PER_INV: usize = 70;
+
 /// A peer inventory status, which tracks a hash for both available and missing inventory.
 pub type InventoryStatus<T> = InventoryResponse<T, T>;
 
@@ -59,6 +90,8 @@ type InventoryMarker = InventoryStatus<()>;
 pub struct InventoryRegistry {
     /// Map tracking the latest inventory status from the current interval
     /// period.
+    //
+    // TODO: split maps into available and missing, so we can limit them separately.
     current: HashMap<InventoryHash, HashMap<SocketAddr, InventoryMarker>>,
 
     /// Map tracking inventory statuses from the previous interval period.
@@ -99,7 +132,17 @@ impl InventoryChange {
         hashes: impl IntoIterator<Item = &'a InventoryHash>,
         peer: SocketAddr,
     ) -> Option<Self> {
-        let hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
+        let mut hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
+
+        // # Security
+        //
+        // Don't send more hashes than we're going to store.
+        // It doesn't matter which hashes we choose, because this is an effiency optimisation.
+        //
+        //  This limits known memory denial of service attacks to:
+        // `1000 hashes * 200 peers/channel capacity * 32-64 bytes = up to 12 MB`
+        hashes.truncate(MAX_INV_PER_MAP);
+
         let hashes = hashes.try_into().ok();
 
         hashes.map(|hashes| InventoryStatus::Available((hashes, peer)))
@@ -110,7 +153,14 @@ impl InventoryChange {
         hashes: impl IntoIterator<Item = &'a InventoryHash>,
         peer: SocketAddr,
     ) -> Option<Self> {
-        let hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
+        let mut hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
+
+        // # Security
+        //
+        // Don't send more hashes than we're going to store.
+        // It doesn't matter which hashes we choose, because this is an effiency optimisation.
+        hashes.truncate(MAX_INV_PER_MAP);
+
         let hashes = hashes.try_into().ok();
 
         hashes.map(|hashes| InventoryStatus::Missing((hashes, peer)))
