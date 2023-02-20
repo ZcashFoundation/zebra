@@ -149,8 +149,15 @@ impl InventoryRegistry {
 
         // Don't do an immediate rotation, current and prev are already empty.
         let mut interval = tokio::time::interval_at(Instant::now() + interval, interval);
-        // SECURITY: if the rotation time is late, delay future rotations by the same amount
-        interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+        // # Security
+        //
+        // If the rotation time is late, execute as many ticks as needed to catch up.
+        // This is a tradeoff between memory usage and quickly accessing remote data
+        // under heavy load. Bursting prioritises lower memory usage.
+        //
+        // Skipping or delaying could keep peer inventory in memory for a longer time,
+        // further increasing memory load or delays due to virtual memory swapping.
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Burst);
 
         Self {
             current: Default::default(),
@@ -219,8 +226,19 @@ impl InventoryRegistry {
     /// - rotates HashMaps based on interval events
     /// - drains the inv_stream channel and registers all advertised inventory
     pub fn poll_inventory(&mut self, cx: &mut Context<'_>) -> Result<(), BoxError> {
-        // Correctness: Registers the current task for wakeup when the timer next becomes ready.
-        while Pin::new(&mut self.interval).poll_next(cx).is_ready() {
+        // # Correctness
+        //
+        // Registers the current task for wakeup when the timer next becomes ready.
+        //
+        // # Security
+        //
+        // Only rotate one inventory per peer request, to give the next inventory
+        // time to gather some peer advertisements. This is a tradeoff between
+        // memory usage and quickly accessing remote data under heavy load.
+        //
+        // This prevents a burst edge case where all inventory is emptied after
+        // two interval ticks are delayed.
+        if Pin::new(&mut self.interval).poll_next(cx).is_ready() {
             self.rotate();
         }
 
