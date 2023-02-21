@@ -65,15 +65,19 @@ pub enum Response {
     /// Contains the median-time-past for the *next* block on the best chain.
     BestChainNextMedianTimePast(DateTime32),
 
+    /// Response to [`Request::BestChainBlockHash`](Request::BestChainBlockHash) with the
+    /// specified block hash.
+    BlockHash(Option<block::Hash>),
+
     #[cfg(feature = "getblocktemplate-rpcs")]
-    /// Response to [`Request::CheckBlockProposalValidity`](crate::Request::CheckBlockProposalValidity)
+    /// Response to [`Request::CheckBlockProposalValidity`](Request::CheckBlockProposalValidity)
     ValidBlockProposal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s
-/// [`ReadRequest`](crate::ReadRequest).
+/// [`ReadRequest`](ReadRequest).
 pub enum ReadResponse {
     /// Response to [`ReadRequest::Tip`] with the current best chain tip.
     Tip(Option<(block::Height, block::Hash)>),
@@ -137,21 +141,21 @@ pub enum ReadResponse {
     /// Contains the median-time-past for the *next* block on the best chain.
     BestChainNextMedianTimePast(DateTime32),
 
-    /// Response to [`ReadRequest::BestChainBlockHash`](crate::ReadRequest::BestChainBlockHash) with the
+    /// Response to [`ReadRequest::BestChainBlockHash`](ReadRequest::BestChainBlockHash) with the
     /// specified block hash.
     BlockHash(Option<block::Hash>),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
-    /// Response to [`ReadRequest::ChainInfo`](crate::ReadRequest::ChainInfo) with the state
+    /// Response to [`ReadRequest::ChainInfo`](ReadRequest::ChainInfo) with the state
     /// information needed by the `getblocktemplate` RPC method.
     ChainInfo(GetBlockTemplateChainInfo),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
-    /// Response to [`ReadRequest::SolutionRate`](crate::ReadRequest::SolutionRate)
+    /// Response to [`ReadRequest::SolutionRate`](ReadRequest::SolutionRate)
     SolutionRate(Option<u128>),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
-    /// Response to [`ReadRequest::CheckBlockProposalValidity`](crate::ReadRequest::CheckBlockProposalValidity)
+    /// Response to [`ReadRequest::CheckBlockProposalValidity`](ReadRequest::CheckBlockProposalValidity)
     ValidBlockProposal,
 }
 
@@ -204,6 +208,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::Tip(height_and_hash) => Ok(Response::Tip(height_and_hash)),
             ReadResponse::Depth(depth) => Ok(Response::Depth(depth)),
             ReadResponse::BestChainNextMedianTimePast(median_time_past) => Ok(Response::BestChainNextMedianTimePast(median_time_past)),
+            ReadResponse::BlockHash(hash) => Ok(Response::BlockHash(hash)),
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
             ReadResponse::Transaction(tx_and_height) => {
@@ -227,10 +232,6 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressBalance(_)
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_) => {
-                Err("there is no corresponding Response for this ReadResponse")
-            }
-
-            ReadResponse::BlockHash(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 

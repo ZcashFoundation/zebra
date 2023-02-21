@@ -314,6 +314,10 @@ pub fn check_sync_logs_until(
     if check_legacy_chain {
         zebrad.expect_stdout_line_matches("starting legacy chain check")?;
         zebrad.expect_stdout_line_matches("no legacy chain found")?;
+
+        zebrad.expect_stdout_line_matches("starting state checkpoint validation")?;
+        // TODO: what if the mempool is enabled for debugging before this finishes?
+        zebrad.expect_stdout_line_matches("finished state checkpoint validation")?;
     }
 
     // before the stop regex, expect mempool activation

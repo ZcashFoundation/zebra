@@ -15,11 +15,12 @@
 #[macro_use]
 extern crate tracing;
 
+pub mod constants;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
 
 mod config;
-pub mod constants;
 mod error;
 mod request;
 mod response;
@@ -32,8 +33,6 @@ pub use config::{check_and_delete_old_databases, Config};
 pub use constants::MAX_BLOCK_REORG_HEIGHT;
 pub use error::{BoxError, CloneError, CommitBlockError, ValidateContextError};
 pub use request::{FinalizedBlock, HashOrHeight, PreparedBlock, ReadRequest, Request};
-#[cfg(feature = "getblocktemplate-rpcs")]
-pub use response::GetBlockTemplateChainInfo;
 pub use response::{ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipChange, LatestChainTip, TipAction},
@@ -42,11 +41,15 @@ pub use service::{
     OutputIndex, OutputLocation, TransactionLocation,
 };
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+pub use response::GetBlockTemplateChainInfo;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::{
     arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
     chain_tip::{ChainTipBlock, ChainTipSender},
-    init_test, init_test_services,
+    finalized_state::{DiskWriteBatch, WriteDisk},
+    init_test, init_test_services, ReadStateService,
 };
 
 pub(crate) use request::ContextuallyValidBlock;
