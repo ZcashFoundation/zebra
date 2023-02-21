@@ -40,11 +40,10 @@ mod config;
 mod parameters;
 mod primitives;
 mod script;
-pub mod transaction;
 
 pub mod chain;
-#[allow(missing_docs)]
 pub mod error;
+pub mod transaction;
 
 pub use block::{
     subsidy::{

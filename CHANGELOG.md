@@ -4,6 +4,26 @@ All notable changes to Zebra are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-rc.5](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.5) - 2023-02-TODO INSERT DATE HERE
+
+In this release we ... (TODO)
+We also check that Zebra is following the consensus chain each time it starts up.
+
+### Security
+- Check that Zebra's state contains the consensus chain each time it starts up. This implements
+  the "settled network upgrade" consensus rule using all of Zebra's checkpoints ([#6163](https://github.com/ZcashFoundation/zebra/pull/6163)).
+  *User action required:*
+  - If your config is based on an old version of Zebra, or you have manually edited it,
+    make sure `consensus.checkpoint_sync = true`.
+    This option has been true by default since March 2022.
+
+### Deprecated
+- The `consensus.checkpoint_sync` config in `zebrad.toml` is deprecated. It might be ignored or
+  removed in a future release. ([#6163](https://github.com/ZcashFoundation/zebra/pull/6163))
+
+TODO: add other changes here
+
+
 ## [Zebra 1.0.0-rc.4](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.4) - 2023-01-30
 
 In this release we fixed bugs and inconsistencies between zcashd and zebrad in the output of the `getblocktemplate` RPC method. In addition, we added block proposal mode to the `getblocktemplate` RPC, while we continue the effort of adding and testing mining pool RPC methods.

@@ -42,6 +42,9 @@ pub use disk_format::{OutputIndex, OutputLocation, TransactionLocation};
 
 pub(super) use zebra_db::ZebraDb;
 
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use disk_db::{DiskWriteBatch, WriteDisk};
+
 /// The finalized part of the chain state, stored in the db.
 ///
 /// `rocksdb` allows concurrent writes through a shared reference,

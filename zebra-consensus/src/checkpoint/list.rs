@@ -196,4 +196,9 @@ impl CheckpointList {
     {
         self.0.range(range).map(|(height, _)| *height).next_back()
     }
+
+    /// Returns an iterator over all the checkpoints, in increasing height order.
+    pub fn iter(&self) -> impl Iterator<Item = (&block::Height, &block::Hash)> {
+        self.0.iter()
+    }
 }

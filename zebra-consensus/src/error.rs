@@ -20,6 +20,7 @@ use proptest_derive::Arbitrary;
 const MAX_EXPIRY_HEIGHT: block::Height = block::Height::MAX_EXPIRY_HEIGHT;
 
 #[derive(Error, Copy, Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
 pub enum SubsidyError {
     #[error("no coinbase transaction in block")]
     NoCoinbase,
@@ -36,6 +37,7 @@ pub enum SubsidyError {
 
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[allow(missing_docs)]
 pub enum TransactionError {
     #[error("first transaction must be coinbase")]
     CoinbasePosition,
@@ -226,6 +228,7 @@ impl From<BoxError> for TransactionError {
 }
 
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
 pub enum BlockError {
     #[error("block contains invalid transactions")]
     Transaction(#[from] TransactionError),
