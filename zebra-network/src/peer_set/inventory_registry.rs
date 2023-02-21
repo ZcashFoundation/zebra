@@ -265,6 +265,17 @@ impl InventoryRegistry {
             .is_some()
     }
 
+    /// Returns an iterator over peer inventory status hashes.
+    ///
+    /// Yields current statuses first, then previously rotated statuses.
+    /// This can include multiple statuses for the same hash.
+    #[allow(dead_code)]
+    pub fn status_hashes(
+        &self,
+    ) -> impl Iterator<Item = (&InventoryHash, &IndexMap<SocketAddr, InventoryMarker>)> {
+        self.current.iter().chain(self.prev.iter())
+    }
+
     /// Returns a future that polls once for new registry updates.
     #[allow(dead_code)]
     pub fn update(&mut self) -> Update {
