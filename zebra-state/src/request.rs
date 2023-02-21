@@ -599,6 +599,14 @@ pub enum Request {
     /// Returns [`Response::BestChainNextMedianTimePast`] when successful.
     BestChainNextMedianTimePast,
 
+    /// Looks up a block hash by height in the current best chain.
+    ///
+    /// Returns
+    ///
+    /// * [`Response::BlockHash(Some(hash))`](Response::BlockHash) if the block is in the best chain;
+    /// * [`Response::BlockHash(None)`](Response::BlockHash) otherwise.
+    BestChainBlockHash(block::Height),
+
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
@@ -625,6 +633,7 @@ impl Request {
                 "best_chain_tip_nullifiers_anchors"
             }
             Request::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
+            Request::BestChainBlockHash(_) => "best_chain_block_hash",
             #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
         }
@@ -910,6 +919,7 @@ impl TryFrom<Request> for ReadRequest {
             Request::Tip => Ok(ReadRequest::Tip),
             Request::Depth(hash) => Ok(ReadRequest::Depth(hash)),
             Request::BestChainNextMedianTimePast => Ok(ReadRequest::BestChainNextMedianTimePast),
+            Request::BestChainBlockHash(hash) => Ok(ReadRequest::BestChainBlockHash(hash)),
 
             Request::Block(hash_or_height) => Ok(ReadRequest::Block(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
@@ -933,14 +943,14 @@ impl TryFrom<Request> for ReadRequest {
                 Err("ReadService does not write blocks")
             }
 
+            Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
+                     Manually convert the request to ReadRequest::AnyChainUtxo, \
+                     and handle pending UTXOs"),
+
             #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(prepared) => {
                 Ok(ReadRequest::CheckBlockProposalValidity(prepared))
             }
-
-            Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
-                     Manually convert the request to ReadRequest::AnyChainUtxo, \
-                     and handle pending UTXOs"),
         }
     }
 }

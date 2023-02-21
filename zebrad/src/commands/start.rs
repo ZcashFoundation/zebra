@@ -74,6 +74,7 @@ use tokio::{pin, select, sync::oneshot};
 use tower::{builder::ServiceBuilder, util::BoxService};
 use tracing_futures::Instrument;
 
+use zebra_consensus::chain::BackgroundTaskHandles;
 use zebra_rpc::server::RpcServer;
 
 use crate::{
@@ -140,7 +141,7 @@ impl StartCmd {
             zebra_network::init(config.network.clone(), inbound, latest_chain_tip.clone()).await;
 
         info!("initializing verifiers");
-        let (chain_verifier, tx_verifier, mut groth16_download_handle, max_checkpoint_height) =
+        let (chain_verifier, tx_verifier, consensus_task_handles, max_checkpoint_height) =
             zebra_consensus::chain::init(
                 config.consensus.clone(),
                 config.network.network,
@@ -252,8 +253,17 @@ impl StartCmd {
         pin!(progress_task_handle);
 
         // startup tasks
+        let BackgroundTaskHandles {
+            mut groth16_download_handle,
+            mut state_checkpoint_verify_handle,
+        } = consensus_task_handles;
+
         let groth16_download_handle_fused = (&mut groth16_download_handle).fuse();
         pin!(groth16_download_handle_fused);
+
+        let state_checkpoint_verify_handle_fused = (&mut state_checkpoint_verify_handle).fuse();
+        pin!(state_checkpoint_verify_handle_fused);
+
         let old_databases_task_handle_fused = (&mut old_databases_task_handle).fuse();
         pin!(old_databases_task_handle_fused);
 
@@ -319,7 +329,17 @@ impl StartCmd {
                     Ok(())
                 }
 
-                // The same for the old databases task, we expect it to finish while Zebra is running.
+                // We also expect the state checkpoint verify task to finish.
+                state_checkpoint_verify_result = &mut state_checkpoint_verify_handle_fused => {
+                    state_checkpoint_verify_result
+                        .unwrap_or_else(|_| panic!(
+                            "unexpected panic checking previous state followed the best chain"));
+
+                    exit_when_task_finishes = false;
+                    Ok(())
+                }
+
+                // And the old databases task should finish while Zebra is running.
                 old_databases_result = &mut old_databases_task_handle_fused => {
                     old_databases_result
                         .unwrap_or_else(|_| panic!(
@@ -355,6 +375,7 @@ impl StartCmd {
 
         // startup tasks
         groth16_download_handle.abort();
+        state_checkpoint_verify_handle.abort();
         old_databases_task_handle.abort();
 
         // Wait until the RPC server shuts down.

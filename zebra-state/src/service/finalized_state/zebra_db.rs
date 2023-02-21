@@ -67,7 +67,7 @@ impl ZebraDb {
     /// It should only be used in debugging or test code, immediately before a manual shutdown.
     ///
     /// See [`DiskDb::shutdown`] for details.
-    pub(crate) fn shutdown(&mut self, force: bool) {
+    pub fn shutdown(&mut self, force: bool) {
         self.check_max_on_disk_tip_height();
 
         self.db.shutdown(force);
