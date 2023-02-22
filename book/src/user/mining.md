@@ -15,6 +15,8 @@ Contents:
 ## Download and build Zebra for mining
 [#download-and-build-zebra]: #download-and-build-zebra
 
+Before installing please make sure you have the [Zebra dependencies](https://github.com/ZcashFoundation/zebra#build-instructions) in your OS.
+
 ```console
 cargo install --locked --features getblocktemplate-rpcs --git https://github.com/ZcashFoundation/zebra zebrad
 ```
@@ -44,8 +46,10 @@ Node miner address is required. At the moment zebra only allows `p2pkh` or `p2sh
 
 ```
 [mining]
-miner_address = 't3K4aLYagSSBySdrfAGGeUd5H9z5Qvz88t2'
+miner_address = 't3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd'
 ```
+
+The above address is just the first address of the [Founders' Reward](https://zips.z.cash/protocol/protocol.pdf#foundersreward) section of the Zcash protocol. It's a Mainnet address and it is used here purely as an example.
 
 ### RPC section
 [#rpc-section]: #rpc-section
@@ -79,10 +83,17 @@ Wait until zebra is in sync, you will see the sync at 100% when this happens:
 ## Testing the setup
 [#testing-the-setup]: #testing-the-setup
 
-The easiest way to check your setup is to call the `getblocktemplate` RPC method and check the result. If you can see something similar to the following then you are good to go:
+The easiest way to check your setup is to call the `getblocktemplate` RPC method and check the result.
 
 ```console
 $ curl --silent --data-binary '{"jsonrpc": "1.0", "id":"curltest", "method": "getblocktemplate", "params": [] }' -H 'Content-type: application/json' http://127.0.0.1:8232/ | jq
+```
+
+If you can see something similar to the following then you are good to go.
+
+<details><summary>Click to see demo command output</summary>
+
+```console
 {
   "result": {
     "capabilities": [
@@ -155,8 +166,9 @@ $ curl --silent --data-binary '{"jsonrpc": "1.0", "id":"curltest", "method": "ge
   },
   "id": "curltest"
 }
-$ 
 ```
+</details>
+
 
 ## Run a mining pool
 [#run-a-mining-pool]: #run-a-mining-pool
