@@ -338,16 +338,19 @@ impl StateService {
             tokio::sync::mpsc::unbounded_channel();
 
         let finalized_state_for_writing = finalized_state.clone();
+        let span = Span::current();
         let block_write_task = std::thread::spawn(move || {
-            write::write_blocks_from_channels(
-                finalized_block_write_receiver,
-                non_finalized_block_write_receiver,
-                finalized_state_for_writing,
-                non_finalized_state,
-                invalid_block_reset_sender,
-                chain_tip_sender,
-                non_finalized_state_sender,
-            )
+            span.in_scope(move || {
+                write::write_blocks_from_channels(
+                    finalized_block_write_receiver,
+                    non_finalized_block_write_receiver,
+                    finalized_state_for_writing,
+                    non_finalized_state,
+                    invalid_block_reset_sender,
+                    chain_tip_sender,
+                    non_finalized_state_sender,
+                )
+            })
         });
         let block_write_task = Arc::new(block_write_task);
 

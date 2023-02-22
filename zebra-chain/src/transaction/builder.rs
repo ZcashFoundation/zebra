@@ -15,6 +15,7 @@ impl Transaction {
         network: Network,
         height: Height,
         outputs: impl IntoIterator<Item = (Amount<NonNegative>, transparent::Script)>,
+        extra_coinbase_data: Vec<u8>,
     ) -> Transaction {
         // # Consensus
         //
@@ -36,13 +37,17 @@ impl Transaction {
         //
         // > A coinbase transaction script MUST have length in {2 .. 100} bytes.
         //
-        // Zebra does not add any extra coinbase data.
+        // Zebra adds extra coinbase data if configured to do so.
         //
         // Since we're not using a lock time, any sequence number is valid here.
         // See `Transaction::lock_time()` for the relevant consensus rules.
         //
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-        let inputs = vec![transparent::Input::new_coinbase(height, None, None)];
+        let inputs = vec![transparent::Input::new_coinbase(
+            height,
+            Some(extra_coinbase_data),
+            None,
+        )];
 
         // > The block subsidy is composed of a miner subsidy and a series of funding streams.
         //
@@ -108,15 +113,21 @@ impl Transaction {
         height: Height,
         outputs: impl IntoIterator<Item = (Amount<NonNegative>, transparent::Script)>,
         like_zcashd: bool,
+        extra_coinbase_data: Vec<u8>,
     ) -> Transaction {
-        // `zcashd` includes an extra byte after the coinbase height in the coinbase data,
-        // and a sequence number of u32::MAX.
         let mut extra_data = None;
         let mut sequence = None;
 
+        // `zcashd` includes an extra byte after the coinbase height in the coinbase data,
+        // and a sequence number of u32::MAX.
         if like_zcashd {
             extra_data = Some(vec![0x00]);
             sequence = Some(u32::MAX);
+        }
+
+        // Override like_zcashd if extra_coinbase_data was supplied
+        if !extra_coinbase_data.is_empty() {
+            extra_data = Some(extra_coinbase_data);
         }
 
         // # Consensus

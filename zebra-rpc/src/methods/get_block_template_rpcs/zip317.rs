@@ -46,11 +46,17 @@ pub async fn select_mempool_transactions(
     miner_address: transparent::Address,
     mempool_txs: Vec<VerifiedUnminedTx>,
     like_zcashd: bool,
+    extra_coinbase_data: Vec<u8>,
 ) -> Vec<VerifiedUnminedTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
-    let fake_coinbase_tx =
-        fake_coinbase_transaction(network, next_block_height, miner_address, like_zcashd);
+    let fake_coinbase_tx = fake_coinbase_transaction(
+        network,
+        next_block_height,
+        miner_address,
+        like_zcashd,
+        extra_coinbase_data,
+    );
 
     // Setup the transaction lists.
     let (mut conventional_fee_txs, mut low_fee_txs): (Vec<_>, Vec<_>) = mempool_txs
@@ -117,6 +123,7 @@ pub fn fake_coinbase_transaction(
     height: Height,
     miner_address: transparent::Address,
     like_zcashd: bool,
+    extra_coinbase_data: Vec<u8>,
 ) -> TransactionTemplate<NegativeOrZero> {
     // Block heights are encoded as variable-length (script) and `u32` (lock time, expiry height).
     // They can also change the `u32` consensus branch id.
@@ -129,8 +136,14 @@ pub fn fake_coinbase_transaction(
     // https://developer.bitcoin.org/reference/transactions.html#txout-a-transaction-output
     let miner_fee = 1.try_into().expect("amount is valid and non-negative");
 
-    let coinbase_tx =
-        generate_coinbase_transaction(network, height, miner_address, miner_fee, like_zcashd);
+    let coinbase_tx = generate_coinbase_transaction(
+        network,
+        height,
+        miner_address,
+        miner_fee,
+        like_zcashd,
+        extra_coinbase_data,
+    );
 
     TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee)
 }
