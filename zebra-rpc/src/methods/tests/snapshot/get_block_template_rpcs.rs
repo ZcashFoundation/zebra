@@ -98,6 +98,8 @@ pub async fn test_responses<State, ReadState>(
 
     let mining_config = get_block_template_rpcs::config::Config {
         miner_address: Some(transparent::Address::from_script_hash(network, [0xad; 20])),
+        extra_coinbase_data: None,
+        debug_like_zcashd: true,
     };
 
     // nu5 block height

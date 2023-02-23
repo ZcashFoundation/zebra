@@ -32,6 +32,7 @@ async fn rpc_getinfo() {
         "RPC test",
         Mainnet,
         false,
+        true,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
@@ -75,6 +76,7 @@ async fn rpc_getblock() {
         "RPC test",
         Mainnet,
         false,
+        true,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
@@ -225,6 +227,7 @@ async fn rpc_getblock_parse_error() {
         "RPC test",
         Mainnet,
         false,
+        true,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
@@ -266,6 +269,7 @@ async fn rpc_getblock_missing_error() {
         "RPC test",
         Mainnet,
         false,
+        true,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
@@ -333,6 +337,7 @@ async fn rpc_getbestblockhash() {
         "RPC test",
         Mainnet,
         false,
+        true,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
@@ -374,6 +379,7 @@ async fn rpc_getrawtransaction() {
         "RPC test",
         Mainnet,
         false,
+        true,
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
@@ -461,6 +467,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         "RPC test",
         Mainnet,
         false,
+        true,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip,
@@ -603,6 +610,7 @@ async fn rpc_getaddresstxids_response_with(
         "RPC test",
         network,
         false,
+        true,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip,
@@ -653,6 +661,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
         "RPC test",
         Mainnet,
         false,
+        true,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
@@ -700,6 +709,7 @@ async fn rpc_getaddressutxos_response() {
         "RPC test",
         Mainnet,
         false,
+        true,
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip,
@@ -1116,7 +1126,11 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         true => Some(transparent::Address::from_pub_key_hash(Mainnet, [0x7e; 20])),
     };
 
-    let mining_config = Config { miner_address };
+    let mining_config = Config {
+        miner_address,
+        extra_coinbase_data: None,
+        debug_like_zcashd: true,
+    };
 
     // nu5 block height
     let fake_tip_height = NetworkUpgrade::Nu5.activation_height(Mainnet).unwrap();
@@ -1510,6 +1524,8 @@ async fn rpc_getdifficulty() {
 
     let mining_config = Config {
         miner_address: None,
+        extra_coinbase_data: None,
+        debug_like_zcashd: true,
     };
 
     // nu5 block height

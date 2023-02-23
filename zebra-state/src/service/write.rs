@@ -6,7 +6,10 @@ use tokio::sync::{
     watch,
 };
 
-use zebra_chain::block::{self, Height};
+use zebra_chain::{
+    block::{self, Height},
+    transparent::EXTRA_ZEBRA_COINBASE_DATA,
+};
 
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
@@ -34,7 +37,15 @@ const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
 
 /// Run contextual validation on the prepared block and add it to the
 /// non-finalized state if it is contextually valid.
-#[tracing::instrument(level = "debug", skip(prepared), fields(height = ?prepared.height, hash = %prepared.hash))]
+#[tracing::instrument(
+    level = "debug",
+    skip(finalized_state, non_finalized_state, prepared),
+    fields(
+        height = ?prepared.height,
+        hash = %prepared.hash,
+        chains = non_finalized_state.chain_set.len()
+    )
+)]
 pub(crate) fn validate_and_commit_non_finalized(
     finalized_state: &ZebraDb,
     non_finalized_state: &mut NonFinalizedState,
@@ -56,16 +67,28 @@ pub(crate) fn validate_and_commit_non_finalized(
 /// channels with the latest non-finalized [`ChainTipBlock`] and
 /// [`Chain`].
 ///
+/// `last_zebra_mined_log_height` is used to rate-limit logging.
+///
 /// Returns the latest non-finalized chain tip height.
 ///
 /// # Panics
 ///
 /// If the `non_finalized_state` is empty.
-#[instrument(level = "debug", skip(chain_tip_sender, non_finalized_state_sender))]
+#[instrument(
+    level = "debug",
+    skip(
+        non_finalized_state,
+        chain_tip_sender,
+        non_finalized_state_sender,
+        last_zebra_mined_log_height
+    ),
+    fields(chains = non_finalized_state.chain_set.len())
+)]
 fn update_latest_chain_channels(
     non_finalized_state: &NonFinalizedState,
     chain_tip_sender: &mut ChainTipSender,
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
+    last_zebra_mined_log_height: &mut Option<Height>,
 ) -> block::Height {
     let best_chain = non_finalized_state.best_chain().expect("unexpected empty non-finalized state: must commit at least one block before updating channels");
 
@@ -74,6 +97,8 @@ fn update_latest_chain_channels(
         .expect("unexpected empty chain: must commit at least one block before updating channels")
         .clone();
     let tip_block = ChainTipBlock::from(tip_block);
+
+    log_if_mined_by_zebra(&tip_block, last_zebra_mined_log_height);
 
     let tip_block_height = tip_block.height;
 
@@ -90,13 +115,21 @@ fn update_latest_chain_channels(
 /// `non_finalized_state_sender`.
 // TODO: make the task an object
 #[allow(clippy::too_many_arguments)]
-#[instrument(skip(
-    finalized_block_write_receiver,
-    non_finalized_block_write_receiver,
-    invalid_block_reset_sender,
-    chain_tip_sender,
-    non_finalized_state_sender,
-))]
+#[instrument(
+    level = "debug",
+    skip(
+        finalized_block_write_receiver,
+        non_finalized_block_write_receiver,
+        finalized_state,
+        non_finalized_state,
+        invalid_block_reset_sender,
+        chain_tip_sender,
+        non_finalized_state_sender,
+    ),
+    fields(
+        network = %non_finalized_state.network
+    )
+)]
 pub fn write_blocks_from_channels(
     mut finalized_block_write_receiver: UnboundedReceiver<QueuedFinalized>,
     mut non_finalized_block_write_receiver: UnboundedReceiver<QueuedNonFinalized>,
@@ -106,6 +139,8 @@ pub fn write_blocks_from_channels(
     mut chain_tip_sender: ChainTipSender,
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
 ) {
+    let mut last_zebra_mined_log_height = None;
+
     // Write all the finalized blocks sent by the state,
     // until the state closes the finalized block channel's sender.
     while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
@@ -146,6 +181,8 @@ pub fn write_blocks_from_channels(
         match finalized_state.commit_finalized(ordered_block) {
             Ok(finalized) => {
                 let tip_block = ChainTipBlock::from(finalized);
+
+                log_if_mined_by_zebra(&tip_block, &mut last_zebra_mined_log_height);
 
                 chain_tip_sender.set_finalized_tip(tip_block);
             }
@@ -243,6 +280,7 @@ pub fn write_blocks_from_channels(
             &non_finalized_state,
             &mut chain_tip_sender,
             &non_finalized_state_sender,
+            &mut last_zebra_mined_log_height,
         );
 
         // Update the caller with the result.
@@ -284,4 +322,73 @@ pub fn write_blocks_from_channels(
     // done writing to the finalized state, so we can force it to shut down.
     finalized_state.db.shutdown(true);
     std::mem::drop(finalized_state);
+}
+
+/// Log a message if this block was mined by Zebra.
+///
+/// Does not detect early Zebra blocks, and blocks with custom coinbase transactions.
+/// Rate-limited to every 1000 blocks using `last_zebra_mined_log_height`.
+fn log_if_mined_by_zebra(
+    tip_block: &ChainTipBlock,
+    last_zebra_mined_log_height: &mut Option<Height>,
+) {
+    // This logs at most every 2-3 checkpoints, which seems fine.
+    const LOG_RATE_LIMIT: u32 = 1000;
+
+    let height = tip_block.height.0;
+
+    if let Some(last_height) = last_zebra_mined_log_height {
+        if height < last_height.0 + LOG_RATE_LIMIT {
+            // If we logged in the last 1000 blocks, don't log anything now.
+            return;
+        }
+    };
+
+    // This code is rate-limited, so we can do expensive transformations here.
+    let coinbase_data = tip_block.transactions[0].inputs()[0]
+        .extra_coinbase_data()
+        .expect("valid blocks must start with a coinbase input")
+        .clone();
+
+    if coinbase_data
+        .as_ref()
+        .starts_with(EXTRA_ZEBRA_COINBASE_DATA.as_bytes())
+    {
+        let text = String::from_utf8_lossy(coinbase_data.as_ref());
+
+        *last_zebra_mined_log_height = Some(Height(height));
+
+        // No need for hex-encoded data if it's exactly what we expected.
+        if coinbase_data.as_ref() == EXTRA_ZEBRA_COINBASE_DATA.as_bytes() {
+            info!(
+                %text,
+                %height,
+                hash = %tip_block.hash,
+                "looks like this block was mined by Zebra!"
+            );
+        } else {
+            // # Security
+            //
+            // Use the extra data as an allow-list, replacing unknown characters.
+            // This makes sure control characters and harmful messages don't get logged
+            // to the terminal.
+            let text = text.replace(
+                |c: char| {
+                    !EXTRA_ZEBRA_COINBASE_DATA
+                        .to_ascii_lowercase()
+                        .contains(c.to_ascii_lowercase())
+                },
+                "?",
+            );
+            let data = hex::encode(coinbase_data.as_ref());
+
+            info!(
+                %text,
+                %data,
+                %height,
+                hash = %tip_block.hash,
+                "looks like this block was mined by Zebra!"
+            );
+        }
+    }
 }

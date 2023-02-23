@@ -262,6 +262,10 @@ where
     /// no matter what the estimated height or local clock is.
     debug_force_finished_sync: bool,
 
+    /// Test-only option that makes RPC responses more like `zcashd`.
+    #[allow(dead_code)]
+    debug_like_zcashd: bool,
+
     // Services
     //
     /// A handle to the mempool service.
@@ -301,6 +305,7 @@ where
         app_version: Version,
         network: Network,
         debug_force_finished_sync: bool,
+        debug_like_zcashd: bool,
         mempool: Buffer<Mempool, mempool::Request>,
         state: State,
         latest_chain_tip: Tip,
@@ -323,6 +328,7 @@ where
             app_version,
             network,
             debug_force_finished_sync,
+            debug_like_zcashd,
             mempool: mempool.clone(),
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
@@ -763,14 +769,14 @@ where
         use zebra_chain::block::MAX_BLOCK_BYTES;
 
         #[cfg(feature = "getblocktemplate-rpcs")]
-        /// Determines whether the output of this RPC is sorted like zcashd
-        const SHOULD_USE_ZCASHD_ORDER: bool = true;
+        // Determines whether the output of this RPC is sorted like zcashd
+        let should_use_zcashd_order = self.debug_like_zcashd;
 
         let mut mempool = self.mempool.clone();
 
         async move {
             #[cfg(feature = "getblocktemplate-rpcs")]
-            let request = if SHOULD_USE_ZCASHD_ORDER {
+            let request = if should_use_zcashd_order {
                 mempool::Request::FullTransactions
             } else {
                 mempool::Request::TransactionIds

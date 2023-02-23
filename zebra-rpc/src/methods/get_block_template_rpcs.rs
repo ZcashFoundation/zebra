@@ -17,7 +17,9 @@ use zebra_chain::{
     parameters::Network,
     primitives,
     serialization::ZcashDeserializeInto,
-    transparent,
+    transparent::{
+        self, EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN,
+    },
     work::difficulty::{ExpandedDifficulty, U256},
 };
 use zebra_consensus::{
@@ -246,6 +248,14 @@ where
     /// Zebra currently only supports transparent addresses.
     miner_address: Option<transparent::Address>,
 
+    /// Extra data to include in coinbase transaction inputs.
+    /// Limited to around 95 bytes by the consensus rules.
+    extra_coinbase_data: Vec<u8>,
+
+    /// Should Zebra's block templates try to imitate `zcashd`?
+    /// Developer-only config.
+    debug_like_zcashd: bool,
+
     // Services
     //
     /// A handle to the mempool service.
@@ -293,6 +303,10 @@ where
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the handler for getblocktemplate RPCs.
+    ///
+    /// # Panics
+    ///
+    /// If the `mining_config` is invalid.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         network: Network,
@@ -304,9 +318,38 @@ where
         sync_status: SyncStatus,
         address_book: AddressBook,
     ) -> Self {
+        // A limit on the configured extra coinbase data, regardless of the current block height.
+        // This is different from the consensus rule, which limits the total height + data.
+        const EXTRA_COINBASE_DATA_LIMIT: usize =
+            MAX_COINBASE_DATA_LEN - MAX_COINBASE_HEIGHT_DATA_LEN;
+
+        let debug_like_zcashd = mining_config.debug_like_zcashd;
+
+        // Hex-decode to bytes if possible, otherwise UTF-8 encode to bytes.
+        let extra_coinbase_data = mining_config.extra_coinbase_data.unwrap_or_else(|| {
+            if debug_like_zcashd {
+                ""
+            } else {
+                EXTRA_ZEBRA_COINBASE_DATA
+            }
+            .to_string()
+        });
+        let extra_coinbase_data = hex::decode(&extra_coinbase_data)
+            .unwrap_or_else(|_error| extra_coinbase_data.as_bytes().to_vec());
+
+        assert!(
+            extra_coinbase_data.len() <= EXTRA_COINBASE_DATA_LIMIT,
+            "extra coinbase data is {} bytes, but Zebra's limit is {}.\n\
+             Configure mining.extra_coinbase_data with a shorter string",
+            extra_coinbase_data.len(),
+            EXTRA_COINBASE_DATA_LIMIT,
+        );
+
         Self {
             network,
             miner_address: mining_config.miner_address,
+            extra_coinbase_data,
+            debug_like_zcashd,
             mempool,
             state,
             latest_chain_tip,
@@ -389,14 +432,11 @@ where
         &self,
         parameters: Option<get_block_template::JsonParameters>,
     ) -> BoxFuture<Result<get_block_template::Response>> {
-        // Should we generate coinbase transactions that are exactly like zcashd's?
-        //
-        // This is useful for testing, but either way Zebra should obey the consensus rules.
-        const COINBASE_LIKE_ZCASHD: bool = true;
-
-        // Clone Config
+        // Clone Configs
         let network = self.network;
         let miner_address = self.miner_address;
+        let debug_like_zcashd = self.debug_like_zcashd;
+        let extra_coinbase_data = self.extra_coinbase_data.clone();
 
         // Clone Services
         let mempool = self.mempool.clone();
@@ -634,14 +674,13 @@ where
             );
 
             // Randomly select some mempool transactions.
-            //
-            // TODO: sort these transactions to match zcashd's order, to make testing easier.
             let mempool_txs = zip317::select_mempool_transactions(
                 network,
                 next_block_height,
                 miner_address,
                 mempool_txs,
-                COINBASE_LIKE_ZCASHD,
+                debug_like_zcashd,
+                extra_coinbase_data.clone(),
             )
             .await;
 
@@ -662,7 +701,8 @@ where
                 server_long_poll_id,
                 mempool_txs,
                 submit_old,
-                COINBASE_LIKE_ZCASHD,
+                debug_like_zcashd,
+                extra_coinbase_data,
             );
 
             Ok(response.into())
