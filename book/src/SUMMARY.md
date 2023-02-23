@@ -10,6 +10,7 @@
   - [Zebra Metrics](user/metrics.md)
   - [Lightwalletd](user/lightwalletd.md)
   - [zk-SNARK Parameters](user/parameters.md)
+  - [Mining](user/mining.md)
 - [Developer Documentation](dev.md)
   - [Contribution Guide](CONTRIBUTING.md)
   - [Design Overview](dev/overview.md)
