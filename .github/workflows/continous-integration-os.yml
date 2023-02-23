@@ -70,7 +70,7 @@ jobs:
       matrix:
         # TODO: Windows was removed for now, see https://github.com/ZcashFoundation/zebra/issues/3801
         os: [ubuntu-latest, macos-latest]
-        rust: [stable, beta]
+        rust: [stable, beta, nightly]
         features: ["", " --features getblocktemplate-rpcs"]
         exclude:
         # We're excluding macOS for the following reasons:
@@ -79,6 +79,8 @@ jobs:
         # - macOS is a second-tier Zebra support platform
           - os: macos-latest
             rust: beta
+          - os: macos-latest
+            rust: nightly
           - os: macos-latest
             features: " --features getblocktemplate-rpcs"
 
