@@ -335,29 +335,6 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.60.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "062dddbc1ba4aca46de6338e2bf87771414c335f7b2f2036e8f3e9befebf88e6"
-dependencies = [
- "bitflags",
- "cexpr",
- "clang-sys",
- "clap 3.2.20",
- "env_logger 0.9.1",
- "lazy_static",
- "lazycell",
- "log",
- "peeking_take_while",
- "proc-macro2 1.0.47",
- "quote 1.0.20",
- "regex",
- "rustc-hash",
- "shlex",
- "which",
-]
-
-[[package]]
-name = "bindgen"
 version = "0.64.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4243e6031260db77ede97ad86c27e501d646a27ab57b59a574f725d98ab1fb4"
@@ -367,6 +344,7 @@ dependencies = [
  "clang-sys",
  "lazy_static",
  "lazycell",
+ "log",
  "peeking_take_while",
  "proc-macro2 1.0.47",
  "quote 1.0.20",
@@ -374,6 +352,7 @@ dependencies = [
  "rustc-hash",
  "shlex",
  "syn 1.0.104",
+ "which",
 ]
 
 [[package]]
@@ -745,12 +724,9 @@ version = "3.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b71c3ce99b7611011217b366d923f1d0a7e07a92bb2dbf1e84508c673ca3bd"
 dependencies = [
- "atty",
  "bitflags",
  "clap_lex",
  "indexmap",
- "strsim 0.10.0",
- "termcolor",
  "textwrap 0.15.0",
 ]
 
@@ -1273,19 +1249,6 @@ checksum = "44533bbbb3bb3c1fa17d9f2e4e38bbbaf8396ba82193c4cb1b6445d711445d36"
 dependencies = [
  "log",
  "regex",
-]
-
-[[package]]
-name = "env_logger"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c90bf5f19754d10198ccb95b70664fc925bd1fc090a0fd9a6ebc54acc8cd6272"
-dependencies = [
- "atty",
- "humantime",
- "log",
- "regex",
- "termcolor",
 ]
 
 [[package]]
@@ -2212,7 +2175,7 @@ version = "0.10.0+7.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fe4d5874f5ff2bc616e55e8c6086d478fcda13faf9495768a4aa1c22042d30b"
 dependencies = [
- "bindgen 0.64.0",
+ "bindgen",
  "bzip2-sys",
  "cc",
  "glob",
@@ -3226,7 +3189,7 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a44883e74aa97ad63db83c4bf8ca490f02b2fc02f92575e720c8551e843c945f"
 dependencies = [
- "env_logger 0.7.1",
+ "env_logger",
  "log",
  "rand 0.7.3",
  "rand_core 0.5.1",
@@ -5449,11 +5412,11 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70ae95d6cd4849b814313ddbd633e5c0c7843df3daf52832be547c66fed989e0"
+checksum = "a27a0e71f69f4c8661b4dc947518d8588c1f29bd3f035749068a40bd5cdee4e8"
 dependencies = [
- "bindgen 0.60.1",
+ "bindgen",
  "blake2b_simd",
  "cc",
  "cxx",
