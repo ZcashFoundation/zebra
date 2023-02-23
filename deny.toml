@@ -51,7 +51,7 @@ skip-tree = [
 
     # wait for zcash_script to upgrade
     # https://github.com/ZcashFoundation/zcash_script/pulls
-    { name = "zcash_primitives", version = "=0.8.1" },
+    { name = "zcash_primitives", version = "=0.9.1" },
     { name = "bindgen", version = "=0.60.1" },
 
     # wait for ed25519-zebra, indexmap, metrics-util, and metrics to upgrade
