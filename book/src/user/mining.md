@@ -175,6 +175,6 @@ If you can see something similar to the following then you are good to go.
 
 Just point your mining pool software to the Zebra RPC endpoint (127.0.0.1:8232). Zebra supports the RPC methods needed to run most mining pool software.
 
-If you want to run an experimental `s-nomp` mining pool with Zebra on testnet, please refer to [this document](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/mining-testnet-s-nomp.md) for a very detailed guide. `s-nomp` is not compatible with NU5, so some mining functions are disabled.
+If you want to run an experimental `s-nomp` mining pool with Zebra on testnet, please refer to [this document](mining-testnet-s-nomp.md) for a very detailed guide. `s-nomp` is not compatible with NU5, so some mining functions are disabled.
 
 If your mining pool software needs additional support, or if you as a miner need additional RPC methods, then please open a ticket in the [Zebra repository](https://github.com/ZcashFoundation/zebra/issues/new).

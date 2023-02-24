@@ -11,6 +11,7 @@
   - [Lightwalletd](user/lightwalletd.md)
   - [zk-SNARK Parameters](user/parameters.md)
   - [Mining](user/mining.md)
+  - [Mining on Testnet](user/mining-testnet-s-nomp.md)
 - [Developer Documentation](dev.md)
   - [Contribution Guide](CONTRIBUTING.md)
   - [Design Overview](dev/overview.md)
