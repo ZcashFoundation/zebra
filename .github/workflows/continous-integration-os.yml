@@ -309,9 +309,10 @@ jobs:
           echo "-- full cargo machete output, including ignored dependencies --"
           cargo machete --skip-target-dir || true
           echo "-- unused dependencies are below this line, full output is above --"
-          (cargo machete --skip-target-dir 2>/dev/null || true) | \
-          grep -v -e gumdrop -e humantime-serde -e tinyvec -e "found the following" -e Cargo.toml -e Done \
-          && ( \
-          echo "New unused dependencies were found, please remove them!"; \
-          exit 1; \
-          )
+          if (cargo machete --skip-target-dir 2>/dev/null || true) | \
+          grep -v -e gumdrop -e humantime-serde -e tinyvec -e "found the following" -e Cargo.toml -e Done; then
+              echo "No unused dependencies found."
+          else
+              echo "New unused dependencies were found, please remove them!"
+              exit 1
+          fi
