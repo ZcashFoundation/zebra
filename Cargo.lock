@@ -298,12 +298,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf9ff0bbfd639f15c74af777d81383cf53efb7c93613f6cab67c6c11e05bbf8b"
 
 [[package]]
-name = "bech32"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
-
-[[package]]
 name = "bellman"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5316,7 +5310,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "804268e702b664fc09d3e2ce82786d0addf4ae57ba6976469be63e09066bf9f7"
 dependencies = [
- "bech32 0.8.1",
+ "bech32",
  "bs58",
  "f4jumble",
  "zcash_encoding",
@@ -5476,13 +5470,10 @@ dependencies = [
 name = "zebra-chain"
 version = "1.0.0-beta.20"
 dependencies = [
- "aes",
- "bech32 0.9.1",
  "bitflags",
  "bitvec",
  "blake2b_simd",
  "blake2s_simd",
- "bls12_381",
  "bs58",
  "byteorder",
  "chrono",
@@ -5518,7 +5509,6 @@ dependencies = [
  "sha2",
  "spandoc",
  "static_assertions",
- "subtle",
  "thiserror",
  "tinyvec",
  "tokio",
@@ -5546,7 +5536,6 @@ dependencies = [
  "bls12_381",
  "chrono",
  "color-eyre",
- "dirs",
  "displaydoc",
  "futures",
  "futures-util",
@@ -5639,7 +5628,6 @@ dependencies = [
  "jsonrpc-http-server",
  "num_cpus",
  "proptest",
- "proptest-derive",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -5647,7 +5635,6 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
- "tracing-futures",
  "zcash_address",
  "zebra-chain",
  "zebra-consensus",
@@ -5679,7 +5666,6 @@ dependencies = [
  "chrono",
  "color-eyre",
  "dirs",
- "displaydoc",
  "futures",
  "halo2_proofs",
  "hex",
@@ -5766,7 +5752,6 @@ dependencies = [
  "futures",
  "gumdrop",
  "hex",
- "humantime",
  "humantime-serde",
  "hyper",
  "indexmap",
