@@ -5406,9 +5406,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a27a0e71f69f4c8661b4dc947518d8588c1f29bd3f035749068a40bd5cdee4e8"
+checksum = "bd2f9cb33d1244816179614fcd76d62df2d9b3e76e5513e70186c96650eba3c6"
 dependencies = [
  "bindgen",
  "blake2b_simd",
