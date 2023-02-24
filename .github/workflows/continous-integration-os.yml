@@ -306,11 +306,11 @@ jobs:
         # Exclude macro and transitive dependencies by filtering them out of the output,
         # then if there are any more unused dependencies, show the full output of the command.
         run: |
+          cargo machete --skip-target-dir
+          echo "-- unused dependencies are below this line, full output is above --"
           cargo machete --skip-target-dir 2>/dev/null | \
           grep -v -e gumdrop -e humantime-serde -e tinyvec -e "found the following" -e Cargo.toml -e Done \
           && ( \
-          echo "-- unused dependencies above this line, full output below --"; \
-          cargo machete --skip-target-dir; \
           echo "New unused dependencies were found, please remove them!"; \
           exit 1; \
           )
