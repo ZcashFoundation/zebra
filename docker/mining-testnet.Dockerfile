@@ -80,7 +80,7 @@ ARG CHECKPOINT_SYNC
 ENV CHECKPOINT_SYNC ${CHECKPOINT_SYNC:-true}
 
 ARG NETWORK
-ENV NETWORK ${NETWORK:-Mainnet}
+ENV NETWORK ${NETWORK:-Testnet}
 
 ENV CARGO_HOME /opt/zebrad/.cargo/
 
@@ -100,10 +100,10 @@ COPY --from=us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd /opt/lightwalletd
 # This is the caching Docker layer for Rust!
 #
 # TODO: is it faster to use --tests here?
-RUN cargo chef cook --release --features sentry,lightwalletd-grpc-tests --workspace --recipe-path recipe.json
+RUN cargo chef cook --release --features getblocktemplate-rpcs sentry,lightwalletd-grpc-tests --workspace --recipe-path recipe.json
 
 COPY . .
-RUN cargo test --locked --release --features lightwalletd-grpc-tests --workspace --no-run
+RUN cargo test --locked --release --features getblocktemplate-rpcs lightwalletd-grpc-tests --workspace --no-run
 RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
 
 COPY ./docker/entrypoint.sh /
@@ -118,11 +118,11 @@ ENTRYPOINT [ "/entrypoint.sh" ]
 # `test` stage. This step is a dependency for the `runtime` stage, which uses the resulting
 # zebrad binary from this step.
 FROM deps AS release
-RUN cargo chef cook --release --features sentry --recipe-path recipe.json
+RUN cargo chef cook --release --features getblocktemplate-rpcs sentry --recipe-path recipe.json
 
 COPY . .
 # Build zebra
-RUN cargo build --locked --release --features sentry --package zebrad --bin zebrad
+RUN cargo build --locked --release --features getblocktemplate-rpcs sentry --package zebrad --bin zebrad
 
 # This stage is only used when deploying nodes or when only the resulting zebrad binary is needed
 #
@@ -137,7 +137,8 @@ RUN apt-get update && \
     ca-certificates
 
 ARG CHECKPOINT_SYNC=true
-ARG NETWORK=Mainnet
+ARG NETWORK=Testnet
+ARG RPC_PORT=18232
 
 # Use a configurable dir and file for the zebrad configuration file
 ARG ZEBRA_CONF_DIR=/etc/zebra
@@ -174,7 +175,7 @@ RUN set -ex; \
     echo "[state]"; \
     echo "cache_dir = '/zebrad-cache'"; \
     echo "[rpc]"; \
-    echo "#listen_addr = '127.0.0.1:8232'"; \
+    echo "listen_addr = '127.0.0.1:${RPC_PORT}'"; \
     echo "parallel_cpu_threads = 0"; \
     echo "[metrics]"; \
     echo "#endpoint_addr = '127.0.0.1:9999'"; \
@@ -182,7 +183,8 @@ RUN set -ex; \
     echo "#endpoint_addr = '127.0.0.1:3000'"; \
   } > "${ZEBRA_CONF_PATH}"
 
-EXPOSE 8233 18233
+
+EXPOSE 8233 18233 $RPC_PORT
 
 ARG SHORT_SHA
 ENV SHORT_SHA $SHORT_SHA
