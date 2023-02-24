@@ -32,7 +32,6 @@ starts up.
     been true by default since March 2022.
 
 - Bump hyper from 0.14.23 to 0.14.24, fixing a denial of service risk ([#6094](https://github.com/ZcashFoundation/zebra/pull/6094))
-- Bump once_cell from 1.17.0 to 1.17.1 ([#6161](https://github.com/ZcashFoundation/zebra/pull/6161))
 - Re-verify transactions that were verified at a different tip height ([#6154](https://github.com/ZcashFoundation/zebra/pull/6154))
 - Fix minute-long delays in block verification after a chain fork ([#6122](https://github.com/ZcashFoundation/zebra/pull/6122))
 
