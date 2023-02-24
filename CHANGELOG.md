@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.0.0-rc.5](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.5) - 2023-02-23
 
-This release
+This release:
 
 - finishes the implementation of mining-related RPCs;
 - makes Zebra ready for testing and initial adoption by mining pools;
@@ -62,33 +62,23 @@ starts up.
 
 ### Changed
 
-- Run the send transactions test on each PR update ([#6040](https://github.com/ZcashFoundation/zebra/pull/6040))
 - Use `reddsa` crate and remove duplicated RedPallas code ([#6013](https://github.com/ZcashFoundation/zebra/pull/6013))
-- Run block proposal tests in CI ([#5963](https://github.com/ZcashFoundation/zebra/pull/5963))
 - Upgrade to the zcash_primitives 0.10 API ([#6087](https://github.com/ZcashFoundation/zebra/pull/6087))
 - Simplify `getdifficulty` RPC implementation ([#6105](https://github.com/ZcashFoundation/zebra/pull/6105))
 
 ### Fixed
 
 - Change error format in proposals ([#6044](https://github.com/ZcashFoundation/zebra/pull/6044))
-- Use newer method to set an output parameter ([#6039](https://github.com/ZcashFoundation/zebra/pull/6039))
 - Fix `lightwalletd` instructions to be compatible with Zebra ([#6088](https://github.com/ZcashFoundation/zebra/pull/6088))
-- Fix full sync timeouts ([#6103](https://github.com/ZcashFoundation/zebra/pull/6103))
-- Increase macOS CI timeout ([#6176](https://github.com/ZcashFoundation/zebra/pull/6176))
-- Run lightwalletd full sync in multi-job mode ([#6164](https://github.com/ZcashFoundation/zebra/pull/6164))
-- Do not mix cache images with test images ([#6038](https://github.com/ZcashFoundation/zebra/pull/6038))
-- Change error format in proposals ([#6044](https://github.com/ZcashFoundation/zebra/pull/6044))
 - Downgrade `owo-colors` from 3.6.0 to 3.5.0 ([#6203](https://github.com/ZcashFoundation/zebra/pull/6203))
-- Add `getblock` RPC fields to support the latest version of `zcash/lightwalletd` ([#6134](https://github.com/ZcashFoundation/zebra/pull/6134))
 - Make RPC "incorrect parameters" error code match `zcashd` ([#6066](https://github.com/ZcashFoundation/zebra/pull/6066))
 - Make the verbosity argument optional in the getblock RPC ([#6092](https://github.com/ZcashFoundation/zebra/pull/6092))
-- Avoid failing getblocktemplate acceptance test when the chain tip changes ([#6091](https://github.com/ZcashFoundation/zebra/pull/6091))
 - Increase legacy chain limit to 100,000 ([#6053](https://github.com/ZcashFoundation/zebra/pull/6053))
 
 ### Contributors
 
 Thank you to everyone who contributed to this release, we couldn't make Zebra
-without you: @arya2, @conradoplg, @dependabot[bot], @gustavovalverde,
+without you: @arya2, @conradoplg, @gustavovalverde,
 @jackgavigan, @oxarbitrage, @sandakersmann, @teor2345 and @upbqdn
 
 ## [Zebra 1.0.0-rc.4](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.4) - 2023-01-30
