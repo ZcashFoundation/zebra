@@ -64,6 +64,7 @@ and Zebra implements all the features required to reach Zcash network consensus.
 Currently, Zebra validates all of the Zcash consensus rules for the NU5 network upgrade.
 
 Zebra validates blocks and transactions, but needs extra software to generate them:
+
 - to generate transactions, [configure `zebrad`'s JSON-RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd),
   and use a light wallet with `lightwalletd` and Zebra.
 - to generate blocks, [compile `zebrad` with the `getblocktemplate-rpcs` feature](https://doc.zebra.zfnd.org/zebrad/#json-rpc), configure the JSON-RPC port,
@@ -76,12 +77,13 @@ You can run Zebra using our Docker image.
 This command will run our latest release, and sync it to the tip:
 
 ```sh
-docker run zfnd/zebra:1.0.0-rc.4
+docker run zfnd/zebra:1.0.0-rc.5
 ```
 
 For more information, read our [Docker documentation](book/src/user/docker.md).
 
 You can also:
+
 - [compile Zebra with metrics or tracing](https://doc.zebra.zfnd.org/zebrad/#metrics),
 - [enable Zebra's RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd), and
 - [configure other features](https://zebra.zfnd.org/user/run.html).
@@ -100,7 +102,7 @@ for your platform:
    - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages
      (these packages will have different names depending on your package manager)
    - **clang** or another C++ compiler: `g++` (all platforms) or `Xcode` (macOS)
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.4 zebrad`
+3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.5 zebrad`
 4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
 For more detailed instructions, refer to the [documentation](https://zebra.zfnd.org/user/install.html).
@@ -239,8 +241,6 @@ So Zebra's state should always be valid, unless your OS or disk hardware is corr
 There are a few bugs in Zebra that we're still working on fixing:
 
 - If Zebra fails downloading the Zcash parameters, use [the Zcash parameters download script](https://github.com/zcash/zcash/blob/master/zcutil/fetch-params.sh) instead.
-
-- Zebra falsely estimates that it's close to the tip when the network connection goes down [#4649](https://github.com/ZcashFoundation/zebra/issues/4649).
 
 - Block download and verification sometimes times out during Zebra's initial sync [#5709](https://github.com/ZcashFoundation/zebra/issues/5709). The full sync still finishes reasonably quickly.
 

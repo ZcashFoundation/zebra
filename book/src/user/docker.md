@@ -11,13 +11,13 @@ You can deploy Zebra for a daily use with the images available in [Docker Hub](h
 ### Ready to use image
 
 ```shell
-docker run --detach zfnd/zebra:1.0.0-rc.4
+docker run --detach zfnd/zebra:1.0.0-rc.5
 ```
 
 ### Build it locally
 
 ```shell
-git clone --depth 1 --branch v1.0.0-rc.4 https://github.com/ZcashFoundation/zebra.git
+git clone --depth 1 --branch v1.0.0-rc.5 https://github.com/ZcashFoundation/zebra.git
 docker build --file docker/Dockerfile --target runtime --tag zebra:local
 docker run --detach zebra:local
 ```
@@ -28,14 +28,14 @@ See the Zebra [build instructions](https://github.com/ZcashFoundation/zebra#buil
 
 ## Images
 
-The Zebra team builds multiple images with a single [Dockerfile](https://github.com/ZcashFoundation/zebra/blob/main/docker/Dockerfile) using [multistage builds](https://docs.docker.com/build/building/multi-stage/). The `test` stage adds needed features and tools (like [lightwalletd](https://github.com/adityapk00/lightwalletd)) and the `runtime` stage just adds the *zebrad* binary and required *zcash-params* for Zebra to run correctly.
+The Zebra team builds multiple images with a single [Dockerfile](https://github.com/ZcashFoundation/zebra/blob/main/docker/Dockerfile) using [multistage builds](https://docs.docker.com/build/building/multi-stage/). The `test` stage adds needed features and tools (like [lightwalletd](https://github.com/adityapk00/lightwalletd)) and the `runtime` stage just adds the _zebrad_ binary and required _zcash-params_ for Zebra to run correctly.
 
 As a result the Zebra team builds four images:
 
 - [zcash-params](us-docker.pkg.dev/zealous-zebra/zebra/zcash-params): built Zcash network parameters
 - [lightwalletd](us-docker.pkg.dev/zealous-zebra/zebra/lightwalletd): a backend service that provides an interface to the Zcash blockchain
 - [zebrad-test](us-docker.pkg.dev/zealous-zebra/zebra/zebrad-test): a zebrad binary with lightwalletd included, and test suites enabled
-- [zebra](https://hub.docker.com/repository/docker/zfnd/zebra): a streamlined version with the zebrad binary and just the needed features needed to run *as-is*
+- [zebra](https://hub.docker.com/repository/docker/zfnd/zebra): a streamlined version with the zebrad binary and just the needed features needed to run _as-is_
 
 ## Registries
 
