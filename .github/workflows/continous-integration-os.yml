@@ -279,3 +279,38 @@ jobs:
         with:
           command: check ${{ matrix.checks }}
           arguments: --workspace ${{ matrix.features }}
+
+  unused-deps:
+    name: Check for unused dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout git repository
+        uses: actions/checkout@v3.3.0
+        with:
+          persist-credentials: false
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Install cargo-machete
+        uses: baptiste0928/cargo-install@v1
+        with:
+          crate: cargo-machete
+
+      - name: Check unused dependencies
+        # Exclude macro and transitive dependencies by filtering them out of the output,
+        # then if there are any more unused dependencies, show the full output of the command.
+        run: |
+          cargo machete --skip-target-dir 2>/dev/null | \
+          rg -v -e gumdrop -e humantime-serde -e tinyvec -e "found the following" -e Cargo.toml -e Done \
+          && ( \
+          echo "-- unused dependencies above this line, full output below --"; \
+          cargo machete --skip-target-dir; \
+          echo "New unused dependencies were found, please remove them!"; \
+          exit 1; \
+          )
