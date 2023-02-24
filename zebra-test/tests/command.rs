@@ -504,8 +504,8 @@ fn failure_regex_matches_stdout_failure_message_wait_for_output() {
     std::thread::sleep(Duration::from_secs(1));
 
     // Wait with output should read all unread output to generate the error context,
-    // or the output should be read on drop.
-    child.wait_with_output().unwrap_err();
+    // or the output should be read on drop. We don't care what the exact error is here.
+    let _ = child.wait_with_output().unwrap_err();
 }
 
 /// Make sure failure regex iters detect when a child process prints a failure message to stdout,
