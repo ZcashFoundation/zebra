@@ -307,7 +307,7 @@ jobs:
         # then if there are any more unused dependencies, show the full output of the command.
         run: |
           cargo machete --skip-target-dir 2>/dev/null | \
-          rg -v -e gumdrop -e humantime-serde -e tinyvec -e "found the following" -e Cargo.toml -e Done \
+          grep -v -e gumdrop -e humantime-serde -e tinyvec -e "found the following" -e Cargo.toml -e Done \
           && ( \
           echo "-- unused dependencies above this line, full output below --"; \
           cargo machete --skip-target-dir; \
