@@ -60,10 +60,10 @@ where
         let request = zn::Request::AdvertiseTransactionIds(txs);
 
         // TODO: rate-limit this info level log?
-        info!(%request, %combined_changes, "sending mempool transaction broadcast");
+        info!(%request, changes = %combined_changes, "sending mempool transaction broadcast");
         debug!(
             ?request,
-            ?combined_changes,
+            changes = ?combined_changes,
             "full list of mempool transactions in broadcast"
         );
 
