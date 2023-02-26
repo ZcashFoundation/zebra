@@ -51,7 +51,9 @@ where
         let txs_len = txs.len();
         let request = zn::Request::AdvertiseTransactionIds(txs);
 
-        info!(?request, "sending mempool transaction broadcast");
+        // TODO: rate-limit this info level log?
+        info!(%request, "sending mempool transaction broadcast");
+        debug!(?request, "full list of mempool transactions in broadcast");
 
         // broadcast requests don't return errors, and we'd just want to ignore them anyway
         let _ = broadcast_network.ready().await?.call(request).await;
