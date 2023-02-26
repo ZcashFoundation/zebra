@@ -35,9 +35,6 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # ticket #3000: upgrade tower-fallback dependencies
-    { name = "pin-project", version = "=0.4.30" },
-
     # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
 
