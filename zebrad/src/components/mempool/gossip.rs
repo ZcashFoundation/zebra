@@ -3,18 +3,15 @@
 //! This module is just a function [`gossip_mempool_transaction_id`] that waits for mempool
 //! insertion events received in a channel and broadcasts the transactions to peers.
 
-use tower::{timeout::Timeout, Service, ServiceExt};
-
-use zebra_network as zn;
-
-use tokio::sync::watch;
-use zebra_chain::transaction::UnminedTxId;
-
 use std::collections::HashSet;
 
-use crate::BoxError;
+use tokio::sync::watch;
+use tower::{timeout::Timeout, Service, ServiceExt};
 
-use crate::components::sync::TIPS_RESPONSE_TIMEOUT;
+use zebra_chain::transaction::UnminedTxId;
+use zebra_network as zn;
+
+use crate::{components::sync::TIPS_RESPONSE_TIMEOUT, BoxError};
 
 /// Runs continuously, gossiping new [`UnminedTxId`] to peers.
 ///
@@ -37,10 +34,20 @@ where
     let mut broadcast_network = Timeout::new(broadcast_network, TIPS_RESPONSE_TIMEOUT);
 
     loop {
-        // once we get new data in the channel, broadcast to peers
+        // once we get new data in the channel, broadcast to peers,
+        // the mempool automatically combines some transactions that arrive close together
         receiver.changed().await?;
+        let mut txs = receiver.borrow().clone();
+        tokio::task::yield_now().await;
 
-        let txs = receiver.borrow().clone();
+        // also combine transactions that arrived shortly after this one
+        while receiver.has_changed()? {
+            // Correctness: reset has_changed(), don't hold the lock
+            let extra_txs = receiver.borrow_and_update().clone();
+            txs.extend(extra_txs.iter());
+            tokio::task::yield_now().await;
+        }
+
         let txs_len = txs.len();
         let request = zn::Request::AdvertiseTransactionIds(txs);
 
