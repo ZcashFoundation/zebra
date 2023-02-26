@@ -13,6 +13,9 @@ use zebra_network as zn;
 
 use crate::{components::sync::TIPS_RESPONSE_TIMEOUT, BoxError};
 
+/// The maximum number of times we will delay sending because there is a new change.
+pub const MAX_CHANGES_BEFORE_SEND: usize = 10;
+
 /// Runs continuously, gossiping new [`UnminedTxId`] to peers.
 ///
 /// Broadcasts any [`UnminedTxId`] that gets stored in the mempool to all ready
@@ -34,6 +37,8 @@ where
     let mut broadcast_network = Timeout::new(broadcast_network, TIPS_RESPONSE_TIMEOUT);
 
     loop {
+        let mut combined_changes = 1;
+
         // once we get new data in the channel, broadcast to peers,
         // the mempool automatically combines some transactions that arrive close together
         receiver.changed().await?;
@@ -41,10 +46,13 @@ where
         tokio::task::yield_now().await;
 
         // also combine transactions that arrived shortly after this one
-        while receiver.has_changed()? {
+        while receiver.has_changed()? && combined_changes < MAX_CHANGES_BEFORE_SEND {
             // Correctness: reset has_changed(), don't hold the lock
             let extra_txs = receiver.borrow_and_update().clone();
             txs.extend(extra_txs.iter());
+
+            combined_changes += 1;
+
             tokio::task::yield_now().await;
         }
 
@@ -52,8 +60,12 @@ where
         let request = zn::Request::AdvertiseTransactionIds(txs);
 
         // TODO: rate-limit this info level log?
-        info!(%request, "sending mempool transaction broadcast");
-        debug!(?request, "full list of mempool transactions in broadcast");
+        info!(%request, %combined_changes, "sending mempool transaction broadcast");
+        debug!(
+            ?request,
+            ?combined_changes,
+            "full list of mempool transactions in broadcast"
+        );
 
         // broadcast requests don't return errors, and we'd just want to ignore them anyway
         let _ = broadcast_network.ready().await?.call(request).await;
