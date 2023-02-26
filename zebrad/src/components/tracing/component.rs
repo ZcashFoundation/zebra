@@ -154,7 +154,7 @@ impl Tracing {
         let subscriber = subscriber.with(journaldlayer);
 
         #[cfg(feature = "sentry")]
-        let subscriber = subscriber.with(sentry_tracing::layer());
+        let subscriber = subscriber.with(sentry::integrations::tracing::layer());
 
         // spawn the console server in the background, and apply the console layer
         // TODO: set Builder::poll_duration_histogram_max() if needed
