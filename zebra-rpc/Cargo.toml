@@ -25,7 +25,6 @@ getblocktemplate-rpcs = [
 # Test-only features
 proptest-impl = [
     "proptest",
-    "proptest-derive",
     "zebra-consensus/proptest-impl",
     "zebra-state/proptest-impl",
     "zebra-network/proptest-impl",
@@ -52,7 +51,6 @@ tokio = { version = "1.25.0", features = ["time", "rt-multi-thread", "macros", "
 tower = "0.4.13"
 
 tracing = "0.1.37"
-tracing-futures = "0.2.5"
 
 hex = { version = "0.4.3", features = ["serde"] }
 serde = { version = "1.0.152", features = ["serde_derive"] }
@@ -64,7 +62,6 @@ zcash_address = { version = "0.2.0", optional = true }
 
 # Test-only feature proptest-impl
 proptest = { version = "0.10.1", optional = true }
-proptest-derive = { version = "0.3.0", optional = true }
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-consensus = { path = "../zebra-consensus" }
@@ -77,7 +74,6 @@ zebra-state = { path = "../zebra-state" }
 insta = { version = "1.28.0", features = ["redactions", "json", "ron"] }
 
 proptest = "0.10.1"
-proptest-derive = "0.3.0"
 
 thiserror = "1.0.38"
 tokio = { version = "1.25.0", features = ["full", "tracing", "test-util"] }
