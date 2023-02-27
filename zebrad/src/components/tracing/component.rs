@@ -236,6 +236,10 @@ impl Tracing {
             howudoin::init(terminal_consumer);
 
             info!("activated progress bar");
+
+            if config.log_file.is_some() {
+                eprintln!("waiting for initial progress reports...");
+            }
         }
 
         Ok(Self {
