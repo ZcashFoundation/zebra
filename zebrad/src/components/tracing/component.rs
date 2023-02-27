@@ -1,6 +1,7 @@
 //! The Abscissa component for Zebra's `tracing` implementation.
 
 use abscissa_core::{Component, FrameworkError, Shutdown};
+use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
     fmt::{format, Formatter},
@@ -9,8 +10,6 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
     EnvFilter,
 };
-
-use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
 
 use crate::{application::app_version, components::tracing::Config};
 
@@ -37,7 +36,9 @@ pub struct Tracing {
     flamegrapher: Option<flame::Grapher>,
 
     /// Drop guard for worker thread of non-blocking logger,
-    /// responsible for flushing any remaining logs when the program terminates
+    /// responsible for flushing any remaining logs when the program terminates.
+    //
+    // Correctness: must be listed last in the struct, so it drops after other drops have logged.
     _guard: WorkerGuard,
 }
 
@@ -205,6 +206,23 @@ impl Tracing {
             "installed tokio-console tracing layer",
         );
 
+        // Write any progress reports sent by other tasks to the terminal
+        //
+        // TODO: move this to its own module?
+        #[cfg(feature = "progress-bar")]
+        {
+            use howudoin::consumers::TermLine;
+            use std::time::Duration;
+
+            // Stops flickering during the initial sync.
+            const PROGRESS_BAR_DEBOUNCE: Duration = Duration::from_secs(2);
+
+            let terminal_consumer = TermLine::with_debounce(PROGRESS_BAR_DEBOUNCE);
+            howudoin::init(terminal_consumer);
+
+            info!("activated progress bar");
+        }
+
         Ok(Self {
             filter_handle,
             initial_filter: filter,
@@ -279,6 +297,9 @@ impl<A: abscissa_core::Application> Component<A> for Tracing {
                 .write_flamegraph()
                 .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?
         }
+
+        #[cfg(feature = "progress-bar")]
+        howudoin::cancel();
 
         Ok(())
     }
