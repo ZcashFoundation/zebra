@@ -60,3 +60,10 @@ jobs:
 
     steps:
       - run: 'echo "No build required"'
+
+  unused-deps:
+    name: Check for unused dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - run: 'echo "No build required"'
