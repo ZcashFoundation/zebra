@@ -2,27 +2,83 @@
 
 All notable changes to Zebra are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.0.0-rc.5](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.5) - 2023-02-TODO INSERT DATE HERE
+## [Zebra 1.0.0-rc.5](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.5) - 2023-02-23
 
-In this release we ... (TODO)
-We also check that Zebra is following the consensus chain each time it starts up.
+This release:
+
+- finishes the implementation of mining-related RPCs;
+- makes Zebra ready for testing and initial adoption by mining pools;
+- adds support for the latest version of `lightwalletd`;
+- makes non-finalized chain forks instant;
+- contains other improvements such as deduplication of RedPallas code.
+
+Zebra now also checks that it is following the consensus chain each time it
+starts up.
 
 ### Security
-- Check that Zebra's state contains the consensus chain each time it starts up. This implements
-  the "settled network upgrade" consensus rule using all of Zebra's checkpoints ([#6163](https://github.com/ZcashFoundation/zebra/pull/6163)).
-  *User action required:*
-  - If your config is based on an old version of Zebra, or you have manually edited it,
-    make sure `consensus.checkpoint_sync = true`.
-    This option has been true by default since March 2022.
+
+- Check that Zebra's state contains the consensus chain each time it starts up.
+  This implements the "settled network upgrade" consensus rule using all of
+  Zebra's checkpoints
+  ([#6163](https://github.com/ZcashFoundation/zebra/pull/6163)).
+
+  _User action required:_
+
+  - If your config is based on an old version of Zebra, or you have manually
+    edited it, make sure `consensus.checkpoint_sync = true`. This option has
+    been true by default since March 2022.
+
+- Bump hyper from 0.14.23 to 0.14.24, fixing a denial of service risk ([#6094](https://github.com/ZcashFoundation/zebra/pull/6094))
+- Re-verify transactions that were verified at a different tip height ([#6154](https://github.com/ZcashFoundation/zebra/pull/6154))
+- Fix minute-long delays in block verification after a chain fork ([#6122](https://github.com/ZcashFoundation/zebra/pull/6122))
 
 ### Deprecated
+
 - The `consensus.checkpoint_sync` config in `zebrad.toml` is deprecated. It might be ignored or
   removed in a future release. ([#6163](https://github.com/ZcashFoundation/zebra/pull/6163))
 
-TODO: add other changes here
+### Added
 
+- Log a cute message for blocks that were mined by Zebra (off by default) ([#6098](https://github.com/ZcashFoundation/zebra/pull/6098))
+- Add extra `getblock` RPC fields used by some mining pools ([#6097](https://github.com/ZcashFoundation/zebra/pull/6097))
+- Get details from transaction differences in `getrawmempool` RPC ([#6035](https://github.com/ZcashFoundation/zebra/pull/6035))
+
+#### New RPCs
+
+- Implement the `z_listunifiedreceivers` RPC ([#6171](https://github.com/ZcashFoundation/zebra/pull/6171))
+- Implement the `getblocksubsidy` RPC ([#6032](https://github.com/ZcashFoundation/zebra/pull/6032))
+- Implement the `validateaddress` RPC ([#6086](https://github.com/ZcashFoundation/zebra/pull/6086))
+- Implement the `z_validateaddress` RPC ([#6185](https://github.com/ZcashFoundation/zebra/pull/6185))
+- Implement the `getdifficulty` RPC ([#6099](https://github.com/ZcashFoundation/zebra/pull/6099))
+
+#### Documentation
+
+- Add detailed testnet mining docs to the Zebra repository ([#6201](https://github.com/ZcashFoundation/zebra/pull/6201))
+- Add mining instructions to the zebra book ([#6199](https://github.com/ZcashFoundation/zebra/pull/6199))
+
+### Changed
+
+- Use `reddsa` crate and remove duplicated RedPallas code ([#6013](https://github.com/ZcashFoundation/zebra/pull/6013))
+- Upgrade to the zcash_primitives 0.10 API ([#6087](https://github.com/ZcashFoundation/zebra/pull/6087))
+- Simplify `getdifficulty` RPC implementation ([#6105](https://github.com/ZcashFoundation/zebra/pull/6105))
+
+### Fixed
+
+- Change error format in proposals ([#6044](https://github.com/ZcashFoundation/zebra/pull/6044))
+- Fix `lightwalletd` instructions to be compatible with Zebra ([#6088](https://github.com/ZcashFoundation/zebra/pull/6088))
+- Downgrade `owo-colors` from 3.6.0 to 3.5.0 ([#6203](https://github.com/ZcashFoundation/zebra/pull/6203))
+- Make RPC "incorrect parameters" error code match `zcashd` ([#6066](https://github.com/ZcashFoundation/zebra/pull/6066))
+- Make the verbosity argument optional in the getblock RPC ([#6092](https://github.com/ZcashFoundation/zebra/pull/6092))
+- Increase legacy chain limit to 100,000 ([#6053](https://github.com/ZcashFoundation/zebra/pull/6053))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra
+without you: @arya2, @conradoplg, @gustavovalverde,
+@jackgavigan, @oxarbitrage, @sandakersmann, @teor2345 and @upbqdn
 
 ## [Zebra 1.0.0-rc.4](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.4) - 2023-01-30
 
