@@ -314,8 +314,15 @@ impl<A: abscissa_core::Application> Component<A> for Tracing {
         }
 
         #[cfg(feature = "progress-bar")]
-        howudoin::cancel();
+        howudoin::disable();
 
         Ok(())
+    }
+}
+
+impl Drop for Tracing {
+    fn drop(&mut self) {
+        #[cfg(feature = "progress-bar")]
+        howudoin::disable();
     }
 }

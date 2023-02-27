@@ -136,7 +136,9 @@ pub async fn show_block_chain_progress(
 
             // Send progress reports for block height
             #[cfg(feature = "progress-bar")]
-            {
+            if matches!(howudoin::cancelled(), Some(true)) {
+                block_bar.close();
+            } else {
                 block_bar
                     .set_pos(current_height.0)
                     .set_len(u64::from(estimated_height.0))
