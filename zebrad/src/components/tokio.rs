@@ -111,7 +111,11 @@ mod imp {
             .expect("Failed to register signal handler")
             .recv()
             .await;
+
         zebra_chain::shutdown::set_shutting_down();
+
+        #[cfg(feature = "progress-bar")]
+        howudoin::disable();
 
         info!(
             // use target to remove 'imp' from output
@@ -131,7 +135,11 @@ mod imp {
         tokio::signal::ctrl_c()
             .await
             .expect("listening for ctrl-c signal should never fail");
+
         zebra_chain::shutdown::set_shutting_down();
+
+        #[cfg(feature = "progress-bar")]
+        howudoin::disable();
 
         info!(
             // use target to remove 'imp' from output
