@@ -10,6 +10,10 @@ default = []
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
+progress-bar = [
+    "howudoin",
+]
+
 # Experimental mining RPC support
 getblocktemplate-rpcs = [
      "zebra-state/getblocktemplate-rpcs",
@@ -55,6 +59,9 @@ zebra-script = { path = "../zebra-script" }
 zebra-state = { path = "../zebra-state" }
 zebra-node-services = { path = "../zebra-node-services" }
 zebra-chain = { path = "../zebra-chain" }
+
+# prod feature progress-bar
+howudoin = { version = "0.1.1", optional = true }
 
 # Test-only dependencies
 proptest = { version = "1.1.0", optional = true }
