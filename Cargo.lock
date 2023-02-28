@@ -5587,6 +5587,7 @@ dependencies = [
  "futures-util",
  "halo2_proofs",
  "hex",
+ "howudoin",
  "jubjub",
  "lazy_static",
  "metrics",

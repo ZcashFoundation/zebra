@@ -42,6 +42,7 @@ filter-reload = ["hyper"]
 progress-bar = [
     "howudoin",
     "lock_api",
+    "zebra-consensus/progress-bar",
     "zebra-network/progress-bar",
 ]
 
