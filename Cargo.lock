@@ -5767,6 +5767,7 @@ dependencies = [
  "chrono",
  "futures",
  "hex",
+ "howudoin",
  "humantime-serde",
  "indexmap",
  "lazy_static",
