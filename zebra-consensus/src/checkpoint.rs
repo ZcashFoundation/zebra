@@ -117,7 +117,6 @@ fn progress_from_tip(
 ///
 /// Verifies blocks using a supplied list of checkpoints. There must be at
 /// least one checkpoint for the genesis block.
-#[derive(Debug)]
 pub struct CheckpointVerifier<S>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
@@ -156,6 +155,22 @@ where
     /// A channel to send requests to reset the verifier,
     /// passing the tip of the state.
     reset_sender: mpsc::Sender<Option<(block::Height, block::Hash)>>,
+}
+
+impl<S> std::fmt::Debug for CheckpointVerifier<S>
+where
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CheckpointVerifier")
+            .field("checkpoint_list", &self.checkpoint_list)
+            .field("network", &self.network)
+            .field("initial_tip_hash", &self.initial_tip_hash)
+            .field("queued", &self.queued)
+            .field("verifier_progress", &self.verifier_progress)
+            .finish()
+    }
 }
 
 impl<S> CheckpointVerifier<S>
