@@ -35,6 +35,10 @@ pub struct ActiveConnectionCounter {
 
     /// The channel used to receive closed connection notifications.
     close_notification_rx: mpsc::UnboundedReceiver<ConnectionClosed>,
+
+    /// Active connection count progress transmitter.
+    #[cfg(feature = "progress-bar")]
+    connection_bar: howudoin::Tx,
 }
 
 impl fmt::Debug for ActiveConnectionCounter {
@@ -59,12 +63,19 @@ impl ActiveConnectionCounter {
         // The number of items in this channel is bounded by the connection limit.
         let (close_notification_tx, close_notification_rx) = mpsc::unbounded_channel();
 
+        let label = label.to_string();
+
+        #[cfg(feature = "progress-bar")]
+        let connection_bar = howudoin::new().label(label.clone());
+
         Self {
             count: 0,
             limit,
-            label: label.to_string().into(),
+            label: label.into(),
             close_notification_rx,
             close_notification_tx,
+            #[cfg(feature = "progress-bar")]
+            connection_bar,
         }
     }
 
@@ -102,7 +113,19 @@ impl ActiveConnectionCounter {
             "updated active connection count",
         );
 
+        #[cfg(feature = "progress-bar")]
+        self.connection_bar
+            .set_pos(u64::try_from(self.count).expect("fits in u64"))
+            .set_len(u64::try_from(self.limit).expect("fits in u64"));
+
         self.count
+    }
+}
+
+impl Drop for ActiveConnectionCounter {
+    fn drop(&mut self) {
+        #[cfg(feature = "progress-bar")]
+        self.connection_bar.close();
     }
 }
 
