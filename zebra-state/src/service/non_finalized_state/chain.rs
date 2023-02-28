@@ -233,8 +233,8 @@ impl Chain {
     ///
     /// If the internal states are different, it returns `false`,
     /// even if the blocks in the two chains are equal.
-    #[cfg(test)]
-    pub(crate) fn eq_internal_state(&self, other: &Chain) -> bool {
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn eq_internal_state(&self, other: &Chain) -> bool {
         // blocks, heights, hashes
         self.blocks == other.blocks &&
             self.height_by_hash == other.height_by_hash &&
