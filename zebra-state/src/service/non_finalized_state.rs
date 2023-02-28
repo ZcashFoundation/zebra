@@ -35,7 +35,6 @@ pub(crate) use chain::Chain;
 /// which returns a shared reference to the database.
 ///
 /// Most chain data is clone-on-write using [`Arc`].
-#[derive(Clone, Debug)]
 pub struct NonFinalizedState {
     /// Verified, non-finalized chains, in ascending order.
     ///
@@ -45,12 +44,46 @@ pub struct NonFinalizedState {
     /// The configured Zcash network.
     pub network: Network,
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Configures the non-finalized state to count metrics.
     ///
-    /// Used for skipping metrics counting when testing block proposals
+    /// Used for skipping metrics and progress bars when testing block proposals
     /// with a commit to a cloned non-finalized state.
+    #[cfg(feature = "getblocktemplate-rpcs")]
     pub should_count_metrics: bool,
+
+    /// Number of chain forks transmitter.
+    #[cfg(feature = "progress-bar")]
+    chain_count_bar: Option<howudoin::Tx>,
+}
+
+impl std::fmt::Debug for NonFinalizedState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("NonFinalizedState");
+
+        f.field("chain_set", &self.chain_set)
+            .field("network", &self.network);
+
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        f.field("should_count_metrics", &self.should_count_metrics);
+
+        f.finish()
+    }
+}
+
+impl Clone for NonFinalizedState {
+    fn clone(&self) -> Self {
+        Self {
+            chain_set: self.chain_set.clone(),
+            network: self.network,
+
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            should_count_metrics: self.should_count_metrics,
+
+            // Don't track progress in clones.
+            #[cfg(feature = "progress-bar")]
+            chain_count_bar: None,
+        }
+    }
 }
 
 impl NonFinalizedState {
@@ -61,6 +94,8 @@ impl NonFinalizedState {
             network,
             #[cfg(feature = "getblocktemplate-rpcs")]
             should_count_metrics: true,
+            #[cfg(feature = "progress-bar")]
+            chain_count_bar: None,
         }
     }
 
@@ -96,6 +131,16 @@ impl NonFinalizedState {
         self.chain_set.iter()
     }
 
+    /// Should this `NonFinalizedState` instance track metrics and progress bars?
+    #[allow(dead_code)]
+    fn should_count_metrics(&self) -> bool {
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        return self.should_count_metrics;
+
+        #[cfg(not(feature = "getblocktemplate-rpcs"))]
+        return true;
+    }
+
     /// Insert `chain` into `self.chain_set`, apply `chain_filter` to the chains,
     /// then limit the number of tracked chains.
     fn insert_with<F>(&mut self, chain: Arc<Chain>, chain_filter: F)
@@ -109,6 +154,34 @@ impl NonFinalizedState {
         while self.chain_set.len() > MAX_NON_FINALIZED_CHAIN_FORKS {
             // The first chain is the chain with the lowest work.
             self.chain_set.pop_first();
+        }
+
+        // TODO: make chain_count_bar interior mutable and move to update_metrics_for_chains()
+        #[cfg(feature = "progress-bar")]
+        if self.should_count_metrics() {
+            if self.chain_count_bar.is_none() && !matches!(howudoin::cancelled(), Some(true)) {
+                self.chain_count_bar = Some(howudoin::new().label("Chain Forks"));
+            }
+
+            if let Some(chain_count_bar) = self.chain_count_bar.as_ref() {
+                if matches!(howudoin::cancelled(), Some(true)) {
+                    chain_count_bar.close();
+                } else {
+                    let finalized_tip_height = self
+                        .best_chain()
+                        .map(|chain| chain.non_finalized_root_height().0 - 1);
+
+                    chain_count_bar
+                        .set_pos(u64::try_from(self.chain_count()).expect("fits in u64"))
+                        .set_len(
+                            u64::try_from(MAX_NON_FINALIZED_CHAIN_FORKS).expect("fits in u64"),
+                        );
+
+                    if let Some(finalized_tip_height) = finalized_tip_height {
+                        chain_count_bar.desc(format!("Finalized Root {finalized_tip_height}"));
+                    }
+                }
+            }
         }
     }
 
@@ -530,8 +603,7 @@ impl NonFinalizedState {
 
     /// Update the metrics after `block` is committed
     fn update_metrics_for_committed_block(&self, height: block::Height, hash: block::Hash) {
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        if !self.should_count_metrics {
+        if !self.should_count_metrics() {
             return;
         }
 
@@ -558,8 +630,7 @@ impl NonFinalizedState {
 
     /// Update the metrics after `self.chain_set` is modified
     fn update_metrics_for_chains(&self) {
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        if !self.should_count_metrics {
+        if !self.should_count_metrics() {
             return;
         }
 
@@ -568,5 +639,14 @@ impl NonFinalizedState {
             "state.memory.best.chain.length",
             self.best_chain_len() as f64,
         );
+    }
+}
+
+impl Drop for NonFinalizedState {
+    fn drop(&mut self) {
+        #[cfg(feature = "progress-bar")]
+        if let Some(chain_count_bar) = self.chain_count_bar.as_ref() {
+            chain_count_bar.close();
+        }
     }
 }

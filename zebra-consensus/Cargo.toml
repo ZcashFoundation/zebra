@@ -12,6 +12,7 @@ default = []
 
 progress-bar = [
     "howudoin",
+    "zebra-state/progress-bar",
 ]
 
 # Experimental mining RPC support

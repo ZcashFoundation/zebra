@@ -5717,6 +5717,7 @@ dependencies = [
  "futures",
  "halo2_proofs",
  "hex",
+ "howudoin",
  "indexmap",
  "insta",
  "itertools",
