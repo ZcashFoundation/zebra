@@ -259,7 +259,10 @@ where
     let mut handshake_success_total: usize = 0;
     let mut handshake_error_total: usize = 0;
 
-    let mut active_outbound_connections = ActiveConnectionCounter::new_counter();
+    let mut active_outbound_connections = ActiveConnectionCounter::new_counter_with(
+        config.peerset_outbound_connection_limit(),
+        "Outbound Connections",
+    );
 
     info!(
         initial_peer_count = ?initial_peers.len(),
@@ -517,7 +520,10 @@ where
         + Clone,
     S::Future: Send + 'static,
 {
-    let mut active_inbound_connections = ActiveConnectionCounter::new_counter();
+    let mut active_inbound_connections = ActiveConnectionCounter::new_counter_with(
+        config.peerset_inbound_connection_limit(),
+        "Inbound Connections",
+    );
 
     let mut handshakes = FuturesUnordered::new();
     // Keeping an unresolved future in the pool means the stream never terminates.
