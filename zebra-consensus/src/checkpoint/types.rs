@@ -62,6 +62,31 @@ impl PartialOrd for Progress<block::Height> {
     }
 }
 
+impl Progress<block::Height> {
+    /// Returns the contained height, or `None` if the progress has finished, or has not started.
+    pub fn height(&self) -> Option<block::Height> {
+        match self {
+            BeforeGenesis => None,
+            InitialTip(height) => Some(*height),
+            PreviousCheckpoint(height) => Some(*height),
+            FinalCheckpoint => None,
+        }
+    }
+}
+
+impl<HeightOrHash> Progress<HeightOrHash> {
+    /// Returns `true` if the progress is before the genesis block.
+    #[allow(dead_code)]
+    pub fn is_before_genesis(&self) -> bool {
+        matches!(self, BeforeGenesis)
+    }
+
+    /// Returns `true` if the progress is at or after the final checkpoint block.
+    pub fn is_final_checkpoint(&self) -> bool {
+        matches!(self, FinalCheckpoint)
+    }
+}
+
 /// A `CheckpointVerifier`'s target checkpoint height, based on the current
 /// queue.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
