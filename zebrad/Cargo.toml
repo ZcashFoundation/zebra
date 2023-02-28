@@ -38,7 +38,12 @@ sentry = ["dep:sentry"]
 flamegraph = ["tracing-flame", "inferno"]
 journald = ["tracing-journald"]
 filter-reload = ["hyper"]
-progress-bar = ["howudoin", "lock_api"]
+
+progress-bar = [
+    "howudoin",
+    "lock_api",
+    "zebra-network/progress-bar",
+]
 
 prometheus = ["metrics-exporter-prometheus"]
 

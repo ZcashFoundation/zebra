@@ -9,8 +9,17 @@ edition = "2021"
 
 [features]
 default = []
+
+# Production features that activate extra dependencies, or extra features in dependencies
+
+progress-bar = [
+    "howudoin",
+]
+
 # Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
 # tor = ["arti-client", "tor-rtcompat"]
+
+# Testing features that activate extra dependencies
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 
 [dependencies]
@@ -40,6 +49,9 @@ metrics = "0.20.1"
 tracing-futures = "0.2.5"
 tracing-error = { version = "0.2.0", features = ["traced-error"] }
 tracing = "0.1.37"
+
+# prod feature progress-bar
+howudoin = { version = "0.1.1", optional = true }
 
 # tor dependencies
 # Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
