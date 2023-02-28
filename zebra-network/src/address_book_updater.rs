@@ -57,9 +57,16 @@ impl AddressBookUpdater {
         let address_book = Arc::new(std::sync::Mutex::new(address_book));
 
         #[cfg(feature = "progress-bar")]
-        let address_bar = howudoin::new().label("Known Peer Addresses");
-        #[cfg(feature = "progress-bar")]
-        let mut address_info = address_metrics.clone();
+        let (mut address_info, address_bar, never_bar, failed_bar) = {
+            let address_bar = howudoin::new().label("Known Peers");
+
+            (
+                address_metrics.clone(),
+                address_bar,
+                howudoin::new_with_parent(address_bar.id()).label("Never Attempted Peers"),
+                howudoin::new_with_parent(address_bar.id()).label("Failed Peers"),
+            )
+        };
 
         let worker_address_book = address_book.clone();
         let worker = move || {
@@ -78,13 +85,40 @@ impl AddressBookUpdater {
                     .update(event);
 
                 #[cfg(feature = "progress-bar")]
-                if address_info.has_changed()? {
+                if matches!(howudoin::cancelled(), Some(true)) {
+                    address_bar.close();
+                    never_bar.close();
+                    failed_bar.close();
+                } else if address_info.has_changed()? {
+                    // We don't track:
+                    // - attempt pending because it's always small
+                    // - responded because it's the remaining attempted-but-not-failed peers
+                    // - recently live because it's similar to the connected peer counts
+
                     let address_info = *address_info.borrow_and_update();
 
                     address_bar
                         .set_pos(u64::try_from(address_info.addresses).expect("fits in u64"))
                         .set_len(u64::try_from(address_info.address_limit).expect("fits in u64"));
+
+                    let never_attempted = address_info.never_attempted_alternate
+                        + address_info.never_attempted_gossiped;
+
+                    never_bar
+                        .set_pos(u64::try_from(never_attempted).expect("fits in u64"))
+                        .set_len(u64::try_from(address_info.address_limit).expect("fits in u64"));
+
+                    failed_bar
+                        .set_pos(u64::try_from(address_info.failed).expect("fits in u64"))
+                        .set_len(u64::try_from(address_info.address_limit).expect("fits in u64"));
                 }
+            }
+
+            #[cfg(feature = "progress-bar")]
+            {
+                address_bar.close();
+                never_bar.close();
+                failed_bar.close();
             }
 
             let error = Err(AllAddressBookUpdaterSendersClosed.into());
