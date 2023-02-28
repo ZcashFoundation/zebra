@@ -7,7 +7,7 @@ use tokio::{
     sync::{mpsc, watch},
     task::JoinHandle,
 };
-use tracing::Span;
+use tracing::{Level, Span};
 
 use crate::{
     address_book::AddressMetrics, meta_addr::MetaAddrChange, AddressBook, BoxError, Config,
@@ -44,8 +44,6 @@ impl AddressBookUpdater {
         watch::Receiver<AddressMetrics>,
         JoinHandle<Result<(), BoxError>>,
     ) {
-        use tracing::Level;
-
         // Create an mpsc channel for peerset address book updates,
         // based on the maximum number of inbound and outbound peers.
         let (worker_tx, mut worker_rx) = mpsc::channel(config.peerset_total_connection_limit());
@@ -57,6 +55,11 @@ impl AddressBookUpdater {
         );
         let address_metrics = address_book.address_metrics_watcher();
         let address_book = Arc::new(std::sync::Mutex::new(address_book));
+
+        #[cfg(feature = "progress-bar")]
+        let address_bar = howudoin::new().label("Known Peer Addresses");
+        #[cfg(feature = "progress-bar")]
+        let mut address_info = address_metrics.clone();
 
         let worker_address_book = address_book.clone();
         let worker = move || {
@@ -73,6 +76,15 @@ impl AddressBookUpdater {
                     .lock()
                     .expect("mutex should be unpoisoned")
                     .update(event);
+
+                #[cfg(feature = "progress-bar")]
+                if address_info.has_changed()? {
+                    let address_info = *address_info.borrow_and_update();
+
+                    address_bar
+                        .set_pos(u64::try_from(address_info.addresses).expect("fits in u64"))
+                        .set_len(u64::try_from(address_info.address_limit).expect("fits in u64"));
+                }
             }
 
             let error = Err(AllAddressBookUpdaterSendersClosed.into());

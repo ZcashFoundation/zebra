@@ -94,25 +94,31 @@ pub struct AddressBook {
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct AddressMetrics {
     /// The number of addresses in the `Responded` state.
-    responded: usize,
+    pub responded: usize,
 
     /// The number of addresses in the `NeverAttemptedGossiped` state.
-    never_attempted_gossiped: usize,
+    pub never_attempted_gossiped: usize,
 
     /// The number of addresses in the `NeverAttemptedAlternate` state.
-    never_attempted_alternate: usize,
+    pub never_attempted_alternate: usize,
 
     /// The number of addresses in the `Failed` state.
-    failed: usize,
+    pub failed: usize,
 
     /// The number of addresses in the `AttemptPending` state.
-    attempt_pending: usize,
+    pub attempt_pending: usize,
 
     /// The number of `Responded` addresses within the liveness limit.
-    recently_live: usize,
+    pub recently_live: usize,
 
     /// The number of `Responded` addresses outside the liveness limit.
-    recently_stopped_responding: usize,
+    pub recently_stopped_responding: usize,
+
+    /// The number of addresses in the address book, regardless of their states.
+    pub addresses: usize,
+
+    /// The maximum number of addresses in the address book.
+    pub address_limit: usize,
 }
 
 #[allow(clippy::len_without_is_empty)]
@@ -497,6 +503,8 @@ impl AddressBook {
             .checked_sub(recently_live)
             .expect("all recently live peers must have responded");
 
+        let addresses = self.len();
+
         AddressMetrics {
             responded,
             never_attempted_gossiped,
@@ -505,6 +513,8 @@ impl AddressBook {
             attempt_pending,
             recently_live,
             recently_stopped_responding,
+            addresses,
+            address_limit: self.addr_limit,
         }
     }
 
