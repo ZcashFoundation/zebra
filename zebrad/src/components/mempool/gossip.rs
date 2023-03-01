@@ -49,7 +49,7 @@ where
         while receiver.has_changed()? && combined_changes < MAX_CHANGES_BEFORE_SEND {
             // Correctness
             // - set the has_changed() flag to false using borrow_and_update()
-            // - clone() so we don't hold the watch channel lock while modifying txs 
+            // - clone() so we don't hold the watch channel lock while modifying txs
             let extra_txs = receiver.borrow_and_update().clone();
             txs.extend(extra_txs.iter());
 
