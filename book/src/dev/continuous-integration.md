@@ -38,7 +38,19 @@ Some PRs don't use Mergify:
 We use workflow conditions to skip some checks on PRs, Mergify, or the `main` branch.
 For example, some workflow changes skip Rust code checks.
 
-## Manually Using Google Cloud
+### Pull Requests from Forked Repositories
+
+GitHub doesn't allow PRs from forked repositories to have access to our repository secret keys, even after we approve their CI.
+This means that Google Cloud CI fails on these PRs.
+
+Unril we [fix this CI bug](https://github.com/ZcashFoundation/zebra/issues/4529), we can merge external PRs by:
+1. Reviewing the code to make sure it won't give our secret keys to anyone
+2. Pushing a copy of the branch to the Zebra repository
+3. Opening a PR using that branch
+4. Closing the original PR with a note that it will be merged (this is reauired by Mergify)
+5. Asking another Zebra developer to approve the new PR
+
+## Manual Testing Using Google Cloud
 
 Some Zebra developers have access to the Zcash Foundation's Google Cloud instance, which also runs our automatic CI.
 
