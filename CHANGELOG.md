@@ -5,6 +5,18 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.0.0-rc.6](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.6) - 2023-03-TODO INSERT DATE HERE
+
+This release:
+- TODO: insert summary here
+
+### Known Issues
+
+- `orchard` 0.3.0 can't verify `halo2` proofs when compiled with Rust 1.69 or later (currently nightly Rust TODO: update this based on https://releases.rs/ ). Compile Zebra with stable Rust to avoid this bug. ([halo2/#737](https://github.com/zcash/halo2/issues/737))
+    - TODO: turn this into a breaking change if the bug is fixed in `orchard` 0.3.1 or 0.4.0, and [Zebra has updated #6232](https://github.com/ZcashFoundation/zebra/issues/6232)
+
+TODO: insert the rest of the changelog here
+
 ## [Zebra 1.0.0-rc.5](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-rc.5) - 2023-02-23
 
 This release:
