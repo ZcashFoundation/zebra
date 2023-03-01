@@ -40,7 +40,7 @@ For example, some workflow changes skip Rust code checks.
 
 ### Pull Requests from Forked Repositories
 
-GitHub doesn't allow PRs from forked repositories to have access to our repoistory secret oeys, even after we approve their CI.
+GitHub doesn't allow PRs from forked repositories to have access to our repository secret keys, even after we approve their CI.
 This means that Google Cloud CI fails on these PRs.
 
 Unril we [fix this CI bug](https://github.com/ZcashFoundation/zebra/issues/4529), we can merge external PRs by:
