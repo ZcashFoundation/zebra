@@ -1,8 +1,5 @@
 //! Future types for the `Fallback` middleware.
 
-// TODO: remove this lint exception after upgrading to pin-project 1.0.11 or later (#2355)
-#![allow(dead_code)]
-
 use std::{
     fmt::Debug,
     future::Future,
@@ -29,7 +26,7 @@ where
     state: ResponseState<S1, S2, Request>,
 }
 
-#[pin_project(project_replace, project = ResponseStateProj)]
+#[pin_project(project_replace = __ResponseStateProjectionOwned, project = ResponseStateProj)]
 enum ResponseState<S1, S2, Request>
 where
     S1: Service<Request>,
