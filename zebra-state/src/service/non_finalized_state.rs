@@ -53,7 +53,7 @@ pub struct NonFinalizedState {
     //
     // TODO: make this field private and set it via an argument to NonFinalizedState::new()
     #[cfg(feature = "getblocktemplate-rpcs")]
-    pub should_count_metrics: bool,
+    should_count_metrics: bool,
 
     /// Number of chain forks transmitter.
     #[cfg(feature = "progress-bar")]
@@ -299,7 +299,6 @@ impl NonFinalizedState {
         #[cfg(test)]
         let finalized_tip_height = finalized_tip_height.unwrap_or(zebra_chain::block::Height(0));
 
-        #[allow(unused_mut)]
         let mut chain = Chain::new(
             self.network,
             finalized_tip_height,
@@ -310,10 +309,8 @@ impl NonFinalizedState {
             finalized_state.finalized_value_pool(),
         );
 
-        // TODO: make the field private and set it via an argument to Chain::new/fork()
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        {
-            chain.should_count_metrics = self.should_count_metrics;
+        if !self.should_count_metrics() {
+            chain.disable_metrics();
         }
 
         let (height, hash) = (prepared.height, prepared.hash);
@@ -606,12 +603,13 @@ impl NonFinalizedState {
                     .chain_set
                     .iter()
                     .find_map(|chain| {
-                        #[allow(unused_mut)]
                         let mut forked = chain.fork(parent_hash);
 
-                        #[cfg(feature = "getblocktemplate-rpcs")]
+                        // TODO: add a should_count_metrics argument and move this into fork()
                         if let Some(forked) = forked.as_mut() {
-                            forked.should_count_metrics = self.should_count_metrics;
+                            if !self.should_count_metrics() {
+                                forked.disable_metrics();
+                            }
                         }
 
                         forked
@@ -662,13 +660,31 @@ impl NonFinalizedState {
             self.best_chain_len() as f64,
         );
     }
+
+    /// Stop tracking metrics for this non-finalized state and all its chains.
+    pub fn disable_metrics(&mut self) {
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        {
+            // TODO: give Chain.should_count_metrics interior mutability and set it here
+            self.should_count_metrics = false;
+        }
+
+        #[cfg(feature = "progress-bar")]
+        {
+            // TODO: give Chain.chain_length_bar interior mutability,
+            //       and call Chain.disable_metrics() here for all chains
+
+            if let Some(chain_count_bar) = self.chain_count_bar.as_ref() {
+                chain_count_bar.close();
+            }
+
+            self.chain_count_bar = None;
+        }
+    }
 }
 
 impl Drop for NonFinalizedState {
     fn drop(&mut self) {
-        #[cfg(feature = "progress-bar")]
-        if let Some(chain_count_bar) = self.chain_count_bar.as_ref() {
-            chain_count_bar.close();
-        }
+        self.disable_metrics();
     }
 }
