@@ -43,7 +43,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// An error describing the reason a block could not be committed to the state.
 #[derive(Debug, Error, PartialEq, Eq)]
-#[error("block is not contextually valid")]
+#[error("block is not contextually valid: {}", .0)]
 pub struct CommitBlockError(#[from] ValidateContextError);
 
 /// An error describing why a block failed contextual validation.
