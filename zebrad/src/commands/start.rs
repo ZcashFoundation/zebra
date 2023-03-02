@@ -312,10 +312,9 @@ impl StartCmd {
                     .map_err(|e| eyre!(e)),
 
                 progress_result = &mut progress_task_handle => {
+                    info!("chain progress task exited");
                     progress_result
                         .expect("unexpected panic in the chain progress task");
-                    info!("chain progress task exited");
-                    Ok(())
                 }
 
                 // Unlike other tasks, we expect the download task to finish while Zebra is running.
