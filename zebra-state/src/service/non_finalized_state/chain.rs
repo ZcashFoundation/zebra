@@ -36,7 +36,8 @@ use self::index::TransparentTransfers;
 
 pub mod index;
 
-#[derive(Debug, Clone)]
+/// A single non-finalized partial chain, from the child of the finalized tip,
+/// to a non-finalized chain tip.
 pub struct Chain {
     // Note: `eq_internal_state()` must be updated every time a field is added to [`Chain`].
 
@@ -194,6 +195,89 @@ pub struct Chain {
     /// for equality.
     #[cfg(feature = "getblocktemplate-rpcs")]
     pub should_count_metrics: bool,
+
+    /// Chain length transmitter.
+    #[cfg(feature = "progress-bar")]
+    chain_length_bar: Option<howudoin::Tx>,
+}
+
+impl std::fmt::Debug for Chain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("Chain");
+
+        f.field("network", &self.network)
+            .field("blocks", &self.blocks)
+            .field("height_by_hash", &self.height_by_hash)
+            .field("tx_loc_by_hash", &self.tx_loc_by_hash)
+            .field("created_utxos", &self.created_utxos)
+            .field("spent_utxos", &self.spent_utxos)
+            .field("sprout_trees_by_anchor", &self.sprout_trees_by_anchor)
+            .field("sprout_trees_by_height", &self.sprout_trees_by_height)
+            .field("sapling_trees_by_height", &self.sapling_trees_by_height)
+            .field("orchard_trees_by_height", &self.orchard_trees_by_height)
+            .field("history_trees_by_height", &self.history_trees_by_height)
+            .field("sprout_anchors", &self.sprout_anchors)
+            .field("sprout_anchors_by_height", &self.sprout_anchors_by_height)
+            .field("sapling_anchors", &self.sapling_anchors)
+            .field("sapling_anchors_by_height", &self.sapling_anchors_by_height)
+            .field("orchard_anchors", &self.orchard_anchors)
+            .field("orchard_anchors_by_height", &self.orchard_anchors_by_height)
+            .field("sprout_nullifiers", &self.sprout_nullifiers)
+            .field("sapling_nullifiers", &self.sapling_nullifiers)
+            .field("orchard_nullifiers", &self.orchard_nullifiers)
+            .field(
+                "partial_transparent_transfers",
+                &self.partial_transparent_transfers,
+            )
+            .field("partial_cumulative_work", &self.partial_cumulative_work)
+            .field("chain_value_pools", &self.chain_value_pools)
+            .field("last_fork_height", &self.last_fork_height);
+
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        f.field("should_count_metrics", &self.should_count_metrics);
+
+        f.finish()
+    }
+}
+
+impl Clone for Chain {
+    fn clone(&self) -> Self {
+        Self {
+            network: self.network,
+            blocks: self.blocks.clone(),
+            height_by_hash: self.height_by_hash.clone(),
+            tx_loc_by_hash: self.tx_loc_by_hash.clone(),
+            created_utxos: self.created_utxos.clone(),
+            spent_utxos: self.spent_utxos.clone(),
+            sprout_trees_by_anchor: self.sprout_trees_by_anchor.clone(),
+            sprout_trees_by_height: self.sprout_trees_by_height.clone(),
+            sapling_trees_by_height: self.sapling_trees_by_height.clone(),
+            orchard_trees_by_height: self.orchard_trees_by_height.clone(),
+            history_trees_by_height: self.history_trees_by_height.clone(),
+            sprout_anchors: self.sprout_anchors.clone(),
+            sprout_anchors_by_height: self.sprout_anchors_by_height.clone(),
+            sapling_anchors: self.sapling_anchors.clone(),
+            sapling_anchors_by_height: self.sapling_anchors_by_height.clone(),
+            orchard_anchors: self.orchard_anchors.clone(),
+            orchard_anchors_by_height: self.orchard_anchors_by_height.clone(),
+            sprout_nullifiers: self.sprout_nullifiers.clone(),
+            sapling_nullifiers: self.sapling_nullifiers.clone(),
+            orchard_nullifiers: self.orchard_nullifiers.clone(),
+            partial_transparent_transfers: self.partial_transparent_transfers.clone(),
+            partial_cumulative_work: self.partial_cumulative_work,
+            chain_value_pools: self.chain_value_pools,
+
+            // Don't propagate the last fork height to clones.
+            last_fork_height: None,
+
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            should_count_metrics: self.should_count_metrics,
+
+            // Don't track progress in clones.
+            #[cfg(feature = "progress-bar")]
+            chain_length_bar: None,
+        }
+    }
 }
 
 impl Chain {
@@ -234,6 +318,8 @@ impl Chain {
             last_fork_height: None,
             #[cfg(feature = "getblocktemplate-rpcs")]
             should_count_metrics: true,
+            #[cfg(feature = "progress-bar")]
+            chain_length_bar: None,
         };
 
         chain.add_sprout_tree_and_anchor(finalized_tip_height, sprout_note_commitment_tree);
@@ -307,6 +393,67 @@ impl Chain {
         return true;
     }
 
+    /// Returns the last fork height if that height is still in the non-finalized state.
+    /// Otherwise, if that fork has been finalized, returns `None`.
+    #[allow(dead_code)]
+    fn recent_fork_height(&self) -> Option<Height> {
+        self.last_fork_height
+            .filter(|last| last >= &self.non_finalized_root_height())
+    }
+
+    /// Update metrics for this chain.
+    //
+    // TODO: give chain_length_bar interior mutability, and change `&mut self` to `&self`
+    fn update_metrics(&mut self) {
+        if !self.should_count_metrics() {
+            #[allow(clippy::needless_return)]
+            return;
+        }
+
+        #[cfg(feature = "progress-bar")]
+        {
+            if self.chain_length_bar.is_none() && !matches!(howudoin::cancelled(), Some(true)) {
+                let fork_height = self
+                    .last_fork_height
+                    .unwrap_or_else(|| self.non_finalized_tip_height())
+                    .0;
+
+                let chain_length_bar = howudoin::new().label(format!("Fork {fork_height}"));
+                self.chain_length_bar = Some(chain_length_bar);
+            }
+
+            if let Some(chain_length_bar) = self.chain_length_bar.as_ref() {
+                if matches!(howudoin::cancelled(), Some(true)) {
+                    chain_length_bar.close();
+                } else {
+                    let recent_fork = self.recent_fork_height();
+
+                    chain_length_bar
+                        .set_pos(u64::try_from(self.len()).expect("fits in u64"))
+                        .set_len(
+                            u64::try_from(
+                                zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
+                            )
+                            .expect("fits in u64"),
+                        );
+
+                    let mut desc = format!(
+                        "Work {:?}",
+                        self.partial_cumulative_work.for_display(self.network),
+                    );
+
+                    if let Some(recent_fork) = recent_fork {
+                        let fork_length = self.non_finalized_tip_height() - recent_fork;
+
+                        desc.push_str(&format!(" at {recent_fork:?} + {fork_length} blocks"));
+                    }
+
+                    chain_length_bar.desc(desc);
+                }
+            }
+        }
+    }
+
     /// Push a contextually valid non-finalized block into this chain as the new tip.
     ///
     /// If the block is invalid, drops this chain, and returns an error.
@@ -320,6 +467,8 @@ impl Chain {
 
         tracing::debug!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, block);
+
+        self.update_metrics();
 
         Ok(self)
     }
@@ -344,6 +493,8 @@ impl Chain {
 
         // Update cumulative data members.
         self.revert_chain_with(&block, RevertPosition::Root);
+
+        self.update_metrics();
 
         (block, treestate)
     }
@@ -371,7 +522,7 @@ impl Chain {
             forked.pop_tip();
         }
 
-        // TODO: also set self.last_fork_height, needs interior mutability
+        // TODO: also set self.last_fork_height and update_metrics(), needs interior mutability
         forked.last_fork_height = Some(forked.non_finalized_tip_height());
 
         Some(forked)
@@ -936,6 +1087,8 @@ impl Chain {
         );
 
         self.revert_chain_with(&block, RevertPosition::Tip);
+
+        self.update_metrics();
     }
 
     /// Return the non-finalized tip height for this chain.
@@ -1281,6 +1434,15 @@ impl Chain {
         self.update_chain_tip_with(chain_value_pool_change)?;
 
         Ok(())
+    }
+}
+
+impl Drop for Chain {
+    fn drop(&mut self) {
+        #[cfg(feature = "progress-bar")]
+        if let Some(chain_length_bar) = self.chain_length_bar.as_ref() {
+            chain_length_bar.close();
+        }
     }
 }
 
