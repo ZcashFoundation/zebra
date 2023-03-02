@@ -141,6 +141,25 @@ impl ActiveState {
             }
         }
     }
+
+    /// Returns the number of transactions in storage, or zero if the mempool is disabled.
+    #[cfg(feature = "progress-bar")]
+    fn transaction_count(&self) -> usize {
+        match self {
+            ActiveState::Disabled => 0,
+            ActiveState::Enabled { storage, .. } => storage.transaction_count(),
+        }
+    }
+
+    /// Returns the cost of the transactions in the mempool, according to ZIP-401.
+    /// Returns zero if the mempool is disabled.
+    #[cfg(feature = "progress-bar")]
+    fn total_cost(&self) -> u64 {
+        match self {
+            ActiveState::Disabled => 0,
+            ActiveState::Enabled { storage, .. } => storage.total_cost(),
+        }
+    }
 }
 
 /// Mempool async management and query service.
@@ -183,6 +202,19 @@ pub struct Mempool {
     /// Sender part of a gossip transactions channel.
     /// Used to broadcast transaction ids to peers.
     transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
+
+    // Diagnostics
+    //
+    // TODO: make these optional and only initialize them when the mempool is active,
+    //       or move them to ActiveState
+    //
+    /// Number of mempool transactions transmitter.
+    #[cfg(feature = "progress-bar")]
+    transaction_count_bar: howudoin::Tx,
+
+    /// Mempool transaction cost transmitter.
+    #[cfg(feature = "progress-bar")]
+    transaction_cost_bar: howudoin::Tx,
 }
 
 impl Mempool {
@@ -198,6 +230,17 @@ impl Mempool {
         let (transaction_sender, transaction_receiver) =
             tokio::sync::watch::channel(HashSet::new());
 
+        #[cfg(feature = "progress-bar")]
+        let transaction_count_bar = howudoin::new().label("Mempool Txs").set_pos(0u64).set_len(
+            config.tx_cost_limit / zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD,
+        );
+        #[cfg(feature = "progress-bar")]
+        let transaction_cost_bar = howudoin::new()
+            .label("Mempool Cost")
+            .set_pos(0u64)
+            .set_len(config.tx_cost_limit)
+            .fmt_as_bytes(true);
+
         let mut service = Mempool {
             config: config.clone(),
             active_state: ActiveState::Disabled,
@@ -209,6 +252,10 @@ impl Mempool {
             state,
             tx_verifier,
             transaction_sender,
+            #[cfg(feature = "progress-bar")]
+            transaction_count_bar,
+            #[cfg(feature = "progress-bar")]
+            transaction_cost_bar,
         };
 
         // Make sure `is_enabled` is accurate.
@@ -312,6 +359,34 @@ impl Mempool {
             .copied()
             .collect()
     }
+
+    /// Update metrics for the mempool.
+    //
+    // TODO: call this whenever the storage is updated
+    fn update_metrics(&self) {
+        #[cfg(feature = "progress-bar")]
+        if matches!(howudoin::cancelled(), Some(true)) {
+            self.disable_metrics();
+        } else {
+            let transaction_count = self.active_state.transaction_count();
+            let transaction_cost = self.active_state.total_cost();
+
+            self.transaction_count_bar
+                .set_pos(u64::try_from(transaction_count).expect("fits in u64"));
+            // Note: costs can be much higher than the transaction size due to the
+            // MEMPOOL_TRANSACTION_COST_THRESHOLD minimum cost.
+            self.transaction_cost_bar.set_pos(transaction_cost);
+        }
+    }
+
+    /// Disable metrics for the mempool.
+    fn disable_metrics(&self) {
+        #[cfg(feature = "progress-bar")]
+        {
+            self.transaction_count_bar.close();
+            self.transaction_cost_bar.close();
+        }
+    }
 }
 
 impl Service<Request> for Mempool {
@@ -329,6 +404,8 @@ impl Service<Request> for Mempool {
         // When the mempool is disabled we still return that the service is ready.
         // Otherwise, callers could block waiting for the mempool to be enabled.
         if !self.is_enabled() {
+            self.update_metrics();
+
             return Poll::Ready(Ok(()));
         }
 
@@ -370,6 +447,8 @@ impl Service<Request> for Mempool {
                     let _result = tx_downloads.download_if_needed_and_verify(tx);
                 }
             }
+
+            self.update_metrics();
 
             return Poll::Ready(Ok(()));
         }
@@ -468,6 +547,8 @@ impl Service<Request> for Mempool {
                 self.transaction_sender.send(send_to_peers_ids)?;
             }
         }
+
+        self.update_metrics();
 
         Poll::Ready(Ok(()))
     }
@@ -624,5 +705,11 @@ impl Service<Request> for Mempool {
                 async move { Ok(resp) }.boxed()
             }
         }
+    }
+}
+
+impl Drop for Mempool {
+    fn drop(&mut self) {
+        self.disable_metrics();
     }
 }
