@@ -319,14 +319,11 @@ impl Service<Request> for Mempool {
 
         let tip_action = self.chain_tip_change.last_tip_change();
 
-        // If the mempool was just freshly enabled,
-        // skip resetting and removing mined transactions for this tip.
-        if is_state_changed {
-            return Poll::Ready(Ok(()));
-        }
-
         // Clear the mempool and cancel downloads if there has been a chain tip reset.
-        if matches!(tip_action, Some(TipAction::Reset { .. })) {
+        //
+        // But if the mempool was just freshly enabled,
+        // skip resetting and removing mined transactions for this tip.
+        if !is_state_changed && matches!(tip_action, Some(TipAction::Reset { .. })) {
             info!(
                 tip_height = ?tip_action.as_ref().unwrap().best_tip_height(),
                 "resetting mempool: switched best chain, skipped blocks, or activated network upgrade"
