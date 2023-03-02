@@ -176,6 +176,14 @@ pub struct Chain {
     /// When a new chain is created from the finalized tip,
     /// it is initialized with the finalized tip chain value pool balances.
     pub(crate) chain_value_pools: ValueBalance<NonNegative>,
+
+    // Diagnostics
+    //
+    /// The last height this chain forked at. Diagnostics only.
+    ///
+    /// This field is only used for metrics, it is not consensus-critical, and it is not checked
+    /// for equality.
+    last_fork_height: Option<Height>,
 }
 
 impl Chain {
@@ -213,6 +221,7 @@ impl Chain {
             partial_cumulative_work: Default::default(),
             history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
+            last_fork_height: None,
         };
 
         chain.add_sprout_tree_and_anchor(finalized_tip_height, sprout_note_commitment_tree);
@@ -339,6 +348,9 @@ impl Chain {
         while forked.non_finalized_tip_hash() != fork_tip {
             forked.pop_tip();
         }
+
+        // TODO: also set self.last_fork_height, needs interior mutability
+        forked.last_fork_height = Some(forked.non_finalized_tip_height());
 
         Some(forked)
     }
