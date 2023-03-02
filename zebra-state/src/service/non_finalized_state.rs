@@ -689,10 +689,10 @@ impl NonFinalizedState {
                         zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
                     ));
 
-                // TODO: display work as exponential or bits?
+                // display work as bits
                 let mut desc = format!(
-                    "Work {:?}",
-                    chain.partial_cumulative_work.for_display(self.network),
+                    "Work {:.1} bits",
+                    chain.partial_cumulative_work.difficulty_bits_for_display(),
                 );
 
                 if let Some(recent_fork_height) = chain.recent_fork_height() {
