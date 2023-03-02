@@ -39,7 +39,7 @@ pub struct NonFinalizedState {
     /// Verified, non-finalized chains, in ascending work order.
     ///
     /// The best chain is [`NonFinalizedState::best_chain()`],
-    /// `NonFinalizedState.best_chain_iter().next()`, or
+    /// `NonFinalizedState.chain_iter().next()`, or
     /// `NonFinalizedState.chain_set.iter().next_back()`.
     chain_set: BTreeSet<Arc<Chain>>,
 
@@ -144,7 +144,7 @@ impl NonFinalizedState {
 
     /// Returns an iterator over the non-finalized chains, with the best chain first.
     #[allow(dead_code)]
-    pub fn best_chain_iter(&self) -> impl Iterator<Item = &Arc<Chain>> {
+    pub fn chain_iter(&self) -> impl Iterator<Item = &Arc<Chain>> {
         self.chain_set.iter().rev()
     }
 
@@ -674,7 +674,7 @@ impl NonFinalizedState {
             // It doesn't matter what chain the bar was previously used for,
             // because we update everything based on the latest chain in that position.
             for (chain_length_bar, chain) in
-                std::iter::zip(self.chain_fork_length_bars.iter(), self.best_chain_iter())
+                std::iter::zip(self.chain_fork_length_bars.iter(), self.chain_iter())
             {
                 let fork_height = chain
                     .last_fork_height
