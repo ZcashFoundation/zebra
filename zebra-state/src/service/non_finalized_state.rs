@@ -133,16 +133,6 @@ impl NonFinalizedState {
         self.chain_set.iter()
     }
 
-    /// Should this `NonFinalizedState` instance track metrics and progress bars?
-    #[allow(dead_code)]
-    fn should_count_metrics(&self) -> bool {
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        return self.should_count_metrics;
-
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        return true;
-    }
-
     /// Insert `chain` into `self.chain_set`, apply `chain_filter` to the chains,
     /// then limit the number of tracked chains.
     fn insert_with<F>(&mut self, chain: Arc<Chain>, chain_filter: F)
@@ -297,7 +287,7 @@ impl NonFinalizedState {
         #[cfg(test)]
         let finalized_tip_height = finalized_tip_height.unwrap_or(zebra_chain::block::Height(0));
 
-        let mut chain = Chain::new(
+        let chain = Chain::new(
             self.network,
             finalized_tip_height,
             finalized_state.sprout_note_commitment_tree(),
@@ -306,10 +296,6 @@ impl NonFinalizedState {
             finalized_state.history_tree(),
             finalized_state.finalized_value_pool(),
         );
-
-        if !self.should_count_metrics() {
-            chain.disable_metrics();
-        }
 
         let (height, hash) = (prepared.height, prepared.hash);
 
@@ -600,23 +586,22 @@ impl NonFinalizedState {
                 let fork_chain = self
                     .chain_set
                     .iter()
-                    .find_map(|chain| {
-                        let mut forked = chain.fork(parent_hash);
-
-                        // TODO: add a should_count_metrics argument and move this into fork()
-                        if let Some(forked) = forked.as_mut() {
-                            if !self.should_count_metrics() {
-                                forked.disable_metrics();
-                            }
-                        }
-
-                        forked
-                    })
+                    .find_map(|chain| chain.fork(parent_hash))
                     .ok_or(ValidateContextError::NotReadyToBeCommitted)?;
 
                 Ok(Arc::new(fork_chain))
             }
         }
+    }
+
+    /// Should this `NonFinalizedState` instance track metrics and progress bars?
+    #[allow(dead_code)]
+    fn should_count_metrics(&self) -> bool {
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        return self.should_count_metrics;
+
+        #[cfg(not(feature = "getblocktemplate-rpcs"))]
+        return true;
     }
 
     /// Update the metrics after `block` is committed
@@ -663,15 +648,11 @@ impl NonFinalizedState {
     pub fn disable_metrics(&mut self) {
         #[cfg(feature = "getblocktemplate-rpcs")]
         {
-            // TODO: give Chain.should_count_metrics interior mutability and set it here
             self.should_count_metrics = false;
         }
 
         #[cfg(feature = "progress-bar")]
         {
-            // TODO: give Chain.chain_length_bar interior mutability,
-            //       and call Chain.disable_metrics() here for all chains
-
             if let Some(chain_count_bar) = self.chain_count_bar.as_ref() {
                 chain_count_bar.close();
             }
