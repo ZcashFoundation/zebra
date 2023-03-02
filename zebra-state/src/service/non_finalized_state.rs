@@ -50,6 +50,8 @@ pub struct NonFinalizedState {
     ///
     /// Used for skipping metrics and progress bars when testing block proposals
     /// with a commit to a cloned non-finalized state.
+    //
+    // TODO: make this field private and set it via an argument to NonFinalizedState::new()
     #[cfg(feature = "getblocktemplate-rpcs")]
     pub should_count_metrics: bool,
 
@@ -297,7 +299,8 @@ impl NonFinalizedState {
         #[cfg(test)]
         let finalized_tip_height = finalized_tip_height.unwrap_or(zebra_chain::block::Height(0));
 
-        let chain = Chain::new(
+        #[allow(unused_mut)]
+        let mut chain = Chain::new(
             self.network,
             finalized_tip_height,
             finalized_state.sprout_note_commitment_tree(),
@@ -306,6 +309,13 @@ impl NonFinalizedState {
             finalized_state.history_tree(),
             finalized_state.finalized_value_pool(),
         );
+
+        // TODO: make the field private and set it via an argument to Chain::new/fork()
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        {
+            chain.should_count_metrics = self.should_count_metrics;
+        }
+
         let (height, hash) = (prepared.height, prepared.hash);
 
         // If the block is invalid, return the error, and drop the newly created chain fork
@@ -595,7 +605,17 @@ impl NonFinalizedState {
                 let fork_chain = self
                     .chain_set
                     .iter()
-                    .find_map(|chain| chain.fork(parent_hash))
+                    .find_map(|chain| {
+                        #[allow(unused_mut)]
+                        let mut forked = chain.fork(parent_hash);
+
+                        #[cfg(feature = "getblocktemplate-rpcs")]
+                        if let Some(forked) = forked.as_mut() {
+                            forked.should_count_metrics = self.should_count_metrics;
+                        }
+
+                        forked
+                    })
                     .ok_or(ValidateContextError::NotReadyToBeCommitted)?;
 
                 Ok(Arc::new(fork_chain))

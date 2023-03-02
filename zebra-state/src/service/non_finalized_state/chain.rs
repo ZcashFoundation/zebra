@@ -184,6 +184,16 @@ pub struct Chain {
     /// This field is only used for metrics, it is not consensus-critical, and it is not checked
     /// for equality.
     last_fork_height: Option<Height>,
+
+    /// Configures this chain to count metrics.
+    ///
+    /// Used for skipping metrics and progress bars when testing block proposals
+    /// with a commit to a cloned non-finalized state.
+    ///
+    /// This field is only used for metrics, it is not consensus-critical, and it is not checked
+    /// for equality.
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    pub should_count_metrics: bool,
 }
 
 impl Chain {
@@ -222,6 +232,8 @@ impl Chain {
             history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
             last_fork_height: None,
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            should_count_metrics: true,
         };
 
         chain.add_sprout_tree_and_anchor(finalized_tip_height, sprout_note_commitment_tree);
@@ -283,6 +295,16 @@ impl Chain {
 
             // chain value pool balances
             self.chain_value_pools == other.chain_value_pools
+    }
+
+    /// Should this `Chain` instance track metrics and progress bars?
+    #[allow(dead_code)]
+    fn should_count_metrics(&self) -> bool {
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        return self.should_count_metrics;
+
+        #[cfg(not(feature = "getblocktemplate-rpcs"))]
+        return true;
     }
 
     /// Push a contextually valid non-finalized block into this chain as the new tip.
