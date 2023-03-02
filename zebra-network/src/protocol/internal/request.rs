@@ -203,9 +203,9 @@ impl fmt::Display for Request {
             Request::Ping(_) => "Ping".to_string(),
 
             Request::BlocksByHash(hashes) => {
-                format!("BlocksByHash {{ hashes: {} }}", hashes.len())
+                format!("BlocksByHash({})", hashes.len())
             }
-            Request::TransactionsById(ids) => format!("TransactionsById {{ ids: {} }}", ids.len()),
+            Request::TransactionsById(ids) => format!("TransactionsById({})", ids.len()),
 
             Request::FindBlocks { known_blocks, stop } => format!(
                 "FindBlocks {{ known_blocks: {}, stop: {} }}",
@@ -220,7 +220,7 @@ impl fmt::Display for Request {
 
             Request::PushTransaction(_) => "PushTransaction".to_string(),
             Request::AdvertiseTransactionIds(ids) => {
-                format!("AdvertiseTransactionIds {{ ids: {} }}", ids.len())
+                format!("AdvertiseTransactionIds({})", ids.len())
             }
 
             Request::AdvertiseBlock(_) => "AdvertiseBlock".to_string(),
