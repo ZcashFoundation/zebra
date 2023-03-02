@@ -60,6 +60,13 @@ pub struct NonFinalizedState {
     /// Number of chain forks transmitter.
     #[cfg(feature = "progress-bar")]
     chain_count_bar: Option<howudoin::Tx>,
+
+    /// A chain fork length transmitter for each [`Chain`] in [`chain_set`](Self.chain_set).
+    ///
+    /// Because `chain_set` contains `Arc<Chain>`s, it is difficult to update the metrics state
+    /// on each chain. ([`Arc`]s are read-only, and we don't want to clone them just for metrics.)
+    #[cfg(feature = "progress-bar")]
+    chain_fork_length_bars: Vec<howudoin::Tx>,
 }
 
 impl std::fmt::Debug for NonFinalizedState {
@@ -88,6 +95,9 @@ impl Clone for NonFinalizedState {
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
+
+            #[cfg(feature = "progress-bar")]
+            chain_fork_length_bars: Vec::new(),
         }
     }
 }
@@ -102,6 +112,8 @@ impl NonFinalizedState {
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
+            #[cfg(feature = "progress-bar")]
+            chain_fork_length_bars: Vec::new(),
         }
     }
 
@@ -152,33 +164,7 @@ impl NonFinalizedState {
             self.chain_set.pop_first();
         }
 
-        // TODO: make chain_count_bar interior mutable and move to update_metrics_for_chains()
-        #[cfg(feature = "progress-bar")]
-        if self.should_count_metrics() {
-            if self.chain_count_bar.is_none() && !matches!(howudoin::cancelled(), Some(true)) {
-                self.chain_count_bar = Some(howudoin::new().label("Chain Forks"));
-            }
-
-            if let Some(chain_count_bar) = self.chain_count_bar.as_ref() {
-                if matches!(howudoin::cancelled(), Some(true)) {
-                    chain_count_bar.close();
-                } else {
-                    let finalized_tip_height = self
-                        .best_chain()
-                        .map(|chain| chain.non_finalized_root_height().0 - 1);
-
-                    chain_count_bar
-                        .set_pos(u64::try_from(self.chain_count()).expect("fits in u64"))
-                        .set_len(
-                            u64::try_from(MAX_NON_FINALIZED_CHAIN_FORKS).expect("fits in u64"),
-                        );
-
-                    if let Some(finalized_tip_height) = finalized_tip_height {
-                        chain_count_bar.desc(format!("Finalized Root {finalized_tip_height}"));
-                    }
-                }
-            }
-        }
+        self.update_metrics_bars();
     }
 
     /// Insert `chain` into `self.chain_set`, then limit the number of tracked chains.
@@ -644,6 +630,86 @@ impl NonFinalizedState {
         );
     }
 
+    /// Update the progress bars after any chain is modified.
+    /// This includes both chain forks and committed blocks.
+    fn update_metrics_bars(&mut self) {
+        // TODO: make chain_count_bar interior mutable, move to update_metrics_for_committed_block()
+
+        if !self.should_count_metrics() {
+            #[allow(clippy::needless_return)]
+            return;
+        }
+
+        #[cfg(feature = "progress-bar")]
+        {
+            if matches!(howudoin::cancelled(), Some(true)) {
+                self.disable_metrics();
+                return;
+            }
+
+            // Update the chain count bar
+            if self.chain_count_bar.is_none() {
+                self.chain_count_bar = Some(howudoin::new().label("Chain Forks"));
+            }
+
+            let chain_count_bar = self
+                .chain_count_bar
+                .as_ref()
+                .expect("just initialized if missing");
+            let finalized_tip_height = self
+                .best_chain()
+                .map(|chain| chain.non_finalized_root_height().0 - 1);
+
+            chain_count_bar
+                .set_pos(u64::try_from(self.chain_count()).expect("fits in u64"))
+                .set_len(u64::try_from(MAX_NON_FINALIZED_CHAIN_FORKS).expect("fits in u64"));
+
+            if let Some(finalized_tip_height) = finalized_tip_height {
+                chain_count_bar.desc(format!("Finalized Root {finalized_tip_height}"));
+            }
+
+            // Update each chain length bar, creating or deleting bars as needed
+            self.chain_fork_length_bars
+                .resize_with(self.chain_count(), howudoin::new);
+
+            // It doesn't matter what chain the bar was previously used for,
+            // because we update everything based on the latest chain in that position.
+            for (chain_length_bar, chain) in
+                std::iter::zip(self.chain_fork_length_bars.iter(), self.chain_iter())
+            {
+                let fork_height = chain
+                    .last_fork_height
+                    .unwrap_or_else(|| chain.non_finalized_tip_height())
+                    .0;
+
+                chain_length_bar
+                    .label(format!("Fork {fork_height}"))
+                    .set_pos(u64::try_from(chain.len()).expect("fits in u64"))
+                    .set_len(u64::from(
+                        zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
+                    ));
+
+                // TODO: display work as exponential or bits?
+                let mut desc = format!(
+                    "Work {:?}",
+                    chain.partial_cumulative_work.for_display(self.network),
+                );
+
+                if let Some(recent_fork_height) = chain.recent_fork_height() {
+                    let recent_fork_length = chain
+                        .recent_fork_length()
+                        .expect("just checked recent fork height");
+
+                    desc.push_str(&format!(
+                        " at {recent_fork_height:?} + {recent_fork_length} blocks"
+                    ));
+                }
+
+                chain_length_bar.desc(desc);
+            }
+        }
+    }
+
     /// Stop tracking metrics for this non-finalized state and all its chains.
     pub fn disable_metrics(&mut self) {
         #[cfg(feature = "getblocktemplate-rpcs")]
@@ -658,6 +724,12 @@ impl NonFinalizedState {
             }
 
             self.chain_count_bar = None;
+
+            for chain_length_bar in self.chain_fork_length_bars.iter() {
+                chain_length_bar.close();
+            }
+
+            self.chain_fork_length_bars = Vec::new();
         }
     }
 }

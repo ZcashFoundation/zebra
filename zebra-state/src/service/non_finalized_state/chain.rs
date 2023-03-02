@@ -185,7 +185,7 @@ pub struct Chain {
     ///
     /// This field is only used for metrics, it is not consensus-critical, and it is not checked
     /// for equality.
-    last_fork_height: Option<Height>,
+    pub(super) last_fork_height: Option<Height>,
     // # Note
     //
     // Most diagnostics are implemented on the NonFinalizedState, rather than each chain.
@@ -329,9 +329,22 @@ impl Chain {
     /// Returns the last fork height if that height is still in the non-finalized state.
     /// Otherwise, if that fork has been finalized, returns `None`.
     #[allow(dead_code)]
-    fn recent_fork_height(&self) -> Option<Height> {
+    pub fn recent_fork_height(&self) -> Option<Height> {
         self.last_fork_height
             .filter(|last| last >= &self.non_finalized_root_height())
+    }
+
+    /// Returns this chain fork's length, if its fork is still in the non-finalized state.
+    /// Otherwise, if the fork has been finalized, returns `None`.
+    #[allow(dead_code)]
+    pub fn recent_fork_length(&self) -> Option<u32> {
+        let fork_length = self.non_finalized_tip_height() - self.recent_fork_height()?;
+
+        Some(
+            fork_length
+                .try_into()
+                .expect("fork must be at or below tip"),
+        )
     }
 
     /// Push a contextually valid non-finalized block into this chain as the new tip.
