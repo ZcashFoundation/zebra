@@ -194,7 +194,7 @@ pub struct Chain {
     /// This field is only used for metrics, it is not consensus-critical, and it is not checked
     /// for equality.
     #[cfg(feature = "getblocktemplate-rpcs")]
-    pub should_count_metrics: bool,
+    should_count_metrics: bool,
 
     /// Chain length transmitter.
     #[cfg(feature = "progress-bar")]
@@ -451,6 +451,24 @@ impl Chain {
                     chain_length_bar.desc(desc);
                 }
             }
+        }
+    }
+
+    /// Stop tracking metrics for this non-finalized chain.
+    #[allow(dead_code)]
+    pub fn disable_metrics(&mut self) {
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        {
+            self.should_count_metrics = false;
+        }
+
+        #[cfg(feature = "progress-bar")]
+        {
+            if let Some(chain_length_bar) = self.chain_length_bar.as_ref() {
+                chain_length_bar.close();
+            }
+
+            self.chain_length_bar = None;
         }
     }
 
@@ -1439,10 +1457,7 @@ impl Chain {
 
 impl Drop for Chain {
     fn drop(&mut self) {
-        #[cfg(feature = "progress-bar")]
-        if let Some(chain_length_bar) = self.chain_length_bar.as_ref() {
-            chain_length_bar.close();
-        }
+        self.disable_metrics();
     }
 }
 
