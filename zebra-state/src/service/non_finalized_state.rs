@@ -36,9 +36,9 @@ pub(crate) use chain::Chain;
 ///
 /// Most chain data is clone-on-write using [`Arc`].
 pub struct NonFinalizedState {
-    /// Verified, non-finalized chains, in ascending order.
+    /// Verified, non-finalized chains, in ascending work order.
     ///
-    /// The best chain is `chain_iter().next()`.
+    /// The best chain is [`NonFinalizedState::best_chain()`], or `chain_iter().next()`.
     /// Using `chain_set.last()` or `chain_set.iter().next_back()` is deprecated,
     /// callers should migrate to `chain_iter().next()`.
     chain_set: BTreeSet<Arc<Chain>>,
@@ -46,6 +46,8 @@ pub struct NonFinalizedState {
     /// The configured Zcash network.
     pub network: Network,
 
+    // Diagnostics
+    //
     /// Configures the non-finalized state to count metrics.
     ///
     /// Used for skipping metrics and progress bars when testing block proposals
@@ -213,7 +215,7 @@ impl NonFinalizedState {
         }
 
         // for each remaining chain in side_chains
-        for mut side_chain in side_chains {
+        for mut side_chain in side_chains.rev() {
             if side_chain.non_finalized_root_hash() != best_chain_root.hash {
                 // If we popped the root, the chain would be empty or orphaned,
                 // so just drop it now.
@@ -561,7 +563,7 @@ impl NonFinalizedState {
 
     /// Return the non-finalized portion of the current best chain.
     pub fn best_chain(&self) -> Option<&Arc<Chain>> {
-        self.chain_set.iter().next_back()
+        self.chain_set.iter().rev().next()
     }
 
     /// Return the number of chains.
@@ -588,6 +590,7 @@ impl NonFinalizedState {
                 let fork_chain = self
                     .chain_set
                     .iter()
+                    .rev()
                     .find_map(|chain| chain.fork(parent_hash))
                     .ok_or(ValidateContextError::NotReadyToBeCommitted)?;
 
@@ -617,13 +620,8 @@ impl NonFinalizedState {
 
         if self
             .best_chain()
-            .unwrap()
-            .blocks
-            .iter()
-            .next_back()
-            .unwrap()
-            .1
-            .hash
+            .expect("metrics are only updated after initialization")
+            .non_finalized_tip_hash()
             == hash
         {
             metrics::counter!("state.memory.best.committed.block.count", 1);
