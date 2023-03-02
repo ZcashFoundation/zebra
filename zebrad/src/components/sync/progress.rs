@@ -64,7 +64,7 @@ pub async fn show_block_chain_progress(
     network: Network,
     latest_chain_tip: impl ChainTip,
     sync_status: SyncStatus,
-) {
+) -> ! {
     // The minimum number of extra blocks after the highest checkpoint, based on:
     // - the non-finalized state limit, and
     // - the minimum number of extra blocks mined between a checkpoint update,
