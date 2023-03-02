@@ -175,6 +175,19 @@ pub struct Mempool {
     /// Sender part of a gossip transactions channel.
     /// Used to broadcast transaction ids to peers.
     transaction_sender: watch::Sender<HashSet<UnminedTxId>>,
+
+    // Diagnostics
+    //
+    // TODO: make these optional and only initialize them when the mempool is active,
+    //       or move them to ActiveState
+    //
+    /// Number of mempool transactions transmitter.
+    #[cfg(feature = "progress-bar")]
+    transaction_count_bar: howudoin::Tx,
+
+    /// Mempool transaction bytes transmitter.
+    #[cfg(feature = "progress-bar")]
+    transaction_bytes_bar: howudoin::Tx,
 }
 
 impl Mempool {
@@ -190,6 +203,18 @@ impl Mempool {
         let (transaction_sender, transaction_receiver) =
             tokio::sync::watch::channel(HashSet::new());
 
+        #[cfg(feature = "progress-bar")]
+        let transaction_count_bar = howudoin::new()
+            .label("Mempool Txs")
+            .set_pos(0u64)
+            .set_len(config.tx_cost_limit / zebra_chain::transaction::MIN_TRANSPARENT_TX_SIZE);
+        #[cfg(feature = "progress-bar")]
+        let transaction_bytes_bar = howudoin::new()
+            .label("Mempool Bytes")
+            .set_pos(0u64)
+            .set_len(config.tx_cost_limit)
+            .fmt_as_bytes(true);
+
         let mut service = Mempool {
             config: config.clone(),
             active_state: ActiveState::Disabled,
@@ -201,6 +226,10 @@ impl Mempool {
             state,
             tx_verifier,
             transaction_sender,
+            #[cfg(feature = "progress-bar")]
+            transaction_count_bar,
+            #[cfg(feature = "progress-bar")]
+            transaction_bytes_bar,
         };
 
         // Make sure `is_enabled` is accurate.
@@ -297,6 +326,29 @@ impl Mempool {
             .difference(expired_transactions)
             .copied()
             .collect()
+    }
+
+    /// Update metrics for the mempool.
+    //
+    // TODO: call this whenever the storage is updated
+    fn update_metrics(&self) {
+        #[cfg(feature = "progress-bar")]
+        if matches!(howudoin::cancelled(), Some(true)) {
+            self.disable_metrics();
+        } else {
+            // TODO: get transaction count and bytes from storage
+            self.transaction_count_bar.set_pos(pos);
+            self.transaction_bytes_bar.set_pos(pos);
+        }
+    }
+
+    /// Disable metrics for the mempool.
+    fn disable_metrics(&self) {
+        #[cfg(feature = "progress-bar")]
+        {
+            self.transaction_count_bar.close();
+            self.transaction_bytes_bar.close();
+        }
     }
 }
 
@@ -590,5 +642,11 @@ impl Service<Request> for Mempool {
                 async move { Ok(resp) }.boxed()
             }
         }
+    }
+}
+
+impl Drop for Mempool {
+    fn drop(&mut self) {
+        self.disable_metrics();
     }
 }

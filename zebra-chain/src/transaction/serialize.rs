@@ -962,7 +962,7 @@ pub(crate) const MIN_TRANSPARENT_OUTPUT_SIZE: u64 = 8 + 1;
 ///
 /// Shielded transfers are much larger than transparent transfers,
 /// so this is the minimum transaction size.
-pub(crate) const MIN_TRANSPARENT_TX_SIZE: u64 =
+pub const MIN_TRANSPARENT_TX_SIZE: u64 =
     MIN_TRANSPARENT_INPUT_SIZE + 4 + MIN_TRANSPARENT_OUTPUT_SIZE;
 
 /// No valid Zcash message contains more transactions than can fit in a single block

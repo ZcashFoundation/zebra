@@ -29,7 +29,7 @@ pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
 pub use sapling::FieldNotPresent;
-pub use serialize::SerializedTransaction;
+pub use serialize::{SerializedTransaction, MIN_TRANSPARENT_TX_SIZE};
 pub use sighash::{HashType, SigHash};
 pub use unmined::{UnminedTx, UnminedTxId, VerifiedUnminedTx};
 
