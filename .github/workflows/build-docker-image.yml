@@ -37,6 +37,16 @@ on:
         required: false
         type: string
         default: info
+      with_mining_rpcs:
+        required: false
+        type: boolean
+      rpc_port: 
+        required: false
+        type: string
+      tag_suffix: 
+        required: false
+        type: string
+
     outputs:
       image_digest:
         description: 'The image digest to be used on a caller workflow'
@@ -72,6 +82,9 @@ jobs:
           images: |
             us-docker.pkg.dev/zealous-zebra/zebra/${{ inputs.image_name }}
             zfnd/zebra,enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
+          # appends inputs.tag_suffix to tags
+          flavor: |
+            suffix=${{ inputs.tag_suffix }}
           # generate Docker tags based on the following events/attributes
           tags: |
             type=schedule
@@ -145,6 +158,8 @@ jobs:
             ZEBRA_SKIP_IPV6_TESTS=${{ inputs.zebra_skip_ipv6_tests }}
             CHECKPOINT_SYNC=${{ inputs.checkpoint_sync }}
             RUST_LOG=${{ inputs.rust_log }}
+            WITH_MINING_RPCS=${{ inputs.with_mining_rpcs }}
+            RPC_PORT=${{ inputs.rpc_port }}
           push: true
           # To improve build speeds, for each branch we push an additional image to the registry,
           # to be used as the caching layer, using the `max` caching mode.

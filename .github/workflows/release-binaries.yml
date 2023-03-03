@@ -39,10 +39,13 @@ jobs:
     name: Build Release Testnet Mining Docker
     uses: ./.github/workflows/build-docker-image.yml
     with:
-      dockerfile_path: ./docker/mining.Dockerfile
+      dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebrad-mining-rpcs-testnet
+      tag_suffix: .experimental
       network: Testnet
+      rpc_port: '18232'
+      with_mining_rpcs: true
       checkpoint_sync: true
       rust_backtrace: '1'
       zebra_skip_ipv6_tests: '1'
