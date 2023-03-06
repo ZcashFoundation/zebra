@@ -22,6 +22,9 @@ proptest-impl = [
     "zebra-chain/proptest-impl"
 ]
 
+# Experimental elasticsearch support
+elasticsearch = []
+
 [dependencies]
 bincode = "1.3.3"
 chrono = { version = "0.4.23", default-features = false, features = ["clock", "std"] }

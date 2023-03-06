@@ -32,14 +32,6 @@ use tracing::{instrument, Instrument, Span};
 #[cfg(any(test, feature = "proptest-impl"))]
 use tower::buffer::Buffer;
 
-use elasticsearch::{
-    auth::Credentials::Basic,
-    cert::CertificateValidation,
-    http::transport::{SingleNodeConnectionPool, TransportBuilder},
-    http::Url,
-    Elasticsearch,
-};
-
 use zebra_chain::{
     block::{self, CountedHeader},
     diagnostic::CodeTimer,
@@ -316,20 +308,38 @@ impl StateService {
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         let timer = CodeTimer::start();
 
-        // if elasticsearch feature is enabled
-        let conn_pool =
-            SingleNodeConnectionPool::new(Url::parse("https://localhost:9200").unwrap());
-        let transport = TransportBuilder::new(conn_pool)
-            .cert_validation(CertificateValidation::None)
-            .auth(Basic(
-                "elastic".to_string(),
-                "my_password".to_string(),
-            ))
-            .build()
-            .unwrap();
-        let client = Elasticsearch::new(transport);
+        #[cfg(feature = "elasticsearch")]
+        let elasticsearch_client = {
+            use elasticsearch::{
+                auth::Credentials::Basic,
+                cert::CertificateValidation,
+                http::transport::{SingleNodeConnectionPool, TransportBuilder},
+                http::Url,
+                Elasticsearch,
+            };
 
-        let finalized_state = FinalizedState::new(&config, network, Some(client));
+            let conn_pool = SingleNodeConnectionPool::new(
+                Url::parse(&config.elasticsearch_url.as_str()).unwrap(),
+            );
+            let transport = TransportBuilder::new(conn_pool)
+                .cert_validation(CertificateValidation::None)
+                .auth(Basic(
+                    config.clone().elasticsearch_username,
+                    config.clone().elasticsearch_password,
+                ))
+                .build()
+                .unwrap();
+            Elasticsearch::new(transport)
+        };
+
+        let finalized_state = FinalizedState::new(
+            &config,
+            network,
+            #[cfg(feature = "elasticsearch")]
+            elasticsearch_client,
+        );
+
+        // let finalized_state = FinalizedState::new(&config, network, elasticsearch_client);
         timer.finish(module_path!(), line!(), "opening finalized state database");
 
         let timer = CodeTimer::start();

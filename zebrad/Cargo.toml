@@ -34,6 +34,10 @@ getblocktemplate-rpcs = [
     "zebra-chain/getblocktemplate-rpcs",
 ]
 
+elasticsearch = [
+    "zebra-state/elasticsearch",
+]
+
 sentry = ["dep:sentry"]
 flamegraph = ["tracing-flame", "inferno"]
 journald = ["tracing-journald"]
