@@ -45,6 +45,10 @@ tokio = { version = "1.25.0", features = ["sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
 tracing = "0.1.37"
 
+# this should be behind a feature
+elasticsearch = "8.5.0-alpha.1"
+serde_json = "1.0.93"
+
 zebra-chain = { path = "../zebra-chain" }
 zebra-test = { path = "../zebra-test/", optional = true }
 

@@ -20,6 +20,10 @@ use std::{
     sync::Arc,
 };
 
+use chrono::Utc;
+use elasticsearch::{BulkParts, Elasticsearch};
+use serde_json::Value;
+
 use zebra_chain::{block, parameters::Network};
 
 use crate::{
@@ -53,7 +57,7 @@ pub use disk_db::{DiskWriteBatch, WriteDisk};
 ///
 /// This is different from `NonFinalizedState::clone()`,
 /// which returns an independent copy of the chains.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct FinalizedState {
     // Configuration
     //
@@ -78,18 +82,26 @@ pub struct FinalizedState {
     /// so this database object can be freely cloned.
     /// The last instance that is dropped will close the underlying database.
     pub db: ZebraDb,
+
+    /// The elasticsearch handle.
+    pub elastic_db: Option<Elasticsearch>,
+
+    /// A collection of blocks to be sent to elasticsearch as a bulk.
+    pub elastic_blocks: Vec<String>,
 }
 
 impl FinalizedState {
     /// Returns an on-disk database instance for `config` and `network`.
     /// If there is no existing database, creates a new database on disk.
-    pub fn new(config: &Config, network: Network) -> Self {
+    pub fn new(config: &Config, network: Network, elastic_db: Option<Elasticsearch>) -> Self {
         let db = ZebraDb::new(config, network);
 
         let new_state = Self {
             network,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
             db,
+            elastic_db,
+            elastic_blocks: vec![],
         };
 
         // TODO: move debug_stop_at_height into a task in the start command (#3442)
@@ -205,6 +217,59 @@ impl FinalizedState {
         let finalized = finalized_with_trees.finalized;
         let committed_tip_hash = self.db.finalized_tip_hash();
         let committed_tip_height = self.db.finalized_tip_height();
+
+        // Elasticsearch stuff
+        let block = finalized.block.clone();
+        let block_time = block.header.time.timestamp();
+        let local_time = Utc::now().timestamp();
+
+        const AWAY_FROM_TIP_BULK_SIZE: usize = 800;
+        const CLOSE_TO_TIP_BULK_SIZE: usize = 2;
+        const CLOSE_TO_TIP_SECONDS: i64 = 900;
+
+        let mut blocks_size_to_dump = AWAY_FROM_TIP_BULK_SIZE;
+        if local_time - block_time < CLOSE_TO_TIP_SECONDS {
+            blocks_size_to_dump = CLOSE_TO_TIP_BULK_SIZE;
+        }
+
+        // Insert the header.
+        let height_number = committed_tip_height.unwrap_or(block::Height(0)).0;
+        self.elastic_blocks.push(
+            serde_json::json!({
+                "index": {
+                    "_id": height_number.to_string().as_str()
+                }
+            })
+            .to_string(),
+        );
+
+        // Insert the block.
+        self.elastic_blocks
+            .push(serde_json::json!(block).to_string());
+
+        // We are in bulk time, insert to ES all we have.
+        if self.elastic_blocks.len() >= blocks_size_to_dump {
+            let client = self.elastic_db.as_ref().unwrap().clone();
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let blocks = self.elastic_blocks.clone();
+
+            rt.block_on(async move {
+                let response = client
+                    .bulk(BulkParts::Index("testing"))
+                    .body(blocks)
+                    .send()
+                    .await
+                    .unwrap();
+
+                // make sure no errors ever.
+                let response_body = response.json::<Value>().await.unwrap();
+                assert!(!response_body["errors"].as_bool().unwrap());
+            });
+
+            // clean
+            self.elastic_blocks.clear();
+        }
+        // end Elasticsearch
 
         // Assert that callers (including unit tests) get the chain order correct
         if self.db.is_empty() {
