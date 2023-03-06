@@ -319,7 +319,7 @@ impl StateService {
             };
 
             let conn_pool = SingleNodeConnectionPool::new(
-                Url::parse(&config.elasticsearch_url.as_str()).unwrap(),
+                Url::parse(config.elasticsearch_url.as_str()).unwrap(),
             );
             let transport = TransportBuilder::new(conn_pool)
                 .cert_validation(CertificateValidation::None)
@@ -329,17 +329,18 @@ impl StateService {
                 ))
                 .build()
                 .unwrap();
-            Elasticsearch::new(transport)
+            Some(Elasticsearch::new(transport))
         };
 
         let finalized_state = FinalizedState::new(
             &config,
             network,
-            #[cfg(feature = "elasticsearch")]
-            elasticsearch_client,
+            match elasticsearch_client {
+                Some(_) => elasticsearch_client,
+                None => None,
+            },
         );
 
-        // let finalized_state = FinalizedState::new(&config, network, elasticsearch_client);
         timer.finish(module_path!(), line!(), "opening finalized state database");
 
         let timer = CodeTimer::start();

@@ -77,7 +77,7 @@ fn test_block_db_round_trip_with(
 ) {
     let _init_guard = zebra_test::init();
 
-    let state = FinalizedState::new(&Config::ephemeral(), network);
+    let state = FinalizedState::new(&Config::ephemeral(), network, None);
 
     // Check that each block round-trips to the database
     for original_block in block_test_cases.into_iter() {

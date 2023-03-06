@@ -94,7 +94,7 @@ impl FinalizedState {
     pub fn new(
         config: &Config,
         network: Network,
-        #[cfg(feature = "elasticsearch")] elastic_db: elasticsearch::Elasticsearch,
+        elastic_db: Option<elasticsearch::Elasticsearch>,
     ) -> Self {
         let db = ZebraDb::new(config, network);
 
@@ -103,7 +103,7 @@ impl FinalizedState {
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
             db,
             #[cfg(feature = "elasticsearch")]
-            elastic_db,
+            elastic_db: elastic_db.expect("database handle should be here"),
             #[cfg(feature = "elasticsearch")]
             elastic_blocks: vec![],
         };
@@ -278,7 +278,7 @@ impl FinalizedState {
                         .expect("ES response parsing to a json_body should never fail");
                     assert!(!response_body["errors"]
                         .as_bool()
-                        .expect(format!("ES error: {}", response_body).as_str()));
+                        .unwrap_or_else(|| panic!("ES error: {response_body}")));
                 });
 
                 // clean the storage.

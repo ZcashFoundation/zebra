@@ -156,7 +156,7 @@ fn best_chain_wins_for_network(network: Network) -> Result<()> {
     let expected_hash = block2.hash();
 
     let mut state = NonFinalizedState::new(network);
-    let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), network, None);
 
     state.commit_new_chain(block2.prepare(), &finalized_state)?;
     state.commit_new_chain(child.prepare(), &finalized_state)?;
@@ -194,7 +194,7 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
     let child = block1.make_fake_child().set_work(1);
 
     let mut state = NonFinalizedState::new(network);
-    let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), network, None);
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -247,7 +247,7 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
     let child2 = block2.make_fake_child().set_work(1);
 
     let mut state = NonFinalizedState::new(network);
-    let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), network, None);
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -294,7 +294,7 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
     let short_chain_block = block1.make_fake_child().set_work(3);
 
     let mut state = NonFinalizedState::new(network);
-    let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), network, None);
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -341,7 +341,7 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
     let short_chain_block = block1.make_fake_child().set_work(3);
 
     let mut state = NonFinalizedState::new(network);
-    let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), network, None);
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -386,7 +386,7 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
     let expected_hash = more_work_child.hash();
 
     let mut state = NonFinalizedState::new(network);
-    let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), network, None);
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -430,7 +430,7 @@ fn history_tree_is_updated_for_network_upgrade(
     );
 
     let mut state = NonFinalizedState::new(network);
-    let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), network, None);
 
     state
         .commit_new_chain(prev_block.clone().prepare(), &finalized_state)
@@ -526,7 +526,7 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
     );
 
     let mut state = NonFinalizedState::new(network);
-    let finalized_state = FinalizedState::new(&Config::ephemeral(), network);
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), network, None);
 
     state
         .commit_new_chain(prev_block.clone().prepare(), &finalized_state)
