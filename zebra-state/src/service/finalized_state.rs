@@ -389,11 +389,13 @@ impl FinalizedState {
             let client = self.elastic_db.clone();
             let rt = tokio::runtime::Runtime::new().unwrap();
             let blocks = self.elastic_blocks.clone();
-            let network = self.network.clone();
+            let network = self.network;
 
             rt.block_on(async move {
                 let response = client
-                    .bulk(BulkParts::Index(format!("Zcash_{network}").as_str()))
+                    .bulk(BulkParts::Index(
+                        format!("zcash_{}", network.to_string().to_lowercase()).as_str(),
+                    ))
                     .body(blocks)
                     .send()
                     .await
@@ -404,9 +406,8 @@ impl FinalizedState {
                     .json::<Value>()
                     .await
                     .expect("ES response parsing to a json_body should never fail");
-                assert!(!response_body["errors"]
-                    .as_bool()
-                    .unwrap_or_else(|| panic!("ES error: {response_body}")));
+                let errors = response_body["errors"].as_bool().unwrap_or(true);
+                assert!(!errors, "{}", format!("ES error: {response_body}"));
             });
 
             // clean the block storage.
