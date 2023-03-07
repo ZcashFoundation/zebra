@@ -450,6 +450,9 @@ impl Service<Request> for Mempool {
             if !send_to_peers_ids.is_empty() {
                 tracing::trace!(?send_to_peers_ids, "sending new transactions to peers");
 
+                // TODO:
+                // - if the transaction gossip task is slow, we can overwrite unsent IDs here
+                // - does this happen often enough to be worth a fix?
                 self.transaction_sender.send(send_to_peers_ids)?;
             }
         }
