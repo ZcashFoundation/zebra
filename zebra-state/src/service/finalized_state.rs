@@ -389,10 +389,11 @@ impl FinalizedState {
             let client = self.elastic_db.clone();
             let rt = tokio::runtime::Runtime::new().unwrap();
             let blocks = self.elastic_blocks.clone();
+            let network = self.network.clone();
 
             rt.block_on(async move {
                 let response = client
-                    .bulk(BulkParts::Index("testing"))
+                    .bulk(BulkParts::Index(format!("Zcash_{network}").as_str()))
                     .body(blocks)
                     .send()
                     .await
