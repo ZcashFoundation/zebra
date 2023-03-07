@@ -1188,12 +1188,18 @@ where
 ///
 /// See the notes for the [`Rpc::get_info` method].
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct GetInfo {
     /// The node version build number
-    build: String,
+    pub(crate) build: String,
 
     /// The server sub-version identifier, used as the network protocol user-agent
-    subversion: String,
+    pub(crate) subversion: String,
 }
 
 /// Response to a `getblockchaininfo` RPC request.
@@ -1202,26 +1208,26 @@ pub struct GetInfo {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetBlockChainInfo {
     /// Current network name as defined in BIP70 (main, test, regtest)
-    chain: String,
+    pub chain: String,
 
     /// The current number of blocks processed in the server, numeric
-    blocks: Height,
+    pub blocks: Height,
 
     /// The hash of the currently best block, in big-endian order, hex-encoded
     #[serde(rename = "bestblockhash", with = "hex")]
-    best_block_hash: block::Hash,
+    pub best_block_hash: block::Hash,
 
     /// If syncing, the estimated height of the chain, else the current best height, numeric.
     ///
     /// In Zebra, this is always the height estimate, so it might be a little inaccurate.
     #[serde(rename = "estimatedheight")]
-    estimated_height: Height,
+    pub estimated_height: Height,
 
     /// Status of network upgrades
-    upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
+    pub upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
 
     /// Branch IDs of the current and upcoming consensus rules
-    consensus: TipConsensusBranch,
+    pub consensus: TipConsensusBranch,
 }
 
 /// A wrapper type with a list of transparent address strings.
@@ -1229,6 +1235,12 @@ pub struct GetBlockChainInfo {
 /// This is used for the input parameter of [`Rpc::get_address_balance`],
 /// [`Rpc::get_address_tx_ids`] and [`Rpc::get_address_utxos`].
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct AddressStrings {
     /// A list of transparent address strings.
     addresses: Vec<String>,
@@ -1261,6 +1273,12 @@ impl AddressStrings {
 
 /// The transparent balance of a set of addresses.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct AddressBalance {
     /// The total transparent balance.
     balance: u64,
@@ -1268,11 +1286,17 @@ pub struct AddressBalance {
 
 /// A hex-encoded [`ConsensusBranchId`] string.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
-struct ConsensusBranchIdHex(#[serde(with = "hex")] ConsensusBranchId);
+pub struct ConsensusBranchIdHex(#[serde(with = "hex")] pub ConsensusBranchId);
 
 /// Information about [`NetworkUpgrade`] activation.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-struct NetworkUpgradeInfo {
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
+pub struct NetworkUpgradeInfo {
     /// Name of upgrade, string.
     ///
     /// Ignored by lightwalletd, but useful for debugging.
@@ -1288,7 +1312,13 @@ struct NetworkUpgradeInfo {
 
 /// The activation status of a [`NetworkUpgrade`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-enum NetworkUpgradeStatus {
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
+pub enum NetworkUpgradeStatus {
     /// The network upgrade is currently active.
     ///
     /// Includes all network upgrades that have previously activated,
@@ -1309,14 +1339,14 @@ enum NetworkUpgradeStatus {
 ///
 /// These branch IDs are different when the next block is a network upgrade activation block.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-struct TipConsensusBranch {
+pub struct TipConsensusBranch {
     /// Branch ID used to validate the current chain tip, big-endian, hex-encoded.
     #[serde(rename = "chaintip")]
-    chain_tip: ConsensusBranchIdHex,
+    pub chain_tip: ConsensusBranchIdHex,
 
     /// Branch ID used to validate the next block, big-endian, hex-encoded.
     #[serde(rename = "nextblock")]
-    next_block: ConsensusBranchIdHex,
+    pub next_block: ConsensusBranchIdHex,
 }
 
 /// Response to a `sendrawtransaction` RPC request.

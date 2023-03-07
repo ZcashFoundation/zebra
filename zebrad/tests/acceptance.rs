@@ -487,7 +487,8 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
         }
     };
 
-    let expected_run_dir_file_names = expected_run_dir_file_names.map(Into::into).collect();
+    let expected_run_dir_file_names: HashSet<_> =
+        expected_run_dir_file_names.map(Into::into).collect();
     let run_dir_file_names = run_dir
         .path()
         .read_dir()

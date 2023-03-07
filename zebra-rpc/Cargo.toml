@@ -26,7 +26,8 @@ getblocktemplate-rpcs = [
 rkyv-serialization = [
     "rkyv",
     "bytecheck",
-    "datacake-rpc"
+    "datacake-rpc",
+    "zebra-chain/rkyv-serialization"
 ]
 
 # Test-only features

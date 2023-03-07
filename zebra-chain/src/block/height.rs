@@ -19,6 +19,12 @@ use crate::serialization::SerializationError;
 /// There are multiple formats for serializing a height, so we don't implement
 /// `ZcashSerialize` or `ZcashDeserialize` for `Height`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct Height(pub u32);
 
 impl std::str::FromStr for Height {

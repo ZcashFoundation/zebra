@@ -28,6 +28,23 @@ pub struct Config {
     /// They can also query your node's state.
     pub listen_addr: Option<SocketAddr>,
 
+    #[cfg(feature = "rkyv-serialization")]
+    /// IP address and port for the Rkyv RPC server.
+    ///
+    /// Note: The rkyv RPC server is disabled by default.
+    /// To enable the rkyv RPC server, set a listen address in the config:
+    /// ```toml
+    /// [rpc]
+    /// rkyv_listen_addr = '127.0.0.1:8232'
+    /// ```
+    ///
+    /// # Security
+    ///
+    /// If you bind Zebra's RPC port to a public IP address,
+    /// anyone on the internet can send transactions via your node.
+    /// They can also query your node's state.
+    pub rkyv_listen_addr: Option<SocketAddr>,
+
     /// The number of threads used to process RPC requests and responses.
     ///
     /// Zebra's RPC server has a separate thread pool and a `tokio` executor for each thread.
@@ -73,6 +90,10 @@ impl Default for Config {
 
             // Debug options are always off by default.
             debug_force_finished_sync: false,
+
+            // Disable rkyv RPCs by default.
+            #[cfg(feature = "rkyv-serialization")]
+            rkyv_listen_addr: None,
         }
     }
 }

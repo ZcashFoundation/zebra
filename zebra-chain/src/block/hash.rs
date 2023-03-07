@@ -22,6 +22,12 @@ use proptest_derive::Arbitrary;
 /// following the u256 convention set by Bitcoin and zcashd.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct Hash(pub [u8; 32]);
 
 impl Hash {

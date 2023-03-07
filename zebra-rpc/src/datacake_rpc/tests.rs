@@ -3,6 +3,7 @@
 use datacake_rpc::{Channel, RpcClient};
 use tower::{buffer::Buffer, BoxError};
 use zebra_chain::{chain_tip::NoChainTip, parameters::Network};
+use zebra_network::constants::USER_AGENT;
 use zebra_test::mock_service::MockService;
 
 use crate::datacake_rpc::*;
@@ -17,9 +18,12 @@ async fn datacake_rpc_server_spawn() -> Result<(), BoxError> {
     let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
+    let app_version = "v0.0.1-datacake-RPC-server-test";
+
     let (rpc_impl, _rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC server test",
+        app_version,
         Network::Mainnet,
+        false,
         false,
         Buffer::new(mempool, 1),
         state,
@@ -52,7 +56,15 @@ async fn datacake_rpc_server_spawn() -> Result<(), BoxError> {
         >,
     > = RpcClient::new(client);
 
-    let resp = rpc_client.send(&Method::GetInfo).await?;
-    assert_eq!(resp, "getinfo".to_string());
+    let resp = rpc_client.send(&Request::GetInfo).await?.to_owned()?;
+
+    assert_eq!(
+        resp,
+        Response::GetInfo(GetInfo {
+            build: app_version.into(),
+            subversion: USER_AGENT.into(),
+        })
+    );
+
     Ok(())
 }
