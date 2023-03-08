@@ -1355,6 +1355,12 @@ pub struct TipConsensusBranch {
 ///
 /// See the notes for the [`Rpc::send_raw_transaction` method].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
 
 /// Response to a `getblock` RPC request.

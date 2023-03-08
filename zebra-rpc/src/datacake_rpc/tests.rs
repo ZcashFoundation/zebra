@@ -56,14 +56,14 @@ async fn datacake_rpc_server_spawn() -> Result<(), BoxError> {
         >,
     > = RpcClient::new(client);
 
-    let resp = rpc_client.send(&Request::GetInfo).await?.to_owned()?;
+    let resp = rpc_client.send(&request::Info).await?.to_owned()?;
 
     assert_eq!(
         resp,
-        Response::GetInfo(GetInfo {
+        response::GetInfo {
             build: app_version.into(),
             subversion: USER_AGENT.into(),
-        })
+        }
     );
 
     Ok(())

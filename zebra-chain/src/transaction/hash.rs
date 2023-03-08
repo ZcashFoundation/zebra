@@ -62,6 +62,12 @@ use super::{txid::TxIdBuilder, AuthDigest, Transaction};
 /// [Spec: Transaction Identifiers]: https://zips.z.cash/protocol/protocol.pdf#txnidentifiers
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct Hash(pub [u8; 32]);
 
 impl From<Transaction> for Hash {
