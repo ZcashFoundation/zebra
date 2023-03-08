@@ -136,6 +136,45 @@ where
         self.send_raw_transaction(raw_transaction_data)
             .await
             .map_err(make_status_error)
-            .map(Into::into)
+    }
+}
+
+#[datacake_rpc::async_trait]
+impl<Mempool, State, Tip> Handler<request::Block> for RpcImpl<Mempool, State, Tip>
+where
+    Mempool: tower::Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
+    Mempool::Future: Send,
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+{
+    type Reply = response::GetBlock;
+
+    async fn on_message(
+        &self,
+        request: datacake_rpc::Request<request::Block>,
+    ) -> Result<Self::Reply, Status> {
+        let request::Block {
+            hash_or_height,
+            verbosity,
+        } = request.to_owned().map_err(|err| Status {
+            code: ErrorCode::InvalidPayload,
+            message: err.to_string(),
+        })?;
+
+        self.get_block(hash_or_height, verbosity)
+            .await
+            .map_err(make_status_error)
     }
 }

@@ -36,3 +36,17 @@ pub struct AddressBalance(pub AddressStrings);
 ///
 /// See [`Rpc::send_raw_transaction`] for more information.
 pub struct SendRawTransaction(pub String);
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
+#[archive_attr(derive(CheckBytes, PartialEq, Debug))]
+/// Returns the requested block by hash or height, as a GetBlock JSON string.
+/// If the block is not in Zebra's state, returns error code -8.
+///
+/// See [`Rpc::get_block`] for more information.
+pub struct Block {
+    /// The hash or height for the block to be returned.
+    pub hash_or_height: String,
+    /// 0 for hex encoded data, 1 for a json object, and 2 for json object with transaction data.
+    pub verbosity: Option<u8>,
+}

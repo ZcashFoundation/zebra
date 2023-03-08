@@ -1368,6 +1368,12 @@ pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
 /// See the notes for the [`Rpc::get_block`] method.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 #[serde(untagged)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub enum GetBlock {
     /// The request block, hex-encoded.
     Raw(#[serde(with = "hex")] SerializedBlock),
@@ -1398,6 +1404,12 @@ pub enum GetBlock {
 /// Also see the notes for the [`Rpc::get_best_block_hash`] and `get_block_hash` methods.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(transparent)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct GetBlockHash(#[serde(with = "hex")] pub block::Hash);
 
 /// Response to a `z_gettreestate` RPC request.

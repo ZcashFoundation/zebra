@@ -159,6 +159,12 @@ impl ZcashDeserialize for Block {
 ///
 /// Stores bytes that are guaranteed to be deserializable into a [`Block`].
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct SerializedBlock {
     bytes: Vec<u8>,
 }

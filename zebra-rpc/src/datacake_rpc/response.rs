@@ -9,8 +9,8 @@ use zebra_chain::{
 };
 
 pub use crate::methods::{
-    AddressBalance, ConsensusBranchIdHex, GetInfo, NetworkUpgradeInfo, SentTransactionHash,
-    TipConsensusBranch,
+    AddressBalance, ConsensusBranchIdHex, GetBlock, GetInfo, NetworkUpgradeInfo,
+    SentTransactionHash, TipConsensusBranch,
 };
 
 /// An IndexMap entry, see 'upgrades' field [`GetBlockChainInfo`](crate::methods::GetBlockChainInfo)
