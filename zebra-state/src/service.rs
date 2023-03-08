@@ -309,7 +309,7 @@ impl StateService {
         let timer = CodeTimer::start();
 
         #[cfg(feature = "elasticsearch")]
-        let elasticsearch_client = {
+        let finalized_state = {
             use elasticsearch::{
                 auth::Credentials::Basic,
                 cert::CertificateValidation,
@@ -329,17 +329,13 @@ impl StateService {
                 ))
                 .build()
                 .unwrap();
-            Some(Elasticsearch::new(transport))
+            let elastic_db = Some(Elasticsearch::new(transport));
+
+            FinalizedState::new(&config, network, elastic_db)
         };
 
-        let finalized_state = FinalizedState::new(
-            &config,
-            network,
-            match elasticsearch_client {
-                Some(_) => elasticsearch_client,
-                None => None,
-            },
-        );
+        #[cfg(not(feature = "elasticsearch"))]
+        let finalized_state = { FinalizedState::new(&config, network) };
 
         timer.finish(module_path!(), line!(), "opening finalized state database");
 

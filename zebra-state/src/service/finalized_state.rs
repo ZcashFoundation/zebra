@@ -81,7 +81,7 @@ pub struct FinalizedState {
 
     #[cfg(feature = "elasticsearch")]
     /// The elasticsearch handle.
-    pub elastic_db: elasticsearch::Elasticsearch,
+    pub elastic_db: Option<elasticsearch::Elasticsearch>,
 
     #[cfg(feature = "elasticsearch")]
     /// A collection of blocks to be sent to elasticsearch as a bulk.
@@ -94,18 +94,24 @@ impl FinalizedState {
     pub fn new(
         config: &Config,
         network: Network,
-        elastic_db: Option<elasticsearch::Elasticsearch>,
+        #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
     ) -> Self {
         let db = ZebraDb::new(config, network);
 
+        #[cfg(feature = "elasticsearch")]
         let new_state = Self {
             network,
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
             db,
-            #[cfg(feature = "elasticsearch")]
-            elastic_db: elastic_db.expect("database handle should be here"),
-            #[cfg(feature = "elasticsearch")]
+            elastic_db,
             elastic_blocks: vec![],
+        };
+
+        #[cfg(not(feature = "elasticsearch"))]
+        let new_state = Self {
+            network,
+            debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
+            db,
         };
 
         // TODO: move debug_stop_at_height into a task in the start command (#3442)
@@ -355,63 +361,64 @@ impl FinalizedState {
         use elasticsearch::BulkParts;
         use serde_json::Value;
 
-        let block = &finalized.block;
-        let block_time = block.header.time.timestamp();
-        let local_time = Utc::now().timestamp();
+        if let Some(client) = self.elastic_db.clone() {
+            let block = &finalized.block;
+            let block_time = block.header.time.timestamp();
+            let local_time = Utc::now().timestamp();
 
-        const AWAY_FROM_TIP_BULK_SIZE: usize = 800;
-        const CLOSE_TO_TIP_BULK_SIZE: usize = 2;
-        const CLOSE_TO_TIP_SECONDS: i64 = 14400; // 4 hours
+            const AWAY_FROM_TIP_BULK_SIZE: usize = 800;
+            const CLOSE_TO_TIP_BULK_SIZE: usize = 2;
+            const CLOSE_TO_TIP_SECONDS: i64 = 14400; // 4 hours
 
-        // If we are close to the tip index one block per bulk call.
-        let mut blocks_size_to_dump = AWAY_FROM_TIP_BULK_SIZE;
-        if local_time - block_time < CLOSE_TO_TIP_SECONDS {
-            blocks_size_to_dump = CLOSE_TO_TIP_BULK_SIZE;
-        }
+            // If we are close to the tip index one block per bulk call.
+            let mut blocks_size_to_dump = AWAY_FROM_TIP_BULK_SIZE;
+            if local_time - block_time < CLOSE_TO_TIP_SECONDS {
+                blocks_size_to_dump = CLOSE_TO_TIP_BULK_SIZE;
+            }
 
-        // Insert the operation line.
-        let height_number = committed_tip_height.unwrap_or(block::Height(0)).0;
-        self.elastic_blocks.push(
-            serde_json::json!({
-                "index": {
-                    "_id": height_number.to_string().as_str()
-                }
-            })
-            .to_string(),
-        );
+            // Insert the operation line.
+            let height_number = committed_tip_height.unwrap_or(block::Height(0)).0;
+            self.elastic_blocks.push(
+                serde_json::json!({
+                    "index": {
+                        "_id": height_number.to_string().as_str()
+                    }
+                })
+                .to_string(),
+            );
 
-        // Insert the block itself.
-        self.elastic_blocks
-            .push(serde_json::json!(block).to_string());
+            // Insert the block itself.
+            self.elastic_blocks
+                .push(serde_json::json!(block).to_string());
 
-        // We are in bulk time, insert to ES all we have.
-        if self.elastic_blocks.len() >= blocks_size_to_dump {
-            let client = self.elastic_db.clone();
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let blocks = self.elastic_blocks.clone();
-            let network = self.network;
+            // We are in bulk time, insert to ES all we have.
+            if self.elastic_blocks.len() >= blocks_size_to_dump {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let blocks = self.elastic_blocks.clone();
+                let network = self.network;
 
-            rt.block_on(async move {
-                let response = client
-                    .bulk(BulkParts::Index(
-                        format!("zcash_{}", network.to_string().to_lowercase()).as_str(),
-                    ))
-                    .body(blocks)
-                    .send()
-                    .await
-                    .expect("ES Request should never fail");
+                rt.block_on(async move {
+                    let response = client
+                        .bulk(BulkParts::Index(
+                            format!("zcash_{}", network.to_string().to_lowercase()).as_str(),
+                        ))
+                        .body(blocks)
+                        .send()
+                        .await
+                        .expect("ES Request should never fail");
 
-                // Make sure no errors ever.
-                let response_body = response
-                    .json::<Value>()
-                    .await
-                    .expect("ES response parsing to a json_body should never fail");
-                let errors = response_body["errors"].as_bool().unwrap_or(true);
-                assert!(!errors, "{}", format!("ES error: {response_body}"));
-            });
+                    // Make sure no errors ever.
+                    let response_body = response
+                        .json::<Value>()
+                        .await
+                        .expect("ES response parsing to a json_body should never fail");
+                    let errors = response_body["errors"].as_bool().unwrap_or(true);
+                    assert!(!errors, "{}", format!("ES error: {response_body}"));
+                });
 
-            // clean the block storage.
-            self.elastic_blocks.clear();
+                // clean the block storage.
+                self.elastic_blocks.clear();
+            }
         }
     }
 
