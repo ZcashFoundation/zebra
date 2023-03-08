@@ -355,7 +355,7 @@ impl FinalizedState {
         use elasticsearch::BulkParts;
         use serde_json::Value;
 
-        let block = finalized.block.clone();
+        let block = &finalized.block;
         let block_time = block.header.time.timestamp();
         let local_time = Utc::now().timestamp();
 
