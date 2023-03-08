@@ -357,14 +357,10 @@ impl FinalizedState {
         finalized: &FinalizedBlock,
         committed_tip_height: &Option<block::Height>,
     ) {
-        use chrono::Utc;
-        use elasticsearch::BulkParts;
-        use serde_json::Value;
-
         if let Some(client) = self.elastic_db.clone() {
             let block = &finalized.block;
             let block_time = block.header.time.timestamp();
-            let local_time = Utc::now().timestamp();
+            let local_time = chrono::Utc::now().timestamp();
 
             const AWAY_FROM_TIP_BULK_SIZE: usize = 800;
             const CLOSE_TO_TIP_BULK_SIZE: usize = 2;
@@ -393,13 +389,14 @@ impl FinalizedState {
 
             // We are in bulk time, insert to ES all we have.
             if self.elastic_blocks.len() >= blocks_size_to_dump {
-                let rt = tokio::runtime::Runtime::new().unwrap();
+                let rt = tokio::runtime::Runtime::new()
+                    .expect("wuntime creation for elasticsearch should not fail.");
                 let blocks = self.elastic_blocks.clone();
                 let network = self.network;
 
                 rt.block_on(async move {
                     let response = client
-                        .bulk(BulkParts::Index(
+                        .bulk(elasticsearch::BulkParts::Index(
                             format!("zcash_{}", network.to_string().to_lowercase()).as_str(),
                         ))
                         .body(blocks)
@@ -409,7 +406,7 @@ impl FinalizedState {
 
                     // Make sure no errors ever.
                     let response_body = response
-                        .json::<Value>()
+                        .json::<serde_json::Value>()
                         .await
                         .expect("ES response parsing to a json_body should never fail");
                     let errors = response_body["errors"].as_bool().unwrap_or(true);

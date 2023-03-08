@@ -24,6 +24,15 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "elasticsearch")]
+use elasticsearch::{
+    auth::Credentials::Basic,
+    cert::CertificateValidation,
+    http::transport::{SingleNodeConnectionPool, TransportBuilder},
+    http::Url,
+    Elasticsearch,
+};
+
 use futures::future::FutureExt;
 use tokio::sync::{oneshot, watch};
 use tower::{util::BoxService, Service, ServiceExt};
@@ -310,16 +319,9 @@ impl StateService {
 
         #[cfg(feature = "elasticsearch")]
         let finalized_state = {
-            use elasticsearch::{
-                auth::Credentials::Basic,
-                cert::CertificateValidation,
-                http::transport::{SingleNodeConnectionPool, TransportBuilder},
-                http::Url,
-                Elasticsearch,
-            };
-
             let conn_pool = SingleNodeConnectionPool::new(
-                Url::parse(config.elasticsearch_url.as_str()).unwrap(),
+                Url::parse(config.elasticsearch_url.as_str())
+                    .expect("configured elasticsearch url is invalid"),
             );
             let transport = TransportBuilder::new(conn_pool)
                 .cert_validation(CertificateValidation::None)
@@ -328,7 +330,7 @@ impl StateService {
                     config.clone().elasticsearch_password,
                 ))
                 .build()
-                .unwrap();
+                .expect("elasticsearch transport builder should not fail");
             let elastic_db = Some(Elasticsearch::new(transport));
 
             FinalizedState::new(&config, network, elastic_db)
