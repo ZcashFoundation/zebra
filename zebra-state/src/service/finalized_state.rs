@@ -361,7 +361,7 @@ impl FinalizedState {
 
         const AWAY_FROM_TIP_BULK_SIZE: usize = 800;
         const CLOSE_TO_TIP_BULK_SIZE: usize = 2;
-        const CLOSE_TO_TIP_SECONDS: i64 = 900;
+        const CLOSE_TO_TIP_SECONDS: i64 = 14400; // 4 hours
 
         // If we are close to the tip index one block per bulk call.
         let mut blocks_size_to_dump = AWAY_FROM_TIP_BULK_SIZE;
