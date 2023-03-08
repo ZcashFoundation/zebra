@@ -390,7 +390,7 @@ impl FinalizedState {
             // We are in bulk time, insert to ES all we have.
             if self.elastic_blocks.len() >= blocks_size_to_dump {
                 let rt = tokio::runtime::Runtime::new()
-                    .expect("wuntime creation for elasticsearch should not fail.");
+                    .expect("runtime creation for elasticsearch should not fail.");
                 let blocks = self.elastic_blocks.clone();
                 let network = self.network;
 
