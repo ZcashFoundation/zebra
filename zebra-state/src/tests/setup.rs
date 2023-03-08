@@ -92,7 +92,12 @@ pub(crate) fn new_state_with_mainnet_genesis() -> (FinalizedState, NonFinalizedS
     let config = Config::ephemeral();
     let network = Mainnet;
 
-    let mut finalized_state = FinalizedState::new(&config, network, None);
+    let mut finalized_state = FinalizedState::new(
+        &config,
+        network,
+        #[cfg(feature = "elasticsearch")]
+        None,
+    );
     let non_finalized_state = NonFinalizedState::new(network);
 
     assert_eq!(

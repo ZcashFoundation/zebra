@@ -478,7 +478,7 @@ fn rejection_restores_internal_state_genesis() -> Result<()> {
       }
       ))| {
         let mut state = NonFinalizedState::new(network);
-        let finalized_state = FinalizedState::new(&Config::ephemeral(), network, None);
+        let finalized_state = FinalizedState::new(&Config::ephemeral(), network, #[cfg(feature = "elasticsearch")] None);
 
         let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
         finalized_state.set_finalized_value_pool(fake_value_pool);
