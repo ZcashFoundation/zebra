@@ -230,7 +230,7 @@ impl FinalizedState {
 
         // Save blocks to elasticsearch if the feature is enabled.
         #[cfg(feature = "elasticsearch")]
-        self.elasticsearch(&finalized, &committed_tip_height);
+        self.elasticsearch(&finalized.block, &committed_tip_height);
 
         // Assert that callers (including unit tests) get the chain order correct
         if self.db.is_empty() {
@@ -354,11 +354,10 @@ impl FinalizedState {
     /// synchronizing the chain, when we get close to tip we index blocks one by one.
     pub fn elasticsearch(
         &mut self,
-        finalized: &FinalizedBlock,
+        block: &Arc<block::Block>,
         committed_tip_height: &Option<block::Height>,
     ) {
         if let Some(client) = self.elastic_db.clone() {
-            let block = &finalized.block;
             let block_time = block.header.time.timestamp();
             let local_time = chrono::Utc::now().timestamp();
 
