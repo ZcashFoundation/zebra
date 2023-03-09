@@ -228,10 +228,6 @@ impl FinalizedState {
         let committed_tip_hash = self.db.finalized_tip_hash();
         let committed_tip_height = self.db.finalized_tip_height();
 
-        // Save blocks to elasticsearch if the feature is enabled.
-        #[cfg(feature = "elasticsearch")]
-        self.elasticsearch(&finalized.block, &committed_tip_height);
-
         // Assert that callers (including unit tests) get the chain order correct
         if self.db.is_empty() {
             assert_eq!(
@@ -316,6 +312,9 @@ impl FinalizedState {
         let finalized_height = finalized.height;
         let finalized_hash = finalized.hash;
 
+        #[cfg(feature = "elasticsearch")]
+        let finalized_block = finalized.block.clone();
+
         let result = self.db.write_block(
             finalized,
             history_tree,
@@ -324,24 +323,30 @@ impl FinalizedState {
             source,
         );
 
-        // TODO: move the stop height check to the syncer (#3442)
-        if result.is_ok() && self.is_at_stop_height(finalized_height) {
-            tracing::info!(
-                height = ?finalized_height,
-                hash = ?finalized_hash,
-                block_source = ?source,
-                "stopping at configured height, flushing database to disk"
-            );
+        if result.is_ok() {
+            // Save blocks to elasticsearch if the feature is enabled.
+            #[cfg(feature = "elasticsearch")]
+            self.elasticsearch(&finalized_block, &committed_tip_height);
 
-            // We're just about to do a forced exit, so it's ok to do a forced db shutdown
-            self.db.shutdown(true);
+            // TODO: move the stop height check to the syncer (#3442)
+            if self.is_at_stop_height(finalized_height) {
+                tracing::info!(
+                    height = ?finalized_height,
+                    hash = ?finalized_hash,
+                    block_source = ?source,
+                    "stopping at configured height, flushing database to disk"
+                );
 
-            // Drops tracing log output that's hasn't already been written to stdout
-            // since this exits before calling drop on the WorkerGuard for the logger thread.
-            // This is okay for now because this is test-only code
-            //
-            // TODO: Call ZebradApp.shutdown or drop its Tracing component before calling exit_process to flush logs to stdout
-            Self::exit_process();
+                // We're just about to do a forced exit, so it's ok to do a forced db shutdown
+                self.db.shutdown(true);
+
+                // Drops tracing log output that's hasn't already been written to stdout
+                // since this exits before calling drop on the WorkerGuard for the logger thread.
+                // This is okay for now because this is test-only code
+                //
+                // TODO: Call ZebradApp.shutdown or drop its Tracing component before calling exit_process to flush logs to stdout
+                Self::exit_process();
+            }
         }
 
         result
