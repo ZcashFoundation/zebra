@@ -326,7 +326,7 @@ impl FinalizedState {
         if result.is_ok() {
             // Save blocks to elasticsearch if the feature is enabled.
             #[cfg(feature = "elasticsearch")]
-            self.elasticsearch(&finalized_block, &committed_tip_height);
+            self.elasticsearch(&finalized_block);
 
             // TODO: move the stop height check to the syncer (#3442)
             if self.is_at_stop_height(finalized_height) {
@@ -357,11 +357,7 @@ impl FinalizedState {
     ///
     /// We use the elasticsearch bulk api to index multiple blocks at a time while we are
     /// synchronizing the chain, when we get close to tip we index blocks one by one.
-    pub fn elasticsearch(
-        &mut self,
-        block: &Arc<block::Block>,
-        committed_tip_height: &Option<block::Height>,
-    ) {
+    pub fn elasticsearch(&mut self, block: &Arc<block::Block>) {
         if let Some(client) = self.elastic_db.clone() {
             let block_time = block.header.time.timestamp();
             let local_time = chrono::Utc::now().timestamp();
@@ -377,7 +373,7 @@ impl FinalizedState {
             }
 
             // Insert the operation line.
-            let height_number = committed_tip_height.unwrap_or(block::Height(0)).0;
+            let height_number = block.coinbase_height().unwrap_or(block::Height(0)).0;
             self.elastic_blocks.push(
                 serde_json::json!({
                     "index": {
