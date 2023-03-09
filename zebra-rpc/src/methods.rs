@@ -6,7 +6,7 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-use std::{collections::HashSet, io, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 
 use chrono::Utc;
 use futures::{FutureExt, TryFutureExt};
@@ -846,6 +846,8 @@ where
     ) -> BoxFuture<Result<GetRawTransaction>> {
         let mut state = self.state.clone();
         let mut mempool = self.mempool.clone();
+        let verbose = verbose != 0;
+        let latest_chain_tip = verbose.then(|| self.latest_chain_tip.clone());
 
         async move {
             let txid = transaction::Hash::from_hex(txid_hex).map_err(|_| {
@@ -878,12 +880,7 @@ where
                 mempool::Response::Transactions(unmined_transactions) => {
                     if !unmined_transactions.is_empty() {
                         let tx = unmined_transactions[0].transaction.clone();
-                        return GetRawTransaction::from_transaction(tx, None, verbose != 0)
-                            .map_err(|error| Error {
-                                code: ErrorCode::ServerError(0),
-                                message: error.to_string(),
-                                data: None,
-                            });
+                        return Ok(GetRawTransaction::from_transaction(tx, None, None, verbose));
                     }
                 }
                 _ => unreachable!("unmatched response to a transactionids request"),
@@ -902,15 +899,15 @@ where
                 })?;
 
             match response {
-                zebra_state::ReadResponse::Transaction(Some((tx, height))) => Ok(
-                    GetRawTransaction::from_transaction(tx, Some(height), verbose != 0).map_err(
-                        |error| Error {
-                            code: ErrorCode::ServerError(0),
-                            message: error.to_string(),
-                            data: None,
-                        },
-                    )?,
-                ),
+                zebra_state::ReadResponse::Transaction(Some((tx, height))) => {
+                    Ok(GetRawTransaction::from_transaction(
+                        tx,
+                        Some(height),
+                        latest_chain_tip
+                            .and_then(|latest_chain_tip| latest_chain_tip.best_tip_height()),
+                        verbose,
+                    ))
+                }
                 zebra_state::ReadResponse::Transaction(None) => Err(Error {
                     code: ErrorCode::ServerError(0),
                     message: "Transaction not found".to_string(),
@@ -1439,6 +1436,10 @@ pub enum GetRawTransaction {
         /// The height of the block that contains the transaction, or -1 if
         /// not applicable.
         height: i32,
+        /// The confirmations of the block that contains the transaction,
+        /// or None if the transaction is in the mempool.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        confirmations: Option<i32>,
     },
 }
 
@@ -1490,10 +1491,15 @@ impl GetRawTransaction {
     fn from_transaction(
         tx: Arc<Transaction>,
         height: Option<block::Height>,
+        tip_height: Option<block::Height>,
         verbose: bool,
-    ) -> std::result::Result<Self, io::Error> {
+    ) -> Self {
         if verbose {
-            Ok(GetRawTransaction::Object {
+            let confirmations = height
+                .zip(tip_height)
+                .map(|(height, tip_height)| (tip_height - height) + 1);
+
+            GetRawTransaction::Object {
                 hex: tx.into(),
                 height: match height {
                     Some(height) => height
@@ -1502,9 +1508,10 @@ impl GetRawTransaction {
                         .expect("valid block heights are limited to i32::MAX"),
                     None => -1,
                 },
-            })
+                confirmations,
+            }
         } else {
-            Ok(GetRawTransaction::Raw(tx.into()))
+            GetRawTransaction::Raw(tx.into())
         }
     }
 }
