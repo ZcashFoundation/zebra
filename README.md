@@ -13,9 +13,9 @@
   - [Using Zebra](#using-zebra)
 - [Release Candidates](#release-candidates)
 - [Getting Started](#getting-started)
-  - [Build Instructions](#build-instructions)
+  - [Building Zebra](#building-zebra)
+    - [Optional Features](#optional-features)
   - [Configuring JSON-RPC for lightwalletd](#configuring-json-rpc-for-lightwalletd)
-  - [Optional Features](#optional-features)
   - [System Requirements](#system-requirements)
     - [Memory Troubleshooting](#memory-troubleshooting)
     - [macOS Test Troubleshooting](#macos-test-troubleshooting)
@@ -82,30 +82,78 @@ docker run zfnd/zebra:1.0.0-rc.5
 
 For more information, read our [Docker documentation](book/src/user/docker.md).
 
-You can also:
+### Building Zebra
 
-- [compile Zebra with metrics or tracing](https://doc.zebra.zfnd.org/zebrad/#metrics),
-- [enable Zebra's RPC port](https://github.com/ZcashFoundation/zebra#configuring-json-rpc-for-lightwalletd), and
-- [configure other features](https://zebra.zfnd.org/user/run.html).
+Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
+[libclang](https://clang.llvm.org/doxygen/group__CINDEX.html),
+[pkg-config](http://pkgconf.org/), and a C++ compiler.
 
-### Build Instructions
+Zebra is tested with the latest `stable` Rust version. Earlier versions are not
+supported or tested. Note that Zebra's code currently uses features introduced
+in Rust 1.65, or any later stable release.
 
-If you want to build `zebrad` yourself, you'll need [Rust](https://www.rust-lang.org/tools/install), [libclang](https://clang.llvm.org/get_started.html), a C++ compiler, and some other dependencies.
+Below are quick summaries for installing the dependencies on your machine.
 
-To run `zebrad`, follow the instructions to compile `zebrad`
-for your platform:
+<details><summary><h4>General instructions for installing dependencies</h4></summary>
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
-   - Zebra is tested with the latest `stable` Rust version. Earlier versions are not supported or tested.
-     (Zebra's code uses features introduced in Rust 1.65, or any later stable release.)
-2. Install Zebra's build dependencies:
-   - **libclang:** the `libclang`, `libclang-dev`, `llvm`, or `llvm-dev` packages
-     (these packages will have different names depending on your package manager)
-   - **clang** or another C++ compiler: `g++` (all platforms) or `Xcode` (macOS)
-3. Run `cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.5 zebrad`
-4. Run `zebrad start` (see [Running Zebra](https://zebra.zfnd.org/user/run.html) for more information)
 
-For more detailed instructions, refer to the [documentation](https://zebra.zfnd.org/user/install.html).
+2. Install Zebra's build dependencies:
+
+   - **libclang** is a library that might have different names depending on your
+     package manager. Typical names are `libclang`, `libclang-dev`, `llvm`, or
+     `llvm-dev`.
+   - **clang** or another C++ compiler: `g++` (all platforms) or `Xcode` (macOS).
+   - **pkg-config**
+
+</details>
+
+<details><summary><h4>Dependencies on Arch</h4></summary>
+
+```sh
+sudo pacman -S rust clang pkgconf
+```
+
+Note that the package `clang` includes `libclang` as well as the C++ compiler.
+
+</details>
+
+Once the dependencies are in place, you can build Zebra
+
+```sh
+cargo install --locked --git https://github.com/ZcashFoundation/zebra --tag v1.0.0-rc.5 zebrad
+```
+
+You can start Zebra by
+
+```sh
+zebrad start
+```
+
+See the [Running Zebra](https://zebra.zfnd.org/user/run.html) section in the
+book for more details.
+
+#### Optional Features
+
+You can also build Zebra with the following [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options):
+
+- `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/requirements.html#sentry-production-monitoring);
+- `filter-reload` for [dynamic tracing](https://zebra.zfnd.org/user/tracing.html#dynamic-tracing)
+- `journald` for [`journald` logging](https://zebra.zfnd.org/user/tracing.html#journald-logging).
+- `flamegraph` for [generating flamegraphs](https://zebra.zfnd.org/user/tracing.html#flamegraphs).
+- `prometheus` for [Prometheus metrics](https://doc.zebra.zfnd.org/zebrad/#metrics).
+- `getblocktemplate-rpcs` for [mining support](https://zebra.zfnd.org/user/mining.html).
+
+You can arbitrarily combine the features by listing them as parameters of the `--features` flag:
+
+```sh
+cargo install --features="<feature1> <feature2> ..." ...
+```
+
+The features are also described in [the API
+documentation](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-feature-flags).
+The debugging and monitoring features are disabled in release builds to increase
+performance.
 
 ### Configuring JSON-RPC for lightwalletd
 
@@ -127,16 +175,6 @@ See the [RPC config documentation](https://doc.zebra.zfnd.org/zebra_rpc/config/s
 
 It is recommended to use [adityapk00/lightwalletd](https://github.com/adityapk00/lightwalletd) because that is used in testing.
 Other `lightwalletd` forks have limited support, see the [detailed `lightwalletd` instructions](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/lightwalletd.md#sync-lightwalletd).
-
-### Optional Features
-
-For performance reasons, some debugging and monitoring features are disabled in release builds.
-
-You can [enable these features](https://doc.zebra.zfnd.org/zebrad/index.html#zebra-feature-flags) using:
-
-```sh
-cargo install --features=<name> ...
-```
 
 ### System Requirements
 
