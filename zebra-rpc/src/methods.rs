@@ -887,6 +887,8 @@ where
             };
 
             // Now check the state
+            let best_tip_height =
+                latest_chain_tip.and_then(|latest_chain_tip| latest_chain_tip.best_tip_height());
             let request = zebra_state::ReadRequest::Transaction(txid);
             let response = state
                 .ready()
@@ -900,11 +902,17 @@ where
 
             match response {
                 zebra_state::ReadResponse::Transaction(Some((tx, height))) => {
+                    // # Correctness:
+                    //
+                    // The transaction request only checks the best chain, so it's okay
+                    // to get the transaction depth by subtracting the transaction height
+                    // from the best chain tip height just before the transaction request.
+                    let depth = best_tip_height.map(|tip_height| (tip_height.0 - height.0));
+
                     Ok(GetRawTransaction::from_transaction(
                         tx,
                         Some(height),
-                        latest_chain_tip
-                            .and_then(|latest_chain_tip| latest_chain_tip.best_tip_height()),
+                        depth.map(|depth| depth + 1),
                         verbose,
                     ))
                 }
@@ -1491,14 +1499,10 @@ impl GetRawTransaction {
     fn from_transaction(
         tx: Arc<Transaction>,
         height: Option<block::Height>,
-        tip_height: Option<block::Height>,
+        confirmations: Option<u32>,
         verbose: bool,
     ) -> Self {
         if verbose {
-            let confirmations = height
-                .zip(tip_height)
-                .map(|(height, tip_height)| (tip_height.0 - height.0) + 1);
-
             GetRawTransaction::Object {
                 hex: tx.into(),
                 height: match height {
