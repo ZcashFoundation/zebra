@@ -50,3 +50,32 @@ pub struct Block {
     /// 0 for hex encoded data, 1 for a json object, and 2 for json object with transaction data.
     pub verbosity: Option<u8>,
 }
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
+#[archive_attr(derive(CheckBytes, PartialEq, Debug))]
+/// Returns the hash of the current best blockchain tip block.
+///
+/// See [`Rpc::get_best_block_hash`] for more information.
+pub struct BestTipBlockHash;
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
+#[archive_attr(derive(CheckBytes, PartialEq, Debug))]
+/// Returns all transaction ids in the memory pool.
+///
+/// See [`Rpc::get_raw_mempool`] for more information.
+pub struct RawMempool;
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
+#[archive_attr(derive(CheckBytes, PartialEq, Debug))]
+/// Returns the raw transaction data.
+///
+/// See [`Rpc::get_raw_transaction`] for more information.
+pub struct RawTransaction {
+    /// - `txid`: (string, required) The transaction ID of the transaction to be returned.
+    pub tx_id_hex: String,
+    /// - `verbose`: (numeric, optional, default=0) If 0, return a string of hex-encoded data, otherwise return a JSON object.
+    pub verbose: u8,
+}

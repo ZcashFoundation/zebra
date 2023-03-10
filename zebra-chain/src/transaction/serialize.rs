@@ -1004,6 +1004,12 @@ impl TrustedPreallocate for transparent::Output {
 ///
 /// Sorts in lexicographic order of the transaction's serialized data.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct SerializedTransaction {
     bytes: Vec<u8>,
 }

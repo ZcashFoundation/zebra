@@ -178,3 +178,101 @@ where
             .map_err(make_status_error)
     }
 }
+
+#[datacake_rpc::async_trait]
+impl<Mempool, State, Tip> Handler<request::BestTipBlockHash> for RpcImpl<Mempool, State, Tip>
+where
+    Mempool: tower::Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
+    Mempool::Future: Send,
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+{
+    type Reply = response::GetBlockHash;
+
+    async fn on_message(
+        &self,
+        _request: datacake_rpc::Request<request::BestTipBlockHash>,
+    ) -> Result<Self::Reply, Status> {
+        self.get_best_block_hash().map_err(make_status_error)
+    }
+}
+
+#[datacake_rpc::async_trait]
+impl<Mempool, State, Tip> Handler<request::RawMempool> for RpcImpl<Mempool, State, Tip>
+where
+    Mempool: tower::Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
+    Mempool::Future: Send,
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+{
+    type Reply = Vec<String>;
+
+    async fn on_message(
+        &self,
+        _request: datacake_rpc::Request<request::RawMempool>,
+    ) -> Result<Self::Reply, Status> {
+        self.get_raw_mempool().await.map_err(make_status_error)
+    }
+}
+
+#[datacake_rpc::async_trait]
+impl<Mempool, State, Tip> Handler<request::RawTransaction> for RpcImpl<Mempool, State, Tip>
+where
+    Mempool: tower::Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
+    Mempool::Future: Send,
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+{
+    type Reply = response::GetRawTransaction;
+
+    async fn on_message(
+        &self,
+        request: datacake_rpc::Request<request::RawTransaction>,
+    ) -> Result<Self::Reply, Status> {
+        let request::RawTransaction { tx_id_hex, verbose } =
+            request.to_owned().map_err(|err| Status {
+                code: ErrorCode::InvalidPayload,
+                message: err.to_string(),
+            })?;
+
+        self.get_raw_transaction(tx_id_hex, verbose)
+            .await
+            .map_err(make_status_error)
+    }
+}
