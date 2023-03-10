@@ -14,6 +14,12 @@ getblocktemplate-rpcs = [
     "zebra-chain/getblocktemplate-rpcs",
 ]
 
+# Experimental rkyv RPC support
+rkyv-serialization = [
+    "rkyv",
+    "bytecheck",
+]
+
 # Test-only features
 proptest-impl = [
     "proptest",
@@ -44,6 +50,10 @@ rayon = "1.7.0"
 tokio = { version = "1.26.0", features = ["sync", "tracing"] }
 tower = { version = "0.4.13", features = ["buffer", "util"] }
 tracing = "0.1.37"
+
+# Experimental rkyv RPC support
+rkyv =  { version = "0.7.40", optional = true }
+bytecheck = { version =  "0.6.9", optional = true }
 
 zebra-chain = { path = "../zebra-chain" }
 zebra-test = { path = "../zebra-test/", optional = true }

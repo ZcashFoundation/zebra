@@ -1420,34 +1420,34 @@ pub struct GetBlockHash(#[serde(with = "hex")] pub block::Hash);
 pub struct GetTreestate {
     /// The block hash corresponding to the treestate, hex-encoded.
     #[serde(with = "hex")]
-    hash: block::Hash,
+    pub hash: block::Hash,
 
     /// The block height corresponding to the treestate, numeric.
-    height: Height,
+    pub height: Height,
 
     /// Unix time when the block corresponding to the treestate was mined,
     /// numeric.
     ///
     /// UTC seconds since the Unix 1970-01-01 epoch.
-    time: u32,
+    pub time: u32,
 
     /// A treestate containing a Sapling note commitment tree, hex-encoded.
     #[serde(skip_serializing_if = "Treestate::is_empty")]
-    sapling: Treestate<sapling::tree::SerializedTree>,
+    pub sapling: Treestate<sapling::tree::SerializedTree>,
 
     /// A treestate containing an Orchard note commitment tree, hex-encoded.
     #[serde(skip_serializing_if = "Treestate::is_empty")]
-    orchard: Treestate<orchard::tree::SerializedTree>,
+    pub orchard: Treestate<orchard::tree::SerializedTree>,
 }
 
 /// A treestate that is included in the [`z_gettreestate`][1] RPC response.
 ///
 /// [1]: https://zcash.github.io/rpc/z_gettreestate.html
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-struct Treestate<Tree: AsRef<[u8]>> {
+pub struct Treestate<Tree: AsRef<[u8]>> {
     /// Contains an Orchard or Sapling serialized note commitment tree,
     /// hex-encoded.
-    commitments: Commitments<Tree>,
+    pub commitments: Commitments<Tree>,
 }
 
 /// A wrapper that contains either an Orchard or Sapling note commitment tree.
@@ -1457,11 +1457,11 @@ struct Treestate<Tree: AsRef<[u8]>> {
 ///
 /// [1]: https://zcash.github.io/rpc/z_gettreestate.html
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-struct Commitments<Tree: AsRef<[u8]>> {
+pub struct Commitments<Tree: AsRef<[u8]>> {
     /// Orchard or Sapling serialized note commitment tree, hex-encoded.
     #[serde(with = "hex")]
     #[serde(rename = "finalState")]
-    final_state: Tree,
+    pub final_state: Tree,
 }
 
 impl<Tree: AsRef<[u8]>> Treestate<Tree> {
@@ -1500,6 +1500,12 @@ pub enum GetRawTransaction {
 ///
 /// See the notes for the [`Rpc::get_address_utxos` method].
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct GetAddressUtxos {
     /// The transparent address, base58check encoded
     address: transparent::Address,
@@ -1529,13 +1535,19 @@ pub struct GetAddressUtxos {
 ///
 /// See the notes for the [`Rpc::get_address_tx_ids` method].
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct GetAddressTxIdsRequest {
-    // A list of addresses to get transactions from.
-    addresses: Vec<String>,
-    // The height to start looking for transactions.
-    start: u32,
-    // The height to end looking for transactions.
-    end: u32,
+    /// A list of addresses to get transactions from.
+    pub addresses: Vec<String>,
+    /// The height to start looking for transactions.
+    pub start: u32,
+    /// The height to end looking for transactions.
+    pub end: u32,
 }
 
 impl GetRawTransaction {

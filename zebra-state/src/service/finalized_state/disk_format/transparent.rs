@@ -47,6 +47,12 @@ pub const OUTPUT_LOCATION_DISK_BYTES: usize =
 
 /// A transparent output's index in its transaction.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct OutputIndex(u32);
 
 impl OutputIndex {

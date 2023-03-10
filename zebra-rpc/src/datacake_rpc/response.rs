@@ -5,12 +5,14 @@ use rkyv::{Archive, Deserialize, Serialize};
 
 use zebra_chain::{
     block::{self, Height},
+    orchard,
     parameters::ConsensusBranchId,
+    sapling,
 };
 
 pub use crate::methods::{
-    AddressBalance, ConsensusBranchIdHex, GetBlock, GetBlockHash, GetInfo, GetRawTransaction,
-    NetworkUpgradeInfo, SentTransactionHash, TipConsensusBranch,
+    AddressBalance, ConsensusBranchIdHex, GetAddressUtxos, GetBlock, GetBlockHash, GetInfo,
+    GetRawTransaction, NetworkUpgradeInfo, SentTransactionHash, TipConsensusBranch,
 };
 
 /// An IndexMap entry, see 'upgrades' field [`GetBlockChainInfo`](crate::methods::GetBlockChainInfo)
@@ -78,6 +80,51 @@ impl From<crate::methods::GetBlockChainInfo> for GetBlockChainInfo {
             upgrades,
             consensus_chain_tip,
             consensus_next_block,
+        }
+    }
+}
+
+/// Contains the Sapling & Orchard note commitment trees, and their
+/// corresponding [`block::Hash`], [`Height`], and block time.
+#[repr(C)]
+#[derive(Serialize, Deserialize, Archive, PartialEq, Clone, Debug)]
+#[archive_attr(derive(CheckBytes, PartialEq, Debug))]
+pub struct GetTreestate {
+    /// The block hash corresponding to the treestate.
+    hash: block::Hash,
+
+    /// The block height corresponding to the treestate, numeric.
+    height: Height,
+
+    /// Unix time when the block corresponding to the treestate was mined,
+    /// numeric.
+    ///
+    /// UTC seconds since the Unix 1970-01-01 epoch.
+    time: u32,
+
+    /// A treestate containing a Sapling note commitment tree.
+    sapling_commitment_tree: sapling::tree::SerializedTree,
+
+    /// A treestate containing an Orchard note commitment tree.
+    orchard_commitment_tree: orchard::tree::SerializedTree,
+}
+
+impl From<crate::methods::GetTreestate> for GetTreestate {
+    fn from(
+        crate::methods::GetTreestate {
+            hash,
+            height,
+            time,
+            sapling,
+            orchard,
+        }: crate::methods::GetTreestate,
+    ) -> Self {
+        Self {
+            hash,
+            height,
+            time,
+            sapling_commitment_tree: sapling.commitments.final_state,
+            orchard_commitment_tree: orchard.commitments.final_state,
         }
     }
 }

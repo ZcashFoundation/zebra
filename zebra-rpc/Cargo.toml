@@ -27,7 +27,8 @@ rkyv-serialization = [
     "rkyv",
     "bytecheck",
     "datacake-rpc",
-    "zebra-chain/rkyv-serialization"
+    "zebra-chain/rkyv-serialization",
+    "zebra-state/rkyv-serialization"
 ]
 
 # Test-only features

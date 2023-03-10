@@ -453,6 +453,12 @@ impl From<Vec<pallas::Base>> for NoteCommitmentTree {
 /// case the current implementation will have to change and use the format
 /// compatible with [`Frontier`](bridgetree::Frontier) instead.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct SerializedTree(Vec<u8>);
 
 impl From<&NoteCommitmentTree> for SerializedTree {

@@ -5799,6 +5799,7 @@ name = "zebra-state"
 version = "1.0.0-beta.21"
 dependencies = [
  "bincode",
+ "bytecheck",
  "chrono",
  "color-eyre",
  "dirs",
@@ -5817,6 +5818,7 @@ dependencies = [
  "proptest-derive",
  "rayon",
  "regex",
+ "rkyv",
  "rlimit",
  "rocksdb",
  "serde",

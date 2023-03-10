@@ -14,6 +14,12 @@ use crate::serialization::{
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
 )]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct Script(
     /// # Correctness
     ///

@@ -3,7 +3,7 @@
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 
-pub use crate::methods::{AddressStrings, Rpc};
+pub use crate::methods::{AddressStrings, GetAddressTxIdsRequest, Rpc};
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
@@ -79,3 +79,19 @@ pub struct RawTransaction {
     /// - `verbose`: (numeric, optional, default=0) If 0, return a string of hex-encoded data, otherwise return a JSON object.
     pub verbose: u8,
 }
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
+#[archive_attr(derive(CheckBytes, PartialEq, Debug))]
+/// Returns information about the given block's Sapling & Orchard tree state.
+///
+/// See [`Rpc::z_get_treestate`] for more information.
+pub struct ZTreestate(pub String);
+
+#[repr(C)]
+#[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
+#[archive_attr(derive(CheckBytes, PartialEq, Debug))]
+/// Returns all unspent outputs for a list of addresses.
+///
+/// See [`Rpc::get_address_utxos`] for more information.
+pub struct AddressUtxos(pub AddressStrings);
