@@ -1,5 +1,11 @@
 use super::*;
 
+pub mod request;
+pub mod response;
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+pub mod get_block_template_rpcs;
+
 #[datacake_rpc::async_trait]
 impl<Mempool, State, Tip> Handler<request::Info> for RpcImpl<Mempool, State, Tip>
 where

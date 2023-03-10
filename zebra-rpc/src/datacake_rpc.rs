@@ -10,8 +10,7 @@ use zebra_node_services::mempool;
 use crate::methods::{Rpc, RpcImpl};
 
 mod methods;
-pub mod request;
-pub mod response;
+pub use methods::{request, response};
 
 #[cfg(test)]
 mod tests;
@@ -37,14 +36,69 @@ where
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     fn service_name() -> &'static str {
-        "zebra_datacake_rpc_server"
+        "zebra_datacake_rpc_service"
     }
 
     fn register_handlers(registry: &mut ServiceRegistry<Self>) {
         registry.add_handler::<request::Info>();
         registry.add_handler::<request::BlockChainInfo>();
         registry.add_handler::<request::AddressBalance>();
+        registry.add_handler::<request::SendRawTransaction>();
+        registry.add_handler::<request::Block>();
+        registry.add_handler::<request::BestTipBlockHash>();
+        registry.add_handler::<request::RawMempool>();
+        registry.add_handler::<request::RawTransaction>();
+        registry.add_handler::<request::ZTreestate>();
+        registry.add_handler::<request::GetAddressTxIdsRequest>();
+        registry.add_handler::<request::AddressUtxos>();
     }
+}
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+/// Handles rkyv-serialized getblocktemplate RPC requests
+impl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook> RpcService
+    for crate::methods::GetBlockTemplateRpcImpl<
+        Mempool,
+        State,
+        Tip,
+        ChainVerifier,
+        SyncStatus,
+        AddressBook,
+    >
+where
+    Mempool: Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + 'static,
+    Mempool::Future: Send,
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+    ChainVerifier: Service<
+            zebra_consensus::Request,
+            Response = zebra_chain::block::Hash,
+            Error = zebra_consensus::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <ChainVerifier as Service<zebra_consensus::Request>>::Future: Send,
+    SyncStatus: zebra_chain::chain_sync_status::ChainSyncStatus + Clone + Send + Sync + 'static,
+    AddressBook: zebra_network::AddressBookPeers + Clone + Send + Sync + 'static,
+{
+    fn service_name() -> &'static str {
+        "zebra_datacake_getblocktemplate_rpc_service"
+    }
+
+    fn register_handlers(_registry: &mut ServiceRegistry<Self>) {}
 }
 
 fn make_status_error(
