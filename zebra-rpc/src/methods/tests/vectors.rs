@@ -381,7 +381,7 @@ async fn rpc_getrawtransaction() {
         false,
         true,
         Buffer::new(mempool.clone(), 1),
-        read_state,
+        read_state.clone(),
         latest_chain_tip,
     );
 
@@ -418,27 +418,59 @@ async fn rpc_getrawtransaction() {
 
     // Test case where transaction is _not_ in mempool.
     // Skip genesis because its tx is not indexed.
-    for block in blocks.iter().skip(1) {
+    for (block_idx, block) in blocks.iter().enumerate().skip(1) {
         for tx in block.transactions.iter() {
-            let mempool_req = mempool
-                .expect_request_that(|request| {
-                    if let mempool::Request::TransactionsByMinedId(ids) = request {
-                        ids.len() == 1 && ids.contains(&tx.hash())
-                    } else {
-                        false
-                    }
-                })
-                .map(|responder| {
-                    responder.respond(mempool::Response::Transactions(vec![]));
-                });
+            let make_mempool_req = || {
+                let mut mempool = mempool.clone();
+
+                async move {
+                    mempool
+                        .expect_request_that(|request| {
+                            if let mempool::Request::TransactionsByMinedId(ids) = request {
+                                ids.len() == 1 && ids.contains(&tx.hash())
+                            } else {
+                                false
+                            }
+                        })
+                        .await
+                        .respond(mempool::Response::Transactions(vec![]));
+                }
+            };
+
             let get_tx_req = rpc.get_raw_transaction(tx.hash().encode_hex(), 0u8);
-            let (response, _) = futures::join!(get_tx_req, mempool_req);
+            let (response, _) = futures::join!(get_tx_req, make_mempool_req());
             let get_tx = response.expect("We should have a GetRawTransaction struct");
             if let GetRawTransaction::Raw(raw_tx) = get_tx {
                 assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
             } else {
                 unreachable!("Should return a Raw enum")
             }
+
+            let get_tx_req = rpc.get_raw_transaction(tx.hash().encode_hex(), 1u8);
+            let (response, _) = futures::join!(get_tx_req, make_mempool_req());
+            let GetRawTransaction::Object { hex, height, confirmations } = response.expect("We should have a GetRawTransaction struct") else {
+                unreachable!("Should return a Raw enum")
+            };
+
+            assert_eq!(hex.as_ref(), tx.zcash_serialize_to_vec().unwrap());
+            assert_eq!(height, block_idx as i32);
+
+            let confirmations =
+                confirmations.expect("getrawtransaction should return confirmations field");
+
+            let depth_response = read_state
+                .clone()
+                .oneshot(zebra_state::ReadRequest::Depth(block.hash()))
+                .await
+                .expect("state request should succeed");
+
+            let zebra_state::ReadResponse::Depth(depth) = depth_response else {
+                panic!("unexpected response to Depth request");
+            };
+
+            let expected_confirmations = 1 + depth.expect("depth should be Some");
+
+            assert_eq!(confirmations, expected_confirmations);
         }
     }
 

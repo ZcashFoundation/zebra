@@ -1439,7 +1439,7 @@ pub enum GetRawTransaction {
         /// The confirmations of the block that contains the transaction,
         /// or None if the transaction is in the mempool.
         #[serde(skip_serializing_if = "Option::is_none")]
-        confirmations: Option<i32>,
+        confirmations: Option<u32>,
     },
 }
 
@@ -1497,7 +1497,7 @@ impl GetRawTransaction {
         if verbose {
             let confirmations = height
                 .zip(tip_height)
-                .map(|(height, tip_height)| (tip_height - height) + 1);
+                .map(|(height, tip_height)| (tip_height.0 - height.0) + 1);
 
             GetRawTransaction::Object {
                 hex: tx.into(),
