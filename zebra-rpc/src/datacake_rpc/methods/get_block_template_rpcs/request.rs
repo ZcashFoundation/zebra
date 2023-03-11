@@ -5,7 +5,6 @@ use rkyv::{Archive, Deserialize, Serialize};
 
 use crate::methods::get_block_template_rpcs::{get_block_template, types::hex_data::HexData};
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns the height of the most recent block in the best valid block chain.
@@ -13,7 +12,6 @@ use crate::methods::get_block_template_rpcs::{get_block_template, types::hex_dat
 /// See [`Rpc::get_block_count`] for more information.
 pub struct BlockCount;
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns the hash of the block of a given height if the index argument correspond
@@ -22,7 +20,6 @@ pub struct BlockCount;
 /// See [`Rpc::get_block_hash`] for more information.
 pub struct BlockHash(pub i32);
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns a block template for mining new Zcash blocks.
@@ -30,7 +27,6 @@ pub struct BlockHash(pub i32);
 /// See [`Rpc::get_block_template`] for more information.
 pub struct BlockTemplate(pub Option<get_block_template::JsonParameters>);
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Submits block to the node to be validated and committed.
@@ -38,7 +34,6 @@ pub struct BlockTemplate(pub Option<get_block_template::JsonParameters>);
 /// See [`Rpc::submit_block`] for more information.
 pub struct SubmitBlock(pub HexData);
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns mining-related information.
@@ -46,7 +41,6 @@ pub struct SubmitBlock(pub HexData);
 /// See [`Rpc::get_mining_info`] for more information.
 pub struct MiningInfo;
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns the estimated network solutions per second based on the last
@@ -61,7 +55,6 @@ pub struct NetworkSolPs {
     pub height: Option<i32>,
 }
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns data about each connected network node.

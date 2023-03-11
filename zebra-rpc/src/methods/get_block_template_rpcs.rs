@@ -217,26 +217,27 @@ pub trait GetBlockTemplateRpc {
     ) -> BoxFuture<Result<unified_address::Response>>;
 }
 
+#[derive(Clone)]
 /// RPC method implementations.
 pub struct GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>
 where
     Mempool: Service<
-        mempool::Request,
-        Response = mempool::Response,
-        Error = zebra_node_services::BoxError,
-    >,
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + Clone,
     State: Service<
-        zebra_state::ReadRequest,
-        Response = zebra_state::ReadResponse,
-        Error = zebra_state::BoxError,
-    >,
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone,
     ChainVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
-    AddressBook: AddressBookPeers,
+    AddressBook: AddressBookPeers + Clone,
 {
     // Configuration
     //
@@ -284,7 +285,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     State: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
@@ -367,7 +369,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,

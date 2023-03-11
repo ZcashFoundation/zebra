@@ -56,7 +56,7 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
 
         info!("spawning RPC server...");
 
-        let (rpc_server_task_handle, rpc_tx_queue_task_handle, _rpc_server) = RpcServer::spawn(
+        let (handles, _rpc_server) = RpcServer::spawn(
             config,
             Default::default(),
             "RPC server test",
@@ -76,10 +76,10 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
         chain_verifier.expect_no_requests().await;
 
         // The server and queue tasks should continue without errors or panics
-        let rpc_server_task_result = rpc_server_task_handle.now_or_never();
+        let rpc_server_task_result = handles.rpc_server_task.now_or_never();
         assert!(matches!(rpc_server_task_result, None));
 
-        let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+        let rpc_tx_queue_task_result = handles.rpc_tx_queue_task.now_or_never();
         assert!(matches!(rpc_tx_queue_task_result, None));
     });
 
@@ -144,7 +144,7 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool, do_shutdown: bo
 
         info!("spawning RPC server...");
 
-        let (rpc_server_task_handle, rpc_tx_queue_task_handle, rpc_server) = RpcServer::spawn(
+        let (handles, rpc_server) = RpcServer::spawn(
             config,
             Default::default(),
             "RPC server test",
@@ -171,23 +171,23 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool, do_shutdown: bo
                 .expect("unexpected panic during RpcServer shutdown");
 
             // The server and queue tasks should shut down without errors or panics
-            let rpc_server_task_result = rpc_server_task_handle.await;
+            let rpc_server_task_result = handles.rpc_server_task.await;
             assert!(
                 matches!(rpc_server_task_result, Ok(())),
                 "unexpected server task panic during shutdown: {rpc_server_task_result:?}"
             );
 
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.await;
+            let rpc_tx_queue_task_result = handles.rpc_tx_queue_task.await;
             assert!(
                 matches!(rpc_tx_queue_task_result, Ok(())),
                 "unexpected queue task panic during shutdown: {rpc_tx_queue_task_result:?}"
             );
         } else {
             // The server and queue tasks should continue without errors or panics
-            let rpc_server_task_result = rpc_server_task_handle.now_or_never();
+            let rpc_server_task_result = handles.rpc_server_task.now_or_never();
             assert!(matches!(rpc_server_task_result, None));
 
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            let rpc_tx_queue_task_result = handles.rpc_tx_queue_task.now_or_never();
             assert!(matches!(rpc_tx_queue_task_result, None));
         }
     });
@@ -225,25 +225,24 @@ fn rpc_server_spawn_port_conflict() {
 
         info!("spawning RPC server 1...");
 
-        let (_rpc_server_1_task_handle, _rpc_tx_queue_1_task_handle, _rpc_server) =
-            RpcServer::spawn(
-                config.clone(),
-                Default::default(),
-                "RPC server 1 test",
-                Buffer::new(mempool.clone(), 1),
-                Buffer::new(state.clone(), 1),
-                Buffer::new(chain_verifier.clone(), 1),
-                MockSyncStatus::default(),
-                MockAddressBookPeers::default(),
-                NoChainTip,
-                Mainnet,
-            );
+        let (_handles, _rpc_server) = RpcServer::spawn(
+            config.clone(),
+            Default::default(),
+            "RPC server 1 test",
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state.clone(), 1),
+            Buffer::new(chain_verifier.clone(), 1),
+            MockSyncStatus::default(),
+            MockAddressBookPeers::default(),
+            NoChainTip,
+            Mainnet,
+        );
 
         tokio::time::sleep(Duration::from_secs(3)).await;
 
         info!("spawning conflicted RPC server 2...");
 
-        let (rpc_server_2_task_handle, _rpc_tx_queue_2_task_handle, _rpc_server) = RpcServer::spawn(
+        let (handles, _rpc_server) = RpcServer::spawn(
             config,
             Default::default(),
             "RPC server 2 conflict test",
@@ -267,7 +266,7 @@ fn rpc_server_spawn_port_conflict() {
         // particularly across different machines and OSes.
 
         // The second server should panic, so its task handle should return the panic
-        let rpc_server_2_task_result = rpc_server_2_task_handle.await;
+        let rpc_server_2_task_result = handles.rpc_server_task.await;
         match rpc_server_2_task_result {
             Ok(()) => panic!(
                 "RPC server with conflicting port should exit with an error: \
@@ -335,25 +334,24 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
 
         info!("spawning parallel RPC server 1...");
 
-        let (_rpc_server_1_task_handle, _rpc_tx_queue_1_task_handle, _rpc_server) =
-            RpcServer::spawn(
-                config.clone(),
-                Default::default(),
-                "RPC server 1 test",
-                Buffer::new(mempool.clone(), 1),
-                Buffer::new(state.clone(), 1),
-                Buffer::new(chain_verifier.clone(), 1),
-                MockSyncStatus::default(),
-                MockAddressBookPeers::default(),
-                NoChainTip,
-                Mainnet,
-            );
+        let (_handles, _rpc_server) = RpcServer::spawn(
+            config.clone(),
+            Default::default(),
+            "RPC server 1 test",
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state.clone(), 1),
+            Buffer::new(chain_verifier.clone(), 1),
+            MockSyncStatus::default(),
+            MockAddressBookPeers::default(),
+            NoChainTip,
+            Mainnet,
+        );
 
         tokio::time::sleep(Duration::from_secs(3)).await;
 
         info!("spawning parallel conflicted RPC server 2...");
 
-        let (rpc_server_2_task_handle, _rpc_tx_queue_2_task_handle, _rpc_server) = RpcServer::spawn(
+        let (handles, _rpc_server) = RpcServer::spawn(
             config,
             Default::default(),
             "RPC server 2 conflict test",
@@ -378,7 +376,7 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
 
         // The second server doesn't panic, but we'd like it to.
         // (See the function docs for details.)
-        let rpc_server_2_task_result = rpc_server_2_task_handle.await;
+        let rpc_server_2_task_result = handles.rpc_server_task.await;
         match rpc_server_2_task_result {
             Ok(()) => info!(
                 "Parallel RPC server with conflicting port should exit with an error: \

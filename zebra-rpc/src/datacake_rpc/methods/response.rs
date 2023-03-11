@@ -19,12 +19,11 @@ pub use crate::methods::{
 pub use super::get_block_template_rpcs::response::*;
 
 /// An IndexMap entry, see 'upgrades' field [`GetBlockChainInfo`](crate::methods::GetBlockChainInfo)
-#[repr(C)]
+
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 pub struct NetworkUpgradeInfoEntry(pub ConsensusBranchId, pub NetworkUpgradeInfo);
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Blockchain state information, as a [`GetBlockChainInfo`].
@@ -89,7 +88,7 @@ impl From<crate::methods::GetBlockChainInfo> for GetBlockChainInfo {
 
 /// Contains the Sapling & Orchard note commitment trees, and their
 /// corresponding [`block::Hash`], [`Height`], and block time.
-#[repr(C)]
+
 #[derive(Serialize, Deserialize, Archive, PartialEq, Clone, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 pub struct GetTreestate {

@@ -52,10 +52,12 @@ async fn datacake_get_block_template() -> Result<(), BoxError> {
 
     let rpc_client: RpcClient<GetBlockTemplateRpcService> = RpcClient::new(client);
 
-    let resp = rpc_client
+    let response::get_block_template::Response::TemplateMode(_template) = rpc_client
         .send(&request::BlockTemplate(None))
         .await?
-        .to_owned()?;
+        .to_owned()? else {
+            panic!("getblocktemplate method call without params should return template.");
+        };
 
     Ok(())
 }

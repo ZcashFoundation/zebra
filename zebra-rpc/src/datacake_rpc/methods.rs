@@ -13,7 +13,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -43,7 +44,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -75,7 +77,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -114,7 +117,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -152,7 +156,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -192,7 +197,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -222,7 +228,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -252,7 +259,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -290,7 +298,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -328,7 +337,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -365,7 +375,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,

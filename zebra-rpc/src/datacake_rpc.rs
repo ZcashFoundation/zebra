@@ -1,4 +1,6 @@
 //! Datacake RPC Server
+//!
+//! Note that this is currently an unstable feature.
 
 use std::{io, net::SocketAddr};
 
@@ -22,7 +24,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
@@ -70,7 +73,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,

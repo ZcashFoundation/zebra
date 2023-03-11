@@ -235,20 +235,27 @@ pub trait Rpc {
     ) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
 }
 
+#[derive(Clone)]
 /// RPC method implementations.
 pub struct RpcImpl<Mempool, State, Tip>
 where
-    Mempool: Service<
-        mempool::Request,
-        Response = mempool::Response,
-        Error = zebra_node_services::BoxError,
-    >,
+    Mempool: tower::Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + Clone
+        + 'static,
+    Mempool::Future: Send,
     State: Service<
-        zebra_state::ReadRequest,
-        Response = zebra_state::ReadResponse,
-        Error = zebra_state::BoxError,
-    >,
-    Tip: ChainTip,
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     // Configuration
     //
@@ -285,11 +292,13 @@ where
 
 impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
 where
-    Mempool: Service<
+    Mempool: tower::Service<
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
+    Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
@@ -298,6 +307,7 @@ where
         + Send
         + Sync
         + 'static,
+    State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the RPC handler.
@@ -312,8 +322,6 @@ where
     ) -> (Self, JoinHandle<()>)
     where
         Version: ToString,
-        <Mempool as Service<mempool::Request>>::Future: Send,
-        <State as Service<zebra_state::ReadRequest>>::Future: Send,
     {
         let (runner, queue_sender) = Queue::start();
 
@@ -352,7 +360,8 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + 'static,
+        > + Clone
+        + 'static,
     Mempool::Future: Send,
     State: Service<
             zebra_state::ReadRequest,

@@ -8,7 +8,6 @@ pub use crate::methods::{AddressStrings, GetAddressTxIdsRequest, Rpc};
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub use super::get_block_template_rpcs::request::*;
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns software information from the RPC server, as a [`GetInfo`](super::response::GetInfo).
@@ -16,7 +15,6 @@ pub use super::get_block_template_rpcs::request::*;
 /// See [`Rpc::get_info`] for more information.
 pub struct Info;
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns blockchain state information, as a [`GetBlockChainInfo`].
@@ -24,7 +22,6 @@ pub struct Info;
 /// See [`Rpc::get_blockchain_info`] for more information.
 pub struct BlockChainInfo;
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Total balance of a provided `addresses` in an [`AddressBalance`] instance.
@@ -32,7 +29,6 @@ pub struct BlockChainInfo;
 /// See [`Rpc::get_address_balance`] for more information.
 pub struct AddressBalance(pub AddressStrings);
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Sends the raw bytes of a signed transaction to the local node's mempool, if the transaction is valid.
@@ -40,7 +36,6 @@ pub struct AddressBalance(pub AddressStrings);
 /// See [`Rpc::send_raw_transaction`] for more information.
 pub struct SendRawTransaction(pub String);
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns the requested block by hash or height, as a GetBlock JSON string.
@@ -54,7 +49,6 @@ pub struct Block {
     pub verbosity: Option<u8>,
 }
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns the hash of the current best blockchain tip block.
@@ -62,7 +56,6 @@ pub struct Block {
 /// See [`Rpc::get_best_block_hash`] for more information.
 pub struct BestTipBlockHash;
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns all transaction ids in the memory pool.
@@ -70,7 +63,6 @@ pub struct BestTipBlockHash;
 /// See [`Rpc::get_raw_mempool`] for more information.
 pub struct RawMempool;
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns the raw transaction data.
@@ -83,7 +75,6 @@ pub struct RawTransaction {
     pub verbose: u8,
 }
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns information about the given block's Sapling & Orchard tree state.
@@ -91,7 +82,6 @@ pub struct RawTransaction {
 /// See [`Rpc::z_get_treestate`] for more information.
 pub struct ZTreestate(pub String);
 
-#[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
 /// Returns all unspent outputs for a list of addresses.

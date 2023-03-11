@@ -64,6 +64,19 @@ impl fmt::Debug for RpcServer {
     }
 }
 
+/// Task handles for RPC server(s)
+pub struct RpcServerHandles {
+    /// Waits for the server to finish
+    pub rpc_server_task: JoinHandle<()>,
+
+    #[cfg(feature = "rkyv-serialization")]
+    /// Datacake server handle
+    pub datacake_rpc_server: Option<datacake_rpc::Server>,
+
+    /// Processes queue for sending raw mempool transactions
+    pub rpc_tx_queue_task: JoinHandle<()>,
+}
+
 impl RpcServer {
     /// Start a new RPC server endpoint using the supplied configs and services.
     /// `app_version` is a version string for the application, which is used in RPC responses.
@@ -91,14 +104,15 @@ impl RpcServer {
         address_book: AddressBook,
         latest_chain_tip: Tip,
         network: Network,
-    ) -> (JoinHandle<()>, JoinHandle<()>, Option<Self>)
+    ) -> (RpcServerHandles, Option<Self>)
     where
         Version: ToString + Clone + Send + 'static,
         Mempool: tower::Service<
                 mempool::Request,
                 Response = mempool::Response,
                 Error = zebra_node_services::BoxError,
-            > + 'static,
+            > + Clone
+            + 'static,
         Mempool::Future: Send,
         State: Service<
                 zebra_state::ReadRequest,
@@ -122,7 +136,88 @@ impl RpcServer {
         SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
         AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     {
-        if let Some(listen_addr) = config.listen_addr {
+        let should_spawn = config.listen_addr.is_some();
+
+        #[cfg(feature = "rkyv-serialization")]
+        let should_spawn = should_spawn || config.rkyv_listen_addr.is_some();
+
+        if !should_spawn {
+            // There is no RPC port, so the RPC tasks do nothing.
+            return (
+                RpcServerHandles {
+                    rpc_server_task: tokio::task::spawn(
+                        futures::future::pending().in_current_span(),
+                    ),
+
+                    #[cfg(feature = "rkyv-serialization")]
+                    datacake_rpc_server: None,
+
+                    rpc_tx_queue_task: tokio::task::spawn(
+                        futures::future::pending().in_current_span(),
+                    ),
+                },
+                None,
+            );
+        }
+
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        let get_block_template_rpc_impl = {
+            // Prevent loss of miner funds due to an unsupported or incorrect address type.
+            if let Some(miner_address) = mining_config.miner_address {
+                assert_eq!(
+                    miner_address.network(),
+                    network,
+                    "incorrect miner address config: {miner_address} \
+                     network.network {network} and miner address network {} must match",
+                    miner_address.network(),
+                );
+            }
+
+            // Initialize the getblocktemplate rpc method handler
+            GetBlockTemplateRpcImpl::new(
+                network,
+                mining_config.clone(),
+                mempool.clone(),
+                state.clone(),
+                latest_chain_tip.clone(),
+                chain_verifier,
+                sync_status,
+                address_book,
+            )
+        };
+
+        // Initialize the rpc methods with the zebra version
+        let (rpc_impl, rpc_tx_queue_task) = RpcImpl::new(
+            app_version.clone(),
+            network,
+            config.debug_force_finished_sync,
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            mining_config.debug_like_zcashd,
+            #[cfg(not(feature = "getblocktemplate-rpcs"))]
+            true,
+            mempool,
+            state,
+            latest_chain_tip,
+        );
+
+        #[cfg(feature = "rkyv-serialization")]
+        let datacake_rpc_server = if let Some(server) =
+            config.rkyv_listen_addr.and_then(|rkyv_listen_addr| {
+                tokio::runtime::Handle::current()
+                    .block_on(crate::datacake_rpc::spawn_server(rkyv_listen_addr))
+                    .ok()
+            }) {
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            server.add_service(get_block_template_rpc_impl.clone());
+
+            server.add_service(rpc_impl.clone());
+
+            Some(server)
+        } else {
+            None
+        };
+
+        let (rpc_server_task, rpc_server_handle) = if let Some(listen_addr) = config.listen_addr {
             info!("Trying to open RPC endpoint at {}...", listen_addr,);
 
             // Create handler compatible with V1 and V2 RPC protocols
@@ -130,46 +225,7 @@ impl RpcServer {
                 MetaIoHandler::new(Compatibility::Both, FixRpcResponseMiddleware);
 
             #[cfg(feature = "getblocktemplate-rpcs")]
-            {
-                // Prevent loss of miner funds due to an unsupported or incorrect address type.
-                if let Some(miner_address) = mining_config.miner_address {
-                    assert_eq!(
-                        miner_address.network(),
-                        network,
-                        "incorrect miner address config: {miner_address} \
-                         network.network {network} and miner address network {} must match",
-                        miner_address.network(),
-                    );
-                }
-
-                // Initialize the getblocktemplate rpc method handler
-                let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
-                    network,
-                    mining_config.clone(),
-                    mempool.clone(),
-                    state.clone(),
-                    latest_chain_tip.clone(),
-                    chain_verifier,
-                    sync_status,
-                    address_book,
-                );
-
-                io.extend_with(get_block_template_rpc_impl.to_delegate());
-            }
-
-            // Initialize the rpc methods with the zebra version
-            let (rpc_impl, rpc_tx_queue_task_handle) = RpcImpl::new(
-                app_version.clone(),
-                network,
-                config.debug_force_finished_sync,
-                #[cfg(feature = "getblocktemplate-rpcs")]
-                mining_config.debug_like_zcashd,
-                #[cfg(not(feature = "getblocktemplate-rpcs"))]
-                true,
-                mempool,
-                state,
-                latest_chain_tip,
-            );
+            io.extend_with(get_block_template_rpc_impl.to_delegate());
 
             io.extend_with(rpc_impl.to_delegate());
 
@@ -230,7 +286,7 @@ impl RpcServer {
             };
 
             let span = Span::current();
-            let rpc_server_task_handle = tokio::task::spawn_blocking(move || {
+            let rpc_server_task = tokio::task::spawn_blocking(move || {
                 let thread_handle = std::thread::spawn(wait_on_server);
 
                 // Propagate panics from the inner std::thread to the outer tokio blocking task
@@ -240,19 +296,25 @@ impl RpcServer {
                 })
             });
 
-            (
-                rpc_server_task_handle,
-                rpc_tx_queue_task_handle,
-                Some(rpc_server_handle),
-            )
+            (rpc_server_task, Some(rpc_server_handle))
         } else {
-            // There is no RPC port, so the RPC tasks do nothing.
             (
-                tokio::task::spawn(futures::future::pending().in_current_span()),
                 tokio::task::spawn(futures::future::pending().in_current_span()),
                 None,
             )
-        }
+        };
+
+        (
+            RpcServerHandles {
+                rpc_server_task,
+
+                #[cfg(feature = "rkyv-serialization")]
+                datacake_rpc_server,
+
+                rpc_tx_queue_task,
+            },
+            rpc_server_handle,
+        )
     }
 
     /// Shut down this RPC server, blocking the current thread.
