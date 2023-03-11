@@ -66,7 +66,7 @@ The following changes are needed:
 
 ### `network` section
 
-Change the `network` field to `Testnet`. The `Mainnet` should work but it is untested. Also ,the prefered p2p port for the testnet is 18233, so optionally change the `listen_addr` field to `0.0.0.0:18233`. 
+Change the `network` field to `Testnet`. The `Mainnet` should work but it is untested. Also ,the preferred p2p port for the testnet is 18233, so optionally change the `listen_addr` field to `0.0.0.0:18233`. 
 
 ### `state` section
 
