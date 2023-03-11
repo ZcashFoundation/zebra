@@ -28,10 +28,19 @@ async fn datacake_get_block_template() -> Result<(), BoxError> {
 
     let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
 
+    let mining_config: crate::methods::get_block_template_rpcs::config::Config =
+        crate::methods::get_block_template_rpcs::config::Config {
+            miner_address: Some(zebra_chain::transparent::Address::from_script_hash(
+                Network::Mainnet,
+                [0x7e; 20],
+            )),
+            ..Default::default()
+        };
+
     // Init RPC
     let get_block_template_rpc_impl: GetBlockTemplateRpcService = GetBlockTemplateRpcImpl::new(
         Network::Mainnet,
-        Default::default(),
+        mining_config,
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         mock_chain_tip,
