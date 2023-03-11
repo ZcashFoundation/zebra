@@ -15,6 +15,9 @@ pub use crate::methods::{
     GetRawTransaction, NetworkUpgradeInfo, SentTransactionHash, TipConsensusBranch,
 };
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+pub use super::get_block_template_rpcs::response::*;
+
 /// An IndexMap entry, see 'upgrades' field [`GetBlockChainInfo`](crate::methods::GetBlockChainInfo)
 #[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]

@@ -32,8 +32,10 @@ async fn datacake_rpc_server_spawn() -> Result<(), BoxError> {
 
     tracing::info!("spawning datacake RPC server...");
 
-    let _server = spawn_server(address, rpc_impl).await?;
+    let server = spawn_server(address).await?;
     tracing::info!("Listening to address {}!", address);
+
+    server.add_service(rpc_impl);
 
     let client = Channel::connect(address);
     tracing::info!("Connected to address {}!", address);

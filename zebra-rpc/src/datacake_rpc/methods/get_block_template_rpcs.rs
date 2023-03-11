@@ -5,6 +5,9 @@ use crate::methods::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 pub mod request;
 pub mod response;
 
+#[cfg(test)]
+mod tests;
+
 #[datacake_rpc::async_trait]
 impl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook> Handler<request::BlockCount>
     for GetBlockTemplateRpcImpl<Mempool, State, Tip, ChainVerifier, SyncStatus, AddressBook>

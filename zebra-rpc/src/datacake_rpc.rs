@@ -99,8 +99,11 @@ where
     }
 
     fn register_handlers(registry: &mut ServiceRegistry<Self>) {
-        registry.add_handler::<methods::get_block_template_rpcs::request::BlockCount>();
-        registry.add_handler::<methods::get_block_template_rpcs::request::BlockHash>();
+        use methods::get_block_template_rpcs::request;
+
+        registry.add_handler::<request::BlockCount>();
+        registry.add_handler::<request::BlockHash>();
+        registry.add_handler::<request::BlockTemplate>();
     }
 }
 
@@ -128,30 +131,8 @@ fn make_status_error(
 /// Accepts a [`SocketAddr`] and runs rkyv RPC server
 ///
 /// Returns the [`Server`] with the JoinHandle if successful or an `io::Error`
-pub async fn spawn_server<Mempool, State, Tip>(
-    address: SocketAddr,
-    rpc_impl: RpcImpl<Mempool, State, Tip>,
-) -> io::Result<Server>
-where
-    Mempool: tower::Service<
-            mempool::Request,
-            Response = mempool::Response,
-            Error = zebra_node_services::BoxError,
-        > + 'static,
-    Mempool::Future: Send,
-    State: Service<
-            zebra_state::ReadRequest,
-            Response = zebra_state::ReadResponse,
-            Error = zebra_state::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    State::Future: Send,
-    Tip: ChainTip + Clone + Send + Sync + 'static,
-{
+pub async fn spawn_server(address: SocketAddr) -> io::Result<Server> {
     let server = Server::listen(address).await?;
-    server.add_service(rpc_impl);
 
     tracing::info!("Listening to address {}!", address);
 

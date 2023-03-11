@@ -5,6 +5,9 @@ use rkyv::{Archive, Deserialize, Serialize};
 
 pub use crate::methods::{AddressStrings, GetAddressTxIdsRequest, Rpc};
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+pub use super::get_block_template_rpcs::request::*;
+
 #[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
 #[archive_attr(derive(CheckBytes, PartialEq, Debug))]
