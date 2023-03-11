@@ -114,15 +114,33 @@ pub(crate) async fn run() -> Result<()> {
 
     assert!(is_response_success);
 
-    for _ in 0..NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED {
+    let mut total_latency = Duration::new(0, 0);
+
+    for n in 0..NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED {
+        let start = std::time::Instant::now();
+        let template: GetBlockTemplate = client
+            .json_result_from_call("getblocktemplate", "[]".to_string())
+            .await
+            .expect("response should be success output with a serialized `GetBlockTemplate`");
+        total_latency += start.elapsed();
+
+        if n % (NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED / 10) == 0 {
+            let average_latency_ms = total_latency.as_millis() / n as u128;
+            tracing::info!(?average_latency_ms, "got/deserialized block template");
+        }
+
         let (validation_result, _) = futures::future::join(
-            try_validate_block_template(&client),
+            try_validate_block_template(&client, template),
             tokio::time::sleep(BLOCK_PROPOSAL_INTERVAL),
         )
         .await;
 
         validation_result.expect("block proposal validation failed");
     }
+
+    let average_latency_ms =
+        total_latency.as_millis() / NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED as u128;
+    tracing::info!(?average_latency_ms, "finished block proposals");
 
     zebrad.kill(false)?;
 
@@ -148,12 +166,10 @@ pub(crate) async fn run() -> Result<()> {
 /// If an RPC call returns a failure
 /// If the response result cannot be deserialized to `GetBlockTemplate` in 'template' mode
 /// or `ProposalResponse` in 'proposal' mode.
-async fn try_validate_block_template(client: &RPCRequestClient) -> Result<()> {
-    let mut response_json_result: GetBlockTemplate = client
-        .json_result_from_call("getblocktemplate", "[]".to_string())
-        .await
-        .expect("response should be success output with a serialized `GetBlockTemplate`");
-
+async fn try_validate_block_template(
+    client: &RPCRequestClient,
+    mut response_json_result: GetBlockTemplate,
+) -> Result<()> {
     let (long_poll_result_tx, mut long_poll_result_rx) =
         tokio::sync::watch::channel(response_json_result.clone());
     let (done_tx, mut done_rx) = tokio::sync::mpsc::channel(1);
