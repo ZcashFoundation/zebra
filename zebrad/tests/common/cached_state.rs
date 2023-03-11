@@ -216,10 +216,12 @@ pub async fn get_raw_future_blocks(
     );
 
     let should_sync = true;
-    let (zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
-            .ok_or_else(|| eyre!("get_raw_future_blocks requires a cached state"))?;
-    let rpc_address = zebra_rpc_address.expect("test type must have RPC port");
+    let (zebrad, config) = spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
+        .ok_or_else(|| eyre!("get_raw_future_blocks requires a cached state"))?;
+    let rpc_address = config
+        .rpc
+        .listen_addr
+        .expect("test type must have RPC port");
 
     let mut zebrad = check_sync_logs_until(
         zebrad,

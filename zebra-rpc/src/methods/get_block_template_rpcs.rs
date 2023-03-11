@@ -225,7 +225,10 @@ where
             mempool::Request,
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
-        > + Clone,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
     State: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
@@ -260,7 +263,7 @@ where
     // Services
     //
     /// A handle to the mempool service.
-    mempool: Buffer<Mempool, mempool::Request>,
+    mempool: Mempool,
 
     /// A handle to the state service.
     state: State,
@@ -286,6 +289,8 @@ where
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
         > + Clone
+        + Send
+        + Sync
         + 'static,
     State: Service<
             zebra_state::ReadRequest,
@@ -313,7 +318,7 @@ where
     pub fn new(
         network: Network,
         mining_config: config::Config,
-        mempool: Buffer<Mempool, mempool::Request>,
+        mempool: Mempool,
         state: State,
         latest_chain_tip: Tip,
         chain_verifier: ChainVerifier,
@@ -370,6 +375,8 @@ where
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
         > + Clone
+        + Send
+        + Sync
         + 'static,
     Mempool::Future: Send,
     State: Service<

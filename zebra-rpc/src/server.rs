@@ -12,7 +12,7 @@ use std::{fmt, panic};
 use jsonrpc_core::{Compatibility, MetaIoHandler};
 use jsonrpc_http_server::{CloseHandle, ServerBuilder};
 use tokio::task::JoinHandle;
-use tower::{buffer::Buffer, Service};
+use tower::Service;
 
 use tracing::{Instrument, *};
 
@@ -94,7 +94,7 @@ impl RpcServer {
         #[allow(unused_variables)]
         mining_config: (),
         app_version: Version,
-        mempool: Buffer<Mempool, mempool::Request>,
+        mempool: Mempool,
         state: State,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         chain_verifier: ChainVerifier,
@@ -112,6 +112,8 @@ impl RpcServer {
                 Response = mempool::Response,
                 Error = zebra_node_services::BoxError,
             > + Clone
+            + Send
+            + Sync
             + 'static,
         Mempool::Future: Send,
         State: Service<

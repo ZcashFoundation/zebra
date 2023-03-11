@@ -189,7 +189,7 @@ impl StartCmd {
             #[cfg(not(feature = "getblocktemplate-rpcs"))]
             (),
             app_version(),
-            Buffer::new(mempool.clone(), mempool::downloads::MAX_INBOUND_CONCURRENCY),
+            mempool.clone(),
             read_only_state_service,
             chain_verifier.clone(),
             sync_status.clone(),

@@ -5886,6 +5886,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "console-subscriber",
+ "datacake-rpc",
  "dirs",
  "futures",
  "gumdrop",

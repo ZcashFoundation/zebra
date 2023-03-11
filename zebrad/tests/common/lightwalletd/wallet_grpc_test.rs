@@ -85,7 +85,7 @@ pub async fn run() -> Result<()> {
 
     // Launch zebra with peers and using a predefined zebrad state path.
     // As this tests are just queries we can have a live chain where blocks are coming.
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
+    let (mut zebrad, zebra_rpc_address) = if let Some((zebrad, config)) =
         spawn_zebrad_for_rpc(network, test_name, test_type, use_internet_connection)?
     {
         tracing::info!(
@@ -94,7 +94,7 @@ pub async fn run() -> Result<()> {
             "running gRPC query tests using lightwalletd & zebrad...",
         );
 
-        zebrad_and_address
+        (zebrad, config.rpc.listen_addr)
     } else {
         // Skip the test, we don't have the required cached state
         return Ok(());

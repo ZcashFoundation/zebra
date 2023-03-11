@@ -7,7 +7,6 @@
 
 use std::{
     env,
-    net::SocketAddr,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -214,7 +213,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
     test_name: S,
     test_type: TestType,
     use_internet_connection: bool,
-) -> Result<Option<(TestChild<TempDir>, Option<SocketAddr>)>> {
+) -> Result<Option<(TestChild<TempDir>, ZebradConfig)>> {
     let test_name = test_name.as_ref();
 
     // Skip the test unless the user specifically asked for it
@@ -247,7 +246,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + std::fmt::Debug>(
         .with_timeout(test_type.zebrad_timeout())
         .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
-    Ok(Some((zebrad, config.rpc.listen_addr)))
+    Ok(Some((zebrad, config)))
 }
 
 /// Returns `true` if a zebrad test for `test_type` has everything it needs to run.

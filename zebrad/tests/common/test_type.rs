@@ -186,6 +186,14 @@ impl TestType {
             zebra_chain::transparent::Address::from_script_hash(config.network.network, [0x7e; 20]),
         );
 
+        #[cfg(feature = "rkyv-serialization")]
+        if self.needs_zebra_rpc_server() {
+            let listen_port = zebra_test::net::random_known_port();
+            let listen_ip = "127.0.0.1".parse().ok()?;
+            let zebra_rkyv_rpc_listener = std::net::SocketAddr::new(listen_ip, listen_port);
+            let _ = config.rpc.rkyv_listen_addr.insert(zebra_rkyv_rpc_listener);
+        }
+
         let zebra_state_path = self.zebrad_state_path(test_name)?;
 
         config.sync.checkpoint_verify_concurrency_limit =

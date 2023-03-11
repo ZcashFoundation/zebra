@@ -1000,7 +1000,7 @@ async fn rpc_getmininginfo() {
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Mainnet,
         Default::default(),
-        Buffer::new(MockService::build().for_unit_tests(), 1),
+        MockService::build().for_unit_tests(),
         read_state,
         latest_chain_tip.clone(),
         MockService::build().for_unit_tests(),
@@ -1036,7 +1036,7 @@ async fn rpc_getnetworksolps() {
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Mainnet,
         Default::default(),
-        Buffer::new(MockService::build().for_unit_tests(), 1),
+        MockService::build().for_unit_tests(),
         read_state,
         latest_chain_tip.clone(),
         MockService::build().for_unit_tests(),
@@ -1418,7 +1418,7 @@ async fn rpc_validateaddress() {
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Mainnet,
         Default::default(),
-        Buffer::new(MockService::build().for_unit_tests(), 1),
+        MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         mock_chain_tip,
         MockService::build().for_unit_tests(),
@@ -1463,7 +1463,7 @@ async fn rpc_z_validateaddress() {
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Mainnet,
         Default::default(),
-        Buffer::new(MockService::build().for_unit_tests(), 1),
+        MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         mock_chain_tip,
         MockService::build().for_unit_tests(),
@@ -1670,7 +1670,7 @@ async fn rpc_z_listunifiedreceivers() {
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
         Mainnet,
         Default::default(),
-        Buffer::new(MockService::build().for_unit_tests(), 1),
+        MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         mock_chain_tip,
         MockService::build().for_unit_tests(),

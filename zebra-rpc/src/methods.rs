@@ -15,7 +15,7 @@ use indexmap::IndexMap;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
 use tokio::{sync::broadcast, task::JoinHandle};
-use tower::{buffer::Buffer, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
@@ -244,6 +244,8 @@ where
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
         > + Clone
+        + Send
+        + Sync
         + 'static,
     Mempool::Future: Send,
     State: Service<
@@ -276,7 +278,7 @@ where
     // Services
     //
     /// A handle to the mempool service.
-    mempool: Buffer<Mempool, mempool::Request>,
+    mempool: Mempool,
 
     /// A handle to the state service.
     state: State,
@@ -297,6 +299,8 @@ where
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
         > + Clone
+        + Send
+        + Sync
         + 'static,
     Mempool::Future: Send,
     State: Service<
@@ -316,7 +320,7 @@ where
         network: Network,
         debug_force_finished_sync: bool,
         debug_like_zcashd: bool,
-        mempool: Buffer<Mempool, mempool::Request>,
+        mempool: Mempool,
         state: State,
         latest_chain_tip: Tip,
     ) -> (Self, JoinHandle<()>)
@@ -361,6 +365,8 @@ where
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
         > + Clone
+        + Send
+        + Sync
         + 'static,
     Mempool::Future: Send,
     State: Service<

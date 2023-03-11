@@ -1614,7 +1614,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
     }
 
     // Launch zebra with peers and using a predefined zebrad state path.
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
+    let (mut zebrad, zebra_rpc_address) = if let Some((zebrad, config)) =
         spawn_zebrad_for_rpc(network, test_name, test_type, use_internet_connection)?
     {
         tracing::info!(
@@ -1622,7 +1622,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
             "running lightwalletd & zebrad integration test, launching zebrad...",
         );
 
-        zebrad_and_address
+        (zebrad, config.rpc.listen_addr)
     } else {
         // Skip the test, we don't have the required cached state
         return Ok(());
@@ -2044,12 +2044,12 @@ async fn fully_synced_rpc_test() -> Result<()> {
     let test_type = TestType::UpdateCachedState;
     let network = Network::Mainnet;
 
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
+    let (mut zebrad, zebra_rpc_address) = if let Some((zebrad, config)) =
         spawn_zebrad_for_rpc(network, "fully_synced_rpc_test", test_type, false)?
     {
         tracing::info!("running fully synced zebrad RPC test");
 
-        zebrad_and_address
+        (zebrad, config.rpc.listen_addr)
     } else {
         // Skip the test, we don't have the required cached state
         return Ok(());

@@ -1,7 +1,7 @@
 //! Datacake RPC server tests
 
 use datacake_rpc::{Channel, RpcClient};
-use tower::{buffer::Buffer, BoxError};
+use tower::BoxError;
 use zebra_chain::{
     block, chain_sync_status::MockSyncStatus, chain_tip::mock::MockChainTip, parameters::Network,
 };
@@ -32,7 +32,7 @@ async fn datacake_get_block_template() -> Result<(), BoxError> {
     let get_block_template_rpc_impl: GetBlockTemplateRpcService = GetBlockTemplateRpcImpl::new(
         Network::Mainnet,
         Default::default(),
-        Buffer::new(MockService::build().for_unit_tests(), 1),
+        MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         mock_chain_tip,
         MockService::build().for_unit_tests(),

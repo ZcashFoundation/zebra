@@ -44,7 +44,7 @@ proptest! {
                 Mainnet,
                 false,
                 true,
-                Buffer::new(mempool.clone(), 1),
+                mempool.clone(),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
             );
@@ -98,7 +98,7 @@ proptest! {
                 Mainnet,
                 false,
                 true,
-                Buffer::new(mempool.clone(), 1),
+                mempool.clone(),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
             );
@@ -157,7 +157,7 @@ proptest! {
                 Mainnet,
                 false,
                 true,
-                Buffer::new(mempool.clone(), 1),
+                mempool.clone(),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
             );
@@ -224,7 +224,7 @@ proptest! {
                 Mainnet,
                 false,
                 true,
-                Buffer::new(mempool.clone(), 1),
+                mempool.clone(),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
             );
@@ -280,7 +280,7 @@ proptest! {
                 Mainnet,
                 false,
                 true,
-                Buffer::new(mempool.clone(), 1),
+                mempool.clone(),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
             );
@@ -334,7 +334,7 @@ proptest! {
                 Mainnet,
                 false,
                 true,
-                Buffer::new(mempool.clone(), 1),
+                mempool.clone(),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
             );
@@ -431,7 +431,7 @@ proptest! {
                 Mainnet,
                 false,
                 true,
-                Buffer::new(mempool.clone(), 1),
+                mempool.clone(),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
             );
@@ -489,7 +489,7 @@ proptest! {
                 Mainnet,
                 false,
                 true,
-                Buffer::new(mempool.clone(), 1),
+                mempool.clone(),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
             );
@@ -536,7 +536,7 @@ proptest! {
             network,
             false,
             true,
-            Buffer::new(mempool.clone(), 1),
+            mempool.clone(),
             Buffer::new(state.clone(), 1),
             NoChainTip,
         );
@@ -586,7 +586,7 @@ proptest! {
             network,
             false,
             true,
-            Buffer::new(mempool.clone(), 1),
+            mempool.clone(),
             Buffer::new(state.clone(), 1),
             chain_tip,
         );
@@ -672,7 +672,7 @@ proptest! {
                 network,
                 false,
                 true,
-                Buffer::new(mempool.clone(), 1),
+                mempool.clone(),
                 Buffer::new(state.clone(), 1),
                 chain_tip,
             );
@@ -735,7 +735,7 @@ proptest! {
                 network,
                 false,
                 true,
-                Buffer::new(mempool.clone(), 1),
+                mempool.clone(),
                 Buffer::new(state.clone(), 1),
                 chain_tip,
             );
@@ -786,7 +786,7 @@ proptest! {
                 Mainnet,
                 false,
                 true,
-                Buffer::new(mempool.clone(), 1),
+                mempool.clone(),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
             );
@@ -875,7 +875,7 @@ proptest! {
                 Mainnet,
                 false,
                 true,
-                Buffer::new(mempool.clone(), 1),
+                mempool.clone(),
                 Buffer::new(state.clone(), 1),
                 NoChainTip,
             );

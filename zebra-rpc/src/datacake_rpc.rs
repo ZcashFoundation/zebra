@@ -25,6 +25,8 @@ where
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
         > + Clone
+        + Send
+        + Sync
         + 'static,
     Mempool::Future: Send,
     State: Service<
@@ -74,6 +76,8 @@ where
             Response = mempool::Response,
             Error = zebra_node_services::BoxError,
         > + Clone
+        + Send
+        + Sync
         + 'static,
     Mempool::Future: Send,
     State: Service<
