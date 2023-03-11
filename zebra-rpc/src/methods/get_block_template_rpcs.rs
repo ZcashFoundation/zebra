@@ -75,7 +75,7 @@ pub trait GetBlockTemplateRpc {
     #[rpc(name = "getblockcount")]
     fn get_block_count(&self) -> Result<u32>;
 
-    /// Returns the hash of the block of a given height iff the index argument correspond
+    /// Returns the hash of the block of a given height if the index argument correspond
     /// to a block in the best chain.
     ///
     /// zcashd reference: [`getblockhash`](https://zcash-rpc.github.io/getblockhash.html)

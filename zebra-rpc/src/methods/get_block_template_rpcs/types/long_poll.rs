@@ -115,6 +115,12 @@ impl LongPollInput {
 /// Since Zebra's IDs are only 46 hex/decimal digits, mining pools should be able to handle them.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct LongPollId {
     // Fields that invalidate old work:
     //

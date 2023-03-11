@@ -5,6 +5,12 @@ use crate::methods::get_block_template_rpcs::types::{hex_data::HexData, long_pol
 /// Defines whether the RPC method should generate a block template or attempt to validate a block proposal.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub enum GetBlockTemplateRequestMode {
     /// Indicates a request for a block template.
     Template,
@@ -22,6 +28,12 @@ impl Default for GetBlockTemplateRequestMode {
 /// Valid `capabilities` values that indicate client-side support.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub enum GetBlockTemplateCapability {
     /// Long Polling support.
     /// Currently ignored by zebra.
@@ -60,6 +72,12 @@ pub enum GetBlockTemplateCapability {
 /// The `data` field must be provided in `proposal` mode, and must be omitted in `template` mode.
 /// All other fields are optional.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, Default)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct JsonParameters {
     /// Defines whether the RPC method should generate a block template or attempt to
     /// validate block data, checking against all of the server's usual acceptance rules
