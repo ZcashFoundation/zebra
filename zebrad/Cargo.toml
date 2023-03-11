@@ -34,6 +34,11 @@ getblocktemplate-rpcs = [
     "zebra-chain/getblocktemplate-rpcs",
 ]
 
+# Experimental rkyv RPC support
+rkyv-serialization = [
+    "zebra-rpc/rkyv-serialization"
+]
+
 sentry = ["dep:sentry"]
 flamegraph = ["tracing-flame", "inferno"]
 journald = ["tracing-journald"]

@@ -71,7 +71,7 @@ use abscissa_core::{config, Command, FrameworkError, Options, Runnable};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
 use tokio::{pin, select, sync::oneshot};
-use tower::{builder::ServiceBuilder, util::BoxService};
+use tower::{buffer::Buffer, builder::ServiceBuilder, util::BoxService};
 use tracing_futures::Instrument;
 
 use zebra_consensus::chain::BackgroundTaskHandles;
@@ -171,19 +171,25 @@ impl StartCmd {
             chain_tip_change.clone(),
         );
         let mempool = BoxService::new(mempool);
-        let mempool = ServiceBuilder::new()
-            .buffer(mempool::downloads::MAX_INBOUND_CONCURRENCY)
-            .service(mempool);
+        let mempool = Buffer::new(mempool, mempool::downloads::MAX_INBOUND_CONCURRENCY);
 
         // Launch RPC server
-        let (rpc_task_handle, rpc_tx_queue_task_handle, rpc_server) = RpcServer::spawn(
+        let (
+            zebra_rpc::server::RpcServerHandles {
+                rpc_server_task: rpc_task_handle,
+                #[cfg(feature = "rkyv-serialization")]
+                    datacake_rpc_server: _datacake_rpc_server,
+                rpc_tx_queue_task: rpc_tx_queue_task_handle,
+            },
+            rpc_server,
+        ) = RpcServer::spawn(
             config.rpc,
             #[cfg(feature = "getblocktemplate-rpcs")]
             config.mining,
             #[cfg(not(feature = "getblocktemplate-rpcs"))]
             (),
             app_version(),
-            mempool.clone(),
+            Buffer::new(mempool.clone(), mempool::downloads::MAX_INBOUND_CONCURRENCY),
             read_only_state_service,
             chain_verifier.clone(),
             sync_status.clone(),

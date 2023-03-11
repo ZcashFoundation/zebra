@@ -50,8 +50,7 @@ pub struct Amount<C = NegativeAllowed>(
     /// This internal Zebra marker type is not consensus-critical.
     /// And it should be ignored during testing. (And other internal uses.)
     #[serde(skip)]
-    #[omit_bounds]
-    #[archive_attr(omit_bounds)]
+    #[cfg_attr(feature = "rkyv-serialization", omit_bounds, archive_attr(omit_bounds))]
     PhantomData<C>,
 );
 
