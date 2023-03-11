@@ -98,7 +98,10 @@ where
         "zebra_datacake_getblocktemplate_rpc_service"
     }
 
-    fn register_handlers(_registry: &mut ServiceRegistry<Self>) {}
+    fn register_handlers(registry: &mut ServiceRegistry<Self>) {
+        registry.add_handler::<methods::get_block_template_rpcs::request::BlockCount>();
+        registry.add_handler::<methods::get_block_template_rpcs::request::BlockHash>();
+    }
 }
 
 fn make_status_error(

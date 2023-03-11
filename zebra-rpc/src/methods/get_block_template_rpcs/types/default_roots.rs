@@ -10,6 +10,12 @@ use zebra_chain::block::{
 /// If the transactions in the block template are modified, these roots must be recalculated
 /// [according to the specification](https://zcash.github.io/rpc/getblocktemplate.html).
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct DefaultRoots {
     /// The merkle root of the transaction IDs in the block.
     /// Used in the new block's header.

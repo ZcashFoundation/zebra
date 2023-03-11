@@ -63,6 +63,12 @@ mod tests;
 ///
 /// [section 7.7.4]: https://zips.z.cash/protocol/protocol.pdf#nbits
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct CompactDifficulty(pub(crate) u32);
 
 /// An invalid CompactDifficulty value, for testing.
@@ -100,6 +106,12 @@ pub const INVALID_COMPACT_DIFFICULTY: CompactDifficulty = CompactDifficulty(u32:
 //
 // TODO: Use NonZeroU256, when available
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct ExpandedDifficulty(U256);
 
 /// A 128-bit unsigned "Work" value.

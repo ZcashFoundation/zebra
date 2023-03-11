@@ -14,6 +14,12 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 /// A date and time, represented by a 32-bit number of seconds since the UNIX epoch.
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct DateTime32 {
     timestamp: u32,
 }

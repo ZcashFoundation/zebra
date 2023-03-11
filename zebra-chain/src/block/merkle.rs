@@ -71,6 +71,12 @@ use proptest_derive::Arbitrary;
 /// [ZIP-244]: https://zips.z.cash/zip-0244
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct Root(pub [u8; 32]);
 
 impl fmt::Debug for Root {
@@ -249,6 +255,12 @@ impl std::iter::FromIterator<transaction::Hash> for Root {
 /// [ZIP-244]: https://zips.z.cash/zip-0244
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct AuthDataRoot(pub(crate) [u8; 32]);
 
 impl fmt::Debug for AuthDataRoot {

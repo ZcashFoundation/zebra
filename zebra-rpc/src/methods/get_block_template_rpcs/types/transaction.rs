@@ -10,6 +10,12 @@ use zebra_script::CachedFfiTransaction;
 /// Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(bound = "FeeConstraint: amount::Constraint + Clone")]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes))
+)]
 pub struct TransactionTemplate<FeeConstraint>
 where
     FeeConstraint: amount::Constraint + Clone,

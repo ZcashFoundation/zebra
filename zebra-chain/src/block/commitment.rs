@@ -152,6 +152,12 @@ impl Commitment {
 //      hash from the current set of peaks
 //    - move to a separate file
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct ChainHistoryMmrRootHash([u8; 32]);
 
 impl fmt::Display for ChainHistoryMmrRootHash {
@@ -248,6 +254,12 @@ impl FromHex for ChainHistoryMmrRootHash {
 ///
 /// Introduced in NU5.
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct ChainHistoryBlockTxAuthCommitmentHash([u8; 32]);
 
 impl fmt::Display for ChainHistoryBlockTxAuthCommitmentHash {

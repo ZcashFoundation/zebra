@@ -34,6 +34,12 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[serde(try_from = "i64")]
 #[serde(into = "i64")]
 #[serde(bound = "C: Constraint + Clone")]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub struct Amount<C = NegativeAllowed>(
     /// The inner amount value.
     i64,
@@ -44,6 +50,8 @@ pub struct Amount<C = NegativeAllowed>(
     /// This internal Zebra marker type is not consensus-critical.
     /// And it should be ignored during testing. (And other internal uses.)
     #[serde(skip)]
+    #[omit_bounds]
+    #[archive_attr(omit_bounds)]
     PhantomData<C>,
 );
 

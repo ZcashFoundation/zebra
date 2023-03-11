@@ -29,6 +29,12 @@ use crate::methods::{
 /// implementation instead, which returns a single raw string.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged, rename_all = "kebab-case")]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes, PartialEq, Debug))
+)]
 pub enum ProposalResponse {
     /// Block proposal was rejected as invalid.
     /// Contains the reason that the proposal was invalid.

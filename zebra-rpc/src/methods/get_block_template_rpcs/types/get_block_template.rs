@@ -35,6 +35,12 @@ pub use proposal::{proposal_block_from_template, ProposalResponse};
 
 /// A serialized `getblocktemplate` RPC response in template mode.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes))
+)]
 pub struct GetBlockTemplate {
     /// The getblocktemplate RPC capabilities supported by Zebra.
     ///
@@ -299,6 +305,12 @@ impl GetBlockTemplate {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
+#[cfg_attr(
+    feature = "rkyv-serialization",
+    repr(C),
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive),
+    archive_attr(derive(bytecheck::CheckBytes))
+)]
 /// A `getblocktemplate` RPC response.
 pub enum Response {
     /// `getblocktemplate` RPC request in template mode.

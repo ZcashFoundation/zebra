@@ -28,7 +28,7 @@ pub struct BlockHash(pub i32);
 /// Returns a block template for mining new Zcash blocks.
 ///
 /// See [`Rpc::get_block_template`] for more information.
-pub struct BlockTemplate(pub get_block_template::JsonParameters);
+pub struct BlockTemplate(pub Option<get_block_template::JsonParameters>);
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, Archive, PartialEq, Debug)]
