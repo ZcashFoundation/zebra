@@ -406,3 +406,182 @@ fn version_message_with_relay() {
 
     assert!(!relay, "relay should be false");
 }
+
+/// Check that the codec enforces size limits on `user_agent` field of version messages.
+#[test]
+fn version_user_agent_size_limits() {
+    let _init_guard = zebra_test::init();
+    let codec = Codec::builder().finish();
+    let mut bytes = BytesMut::new();
+    let [valid_version_message, invalid_version_message]: [Message; 2] = {
+        let services = PeerServices::NODE_NETWORK;
+        let timestamp = Utc
+            .timestamp_opt(1_568_000_000, 0)
+            .single()
+            .expect("in-range number of seconds and valid nanosecond");
+
+        [
+            "X".repeat(MAX_USER_AGENT_LENGTH),
+            "X".repeat(MAX_USER_AGENT_LENGTH + 1),
+        ]
+        .map(|user_agent| {
+            VersionMessage {
+                version: crate::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
+                services,
+                timestamp,
+                address_recv: AddrInVersion::new(
+                    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
+                    services,
+                ),
+                address_from: AddrInVersion::new(
+                    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 6)), 8233),
+                    services,
+                ),
+                nonce: Nonce(0x9082_4908_8927_9238),
+                user_agent,
+                start_height: block::Height(540_000),
+                relay: true,
+            }
+            .into()
+        })
+    };
+
+    // Check that encoding and decoding will succeed when the user_agent is not longer than MAX_USER_AGENT_LENGTH
+    codec
+        .write_body(&valid_version_message, &mut (&mut bytes).writer())
+        .expect("encoding valid version msg should succeed");
+    codec
+        .read_version(Cursor::new(&bytes))
+        .expect("decoding valid version msg should succeed");
+
+    bytes.clear();
+
+    let mut writer = (&mut bytes).writer();
+
+    // Check that encoding will return an error when the user_agent is longer than MAX_USER_AGENT_LENGTH
+    match codec.write_body(&invalid_version_message, &mut writer) {
+        Err(Error::Parse(error_msg)) if error_msg.contains("user agent too long") => {}
+        result => panic!("expected write error: user agent too long, got: {result:?}"),
+    };
+
+    // Encode the rest of the message onto `bytes` (relay should be optional)
+    {
+        let Message::Version(VersionMessage {
+        user_agent,
+        start_height,
+        ..
+    }) = invalid_version_message else {
+        unreachable!("version_message is a version");
+    };
+
+        user_agent
+            .zcash_serialize(&mut writer)
+            .expect("writing user_agent should succeed");
+        writer
+            .write_u32::<LittleEndian>(start_height.0)
+            .expect("writing start_height should succeed");
+    }
+
+    // Check that decoding will return an error when the user_agent is longer than MAX_USER_AGENT_LENGTH
+    match codec.read_version(Cursor::new(&bytes)) {
+        Err(Error::Parse(error_msg)) if error_msg.contains("user agent too long") => {}
+        result => panic!("expected read error: user agent too long, got: {result:?}"),
+    };
+}
+
+/// Check that the codec enforces size limits on `message` and `reason` fields of reject messages.
+#[test]
+fn reject_command_and_reason_size_limits() {
+    let _init_guard = zebra_test::init();
+    let codec = Codec::builder().finish();
+    let mut bytes = BytesMut::new();
+
+    let valid_message = "X".repeat(MAX_REJECT_MESSAGE_LENGTH);
+    let invalid_message = "X".repeat(MAX_REJECT_MESSAGE_LENGTH + 1);
+    let valid_reason = "X".repeat(MAX_REJECT_REASON_LENGTH);
+    let invalid_reason = "X".repeat(MAX_REJECT_REASON_LENGTH + 1);
+
+    let valid_reject_message = Message::Reject {
+        message: valid_message.clone(),
+        ccode: RejectReason::Invalid,
+        reason: valid_reason.clone(),
+        data: None,
+    };
+
+    // Check that encoding and decoding will succeed when `message` and `reason` fields are within size limits.
+    codec
+        .write_body(&valid_reject_message, &mut (&mut bytes).writer())
+        .expect("encoding valid reject msg should succeed");
+    codec
+        .read_reject(Cursor::new(&bytes))
+        .expect("decoding valid reject msg should succeed");
+
+    let invalid_reject_messages = [
+        (
+            "reject message too long",
+            Message::Reject {
+                message: invalid_message,
+                ccode: RejectReason::Invalid,
+                reason: valid_reason,
+                data: None,
+            },
+        ),
+        (
+            "reject reason too long",
+            Message::Reject {
+                message: valid_message,
+                ccode: RejectReason::Invalid,
+                reason: invalid_reason,
+                data: None,
+            },
+        ),
+    ];
+
+    for (expected_err_msg, invalid_reject_message) in invalid_reject_messages {
+        // Check that encoding will return an error when the reason or message are too long.
+        match codec.write_body(&invalid_reject_message, &mut (&mut bytes).writer()) {
+            Err(Error::Parse(error_msg)) if error_msg.contains(expected_err_msg) => {}
+            result => panic!("expected write error: {expected_err_msg}, got: {result:?}"),
+        };
+
+        bytes.clear();
+
+        // Encode the message onto `bytes` without size checks
+        {
+            let Message::Reject {
+                message,
+                ccode,
+                reason,
+                data,
+            } = invalid_reject_message else {
+                unreachable!("invalid_reject_message is a reject");
+            };
+
+            let mut writer = (&mut bytes).writer();
+
+            message
+                .zcash_serialize(&mut writer)
+                .expect("writing message should succeed");
+
+            writer
+                .write_u8(ccode as u8)
+                .expect("writing ccode should succeed");
+
+            reason
+                .zcash_serialize(&mut writer)
+                .expect("writing reason should succeed");
+
+            if let Some(data) = data {
+                writer
+                    .write_all(&data)
+                    .expect("writing data should succeed");
+            }
+        }
+
+        // Check that decoding will return an error when the reason or message are too long.
+        match codec.read_reject(Cursor::new(&bytes)) {
+            Err(Error::Parse(error_msg)) if error_msg.contains(expected_err_msg) => {}
+            result => panic!("expected read error: {expected_err_msg}, got: {result:?}"),
+        };
+    }
+}
