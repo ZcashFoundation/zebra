@@ -71,6 +71,18 @@ pub struct Config {
     /// no check for old database versions will be made and nothing will be
     /// deleted.
     pub delete_old_database: bool,
+
+    #[cfg(feature = "elasticsearch")]
+    /// The elasticsearch database url.
+    pub elasticsearch_url: String,
+
+    #[cfg(feature = "elasticsearch")]
+    /// The elasticsearch database username.
+    pub elasticsearch_username: String,
+
+    #[cfg(feature = "elasticsearch")]
+    /// The elasticsearch database password.
+    pub elasticsearch_password: String,
 }
 
 fn gen_temp_path(prefix: &str) -> PathBuf {
@@ -123,6 +135,12 @@ impl Default for Config {
             ephemeral: false,
             debug_stop_at_height: None,
             delete_old_database: true,
+            #[cfg(feature = "elasticsearch")]
+            elasticsearch_url: "https://localhost:9200".to_string(),
+            #[cfg(feature = "elasticsearch")]
+            elasticsearch_username: "elastic".to_string(),
+            #[cfg(feature = "elasticsearch")]
+            elasticsearch_password: "".to_string(),
         }
     }
 }
