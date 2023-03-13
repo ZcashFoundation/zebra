@@ -4539,7 +4539,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch"
-version = "0.2.36"
+version = "0.2.37"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -4563,7 +4563,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.36"
+version = "0.2.37"
 dependencies = [
  "futures-core",
  "pin-project",
@@ -5492,7 +5492,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.21"
+version = "1.0.0-beta.22"
 dependencies = [
  "bitflags",
  "bitvec",
@@ -5553,7 +5553,7 @@ version = "1.0.0-beta.0"
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.21"
+version = "1.0.0-beta.22"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -5596,7 +5596,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.21"
+version = "1.0.0-beta.22"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -5632,14 +5632,14 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0-beta.21"
+version = "1.0.0-beta.22"
 dependencies = [
  "zebra-chain",
 ]
 
 [[package]]
 name = "zebra-rpc"
-version = "1.0.0-beta.21"
+version = "1.0.0-beta.22"
 dependencies = [
  "chrono",
  "futures",
@@ -5671,7 +5671,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.21"
+version = "1.0.0-beta.22"
 dependencies = [
  "displaydoc",
  "hex",
@@ -5684,7 +5684,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.21"
+version = "1.0.0-beta.22"
 dependencies = [
  "bincode",
  "chrono",
@@ -5721,7 +5721,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.21"
+version = "1.0.0-beta.22"
 dependencies = [
  "color-eyre",
  "futures",
@@ -5748,7 +5748,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.21"
+version = "1.0.0-beta.22"
 dependencies = [
  "color-eyre",
  "hex",
@@ -5765,7 +5765,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 dependencies = [
  "abscissa_core",
  "atty",

@@ -3,7 +3,7 @@
 name = "zebrad"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 license = "MIT OR Apache-2.0"
-version = "1.0.0-rc.5"
+version = "1.0.0-rc.6"
 repository = "https://github.com/ZcashFoundation/zebra"
 
 # Settings that impact compilation
