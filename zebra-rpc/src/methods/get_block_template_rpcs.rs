@@ -5,7 +5,7 @@ use std::{sync::Arc, time::Duration};
 use futures::{future::OptionFuture, FutureExt, TryFutureExt};
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
-use tower::{buffer::Buffer, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 
 use zcash_address::{self, unified::Encoding, TryFromAddress};
 

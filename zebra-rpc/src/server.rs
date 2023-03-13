@@ -71,7 +71,7 @@ pub struct RpcServerHandles {
 
     #[cfg(feature = "rkyv-serialization")]
     /// Datacake server handle
-    pub datacake_rpc_server: Option<datacake_rpc::Server>,
+    pub datacake_rpc_server: Option<JoinHandle<datacake_rpc::Server>>,
 
     /// Processes queue for sending raw mempool transactions
     pub rpc_tx_queue_task: JoinHandle<()>,
@@ -203,18 +203,24 @@ impl RpcServer {
         );
 
         #[cfg(feature = "rkyv-serialization")]
-        let datacake_rpc_server = if let Some(server) =
-            config.rkyv_listen_addr.and_then(|rkyv_listen_addr| {
-                tokio::runtime::Handle::current()
-                    .block_on(crate::datacake_rpc::spawn_server(rkyv_listen_addr))
-                    .ok()
-            }) {
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            server.add_service(get_block_template_rpc_impl.clone());
+        let datacake_rpc_server = if let Some(rkyv_listen_addr) = config.rkyv_listen_addr {
+            let rpc_impl = rpc_impl.clone();
+            let get_block_template_rpc_impl = get_block_template_rpc_impl.clone();
 
-            server.add_service(rpc_impl.clone());
+            let spawn_server_fut = tokio::task::spawn(async move {
+                let server = crate::datacake_rpc::spawn_server(rkyv_listen_addr)
+                    .await
+                    .expect("datacake server should spawn");
 
-            Some(server)
+                #[cfg(feature = "getblocktemplate-rpcs")]
+                server.add_service(get_block_template_rpc_impl);
+
+                server.add_service(rpc_impl);
+
+                server
+            });
+
+            Some(spawn_server_fut)
         } else {
             None
         };

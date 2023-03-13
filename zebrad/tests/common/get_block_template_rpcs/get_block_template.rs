@@ -10,6 +10,10 @@ use std::time::Duration;
 use color_eyre::eyre::{eyre, Context, Result};
 
 use futures::FutureExt;
+
+#[cfg(feature = "rkyv-serialization")]
+use datacake_rpc::*;
+
 use zebra_chain::{parameters::Network, serialization::ZcashSerialize};
 use zebra_rpc::methods::get_block_template_rpcs::{
     get_block_template::{
@@ -76,11 +80,13 @@ pub(crate) async fn run() -> Result<()> {
     );
 
     let should_sync = true;
-    let (zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
-            .ok_or_else(|| eyre!("getblocktemplate test requires a cached state"))?;
+    let (zebrad, config) = spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
+        .ok_or_else(|| eyre!("getblocktemplate test requires a cached state"))?;
 
-    let rpc_address = zebra_rpc_address.expect("test type must have RPC port");
+    let rpc_address = config
+        .rpc
+        .listen_addr
+        .expect("test type must have RPC port");
 
     let mut zebrad = check_sync_logs_until(
         zebrad,
@@ -91,6 +97,38 @@ pub(crate) async fn run() -> Result<()> {
     )?;
 
     let client = RPCRequestClient::new(rpc_address);
+
+    #[cfg(feature = "rkyv-serialization")]
+    let rkyv_client: RpcClient<
+        zebra_rpc::methods::GetBlockTemplateRpcImpl<
+            tower::buffer::Buffer<
+                tower::util::BoxService<
+                    zebra_node_services::mempool::Request,
+                    zebra_node_services::mempool::Response,
+                    tower::BoxError,
+                >,
+                zebra_node_services::mempool::Request,
+            >,
+            zebra_state::ReadStateService,
+            zebra_state::LatestChainTip,
+            tower::buffer::Buffer<
+                tower::util::BoxService<
+                    zebra_consensus::Request,
+                    zebra_chain::block::Hash,
+                    zebra_consensus::VerifyChainError,
+                >,
+                zebra_consensus::Request,
+            >,
+            zebrad::components::sync::SyncStatus,
+            std::sync::Arc<std::sync::Mutex<zebra_network::AddressBook>>,
+        >,
+    > = {
+        let rkyv_rpc_address = config
+            .rpc
+            .rkyv_listen_addr
+            .expect("test type must have RPC port");
+        RpcClient::new(Channel::connect(rkyv_rpc_address))
+    };
 
     tracing::info!(
         "calling getblocktemplate RPC method at {rpc_address}, \
@@ -116,13 +154,34 @@ pub(crate) async fn run() -> Result<()> {
 
     let mut total_latency = Duration::new(0, 0);
 
-    for n in 0..NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED {
+    #[cfg(feature = "rkyv-serialization")]
+    let mut total_latency_rkyv = Duration::new(0, 0);
+
+    for n in 1..=NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED {
         let start = std::time::Instant::now();
         let template: GetBlockTemplate = client
             .json_result_from_call("getblocktemplate", "[]".to_string())
             .await
             .expect("response should be success output with a serialized `GetBlockTemplate`");
         total_latency += start.elapsed();
+
+        #[cfg(feature = "rkyv-serialization")]
+        {
+            let start = std::time::Instant::now();
+            let _template: zebra_rpc::datacake_rpc::response::get_block_template::Response =
+                rkyv_client
+                    .send(&zebra_rpc::datacake_rpc::request::BlockTemplate(None))
+                    .await
+                    .expect("call should succeed")
+                    .to_owned()
+                    .expect("response should be success with a `GetBlockTemplate`");
+            total_latency_rkyv += start.elapsed();
+
+            if n % (NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED / 10) == 0 {
+                let average_latency_ms = total_latency_rkyv.as_millis() / n as u128;
+                tracing::info!(?average_latency_ms, "got/deserialized rkyv block template");
+            }
+        }
 
         if n % (NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED / 10) == 0 {
             let average_latency_ms = total_latency.as_millis() / n as u128;
@@ -140,7 +199,20 @@ pub(crate) async fn run() -> Result<()> {
 
     let average_latency_ms =
         total_latency.as_millis() / NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED as u128;
+
+    #[cfg(not(feature = "rkyv-serialization"))]
     tracing::info!(?average_latency_ms, "finished block proposals");
+
+    #[cfg(feature = "rkyv-serialization")]
+    {
+        let average_latency_rkyv_ms =
+            total_latency_rkyv.as_millis() / NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED as u128;
+        tracing::info!(
+            ?average_latency_ms,
+            ?average_latency_rkyv_ms,
+            "finished block proposals"
+        );
+    }
 
     zebrad.kill(false)?;
 
