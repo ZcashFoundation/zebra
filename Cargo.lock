@@ -1829,6 +1829,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hermit-abi"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fed44880c466736ef9a5c5b5facefb5ed0785676d0c02d612db14e54f0d84286"
+
+[[package]]
 name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2054,12 +2060,12 @@ dependencies = [
 
 [[package]]
 name = "inferno"
-version = "0.11.14"
+version = "0.11.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6e66fa9bb3c52f40d05c11b78919ff2f18993c2305bd8a62556d20cb3e9606f"
+checksum = "2fb7c1b80a1dfa604bb4a649a5c5aeef3d913f7c520cb42b40e534e8a61bcdfc"
 dependencies = [
  "ahash 0.8.2",
- "atty",
+ "is-terminal",
  "itoa",
  "log",
  "num-format",
@@ -2119,6 +2125,18 @@ name = "ipnet"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35e70ee094dc02fd9c13fdad4940090f22dbd6ac7c9e7094a46cf0232a50bc7c"
+
+[[package]]
+name = "is-terminal"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21b6b32576413a8e69b90e952e4a026476040d81017b80445deda5f2d3921857"
+dependencies = [
+ "hermit-abi 0.3.1",
+ "io-lifetimes",
+ "rustix",
+ "windows-sys 0.45.0",
+]
 
 [[package]]
 name = "itertools"
@@ -3926,27 +3944,27 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.152"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb7d1f0d3021d347a83e556fc4683dea2ea09d87bccdf88ff5c12545d89d5efb"
+checksum = "8cdd151213925e7f1ab45a9bbfb129316bd00799784b174b7cc7bcd16961c49e"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde-big-array"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1bb66e1af4481c21cbc943cabb68b98aabb4d7f935e47d1b4de722ca09da0b4"
+checksum = "11fc7cc2c76d73e0f27ee52abbd64eec84d46f370c88371120433196934e4b7f"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.152"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af487d118eecd09402d70a5d72551860e788df87b464af30e5ea6a38c75c541e"
+checksum = "4fc80d722935453bcafdc2c9a73cd6fac4dc1938f0346035d84bf99fa9e33217"
 dependencies = [
  "proc-macro2 1.0.47",
  "quote 1.0.20",
@@ -3998,9 +4016,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "2.2.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30d904179146de381af4c93d3af6ca4984b3152db687dacb9c3c35e86f39809c"
+checksum = "7ea48c9627169d206b35905699f513f513c303ab9d964a59b44fdcf66c1d1ab7"
 dependencies = [
  "base64 0.13.0",
  "chrono",
@@ -4008,7 +4026,7 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_json",
- "serde_with_macros 2.2.0",
+ "serde_with_macros 2.3.0",
  "time 0.3.17",
 ]
 
@@ -4026,9 +4044,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "2.2.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1966009f3c05f095697c537312f5415d1e3ed31ce0a56942bac4c771c5c335e"
+checksum = "9e6b7e52858f9f06c25e1c566bbb4ab428200cb3b30053ea09dc50837de7538b"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2 1.0.47",
@@ -5515,9 +5533,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6879bd4026d9269a41ca91858f453b523f30824288248148211e1cab23b3e0d"
+checksum = "9b3b6457776ea5e6061632178fe20ea48aac2c770416c241b332a599dd7b58b3"
 dependencies = [
  "aes",
  "bip0039",
@@ -5566,7 +5584,7 @@ dependencies = [
  "rand_core 0.6.4",
  "redjubjub",
  "tracing",
- "zcash_primitives 0.10.0",
+ "zcash_primitives 0.10.1",
 ]
 
 [[package]]
@@ -5630,7 +5648,7 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde-big-array",
- "serde_with 2.2.0",
+ "serde_with 2.3.0",
  "sha2",
  "spandoc",
  "static_assertions",
@@ -5644,7 +5662,7 @@ dependencies = [
  "zcash_encoding",
  "zcash_history",
  "zcash_note_encryption",
- "zcash_primitives 0.10.0",
+ "zcash_primitives 0.10.1",
  "zebra-test",
 ]
 
