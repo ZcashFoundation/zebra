@@ -42,7 +42,7 @@ mset = "0.1.1"
 regex = "1.7.1"
 rlimit = "0.9.1"
 rocksdb = { version = "0.20.1", default_features = false, features = ["lz4"] }
-serde = { version = "1.0.154", features = ["serde_derive"] }
+serde = { version = "1.0.155", features = ["serde_derive"] }
 tempfile = "3.4.0"
 thiserror = "1.0.39"
 
